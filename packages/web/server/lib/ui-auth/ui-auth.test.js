@@ -213,6 +213,46 @@ describe('ui auth client credential seam', () => {
     });
     expect(mountedServeCalled).toBe(true);
 
+    const guestReq = { method: 'GET', path: '/api/guests/hello/panel/index.html', url: `/api/guests/hello/panel/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const guestRes = createResponse();
+    let guestCalled = false;
+    await auth.requireAuth(guestReq, guestRes, () => {
+      guestCalled = true;
+    });
+    expect(guestCalled).toBe(true);
+
+    // A guest-scoped token opens only that guest's files. It is the token a
+    // sandboxed guest page can read from its own URL, so it must fail on every
+    // system path and on another guest's files.
+    const guestMintReq = { method: 'POST', path: '/auth/url-token', query: { scope: 'guest:hello' }, headers: { authorization: 'Bearer client-token', accept: 'application/json' } };
+    const guestMintRes = createResponse();
+    await auth.handleUrlAuthToken(guestMintReq, guestMintRes);
+    const guestToken = guestMintRes.body.token;
+    expect(typeof guestToken).toBe('string');
+    const guestScopedReq = { method: 'GET', path: '/api/guests/hello/panel/main.js', url: `/api/guests/hello/panel/main.js?oc_url_token=${encodeURIComponent(guestToken)}`, headers: {} };
+    let guestScopedCalled = false;
+    await auth.requireAuth(guestScopedReq, createResponse(), () => {
+      guestScopedCalled = true;
+    });
+    expect(guestScopedCalled).toBe(true);
+    for (const forbidden of [
+      { method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(guestToken)}` },
+      { method: 'GET', path: '/api/event', url: `/api/event?oc_url_token=${encodeURIComponent(guestToken)}` },
+      { method: 'GET', path: '/api/guests/other/panel/main.js', url: `/api/guests/other/panel/main.js?oc_url_token=${encodeURIComponent(guestToken)}` },
+      { method: 'GET', path: '/api/guests', url: `/api/guests?oc_url_token=${encodeURIComponent(guestToken)}` },
+    ]) {
+      const forbiddenRes = createResponse();
+      let forbiddenCalled = false;
+      await auth.requireAuth({ ...forbidden, headers: {} }, forbiddenRes, () => {
+        forbiddenCalled = true;
+      });
+      expect(forbiddenCalled).toBe(false);
+      expect(forbiddenRes.statusCode).toBe(401);
+    }
+    const badScopeRes = createResponse();
+    await auth.handleUrlAuthToken({ ...guestMintReq, query: { scope: 'admin' } }, badScopeRes);
+    expect(badScopeRes.statusCode).toBe(400);
+
     const dictationWsReq = {
       method: 'GET',
       path: '/api/dictation/ws',
@@ -315,5 +355,61 @@ describe('ui auth client credential seam', () => {
     const expiresAt = Date.parse(createClientInput.expiresAt);
     expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);
+  });
+});
+
+// issue #2377: browsers key cookie jars on host only, so two instances on one
+// LAN IP (different ports) collided on `oc_ui_session`. Cookies are now scoped
+// by the request port so each instance owns its own slot.
+describe('ui auth port-scoped session cookies (issue #2377)', () => {
+  const loginHost = async (auth, host) => {
+    const req = { method: 'POST', headers: { host }, body: { password: 'secret' } };
+    const res = createResponse();
+    await auth.handleSessionCreate(req, res);
+    return String(res.getHeader('set-cookie') || '').split(';', 1)[0];
+  };
+
+  it('names the issued cookie with the request port', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    const issued = await loginHost(auth, '192.168.0.1:3000');
+    expect(issued).toMatch(/^oc_ui_session_3000=/);
+    expect(issued.length).toBeGreaterThan('oc_ui_session_3000='.length);
+  });
+
+  it('keeps the bare cookie name when the host has no explicit port', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    expect(await loginHost(auth, '192.168.0.1')).toMatch(/^oc_ui_session=/);
+  });
+
+  it('reads the slot for the request port and ignores another port cookie', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    // Valid token issued against :3000.
+    const portCookie = await loginHost(auth, '192.168.0.1:3000');
+    const validToken = portCookie.slice('oc_ui_session_3000='.length);
+
+    // A request that lands on :3001 must read the :3001 slot, NOT the :3000 one,
+    // even though the browser ships both cookies to either port.
+    const wrongSlot = {
+      method: 'GET',
+      headers: { host: '192.168.0.1:3001', cookie: `oc_ui_session_3000=${validToken}; oc_ui_session_3001=stale` },
+    };
+    const wrongRes = createResponse();
+    await auth.handleSessionStatus(wrongSlot, wrongRes);
+    expect(wrongRes.body.authenticated).toBe(false);
+
+    // The same token read on its own port authenticates.
+    const rightSlot = {
+      method: 'GET',
+      headers: { host: '192.168.0.1:3000', cookie: `oc_ui_session_3000=${validToken}` },
+    };
+    const rightRes = createResponse();
+    await auth.handleSessionStatus(rightSlot, rightRes);
+    expect(rightRes.body.authenticated).toBe(true);
   });
 });

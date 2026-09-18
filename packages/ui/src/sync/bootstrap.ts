@@ -1,11 +1,21 @@
-import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Project } from "@opencode-ai/sdk/v2/client"
+import { z } from "zod"
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
 import { emitSyncConfigChanged } from "./sync-refs"
 import { warmChatsRootDirectory } from "../lib/chatDirectories"
+import { runBackgroundNetworkTask } from "../lib/background-network"
+import { sessionStatusSnapshotSchema } from "../lib/opencode/session-status"
+import {
+  readDirectoryStatusSnapshot,
+  readDirectoryQuestionSnapshot,
+  readDirectoryPermissionSnapshot,
+  type DirectoryRecoverySource,
+} from "./directory-recovery-snapshots"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+const sdkErrorMessage = z.object({ message: z.string() })
 
 /**
  * SDK returns `{ data, error, response }` without throwing on non-2xx.
@@ -17,42 +27,16 @@ function unwrap<T>(
   name: string,
 ): T {
   if (result.error) {
-    const rawError = result.error
     const status = result.response?.status
-    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-      ? String((rawError as { message?: unknown }).message)
-      : String(rawError)
-    const err = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
-    if (status !== undefined) {
-      ;(err as Error & { status?: number }).status = status
-    }
-    throw err
+    const parsed = sdkErrorMessage.safeParse(result.error)
+    const message = parsed.success ? parsed.data.message : String(result.error)
+    throw Object.assign(new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`), { status })
   }
-  if (result.data === undefined) {
+  if (result.data === undefined || result.data === null) {
     // No error + no data: ambiguous, treat as transient so retry fires.
-    const err = new Error(`${name} returned no data`)
-    ;(err as Error & { status?: number }).status = 503
-    throw err
+    throw Object.assign(new Error(`${name} returned no data`), { status: 503 })
   }
   return result.data
-}
-
-const requestSignature = (items: Array<{ id: string }> | undefined): string => {
-  if (!items || items.length === 0) return ""
-  return items
-    .map((item) => item.id)
-    .sort(cmp)
-    .join("|")
-}
-
-function groupBySession<T extends { id: string; sessionID: string }>(input: T[]) {
-  return input.reduce<Record<string, T[]>>((acc, item) => {
-    if (!item?.id || !item.sessionID) return acc
-    const list = acc[item.sessionID]
-    if (list) list.push(item)
-    else acc[item.sessionID] = [item]
-    return acc
-  }, {})
 }
 
 function projectID(directory: string, projects: Project[]) {
@@ -121,188 +105,127 @@ export async function bootstrapGlobal(
 // Bootstrap per-directory state
 // ---------------------------------------------------------------------------
 
-export async function bootstrapDirectory(input: {
+type DirectoryBootstrapInput = {
   directory: string
   sdk: OpencodeClient
-  getState: () => State
+  store: DirectoryRecoverySource
   set: (patch: Partial<State>) => void
   isStale?: () => boolean
   global: {
-    config: Record<string, unknown>
+    config: State["config"]
     projects: Project[]
   }
   loadSessions: (directory: string) => Promise<void> | void
-}): Promise<"complete" | "failed" | "stale"> {
-  const { directory, sdk, getState, set, global: g } = input
+}
+
+type BootstrapResult = "complete" | "failed" | "stale"
+
+export function bootstrapDirectory(input: DirectoryBootstrapInput) {
+  const sessions = (async (): Promise<BootstrapResult> => {
+    if (input.isStale?.()) return "stale"
+    try {
+      await input.loadSessions(input.directory)
+      return input.isStale?.() ? "stale" : "complete"
+    } catch (error) {
+      if (input.isStale?.()) return "stale"
+      console.error(`[bootstrap] session load failed for ${input.directory}`, error)
+      return "failed"
+    }
+  })()
+  // Initialization has its own completion and network capacity. A slow config
+  // or directory cannot hold the session-list scheduler's slot.
+  const environment = initializeDirectory(input)
+  return { sessions, environment }
+}
+
+async function initializeDirectory(input: DirectoryBootstrapInput): Promise<BootstrapResult> {
+  const { directory, sdk, store, set, global: g } = input
+  const read = <T>(request: () => Promise<T>) => retry(() => runBackgroundNetworkTask(() => {
+    if (input.isStale?.()) throw new Error("Directory initialization superseded")
+    return request()
+  }))
   const commit = (patch: Partial<State>): boolean => {
     if (input.isStale?.()) return false
     set(patch)
     return true
   }
-  const state = getState()
-  const loading = state.status !== "complete"
+  const state = store.getState()
 
   // Seed from global state while we fetch directory-specific data
   const seededProject = projectID(directory, g.projects)
   if (seededProject) commit({ project: seededProject })
   if (Object.keys(state.config ?? {}).length === 0 && Object.keys(g.config ?? {}).length > 0) {
-    const seededConfig = g.config as State["config"]
+    const seededConfig = g.config
     if (commit({ config: seededConfig })) emitSyncConfigChanged(directory, seededConfig)
   }
-  if (loading) commit({ status: "partial" })
+  commit({ status: "partial" })
   if (input.isStale?.()) return "stale"
 
-  // ---------------------------------------------------------------------------
-  // Phase 1: Critical path — block until these resolve so the UI can render.
-  // These are the minimum data needed to show a functional chat interface.
-  // ---------------------------------------------------------------------------
-  const phase1Results = await Promise.allSettled([
+  // Queue live recovery first. Each read commits independently and failures in
+  // config/MCP cannot suppress pending questions or permission recovery.
+  const critical = Promise.allSettled([
+    read(async () => {
+      const session_status = await readDirectoryStatusSnapshot(store, async () => (
+        sessionStatusSnapshotSchema.parse(unwrap(await sdk.session.status({ directory }), "session.status"))
+      ))
+      commit({ session_status, sessionStatusReady: true })
+    }),
+    read(async () => {
+      const question = await readDirectoryQuestionSnapshot(store, async () => (
+        unwrap(await sdk.question.list({ directory }), "question.list")
+      ))
+      commit({ question })
+    }),
+    read(async () => {
+      const permission = await readDirectoryPermissionSnapshot(store, async () => (
+        unwrap(await sdk.permission.list({ directory }), "permission.list")
+      ))
+      commit({ permission })
+    }),
     seededProject
       ? Promise.resolve()
-      : retry(() => sdk.project.current().then((x) => commit({ project: unwrap(x, "project.current").id }))),
-    retry(() => sdk.config.get().then((x) => {
+      : read(() => sdk.project.current({ directory }).then((x) => commit({ project: unwrap(x, "project.current").id }))),
+    read(() => sdk.config.get({ directory }).then((x) => {
       const config = unwrap(x, "config.get")
       if (commit({ config })) emitSyncConfigChanged(directory, config)
     })),
-    retry(() =>
-      sdk.path.get().then((x) => {
+    read(() =>
+      sdk.path.get({ directory }).then((x) => {
         const data = unwrap(x, "path.get")
         commit({ path: data })
         const next = projectID(data?.directory ?? directory, g.projects)
         if (next) commit({ project: next })
       }),
     ),
-    retry(() => sdk.session.status().then((x) => commit({ session_status: unwrap(x, "session.status"), sessionStatusReady: true }))),
   ])
-
-  if (input.isStale?.()) return "stale"
-
-  const phase1Errors = phase1Results
-    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-    .map((r) => r.reason)
-
-  // De-block the UI: only a total failure (OpenCode genuinely unreachable)
-  // should abort the directory. Don't let one transient initial fetch strand
-  // the directory in "loading" forever and skip phase 2/3 (sessions).
-  //   - session.status is LIVE data the event pipeline keeps current — a failed
-  //     initial snapshot is harmless; SSE will deliver the real status.
-  //   - path.get feeds project resolution, but if we already resolved a project
-  //     (from global projects) its failure is tolerable; the worktree path is
-  //     refreshed by later events.
-  const [, , pathResult] = phase1Results
-  const pathFailedWithoutProject =
-    pathResult.status === "rejected" && !getState().project
-
-  if (phase1Errors.length === phase1Results.length || pathFailedWithoutProject) {
-    console.error(`[bootstrap] directory bootstrap failed for ${directory}`, phase1Errors[0])
-    return "failed"
-  }
-
-  // Mark ready after critical data arrives so the UI can paint.
-  if (loading) commit({ status: "complete" })
-
-  // ---------------------------------------------------------------------------
-  // Phase 2: Deferrable — fetch after first paint without blocking.
-  // These enrich the UI but aren't required for basic functionality.
-  // ---------------------------------------------------------------------------
-  const runDeferredPhase = () => Promise.allSettled([
-    retry(() => sdk.command.list().then((x) => commit({ command: unwrap(x, "command.list") }))),
-    retry(() => sdk.mcp.status().then((x) => commit({ mcp: unwrap(x, "mcp.status") }))),
-    retry(() => sdk.lsp.status().then((x) => commit({ lsp: unwrap(x, "lsp.status") }))),
-    retry(() =>
-      sdk.vcs.get().then((x) => {
-        const current = getState()
+  const enrichment = Promise.allSettled([
+    // MCP status and the command list are deliberately not read here. Reading
+    // MCP state initializes the directory's whole stdio server fleet as an
+    // OpenCode side effect, and listing commands enumerates MCP prompts,
+    // which touches that same state. The sidebar declares bootstrap demand
+    // for every known project directory, so either read launched one full
+    // fleet per project at startup. Both surfaces fetch on demand through
+    // their own stores (useMcpStore, useCommandsStore) instead.
+    read(() => sdk.lsp.status({ directory }).then((x) => commit({ lsp: unwrap(x, "lsp.status") }))),
+    read(() =>
+      sdk.vcs.get({ directory }).then((x) => {
+        const current = store.getState()
         if (x.error) {
           throw new Error(`vcs.get failed: ${String(x.error)}`)
         }
         commit({ vcs: x.data ?? current.vcs })
       }),
     ),
-    retry(async () => {
-      const before = getState()
-      const beforeSignatures = new Map(
-        Object.entries(before.question ?? {}).map(([sessionID, questions]) => [sessionID, requestSignature(questions)]),
-      )
-      const x = await sdk.question.list(directory ? { directory } : undefined)
-      if (x.error) {
-        const status = (x as { response?: { status?: number } }).response?.status
-        const err = new Error(`question.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
-        if (status !== undefined) (err as Error & { status?: number }).status = status
-        throw err
-      }
-      const grouped = groupBySession(
-        (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
-      )
-      const current = getState()
-      const merged = { ...current.question }
-      for (const [sessionID, questions] of Object.entries(grouped)) {
-        merged[sessionID] = questions
-          .filter((q) => !!q?.id)
-          .sort((a, b) => cmp(a.id, b.id))
-      }
-      for (const sessionID of beforeSignatures.keys()) {
-        if (grouped[sessionID]) continue
-        const beforeSignature = beforeSignatures.get(sessionID) ?? ""
-        const currentSignature = requestSignature(current.question[sessionID])
-        if (currentSignature !== beforeSignature) continue
-        delete merged[sessionID]
-      }
-      commit({ question: merged })
-    }),
-    retry(async () => {
-      const before = getState()
-      const beforeSignatures = new Map(
-        Object.entries(before.permission ?? {}).map(([sessionID, permissions]) => [sessionID, requestSignature(permissions)]),
-      )
-      const x = await sdk.permission.list(directory ? { directory } : undefined)
-      if (x.error) {
-        const status = (x as { response?: { status?: number } }).response?.status
-        const err = new Error(`permission.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
-        if (status !== undefined) (err as Error & { status?: number }).status = status
-        throw err
-      }
-      const grouped = groupBySession(
-        (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm?.sessionID),
-      )
-      const current = getState()
-      const merged = { ...current.permission }
-      for (const [sessionID, perms] of Object.entries(grouped)) {
-        merged[sessionID] = perms
-          .filter((p) => !!p?.id)
-          .sort((a, b) => cmp(a.id, b.id))
-      }
-      for (const sessionID of beforeSignatures.keys()) {
-        if (grouped[sessionID]) continue
-        const beforeSignature = beforeSignatures.get(sessionID) ?? ""
-        const currentSignature = requestSignature(current.permission[sessionID])
-        if (currentSignature !== beforeSignature) continue
-        delete merged[sessionID]
-      }
-      commit({ permission: merged })
-    }),
-  ]).then((results) => {
-    const errors = results
-      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-      .map((r) => r.reason)
-    if (errors.length) {
-      console.error(`[bootstrap] deferred phase failed for ${directory}`, errors[0])
-    }
-  })
-
-  // ---------------------------------------------------------------------------
-  // Phase 3: Authoritative session list. Keep this scheduler-owned so bounded
-  // bootstrap concurrency also bounds list pagination, but do not hold the slot
-  // for the deferrable enrichment phase above.
-  // ---------------------------------------------------------------------------
-  const sessionsResult = await Promise.allSettled([Promise.resolve(input.loadSessions(directory))])
+  ])
+  const [results, enrichmentResults] = await Promise.all([critical, enrichment])
   if (input.isStale?.()) return "stale"
-  const sessionLoad = sessionsResult[0]
-  setTimeout(() => {
-    if (!input.isStale?.()) void runDeferredPhase()
-  }, 0)
-  if (sessionLoad?.status === "rejected") {
-    console.error(`[bootstrap] session load failed for ${directory}`, sessionLoad.reason)
+  const enrichmentErrors = enrichmentResults.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (enrichmentErrors.length) console.warn(`[bootstrap] optional enrichment failed for ${directory}`, enrichmentErrors[0].reason)
+  const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (errors.length) {
+    console.error(`[bootstrap] environment initialization failed for ${directory}`, errors[0].reason)
     return "failed"
   }
+  commit({ status: "complete" })
   return "complete"
 }

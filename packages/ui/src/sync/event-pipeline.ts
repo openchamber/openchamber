@@ -21,7 +21,13 @@ import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
-const FLUSH_FRAME_MS = 33
+// Paces a sustained event stream only: the first event after a quiet spell is
+// flushed at once, so a lone permission or status event is not delayed. Every
+// flush publishes the directory store and re-renders the streaming message,
+// while streamed text is shown at most every 100ms, so flushing faster than
+// that bought renders nobody sees. Measured at 300 characters per second,
+// 33ms cost six more points of renderer CPU for the same visible output.
+const FLUSH_FRAME_MS = 100
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
 const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8

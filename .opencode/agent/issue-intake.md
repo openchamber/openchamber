@@ -48,6 +48,8 @@ First line is for the maintainer, always:
 
 Then, keeping the whole comment under ~2,500 characters:
 
+- **Issue not in English:** the second line is a 2-3 sentence English summary of what the reporter describes (symptom, where, version), so the maintainer can skim without translating. End the comment with one sentence asking the reporter to continue in English (machine translation is fine). Write the rest of the comment in English as usual.
+
 - **Bugs with a cause:** the mechanism in 2-4 sentences with `file:line` references, and a collapsed `<details>` block containing the minimal reproduction (script or test snippet, with the command to run it). State explicitly whether the mechanism is confirmed for the reporter's symptom or plausible-but-unconfirmed.
 - **Not reproduced:** what you tried in 1-2 sentences, then the unanswerable questions as a short numbered list.
 - **Enhancements/questions:** the one-sentence assessment or the direct answer.

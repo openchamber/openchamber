@@ -36,6 +36,14 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
 
+Both search and directory listing discard `git check-ignore` stderr at spawn.
+They consume stdout for ignore matches. Never create an unread stderr pipe:
+Git diagnostics can fill it and block the child indefinitely, so repeated
+searches accumulate live Git processes. `git-process.test.js` exercises both
+paths with real OS pipes, twelve concurrent checks, and 2 MiB of diagnostics
+per child. Successful completion must preserve ignore filtering and reap all
+twelve children.
+
 ## Composition contract with `index.js`
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
 - `index.js` no longer owns FS route handlers or FS exec job state.
@@ -43,7 +51,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
 - Workspace checks accept, besides the active workspace and its worktrees, the **managed roots**: the OpenChamber config root and the managed chats root (`managedChatsRoot` dependency; `OPENCHAMBER_CHATS_DIR` upstream, default `<config root>/chats`). Chat worktrees may legitimately live outside every project workspace.
-- `GET /api/fs/home` answers `{ home, chatsRoot }`. `chatsRoot` is the server-resolved managed chats root; clients must use it instead of joining `home` + the well-known segment (a relocated root does not contain that segment).
+- `GET /api/fs/home` preserves `{ home, chatsRoot }` and adds `canonicalChatsRoot` and `canonicalLegacyChatsRoot`, resolved by the server's filesystem. If a root does not exist yet, it resolves the nearest existing ancestor and appends the missing segments, without creating directories. Errors resolving the configured root fail the request. A failed legacy lookup warns and omits only that optional alias, retaining exact legacy matching without blocking an accessible relocated root. Clients use confirmed aliases for exact membership while keeping the original roots as folder/scope identities. `chatsRoot` is the server-resolved managed chats root; clients must use it instead of joining `home` + the well-known segment (a relocated root does not contain that segment).
+- Workspace authorization accepts both the configured managed paths and their filesystem-confirmed canonical roots. Canonical lookup runs only when lexical workspace/managed-root checks fail. One failed managed-root lookup cannot reject an independently authorized root or worktree. Path comparisons remain case-sensitive on POSIX: distinct Linux directories named `chats` and `Chats` never become aliases through string folding. Shared UI keeps exact root membership for classification and directory cleanup.
 - Filesystem `EPERM`/`EACCES` failures use the stable `reason: "os-permission"` response marker. Policy denials such as workspace-boundary or missing-grant failures must not use that marker because a native folder picker cannot remediate them.
 - `GET /api/fs/directory-stat?path=...` uses one `stat` without listing contents or resolving project topology. It follows the same authenticated directory-discovery path policy as `/api/fs/list`, including targets outside the active workspace. A directory returns `{ isDirectory: true }`; `ENOENT` returns `not-found`, and a file or `ENOTDIR` returns `not-directory`. Permission and other failures remain distinct from a missing path. VS Code explicitly returns 501, so the shared client treats its probe as unknown.
 - Read-only routes authorize the requested path against the workspace before resolving symlinks. A symlink reached through the workspace may therefore target a file outside it, while a directly requested outside path still requires an exact-path grant. Write routes keep canonical-target boundary checks.

@@ -50,6 +50,13 @@ describe('OverlayScrollbar', () => {
     });
   };
 
+  const waitFor = async (check: () => boolean, timeoutMs = 2_000) => {
+    const startedAt = Date.now();
+    while (!check() && Date.now() - startedAt < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  };
+
   const renderScrollbar = async (props: Partial<React.ComponentProps<typeof OverlayScrollbar>> = {}) => {
     await act(async () => {
       root.render(
@@ -152,7 +159,9 @@ describe('OverlayScrollbar', () => {
     expect(scrollbar?.dataset.visible).toBe('false');
     scroller.dispatchEvent(new window.Event('scroll'));
     expect(scrollbar?.dataset.visible).toBe('true');
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // The hide timer is 10ms, but a busy runner can fire timers late; wait for
+    // the state instead of a fixed pause.
+    await waitFor(() => scrollbar?.dataset.visible === 'false');
     expect(scrollbar?.dataset.visible).toBe('false');
   });
 

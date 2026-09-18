@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -16,6 +16,8 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
     persistSettings: async (changes) => { settings = { ...settings, ...changes }; },
     fetchImpl: fetchImpl ?? vi.fn(async () => new Response('[]')),
     retryDelaysMs,
+    evaluatePermission,
+    onPermissionReplied,
   });
   runtime.start();
   return {
@@ -142,5 +144,39 @@ describe('permission auto-accept runtime', () => {
     expect(replyPaths).toEqual(['/permission/root-pending/reply']);
     expect(fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.get('directory') === '/project')).toBe(true);
     expect(await runtime.load()).toEqual({ sessions: { root: true }, revision: 1 });
+  });
+
+  it('leaves a request held by the safety net unanswered and forgets it once replied', async () => {
+    const fetchImpl = vi.fn(async () => new Response('[]'));
+    const verdicts = { held: { action: 'hold', score: 0.9, kind: 'git_history' }, safe: { action: 'accept', score: 0.1 } };
+    const evaluatePermission = vi.fn(async (permission) => verdicts[permission.id]);
+    const onPermissionReplied = vi.fn();
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: true } } },
+      fetchImpl,
+      evaluatePermission,
+      onPermissionReplied,
+    });
+    await runtime.load();
+
+    emit({ type: 'permission.asked', properties: { id: 'held', sessionID: 'root', permission: 'bash', metadata: {} } });
+    emit({ type: 'permission.asked', properties: { id: 'safe', sessionID: 'root', permission: 'bash', metadata: {} } });
+    await flush();
+
+    const replies = fetchImpl.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('/reply'));
+    expect(replies).toEqual(['http://opencode.test/permission/safe/reply?directory=%2Fproject']);
+    expect(evaluatePermission).toHaveBeenCalledTimes(2);
+
+    emit({ type: 'permission.replied', properties: { sessionID: 'root', requestID: 'held', reply: 'once' } });
+    expect(onPermissionReplied).toHaveBeenCalledWith('held');
+  });
+
+  it('does not consult the safety net for sessions that are not auto-accepting', async () => {
+    const evaluatePermission = vi.fn(async () => ({ action: 'hold' }));
+    const { runtime, emit } = createRuntime({ evaluatePermission });
+    await runtime.load();
+    emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'manual', permission: 'bash', metadata: {} } });
+    await flush();
+    expect(evaluatePermission).not.toHaveBeenCalled();
   });
 });

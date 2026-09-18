@@ -37,6 +37,17 @@ type TestWindow = {
 let createdWindow = false;
 let createdLocalStorage = false;
 let isolatedRuntimeCounter = 0;
+const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+
+// A failed runtime settings API tries HTTP next. Keep that fallback offline in
+// this suite instead of waiting for real DNS/network requests to *.example.
+beforeEach(() => {
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: async () => new Response(null, { status: 503 }),
+  });
+});
 
 // Each test gets its own runtime identity so an in-flight load or save left
 // behind by the previous test is rejected as stale instead of leaking its
@@ -139,6 +150,8 @@ const resetModelPrefsState = (): void => {
 };
 
 afterAll(() => {
+  if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+  else Reflect.deleteProperty(globalThis, 'fetch');
   registerRuntimeAPIs(null);
   if (createdWindow) {
     delete (globalThis as { window?: unknown }).window;

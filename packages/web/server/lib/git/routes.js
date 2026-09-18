@@ -10,6 +10,16 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
     return gitLibraries;
   };
 
+  // A path from an earlier status listing that no longer resolves is a stale
+  // row or a nested repository, not a server fault.
+  const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]]);
+  const sendGitPathError = (res, error) => {
+    const status = GIT_PATH_ERROR_STATUS.get(error?.code);
+    if (!status) return false;
+    res.status(status).json({ error: error.message, code: error.code });
+    return true;
+  };
+
   const resolveDirectoryQuery = (value, preserveWhitespace = false) => {
     const raw = Array.isArray(value) ? value[0] : value;
     if (typeof raw !== 'string') {
@@ -345,7 +355,7 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   });
 
   app.get('/api/git/diff', async (req, res) => {
-    const { getDiff } = await getGitLibraries();
+    const { getPathDiff } = await getGitLibraries();
     try {
       const directory = req.query.directory;
       if (!directory) {
@@ -360,14 +370,15 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       const staged = req.query.staged === 'true';
       const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
 
-      const diff = await getDiff(directory, {
+      const { diff, submodule } = await getPathDiff(directory, {
         path,
         staged,
         contextLines: Number.isFinite(context) ? context : 3,
       });
 
-      res.json({ diff });
+      res.json({ diff, submodule });
     } catch (error) {
+      if (sendGitPathError(res, error)) return;
       console.error('Failed to get git diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git diff' });
     }
@@ -398,8 +409,10 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         modified: result.modified,
         path: result.path,
         isBinary: Boolean(result.isBinary),
+        submodule: result.submodule ?? null,
       });
     } catch (error) {
+      if (sendGitPathError(res, error)) return;
       console.error('Failed to get git file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git file diff' });
     }

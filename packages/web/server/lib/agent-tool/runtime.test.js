@@ -121,8 +121,8 @@ describe('managed agent tool runtime', () => {
     const pluginModule = await import(`${pathToFileURL(pluginPath).href}?both=${Date.now()}`);
     const { tool } = await pluginModule.OpenChamberPlugin();
 
-    const controlActions = tool.openchamber.args.action.enum;
-    const webActions = tool.openchamber_web.args.action.enum;
+    const controlActions = tool.openchamber.args.action.oneOf.map((entry) => entry.const);
+    const webActions = tool.openchamber_web.args.action.oneOf.map((entry) => entry.const);
     expect(webActions).toContain('browser.open');
     expect(controlActions).not.toContain('browser.open');
     expect(webActions).not.toContain('session.create');
@@ -131,6 +131,23 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.args.parameters.properties)).toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('sessionId');
+  });
+
+  it('keeps the action schema to one validator keyword', async () => {
+    // A node carrying both `enum` and `oneOf` is valid JSON Schema, but some
+    // OpenAI-compatible gateways reject it and answer with an empty completion
+    // instead of an error. `oneOf` is the keyword that stayed. Its branches
+    // carry the per-action descriptions the model reads.
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?validator=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    for (const entry of Object.values(tool)) {
+      expect(entry.args.action.oneOf).toBeInstanceOf(Array);
+      expect(entry.args.action).not.toHaveProperty('enum');
+    }
   });
 
   it('accepts inputs passed beside the action, not only inside parameters', async () => {
@@ -352,6 +369,75 @@ describe('managed agent tool runtime', () => {
       .send({ input: { action: 'projects.list' } })
       .expect(200);
     expect(response.body).toEqual(expect.objectContaining({ ok: true, action: 'projects.list' }));
+  });
+
+  it.each([
+    ['0.0.0.0', 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    ['::', 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    [null, 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    ['127.0.0.1', 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    ['100.100.0.3', 'http://100.100.0.3:3901/api/openchamber/agent-tool'],
+    ['fd7a:115c::3', 'http://[fd7a:115c::3]:3901/api/openchamber/agent-tool'],
+  ])('points the callback at where a listener bound to %s answers', async (boundAddress, expectedUrl) => {
+    const { runtime } = await createRuntime({ getActiveHost: () => boundAddress });
+    const env = await runtime.prepareManagedOpenCodeEnv();
+    expect(env.OPENCHAMBER_AGENT_TOOL_URL).toBe(expectedUrl);
+  });
+
+  it.each([
+    ['100.100.0.3', '100.100.0.3', 200],
+    ['100.100.0.3', '::ffff:100.100.0.3', 200],
+    ['100.100.0.3', '100.100.0.7', 401],
+    ['fd7a:115c::3', 'fd7a:115c::3', 200],
+    ['fd7a:115c::3', 'fd7a:115c::7', 401],
+    ['0.0.0.0', '192.168.1.20', 401],
+    ['0.0.0.0', '0.0.0.0', 401],
+    [null, '192.168.1.20', 401],
+  ])('bound to %s, answers a token-bearing caller from %s with %i', async (boundAddress, remoteAddress, status) => {
+    const { runtime } = await createRuntime({ getActiveHost: () => boundAddress });
+    const env = await runtime.prepareManagedOpenCodeEnv();
+    const app = express();
+    app.use((req, _res, next) => {
+      Object.defineProperty(req.socket, 'remoteAddress', { value: remoteAddress, configurable: true });
+      next();
+    });
+    runtime.registerRoutes(app, express);
+
+    await request(app)
+      .post('/api/openchamber/agent-tool')
+      .set('authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`)
+      .send({ input: { action: 'projects.list' } })
+      .expect(status);
+  });
+
+  it.each([
+    ['http://100.100.0.3:3901/api/openchamber/agent-tool', 'localhost,127.0.0.1', 'localhost,127.0.0.1,100.100.0.3'],
+    ['http://[fd7a:115c::3]:3901/api/openchamber/agent-tool', undefined, 'fd7a:115c::3'],
+    ['http://100.100.0.3:3901/api/openchamber/agent-tool', '100.100.0.3', '100.100.0.3'],
+    ['not a url', 'localhost', 'localhost'],
+  ])('keeps the callback %s away from an environment proxy', async (callbackUrl, existing, expected) => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv();
+    const keys = ['OPENCHAMBER_AGENT_TOOL_URL', 'NO_PROXY', 'no_proxy'];
+    const previous = keys.map((key) => process.env[key]);
+    try {
+      process.env.OPENCHAMBER_AGENT_TOOL_URL = callbackUrl;
+      for (const key of ['NO_PROXY', 'no_proxy']) {
+        if (existing === undefined) delete process.env[key];
+        else process.env[key] = existing;
+      }
+      const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+      const pluginModule = await import(`${pathToFileURL(pluginPath).href}?test=${Date.now()}`);
+      await pluginModule.OpenChamberPlugin();
+
+      expect(process.env.NO_PROXY).toBe(expected);
+      expect(process.env.no_proxy).toBe(expected);
+    } finally {
+      keys.forEach((key, index) => {
+        if (previous[index] === undefined) delete process.env[key];
+        else process.env[key] = previous[index];
+      });
+    }
   });
 
   it('executes through the materialized plugin and authenticated callback', async () => {

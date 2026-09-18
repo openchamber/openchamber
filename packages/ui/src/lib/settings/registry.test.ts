@@ -22,6 +22,64 @@ import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('project paths retain absolute Windows roots across parsing and serialization', () => {
+    const parsed = parseSettingsDocument({ projects: [
+      { path: 'c:\\', label: 'Drive' },
+      { path: 'c:\\Users\\Developer\\Project\\' },
+      { path: 'C:/Users/Developer/Project' },
+      { path: '\\\\Server\\Share\\' },
+    ] });
+    expect(parsed?.projects?.map((project) => project.path)).toEqual(['C:/', 'C:/Users/Developer/Project', '//Server/Share']);
+    expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  test('round-trips section order without coupling it to visibility or partial snapshots', () => {
+    const initial = useUIStore.getState().workStatusSectionOrder;
+    const hidden = useUIStore.getState().workStatusHiddenSections;
+    const explicit = useUIStore.getState().workStatusHiddenSectionsExplicit;
+    try {
+      useUIStore.getState().setWorkStatusSectionOrder(['mcp', 'repository', 'session']);
+      const order = useUIStore.getState().workStatusSectionOrder;
+      expect(order.slice(0, 3)).toEqual(['mcp', 'repository', 'session']);
+      expect(AUTO_SAVE_KEYS).toContain('workStatusSectionOrder');
+      expect(MIRRORED_KEYS).toContain('workStatusSectionOrder');
+      const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ workStatusSectionOrder: readAutoSaveSnapshot().workStatusSectionOrder })));
+      useUIStore.getState().setWorkStatusSectionOrder([]);
+      if (!parsed) throw new Error('Expected valid settings');
+      applySettingsToStores(parsed);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(order);
+      applySettingsToStores({ workStatusHiddenSections: ['mcp'] });
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(order);
+      expect(parseSettingsDocument({ workStatusSectionOrder: 'bad' })).toEqual({});
+      applySettingsToStores({});
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(order);
+    } finally {
+      useUIStore.setState({ workStatusSectionOrder: initial, workStatusHiddenSections: hidden, workStatusHiddenSectionsExplicit: explicit });
+    }
+  });
+
+  test('restores section order from the actual local persisted projection', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: {
+        getItem: () => saved,
+        setItem: (_name, value) => { saved = value; },
+        removeItem: () => undefined,
+      } });
+      useUIStore.getState().setWorkStatusSectionOrder(['tasks', 'mcp', 'session']);
+      const chosen = useUIStore.getState().workStatusSectionOrder;
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: () => undefined, removeItem: () => undefined } });
+      useUIStore.getState().setWorkStatusSectionOrder([]);
+      await useUIStore.persist.rehydrate();
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(chosen);
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
+
   test('every key lives in exactly one table', () => {
     const all = [...SETTINGS_KEYS, ...LOCAL_DEVICE_KEYS, ...DESKTOP_SHELL_KEYS];
     expect(new Set(all).size).toBe(all.length);

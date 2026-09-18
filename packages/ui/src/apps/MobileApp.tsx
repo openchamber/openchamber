@@ -6,6 +6,7 @@ import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { ChatView } from '@/components/views/ChatView';
 import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
@@ -22,6 +23,7 @@ import { useRouter } from '@/hooks/useRouter';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
@@ -84,6 +86,7 @@ const MOBILE_SETTINGS_PAGES = [
   'chat',
   'notifications',
   'sessions',
+  'routing',
   'git',
   'magic-prompts',
   'snippets',
@@ -489,73 +492,60 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           />
         ) : null}
 
-        {/* Tablet: the workspace lives inside an animated aside so landscape
-            gets a real sidebar. The drawer element keeps its position in the
-            tree across rotation — only its `variant` changes — so the mounted
-            panes (open diff, edited file, attached terminal) survive it. In
-            portrait the drawer portals itself out and this aside stays at 0. */}
-        {isTabletLayout ? (
-          <aside
-            ref={rightResize.asideRef}
+        {/* Keep the workspace in the same tree position across size classes.
+            Keyboard resizing and folding can both cross the tablet threshold;
+            neither should discard the open editor, its draft, or its focus.
+            Outside panel mode the drawer portals out and this aside stays at 0. */}
+        <aside
+          ref={rightResize.asideRef}
+          className={cn(
+            'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
+            !workspacePanelWidth && 'border-l-0',
+          )}
+          style={{
+            width: workspacePanelWidth,
+            minWidth: workspacePanelWidth,
+            maxWidth: workspacePanelWidth,
+            ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
+            overflowX: 'clip',
+            paddingTop: 'var(--oc-safe-area-top, 0px)',
+            transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
+            transitionDuration: '200ms',
+            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+          aria-hidden={!workspacePanelWidth}
+          data-page-scroll-lock="true"
+        >
+          <div
             className={cn(
-              'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-              !workspacePanelWidth && 'border-l-0',
+              'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+              rightResize.isResizing && 'pointer-events-none',
+              !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
             )}
-            style={{
-              width: workspacePanelWidth,
-              minWidth: workspacePanelWidth,
-              maxWidth: workspacePanelWidth,
-              ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
-              overflowX: 'clip',
-              paddingTop: 'var(--oc-safe-area-top, 0px)',
-              transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
-              transitionDuration: '200ms',
-              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-            aria-hidden={!workspacePanelWidth}
-            data-page-scroll-lock="true"
+            style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
           >
-            <div
-              className={cn(
-                'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-                rightResize.isResizing && 'pointer-events-none',
-                !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
-              )}
-              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
-            >
-              <ErrorBoundary>
-                <MobileWorkspaceDrawer
-                  open={workspaceOpen}
-                  onClose={closeWorkspace}
-                  tab={workspaceTab}
-                  onTabChange={setWorkspaceTab}
-                  pendingChangesDiff={pendingChangesDiff}
-                  onOpenPlan={setOpenPlan}
-                  onOpenMcpSettings={openMcpCreateSettings}
-                  variant={workspaceAsPanel ? 'panel' : 'drawer'}
-                />
-              </ErrorBoundary>
-            </div>
-            {workspacePanelWidth ? (
-              <IpadSidebarResizeHandle
-                side="right"
-                isResizing={rightResize.isResizing}
-                ariaLabel={t('sidebar.resize.rightPanelAria')}
-                handleProps={rightResize.handleProps}
+            <ErrorBoundary>
+              <MobileWorkspaceDrawer
+                open={workspaceOpen}
+                onClose={closeWorkspace}
+                tab={workspaceTab}
+                onTabChange={setWorkspaceTab}
+                pendingChangesDiff={pendingChangesDiff}
+                onOpenPlan={setOpenPlan}
+                onOpenMcpSettings={openMcpCreateSettings}
+                variant={workspaceAsPanel ? 'panel' : 'drawer'}
               />
-            ) : null}
-          </aside>
-        ) : (
-          <MobileWorkspaceDrawer
-            open={workspaceOpen}
-            onClose={closeWorkspace}
-            tab={workspaceTab}
-            onTabChange={setWorkspaceTab}
-            pendingChangesDiff={pendingChangesDiff}
-            onOpenPlan={setOpenPlan}
-            onOpenMcpSettings={openMcpCreateSettings}
-          />
-        )}
+            </ErrorBoundary>
+          </div>
+          {workspacePanelWidth ? (
+            <IpadSidebarResizeHandle
+              side="right"
+              isResizing={rightResize.isResizing}
+              ariaLabel={t('sidebar.resize.rightPanelAria')}
+              handleProps={rightResize.handleProps}
+            />
+          ) : null}
+        </aside>
 
         {/* Layered above the workspace drawer's Notes tab, which opened it. */}
         {openPlan ? (
@@ -1180,6 +1170,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   usePushVisibilityBeacon({ enabled: true });
   useUpdatePolling();
   useWindowTitle();
+  useRoutingSync();
   useRouter();
   // APNs is the only notification channel on the native app (background-capable,
   // focus-suppressed server-side via the visibility beacon). Local notifications are
@@ -1205,8 +1196,8 @@ export function MobileApp({ apis }: MobileAppProps) {
   // already uses the real font instead of flashing the fallback and reflowing (FOUT).
   if (!fontsReady) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
-        <OpenChamberLogo width={120} height={120} isAnimated />
+      <main className="flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground">
+        <OpenChamberLogo width={120} height={120} isAnimated variant="splash" />
       </main>
     );
   }
@@ -1222,9 +1213,9 @@ export function MobileApp({ apis }: MobileAppProps) {
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
     if (hasRuntimeEndpoint) {
       return (
-        <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-foreground">
+        <main className="flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] px-6 text-center text-foreground">
           <div className="flex max-w-sm flex-col items-center gap-4">
-            <OpenChamberLogo width={120} height={120} isAnimated={!showConnectionRecovery} />
+            <OpenChamberLogo width={120} height={120} isAnimated={!showConnectionRecovery} variant="splash" />
             {showConnectionRecovery ? (
               <>
                 <div className="space-y-2">
@@ -1254,8 +1245,8 @@ export function MobileApp({ apis }: MobileAppProps) {
     // (no saved instance, unreachable, or needs re-login).
     if (autoConnectPhase !== 'done') {
       return (
-        <main className="relative flex min-h-dvh items-center justify-center bg-background text-foreground">
-          <OpenChamberLogo width={120} height={120} isAnimated />
+        <main className="relative flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground">
+          <OpenChamberLogo width={120} height={120} isAnimated variant="splash" />
           {/* Absolutely positioned below the (still perfectly centered) logo so
               the text never pushes it up. 50% + half the 120px logo + a gap. */}
           {autoConnectLabel ? (
@@ -1286,8 +1277,8 @@ export function MobileApp({ apis }: MobileAppProps) {
     // only shows once the recovery delay has expired (genuinely unreachable).
     if (!showConnectionRecovery) {
       return (
-        <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
-          <OpenChamberLogo width={120} height={120} isAnimated />
+        <main className="flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground">
+          <OpenChamberLogo width={120} height={120} isAnimated variant="splash" />
         </main>
       );
     }
@@ -1311,11 +1302,7 @@ export function MobileApp({ apis }: MobileAppProps) {
                   until the last-session restore decides between session and
                   draft — otherwise the auto-opened draft flashes first. The
                   shell (and sync) still mounts and warms up underneath. */}
-              {isNativeMobileApp && lastSessionRestorePending ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
-                  <OpenChamberLogo width={120} height={120} isAnimated />
-                </div>
-              ) : null}
+              <AppStartupOverlay ready={!isNativeMobileApp || !lastSessionRestorePending} animated />
               <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
               <OpenCodeUpdateToast />
               <MobileAppUpdateToast />

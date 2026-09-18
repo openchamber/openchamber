@@ -1,250 +1,218 @@
 import { describe, expect, test } from "bun:test"
-import type { OpencodeClient, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { createStore } from "zustand/vanilla"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
+import { getBackgroundNetworkState, runBackgroundNetworkTask } from "../lib/background-network"
 
-const createSdk = (options?: {
-  commandList?: () => Promise<{ data: unknown[] }>
-  sessionStatus?: () => Promise<{ data: State['session_status'] }>
-  questionList?: () => Promise<{ data?: unknown[]; error?: unknown; response?: { status?: number } }>
-}) => ({
-  project: { current: async () => ({ data: { id: "project-a" } }) },
-  config: { get: async () => ({ data: {} }) },
-  path: { get: async () => ({ data: { state: "", config: "", worktree: "/repo", directory: "/repo", home: "/home" } }) },
-  session: { status: options?.sessionStatus ?? (async () => ({ data: {} })) },
-  command: { list: options?.commandList ?? (async () => ({ data: [] })) },
-  mcp: { status: async () => ({ data: {} }) },
-  lsp: { status: async () => ({ data: [] }) },
-  vcs: { get: async () => ({ data: { branch: "main" } }) },
-  question: { list: options?.questionList ?? (async () => ({ data: [] })) },
-  permission: { list: async () => ({ data: [] }) },
-}) as unknown as OpencodeClient
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((complete) => { resolve = complete })
+  return { promise, resolve }
+}
 
-const createState = (): State => ({
-  ...INITIAL_STATE,
-  message: {},
-  part: {},
+const createSdk = (respond?: (url: URL) => Response | Promise<Response> | undefined) => createOpencodeClient({
+  baseUrl: "https://bootstrap.test",
+  directory: "/sdk-default",
+  fetch: async (request) => {
+    const url = new URL(request instanceof Request ? request.url : request.toString())
+    const override = respond?.(url)
+    if (override) return override
+    const directory = url.searchParams.get("directory")
+    const body = url.pathname === "/project/current" ? { id: "project-a" }
+      : url.pathname === "/path" ? { directory, worktree: directory, state: "", config: "", home: "/home" }
+      : url.pathname === "/config" ? { instructions: [directory] }
+      : url.pathname === "/session/status" ? {}
+      : url.pathname === "/vcs" ? { branch: "main" }
+      : []
+    return Response.json(body)
+  },
 })
 
-const project = { id: "project-a", worktree: "/repo" } as Project
+const inputFor = (sdk = createSdk(), state: Partial<State> = {}) => {
+  const store = createStore<State>(() => ({ ...INITIAL_STATE, ...state }))
+  return {
+    directory: "/repo", sdk, store,
+    set: (patch: Partial<State>) => { store.setState(patch) },
+    global: { config: {}, projects: [] },
+    loadSessions: async () => undefined,
+  }
+}
 
 describe("bootstrapDirectory", () => {
-  test("prioritizes session loading without waiting for deferred fields", async () => {
-    let state = createState()
-    let deferredStarted = false
-    let resolveDeferred!: () => void
-    const deferred = new Promise<{ data: unknown[] }>((resolve) => {
-      resolveDeferred = () => resolve({ data: [] })
-    })
-    let resolveSessions!: () => void
-    const sessions = new Promise<void>((resolve) => {
-      resolveSessions = resolve
-    })
-    let settled = false
-    const sdk = createSdk({
-      commandList: async () => {
-        deferredStarted = true
-        return deferred
-      },
-    })
-    const bootstrapping = bootstrapDirectory({
-      directory: "/repo",
-      sdk,
-      getState: () => state,
-      set: (patch) => {
-        state = { ...state, ...patch }
-      },
-      global: { config: {}, projects: [project] },
-      loadSessions: () => sessions,
-    }).then((result) => {
-      settled = true
-      return result
-    })
-
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(settled).toBe(false)
-    expect(deferredStarted).toBe(false)
-    resolveSessions()
-
-    expect(await bootstrapping).toBe("complete")
-    expect(state.status).toBe("complete")
-    expect(state.sessionStatusReady).toBe(true)
-    expect(deferredStarted).toBe(false)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(deferredStarted).toBe(true)
-    resolveDeferred()
-  })
-
-  test("reports session-list failure without clearing existing state", async () => {
-    let state = { ...createState(), session: [{ id: "cached" }] as State["session"] }
-    const result = await bootstrapDirectory({
-      directory: "/repo",
-      sdk: createSdk(),
-      getState: () => state,
-      set: (patch) => {
-        state = { ...state, ...patch }
-      },
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => {
-        throw new Error("unavailable")
-      },
-    })
-
-    expect(result).toBe("failed")
-    expect(state.session.map((session) => session.id)).toEqual(["cached"])
-  })
-
-  test("rejects stale work before committing", async () => {
-    const state = createState()
-    let commits = 0
-    const result = await bootstrapDirectory({
-      directory: "/repo",
-      sdk: createSdk(),
-      getState: () => state,
-      set: () => {
-        commits += 1
-      },
-      isStale: () => true,
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => undefined,
-    })
-
-    expect(result).toBe("stale")
-    expect(commits).toBe(0)
-  })
-
-  test("a failed status request cannot grant idle authority even when bootstrap completes", async () => {
-    let state = createState()
-    const result = await bootstrapDirectory({
-      directory: '/repo',
-      sdk: createSdk({ sessionStatus: async () => { throw new Error('status unavailable') } }),
-      getState: () => state,
-      set: (patch) => { state = { ...state, ...patch } },
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => undefined,
-    })
-    expect(result).toBe('complete')
-    expect(state.sessionStatusReady).toBe(undefined)
-  })
-
-  test("deferred phase merges fetched questions by session, replacing the pre-fetch record", async () => {
-    let state = createState()
-    const preExisting: QuestionRequest = { id: "que_1", sessionID: "ses_1", questions: [] }
-    const fetched: QuestionRequest[] = [
-      { id: "que_2", sessionID: "ses_1", questions: [] },
-      {
-        id: "que_1",
-        sessionID: "ses_1",
-        questions: [{ question: "updated?", header: "Build", options: [{ label: "Yes", description: "Go" }] }],
-      },
-    ]
-    state = { ...state, question: { ses_1: [preExisting] } }
-    const sdk = createSdk({ questionList: async () => ({ data: fetched }) })
-
-    await bootstrapDirectory({
-      directory: "/repo",
-      sdk,
-      getState: () => state,
-      set: (patch) => { state = { ...state, ...patch } },
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => undefined,
-    })
-    // Deferred phase runs on a setTimeout(0); give it a tick.
-    await new Promise((resolve) => setTimeout(resolve, 20))
-
-    // The fetched (sorted) records replace the pre-fetch snapshot entirely.
-    expect(state.question["ses_1"]?.map((q) => q.id)).toEqual(["que_1", "que_2"])
-    expect(state.question["ses_1"]?.[0]?.questions).toEqual(fetched[1].questions)
-  })
-
-  test("deferred phase deletes a session's questions when they disappear and the signature is unchanged", async () => {
-    let state = createState()
-    const que1: QuestionRequest = { id: "que_1", sessionID: "ses_1", questions: [] }
-    const que3: QuestionRequest = { id: "que_3", sessionID: "ses_2", questions: [] }
-    state = {
-      ...state,
-      question: {
-        ses_1: [que1],
-        ses_2: [que3],
-      },
+  test("finishes session loading while /config is unresolved", async () => {
+    const blocked = deferred<Response>()
+    const input = inputFor(createSdk((url) => url.pathname === "/config" ? blocked.promise : undefined))
+    let initialized = false
+    const bootstrap = bootstrapDirectory(input)
+    void bootstrap.environment.then(() => { initialized = true })
+    try {
+      expect(await bootstrap.sessions).toBe("complete")
+      expect(initialized).toBe(false)
+      expect(input.store.getState().status).toBe("partial")
+    } finally {
+      blocked.resolve(Response.json({}))
+      expect(await bootstrap.environment).toBe("complete")
+      expect(input.store.getState().status).toBe("complete")
     }
-    const sdk = createSdk({ questionList: async () => ({ data: [] }) })
-
-    await bootstrapDirectory({
-      directory: "/repo",
-      sdk,
-      getState: () => state,
-      set: (patch) => { state = { ...state, ...patch } },
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => undefined,
-    })
-    await new Promise((resolve) => setTimeout(resolve, 20))
-
-    // Both sessions vanished from the fetched list and nothing changed in
-    // between, so the signature guard allows the delete.
-    expect(state.question).toEqual({})
   })
 
-  test("deferred phase preserves in-flight question changes when the signature changed (stale guard)", async () => {
-    let state = createState()
-    const que1: QuestionRequest = { id: "que_1", sessionID: "ses_1", questions: [] }
-    const que2: QuestionRequest = { id: "que_2", sessionID: "ses_1", questions: [] }
-    state = { ...state, question: { ses_1: [que1] } }
-    const sdk = createSdk({
-      questionList: async () => {
-        // Simulate an event landing while the deferred fetch is in flight:
-        // the session gains a second question before the fetch resolves.
-        state = { ...state, question: { ...state.question, ses_1: [que1, que2] } }
-        return { data: [] }
-      },
-    })
-
-    await bootstrapDirectory({
-      directory: "/repo",
-      sdk,
-      getState: () => state,
-      set: (patch) => { state = { ...state, ...patch } },
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => undefined,
-    })
-    await new Promise((resolve) => setTimeout(resolve, 20))
-
-    // The fetched list is empty, but the in-flight change altered the
-    // signature, so the disappearance must NOT be treated as authoritative.
-    expect(state.question["ses_1"]?.map((q) => q.id)).toEqual(["que_1", "que_2"])
+  test("keeps session-list failure separate from successful environment initialization", async () => {
+    const cached = [{
+      id: "cached", slug: "cached", projectID: "project-a", directory: "/repo",
+      title: "Cached", version: "1", time: { created: 1, updated: 1 },
+    }]
+    const input = inputFor(createSdk(), { session: cached })
+    const bootstrap = bootstrapDirectory({ ...input, loadSessions: async () => { throw new Error("unavailable") } })
+    expect(await bootstrap.sessions).toBe("failed")
+    expect(await bootstrap.environment).toBe("complete")
+    expect(input.store.getState().session).toBe(cached)
   })
 
-  test("deferred phase retries a transient question.list failure and still merges", async () => {
-    let state = createState()
-    const que1: QuestionRequest = { id: "que_1", sessionID: "ses_1", questions: [] }
+  test("a config failure cannot suppress status or pending-question recovery", async () => {
+    const question = { id: "question", sessionID: "session", questions: [] }
+    const input = inputFor(createSdk((url) => {
+      if (url.pathname === "/config") return Response.json({ message: "invalid config" }, { status: 400 })
+      if (url.pathname === "/question") return Response.json([question])
+    }))
+    const bootstrap = bootstrapDirectory(input)
+    expect(await bootstrap.sessions).toBe("complete")
+    expect(await bootstrap.environment).toBe("failed")
+    expect(input.store.getState().question.session).toEqual([question])
+    expect(input.store.getState().sessionStatusReady).toBe(true)
+  })
+
+  test("a failed status request does not grant idle authority", async () => {
+    const input = inputFor(createSdk((url) => url.pathname === "/session/status"
+      ? Response.json({ message: "status unavailable" }, { status: 400 }) : undefined))
+    const bootstrap = bootstrapDirectory(input)
+    expect(await bootstrap.sessions).toBe("complete")
+    expect(await bootstrap.environment).toBe("failed")
+    expect(input.store.getState().sessionStatusReady).toBeUndefined()
+  })
+
+  test("malformed status success does not clear live state or grant idle authority", async () => {
+    const statuses: State["session_status"] = { session: { type: "busy" } }
+    const input = inputFor(createSdk((url) => url.pathname === "/session/status" ? Response.json([]) : undefined), {
+      session_status: statuses,
+    })
+    const bootstrap = bootstrapDirectory(input)
+    expect(await bootstrap.sessions).toBe("complete")
+    expect(await bootstrap.environment).toBe("failed")
+    expect(input.store.getState().sessionStatusReady).toBeUndefined()
+    expect(input.store.getState().session_status).toBe(statuses)
+  })
+
+  test("never reads MCP-initializing endpoints during directory initialization", async () => {
+    // Reading MCP status initializes the directory's entire stdio server
+    // fleet, and listing commands enumerates MCP prompts, which touches the
+    // same state. The sidebar declares bootstrap demand for every known
+    // project directory, so either read spawned a fleet per project at
+    // startup. MCP and command surfaces fetch on demand instead.
+    const requests: URL[] = []
+    const input = inputFor(createSdk((url) => { requests.push(url); return undefined }))
+    const bootstrap = bootstrapDirectory(input)
+    expect(await bootstrap.sessions).toBe("complete")
+    expect(await bootstrap.environment).toBe("complete")
+    expect(requests.some((url) => url.pathname === "/mcp")).toBe(false)
+    expect(requests.some((url) => url.pathname === "/command")).toBe(false)
+  })
+
+  test("rejects stale work before starting either phase", async () => {
     let calls = 0
-    let resolveSecondCall!: () => void
-    const secondCall = new Promise<void>((resolve) => { resolveSecondCall = resolve })
-    const sdk = createSdk({
-      questionList: async () => {
-        calls += 1
-        if (calls === 1) {
-          return { error: { name: "ServerError", data: { message: "boom" } }, response: new Response(null, { status: 500 }) }
-        }
-        resolveSecondCall()
-        return { data: [que1] }
-      },
-    })
+    const input = inputFor(createSdk(() => { calls += 1; return undefined }))
+    const state = input.store.getState()
+    const bootstrap = bootstrapDirectory({ ...input, isStale: () => true, loadSessions: async () => { calls += 1 } })
+    expect(await bootstrap.sessions).toBe("stale")
+    expect(await bootstrap.environment).toBe("stale")
+    expect(calls).toBe(0)
+    expect(input.store.getState()).toBe(state)
+  })
 
-    await bootstrapDirectory({
-      directory: "/repo",
-      sdk,
-      getState: () => state,
-      set: (patch) => { state = { ...state, ...patch } },
-      global: { config: {}, projects: [project] },
-      loadSessions: async () => undefined,
-    })
-    // retry() backs off 500ms before the second attempt; wait for it.
-    await secondCall
-    await new Promise((resolve) => setTimeout(resolve, 0))
+  test("drops queued initialization reads after the directory generation changes", async () => {
+    const blocked = Array.from({ length: getBackgroundNetworkState().limit }, () => deferred<void>())
+    const occupied = blocked.map((task) => runBackgroundNetworkTask(() => task.promise))
+    let calls = 0
+    let stale = false
+    const input = inputFor(createSdk(() => { calls += 1; return undefined }))
+    const bootstrap = bootstrapDirectory({ ...input, isStale: () => stale })
+    expect(await bootstrap.sessions).toBe("complete")
+    stale = true
+    const state = input.store.getState()
+    for (const task of blocked) task.resolve()
+    await Promise.all(occupied)
+    expect(await bootstrap.environment).toBe("stale")
+    expect(calls).toBe(0)
+    expect(input.store.getState()).toBe(state)
+  })
 
-    expect(calls).toBeGreaterThanOrEqual(2)
-    expect(state.question["ses_1"]?.map((q) => q.id)).toEqual(["que_1"])
+  test("an in-flight response cannot commit after its initialization is superseded", async () => {
+    const response = deferred<Response>()
+    const started = deferred<void>()
+    let stale = false
+    const input = inputFor(createSdk((url) => {
+      if (url.pathname !== "/config") return undefined
+      started.resolve()
+      return response.promise
+    }))
+    const bootstrap = bootstrapDirectory({ ...input, isStale: () => stale })
+    await bootstrap.sessions
+    await started.promise
+    stale = true
+    const state = input.store.getState()
+    response.resolve(Response.json({ instructions: ["old configuration"] }))
+    expect(await bootstrap.environment).toBe("stale")
+    expect(input.store.getState()).toBe(state)
+  })
+
+  test("addresses every environment read to its directory rather than the SDK default", async () => {
+    const requests: URL[] = []
+    const sdk = createSdk((url) => { requests.push(url); return undefined })
+    for (const directory of ["/workspace/Alpha", "C:/Users/Developer/Tree", "//Server/Share/Project", "C:/Users/Ірина/Project with spaces/100%", "C:/"]) {
+      requests.length = 0
+      const input = { ...inputFor(sdk), directory }
+      const bootstrap = bootstrapDirectory(input)
+      expect(await bootstrap.sessions).toBe("complete")
+      expect(await bootstrap.environment).toBe("complete")
+      expect(requests).toHaveLength(8)
+      expect(new Set(requests.map((url) => url.searchParams.get("directory")))).toEqual(new Set([directory]))
+      expect(input.store.getState().path.directory).toBe(directory)
+      expect(input.store.getState().config.instructions).toEqual([directory])
+    }
+  })
+
+  test("an authoritative empty question list clears old records", async () => {
+    const input = inputFor(createSdk(), { question: { session: [{ id: "old", sessionID: "session", questions: [] }] } })
+    const bootstrap = bootstrapDirectory(input)
+    await bootstrap.sessions
+    expect(await bootstrap.environment).toBe("complete")
+    expect(input.store.getState().question).toEqual({})
+  })
+
+  test("failed question recovery preserves previous questions", async () => {
+    const questions = { session: [{ id: "old", sessionID: "session", questions: [] }] }
+    const input = inputFor(createSdk((url) => url.pathname === "/question"
+      ? Response.json({ message: "unavailable" }, { status: 400 }) : undefined), { question: questions })
+    const bootstrap = bootstrapDirectory(input)
+    await bootstrap.sessions
+    expect(await bootstrap.environment).toBe("failed")
+    expect(input.store.getState().question).toBe(questions)
+  })
+
+  test("retries transient question failures without replaying the session list", async () => {
+    let attempts = 0
+    let lists = 0
+    const question = { id: "pending", sessionID: "session", questions: [] }
+    const input = inputFor(createSdk((url) => {
+      if (url.pathname !== "/question") return undefined
+      attempts += 1
+      return attempts === 1 ? Response.json({ message: "warming up" }, { status: 503 }) : Response.json([question])
+    }))
+    const bootstrap = bootstrapDirectory({ ...input, loadSessions: async () => { lists += 1 } })
+    expect(await bootstrap.sessions).toBe("complete")
+    expect(await bootstrap.environment).toBe("complete")
+    expect(attempts).toBe(2)
+    expect(lists).toBe(1)
+    expect(input.store.getState().question.session).toEqual([question])
   })
 })

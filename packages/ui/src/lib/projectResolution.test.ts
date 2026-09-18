@@ -6,6 +6,13 @@ const projects = [
 ];
 
 describe('resolveProjectForSessionDirectory', () => {
+  test('resolves descendants of Unix and Windows drive root projects', () => {
+    const roots = [{ id: 'unix', path: '/' }, { id: 'drive', path: 'C:/' }];
+    expect(resolveProjectForSessionDirectory(roots, new Map(), '/workspace/project')?.id).toBe('unix');
+    expect(resolveProjectForSessionDirectory(roots, new Map(), 'c:\\Users\\Developer\\Project')?.id).toBe('drive');
+    expect(resolveProjectForSessionDirectory(roots, new Map(), 'D:/Project')).toBeNull();
+  });
+
   test('resolves a sibling worktree to its registered project', () => {
     const worktrees = new Map([
       ['/workspace/openchamber', [{

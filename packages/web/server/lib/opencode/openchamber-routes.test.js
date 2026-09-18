@@ -18,11 +18,15 @@ const childProcess = await import('child_process');
 const packageManager = await import('../package-manager.js');
 const { registerOpenChamberRoutes } = await import('./openchamber-routes.js');
 
-const createApp = ({ environment = {}, storedOptions = {}, desktopUpdater } = {}) => {
+const createApp = ({ environment = {}, storedOptions = {}, desktopUpdater, platform = 'linux', execPath = '/usr/bin/node' } = {}) => {
   const app = express();
   const dependencies = {
     fs: {
       existsSync: vi.fn(() => false),
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      openSync: vi.fn(() => 7),
+      closeSync: vi.fn(),
       promises: {
         readFile: vi.fn(async () => JSON.stringify({
           launchMode: 'foreground',
@@ -34,11 +38,13 @@ const createApp = ({ environment = {}, storedOptions = {}, desktopUpdater } = {}
     path,
     process: {
       env: environment,
-      platform: 'linux',
-      execPath: '/usr/bin/node',
+      platform,
+      execPath,
+      exit: vi.fn(),
     },
     server: {
       address: () => ({ port: 7897 }),
+      close: vi.fn(),
     },
     __dirname: '/opt/openchamber/server',
     openchamberDataDir: '/tmp/openchamber',
@@ -266,3 +272,65 @@ describe('OpenChamber foreground update route', () => {
     });
   });
 });
+
+describe('OpenChamber web update route on Windows', () => {
+  it('runs the install-and-restart script from a batch file instead of a cmd.exe /c argument', async () => {
+    const { app, dependencies } = createApp({
+      platform: 'win32',
+      execPath: 'C:\\Program Files\\nodejs\\node.exe',
+      environment: { ComSpec: 'C:\\Windows\\system32\\cmd.exe' },
+      storedOptions: { launchMode: 'daemon', port: 7897, uiPassword: 'pa%ss' },
+    });
+    childProcess.spawn.mockReturnValue({ unref: vi.fn() });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await request(app).post('/api/openchamber/update-install').expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+
+    const scriptPath = path.join('/tmp/openchamber', 'update-install.cmd');
+    expect(dependencies.fs.writeFileSync).toHaveBeenCalledWith(scriptPath, expect.any(String), 'utf8');
+    const script = dependencies.fs.writeFileSync.mock.calls[0][1];
+    const lines = script.split('\r\n');
+    expect(lines[0]).toBe('@echo off');
+    // Every preamble line is an echo; none is left to run as a command.
+    expect(lines.filter((line) => line.startsWith('currentVersion=') || line.startsWith('restartCommand='))).toEqual([]);
+    expect(lines).toContain('echo packageManager=npm');
+    expect(lines).toContain('echo restartCommand=^("C:\\Program Files\\nodejs\\node.exe" "/opt/openchamber/bin/cli.js" serve --port 7897 --ui-password "pa%%ss"^) ^|^| ^(openchamber serve --port 7897 --ui-password "pa%%ss"^)');
+    // A .cmd shim (npm, pnpm, yarn) must be `call`ed or the script ends there.
+    expect(lines).toContain('call npm install -g @openchamber/web@latest');
+    expect(lines).toContain('ping -n 3 127.0.0.1 >nul');
+    expect(lines.some((line) => line.startsWith('timeout '))).toBe(false);
+    expect(lines).toContain('if %ERRORLEVEL% EQU 0 (');
+    expect(lines.at(-2)).toBe('del "%~f0"');
+    // A `%` in the password survives batch expansion only when doubled.
+    expect(lines).toContain('  ("C:\\Program Files\\nodejs\\node.exe" "/opt/openchamber/bin/cli.js" serve --port 7897 --ui-password "pa%%ss") || (openchamber serve --port 7897 --ui-password "pa%%ss")');
+
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'C:\\Windows\\system32\\cmd.exe',
+      ['/c', scriptPath],
+      expect.objectContaining({ detached: true, windowsHide: true }),
+    );
+    // The listener is closed before the batch is spawned, so the detached
+    // child cannot inherit the socket and hold the port against the restart.
+    expect(dependencies.server.close).toHaveBeenCalledOnce();
+    expect(dependencies.server.close.mock.invocationCallOrder[0]).toBeLessThan(childProcess.spawn.mock.invocationCallOrder[0]);
+    expect(dependencies.process.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('answers 500 and keeps the server up when the batch file cannot be written', async () => {
+    const { app, dependencies } = createApp({ platform: 'win32', storedOptions: { launchMode: 'daemon', port: 7897 } });
+    dependencies.fs.writeFileSync.mockImplementation(() => { throw new Error('EACCES'); });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await request(app).post('/api/openchamber/update-install').expect(500);
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+
+    expect(response.body.error).toContain('update-install.cmd');
+    expect(response.body.error).toContain('EACCES');
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+    expect(dependencies.process.exit).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledOnce();
+  });
+});
+

@@ -174,7 +174,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
                 type="button"
                 onClick={handleRevertClick}
                 disabled={isReverting}
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
               >
                 {isReverting ? (

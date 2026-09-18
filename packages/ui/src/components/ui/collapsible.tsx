@@ -25,7 +25,7 @@ const CollapsibleTrigger = ({
   return (
     <BaseCollapsible.Trigger
       className={cn(
-        "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className
       )}
       {...props}

@@ -7,7 +7,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
+import { computeCacheHitRate, findLatestContextFill } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -319,14 +319,11 @@ export const ContextPanelContent: React.FC = () => {
     const assistantMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).role === 'assistant');
     const userMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).isUser);
 
-    let contextMessage: SessionMessage | null = null;
-    for (let i = assistantMessages.length - 1; i >= 0; i -= 1) {
-      const message = assistantMessages[i];
-      if (extractTokenBreakdown(message).total > 0) {
-        contextMessage = message;
-        break;
-      }
-    }
+    // After a compaction the fill is unknown until a response reports tokens;
+    // the compaction record itself still supplies the last-turn breakdown.
+    const contextFill = findLatestContextFill(sessionMessages.map((entry) => entry.info));
+    const contextMessage = contextFill ? sessionMessages[contextFill.index] ?? null : null;
+    const isCompacted = contextFill?.state === 'compacted';
 
     const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
 
@@ -351,9 +348,11 @@ export const ContextPanelContent: React.FC = () => {
     );
 
     const contextLimit = providerModel.contextLimit;
-    const usagePercent = contextLimit && contextLimit > 0
-      ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
-      : 0;
+    const usagePercent = isCompacted
+      ? null
+      : contextLimit && contextLimit > 0
+        ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
+        : 0;
 
     const systemPrompt = ([...sessionMessages].reverse().find(
       (entry) => deriveMessageRole(entry.info).isUser && typeof (entry.info as { system?: unknown }).system === 'string',
@@ -433,12 +432,12 @@ export const ContextPanelContent: React.FC = () => {
           <div className="flex items-baseline justify-between">
             <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
             <span className="typography-micro tabular-nums text-muted-foreground/70">
-              {formatNumber(viewModel.tokenBreakdown.total)}
+              {viewModel.usagePercent === null ? '—' : formatNumber(viewModel.tokenBreakdown.total)}
               {viewModel.contextLimit ? ` / ${formatNumber(viewModel.contextLimit)}` : ''}
             </span>
           </div>
           <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {viewModel.usagePercent > 0 && (
+            {viewModel.usagePercent !== null && viewModel.usagePercent > 0 && (
               <div
                 className="rounded-full transition-all duration-300"
                 style={{
@@ -449,7 +448,9 @@ export const ContextPanelContent: React.FC = () => {
             )}
           </div>
           <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
+            {viewModel.usagePercent === null
+              ? t('contextUsage.compacted.description')
+              : t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
           </div>
         </div>
 

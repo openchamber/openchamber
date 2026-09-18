@@ -13,7 +13,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 
@@ -27,6 +27,7 @@ interface ModelSelectorProps {
     placeholder?: string;
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
+    directory?: string;
     /**
      * Drop the model name and the chevron, leaving the provider logo. For
      * headers that run out of room before they run out of controls — the logo
@@ -47,10 +48,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
     compact = false,
+    directory,
 }) => {
     const { t } = useI18n();
-    const { isReady, isUnavailable } = useOpenCodeReadiness();
-    const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
+    const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
+    const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
+        ? state.providers : selectProvidersForDirectory(state, directory));
+    const loadProviders = useConfigStore((state) => state.loadProviders);
+    React.useEffect(() => {
+        if (directory !== undefined) void loadProviders({ directory });
+    }, [directory, loadProviders]);
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore((state) => state.isMobile);
     const hiddenModels = useUIStore((state) => state.hiddenModels);

@@ -1,6 +1,6 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
@@ -216,7 +216,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
 
   if (schedule.kind === 'cron') {
     try {
-      const iterator = parser.parseExpression(schedule.cron, {
+      const iterator = CronExpressionParser.parse(schedule.cron, {
         tz: zone,
         currentDate: new Date(nowMs),
       });

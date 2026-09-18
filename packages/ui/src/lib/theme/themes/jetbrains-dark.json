@@ -2,10 +2,10 @@
   "metadata": {
     "id": "jetbrains-dark",
     "name": "JetBrains",
-    "description": "JetBrains IDE-inspired colors for OpenChamber - dark variant",
-    "author": "Artem Evsevev, adapted for OpenChamber",
-    "version": "1.0.0",
     "variant": "dark",
+    "description": "JetBrains IDE-inspired colors for OpenChamber - dark variant",
+    "version": "1.0.0",
+    "author": "Artem Evsevev, adapted for OpenChamber",
     "tags": [
       "dark",
       "jetbrains",
@@ -16,11 +16,10 @@
   "colors": {
     "primary": {
       "base": "#6796f5",
+      "foreground": "#1E1F22",
       "hover": "#70AEFF",
       "active": "#5594FA",
-      "foreground": "#1E1F22",
-      "muted": "#6796f580",
-      "emphasis": "#70AEFF"
+      "muted": "#6796f580"
     },
     "surface": {
       "background": "#1E1F22",
@@ -28,17 +27,13 @@
       "muted": "#26282B",
       "mutedForeground": "#9fa0a2",
       "elevated": "#2B2D30",
-      "elevatedForeground": "#DFE1E5",
       "overlay": "#00000080",
       "subtle": "#28292c"
     },
     "interactive": {
       "border": "#383a3f",
-      "borderHover": "#4B5059",
-      "borderFocus": "#6796f5",
       "selection": "#43454A",
-      "selectionForeground": "#DFE1E5",
-      "focus": "#6796f5",
+      "borderHover": "#4B5059",
       "focusRing": "#6796f550",
       "cursor": "#CED0D6",
       "hover": "#3C3E41",
@@ -62,16 +57,8 @@
       "infoBackground": "#243846",
       "infoBorder": "#3592C4"
     },
-    "pr": {
-      "open": "#5FAD65",
-      "draft": "#868A91",
-      "blocked": "#F2C55C",
-      "merged": "#A571E6",
-      "closed": "#DB5C5C"
-    },
     "syntax": {
       "base": {
-        "background": "#1E1F22",
         "foreground": "#BCBEC4",
         "comment": "#7A7E85",
         "keyword": "#CF8E6D",
@@ -86,17 +73,11 @@
         "commentDoc": "#5F826B",
         "stringEscape": "#CF8E6D",
         "keywordImport": "#CF8E6D",
-        "storageModifier": "#CF8E6D",
-        "functionCall": "#6AA2D7",
-        "method": "#6AA2D7",
         "functionBuiltin": "#D5A563",
         "variableProperty": "#C77DBB",
-        "variableOther": "#BCBEC4",
         "variableGlobal": "#E59EAE",
-        "variableLocal": "#BCBEC4",
         "parameter": "#3CACAC",
         "constant": "#C77DBB",
-        "class": "#57AAF7",
         "className": "#57AAF7",
         "interface": "#8D91DC",
         "struct": "#A6BB77",
@@ -105,18 +86,13 @@
         "namespace": "#BCBEC4",
         "module": "#8D91DC",
         "tag": "#D5B778",
-        "jsxTag": "#D5B778",
         "tagAttribute": "#B3AE60",
-        "tagAttributeValue": "#6AAB73",
-        "boolean": "#CF8E6D",
         "decorator": "#B3AE60",
         "label": "#D5A563",
         "punctuation": "#BCBEC4",
         "macro": "#D5A563",
         "preprocessor": "#D5A563",
-        "regex": "#6AAB73",
         "url": "#57AAF7",
-        "key": "#C77DBB",
         "exception": "#E59EAE"
       },
       "highlights": {
@@ -130,11 +106,17 @@
         "lineNumberActive": "#A1A3AB"
       }
     },
+    "pr": {
+      "open": "#5FAD65",
+      "draft": "#868A91",
+      "merged": "#A571E6",
+      "closed": "#DB5C5C"
+    },
+    "chat": {
+      "userMessageBackground": "#2a3b5d76",
+      "divider": "#393B41"
+    },
     "markdown": {
-      "heading1": "#FFFFFF",
-      "heading2": "#DFE1E5",
-      "heading3": "#CED0D6",
-      "heading4": "#BCBEC4",
       "link": "#56A8F5",
       "linkHover": "#6796f5",
       "inlineCode": "#6AAB73",
@@ -143,25 +125,13 @@
       "blockquoteBorder": "#393B41",
       "listMarker": "#B3AE6099"
     },
-    "chat": {
-      "userMessage": "#DFE1E5",
-      "userMessageBackground": "#2a3b5d76",
-      "assistantMessage": "#DFE1E5",
-      "assistantMessageBackground": "#1E1F22",
-      "timestamp": "#7A7E85",
-      "divider": "#393B41"
-    },
     "tools": {
-      "background": "#26282B50",
       "border": "#393B41",
-      "headerHover": "#3C3E4150",
       "icon": "#B0B1B3",
       "title": "#DFE1E5",
       "description": "#B0B1B3",
       "edit": {
-        "added": "#549159",
         "addedBackground": "#29443640",
-        "removed": "#F75464",
         "removedBackground": "#45302B40",
         "lineNumber": "#4B5059"
       }

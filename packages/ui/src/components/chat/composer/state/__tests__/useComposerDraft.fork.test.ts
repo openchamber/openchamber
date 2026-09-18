@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
-import { readChatDraft, writeChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { clearChatDraft, readChatDraft, writeChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
@@ -65,7 +65,7 @@ function renderComposer(persistEnabled: boolean) {
 
 beforeEach(() => {
     getDeferredSafeStorage().removeItem('openchamber.chatDrafts.v2');
-    useInputStore.setState({ pendingComposerRestore: null });
+    useInputStore.setState({ pendingComposerRestore: null, attachmentDraftKey: null, attachmentDrafts: new Map() });
     useInputStore.getState().clearAttachedFiles();
 });
 
@@ -96,6 +96,7 @@ describe('fork composer restoration', () => {
 
                 composer.render(source);
                 expect(composer.result.text).toBe('source draft @source.ts');
+                expect(useInputStore.getState().attachedFiles).toBe(sourceFiles);
                 expect(readChatDraft(fork).text).toBe(persistEnabled ? 'replay prompt' : '');
             } finally {
                 composer.teardown();
@@ -156,6 +157,93 @@ describe('fork composer restoration', () => {
                 useInputStore.setState({ pendingComposerRestore: { target: fork, text: '', files: [] } });
             });
             expect(composer.result.text).toBe('');
+            expect(useInputStore.getState().attachedFiles).toEqual([]);
+        } finally {
+            composer.teardown();
+        }
+    });
+});
+
+describe('attachment draft ownership', () => {
+    for (const persistEnabled of [true, false]) {
+        test(`keeps images and files with their draft, persistence=${persistEnabled}`, () => {
+            const composer = renderComposer(persistEnabled);
+            const input = useInputStore.getState();
+            try {
+                input.addRestoredAttachment({ ...replayFile, filename: 'source.txt' });
+                input.addRestoredAttachment({ url: 'data:image/png;base64,aGVsbG8=', mimeType: 'image/png', filename: 'source.png' });
+                input.addVSCodeFileAttachment('/repo/code.ts', 'code.ts', 10);
+                const sourceFiles = useInputStore.getState().attachedFiles;
+                for (const identity of [
+                    fork,
+                    { ...source, directory: '/other' },
+                    { ...source, runtimeKey: 'runtime-b' },
+                    { ...source, sessionId: null },
+                    { ...source, sessionId: 'btw-pending:source' },
+                ]) {
+                    composer.render(identity);
+                    expect(useInputStore.getState().attachedFiles).toEqual([]);
+                    input.addRestoredAttachment(replayFile);
+                    const destinationFiles = useInputStore.getState().attachedFiles;
+                    composer.render(source);
+                    expect(useInputStore.getState().attachedFiles).toBe(sourceFiles);
+                    composer.render(identity);
+                    expect(useInputStore.getState().attachedFiles).toBe(destinationFiles);
+                    input.clearAttachedFiles();
+                    composer.render(source);
+                }
+                input.removeAttachedFile(sourceFiles[0].id);
+                composer.render(fork);
+                composer.render(source);
+                expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(['source.png', 'code.ts']);
+                input.clearAttachedFiles();
+                composer.render(fork);
+                composer.render(source);
+                expect(useInputStore.getState().attachedFiles).toEqual([]);
+            } finally {
+                composer.teardown();
+            }
+        });
+    }
+
+    test('retains attachments across composer remounts', () => {
+        const first = renderComposer(false);
+        useInputStore.getState().addRestoredAttachment(replayFile);
+        const files = useInputStore.getState().attachedFiles;
+        first.teardown();
+        const second = renderComposer(false);
+        try {
+            second.render(fork);
+            expect(useInputStore.getState().attachedFiles).toEqual([]);
+            second.render(source);
+            expect(useInputStore.getState().attachedFiles).toBe(files);
+        } finally {
+            second.teardown();
+        }
+    });
+
+    test('restores a failed send to its source and clears deleted drafts', () => {
+        const composer = renderComposer(false);
+        const input = useInputStore.getState();
+        try {
+            input.addRestoredAttachment({ ...replayFile, filename: 'source.txt' });
+            const sentFiles = useInputStore.getState().attachedFiles;
+            input.clearAttachedFiles(source);
+            composer.render(fork);
+            input.addRestoredAttachment(replayFile);
+            const forkFiles = useInputStore.getState().attachedFiles;
+            input.restoreAttachedFiles(sentFiles, source);
+            input.restoreAttachedFiles(sentFiles, source);
+            expect(useInputStore.getState().attachedFiles).toBe(forkFiles);
+            composer.render(source);
+            expect(useInputStore.getState().attachedFiles).toEqual(sentFiles);
+            composer.render(fork);
+            act(() => { clearChatDraft(source, true); });
+            expect(useInputStore.getState().attachedFiles).toBe(forkFiles);
+            composer.render(source);
+            expect(useInputStore.getState().attachedFiles).toEqual([]);
+            composer.render(fork);
+            act(() => { clearChatDraft(fork, true); });
             expect(useInputStore.getState().attachedFiles).toEqual([]);
         } finally {
             composer.teardown();

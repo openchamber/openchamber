@@ -34,10 +34,10 @@ export const WorkStatusSection: React.FC<{
   children: React.ReactNode;
 }> = ({ title, summary, children }) => (
   <section className={SECTION_CLASS}>
-    <div className="mb-0.5 flex items-center gap-2 px-1">
+    <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
       <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>{title}</h3>
       {summary !== undefined && summary !== null ? (
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{summary}</span>
+        <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
       ) : null}
     </div>
     {children}
@@ -66,8 +66,10 @@ export const WorkStatusCollapsibleSection: React.FC<{
   /** An independent header action, such as refreshing this section's data. */
   action?: React.ReactNode;
   defaultExpanded?: boolean;
+  /** Optional preview that stays below the heading while the section is folded. */
+  collapsedContent?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ id, title, icon, iconNode, iconColor, summary, action, defaultExpanded = false, children }) => {
+}> = ({ id, title, icon, iconNode, iconColor, summary, action, defaultExpanded = false, collapsedContent, children }) => {
   const stored = useUIStore(
     React.useCallback((state) => state.workStatusExpandedSections[id], [id]),
   );
@@ -75,7 +77,7 @@ export const WorkStatusCollapsibleSection: React.FC<{
   const expanded = stored ?? defaultExpanded;
   return (
     <section className={SECTION_CLASS}>
-      <div className="mb-0.5 flex h-6 items-center gap-1">
+      <div data-work-status-heading className="mb-0.5 flex h-6 items-center gap-1">
         <button
           type="button"
           aria-expanded={expanded}
@@ -102,12 +104,12 @@ export const WorkStatusCollapsibleSection: React.FC<{
           />
           <span className="flex-1" />
           {summary !== undefined && summary !== null ? (
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{summary}</span>
+            <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
           ) : null}
         </button>
         {action}
       </div>
-      {expanded ? children : null}
+      {expanded ? children : collapsedContent}
     </section>
   );
 };

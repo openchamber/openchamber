@@ -53,11 +53,20 @@ export const DefaultsSettings: React.FC = () => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
   const getSessionAgentSelection = useSelectionStore((state) => state.getSessionAgentSelection);
+  const agentIsPicked = useConfigStore((state) => state.agentSelectionSource === 'manual');
+  // An agent picked for this chat brings the model its config pins, and a pin
+  // outranks the global default the same way it does in `setAgent`.
+  const pickedAgentPinsModel = useConfigStore((state) => {
+    if (state.agentSelectionSource !== 'manual') return false;
+    const agent = state.agents.find((candidate) => candidate.name === state.currentAgentName);
+    return Boolean(agent?.model?.providerID && agent.model.modelID);
+  });
   const chatHasOwnModel = Boolean(
-    selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId),
+    pickedAgentPinsModel
+    || (selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId)),
   );
   const chatHasOwnAgent = Boolean(
-    selectionIsManual && currentSessionId && getSessionAgentSelection(currentSessionId),
+    agentIsPicked && currentSessionId && getSessionAgentSelection(currentSessionId),
   );
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);

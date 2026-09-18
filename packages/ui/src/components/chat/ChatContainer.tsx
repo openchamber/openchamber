@@ -390,17 +390,18 @@ const ChatViewport = React.memo(({
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
-                composer covers, so the end of the transcript stays readable
-                above it; the extra gap is the breathing room between the last
-                row and the composer's top edge. The height comes from a CSS
-                variable the composer slot's observer writes directly, so a
-                growing composer resizes the footer without a list re-render;
-                the list's own footer observer then extends the content. */}
+                composer covers, plus any panel docked above it (queue, BTW),
+                so the end of the transcript stays readable above them; the
+                extra gap is the breathing room between the last row and the
+                top edge of whatever floats. Both heights come from CSS
+                variables written straight by observers, so a growing composer
+                or panel resizes the footer without a list re-render; the
+                list's own footer observer then extends the content. */}
             <div
                 className="flex-shrink-0"
                 style={{
                     height: floatingComposer
-                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + ${FLOATING_COMPOSER_GAP_PX}px)`
+                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + var(--chat-floating-panel-clearance, 0px) + ${FLOATING_COMPOSER_GAP_PX}px)`
                         : (isMobile ? '40px' : '10vh'),
                 }}
                 aria-hidden="true"
@@ -1632,6 +1633,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
             <div
                 ref={attachComposerSlot}
+                // The mobile pill morph pins a floating slot for its tween.
+                data-composer-slot={floatingComposer ? 'floating' : 'flow'}
                 className={cn(
                     'z-10 flex min-h-0',
                     floatingComposer
@@ -1645,7 +1648,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 )}
             >
                 {!draftLayoutVisible && !isDesktopExpandedInput && sessionMessages.length > 0 && (
-                    <>
+                    /* One zero-height anchor on the slot's top edge for
+                       everything that floats above the composer, so the
+                       mobile keyboard slide and the pill morph move them as
+                       one rider with the box instead of leaving them to jump
+                       when the slot resizes (see mobileComposerMorph). */
+                    <div className="oc-composer-riders absolute bottom-full inset-x-0" data-composer-riders="true">
                         <ScrollToBottomButton
                             visible={timelineController.showScrollToBottom}
                             working={sessionIsWorking}
@@ -1701,7 +1709,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 </div>
                             </div>
                         ) : null}
-                    </>
+                    </div>
                 )}
                 {promptReadOnly ? (
                     <ReadOnlyPromptBanner />

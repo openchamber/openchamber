@@ -15,6 +15,13 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { Button } from '@/components/ui/button';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useUIStore } from '@/stores/useUIStore';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -40,6 +47,7 @@ type Props = {
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
+  const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
@@ -146,6 +154,20 @@ export function SidebarHeader(props: Props): React.ReactNode {
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.nav.archive')}</p></TooltipContent>
             </Tooltip>
+            {guestPages.length > 0 && <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" className="w-6 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
+                  <Icon name="apps" className={headerActionIconClass} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
+                {guestPages.map((guest) => <DropdownMenuItem key={guest.id} onSelect={() => useUIStore.getState().setOpenGuestPage(guest.id)}>
+                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
+                  <span>{guest.pageTitle ?? guest.name}</span>
+                </DropdownMenuItem>)}
+              </DropdownMenuContent>
+            </DropdownMenu>}
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -309,36 +331,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
               ) : <span />}
               <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
             </div>
-            <div className="relative">
-              <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                ref={sessionSearchInputRef}
-                value={sessionSearchQuery}
-                onChange={(event) => setSessionSearchQuery(event.target.value)}
-                placeholder={t('sessions.sidebar.header.search.placeholder')}
-                className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-8 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.stopPropagation();
-                    if (hasSessionSearchQuery) {
-                      setSessionSearchQuery('');
-                    } else {
-                      setIsSessionSearchOpen(false);
-                    }
-                  }
-                }}
-              />
-              {sessionSearchQuery.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setSessionSearchQuery('')}
-                  className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={t('sessions.sidebar.header.search.clear')}
-                >
-                  <Icon name="close" className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-            </div>
+            <SessionSearchInput
+              inputRef={sessionSearchInputRef}
+              value={sessionSearchQuery}
+              onSearch={setSessionSearchQuery}
+              onClose={() => setIsSessionSearchOpen(false)}
+              placeholder={t('sessions.sidebar.header.search.placeholder')}
+              clearLabel={t('sessions.sidebar.header.search.clear')}
+            />
           </div>
         ) : null}
       </div>

@@ -8,6 +8,7 @@ import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -922,12 +923,18 @@ describe('routeMessage skill invocation', () => {
   // content is injected — not sent as a plain "/name" text message (issue #1605).
   const sendCommandCalls = [];
   const sendMessageCalls = [];
+  const liveLookupCalls = [];
+  // Live, directory-scoped command discovery. Tests replace it per case.
+  let liveLookup = async () => [];
   let originalSendCommand;
   let originalSendMessage;
+  let originalListCommands;
 
   beforeEach(() => {
     sendCommandCalls.length = 0;
     sendMessageCalls.length = 0;
+    liveLookupCalls.length = 0;
+    liveLookup = async () => [];
 
     // Minimal optimistic + connection machinery so routeMessage can dispatch.
     const childStore = {
@@ -948,13 +955,18 @@ describe('routeMessage skill invocation', () => {
     setOptimisticRefs(() => {}, () => {});
     useConfigStore.setState({ isConnected: true });
 
-    // The sync command list and the commands store both exclude user skills,
-    // so they start empty here — the skill is only known to the skills store.
-    useCommandsStore.setState({ commands: [] });
-    useSkillsStore.setState({ skills: [] });
+    // Commands and skills are resolved per directory. The commands store
+    // excludes user skills, so a skill is only known to the skills store.
+    useCommandsStore.setState({ commands: [], commandsByDirectory: {} });
+    useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
 
     originalSendCommand = opencodeClient.sendCommand;
     originalSendMessage = opencodeClient.sendMessage;
+    originalListCommands = opencodeClient.listCommandsWithDetails;
+    opencodeClient.listCommandsWithDetails = async (directory) => {
+      liveLookupCalls.push(directory);
+      return liveLookup(directory);
+    };
     opencodeClient.sendCommand = async (params) => {
       sendCommandCalls.push(params);
       return 'msg';
@@ -968,12 +980,14 @@ describe('routeMessage skill invocation', () => {
   afterEach(() => {
     opencodeClient.sendCommand = originalSendCommand;
     opencodeClient.sendMessage = originalSendMessage;
-    useSkillsStore.setState({ skills: [] });
+    opencodeClient.listCommandsWithDetails = originalListCommands;
+    useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
+    useCommandsStore.setState({ commands: [], commandsByDirectory: {} });
   });
 
   test('invokes a user-installed skill as a command', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
 
     await routeMessage({
@@ -991,7 +1005,7 @@ describe('routeMessage skill invocation', () => {
 
   test('forwards trailing arguments to the skill command', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
 
     await routeMessage({
@@ -1009,7 +1023,7 @@ describe('routeMessage skill invocation', () => {
 
   test('preserves context parts and skill invocation on the prompt route', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
     const additionalParts = [createContextPart({
       kind: 'code-comment',
@@ -1040,7 +1054,7 @@ describe('routeMessage skill invocation', () => {
 
   test('expands a contextual command template on the prompt route', async () => {
     useCommandsStore.setState({
-      commands: [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }],
+      commandsByDirectory: { '/skills/project': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
     });
 
     await routeMessage({
@@ -1069,7 +1083,7 @@ describe('routeMessage skill invocation', () => {
 
   test('keeps session.command when the only extra part is pinned knowledge', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
 
     const route = await routeMessage({
@@ -1090,7 +1104,7 @@ describe('routeMessage skill invocation', () => {
 
   test('keeps primary file attachments on the command route', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
     const files = [{
       type: 'file',
@@ -1117,7 +1131,7 @@ describe('routeMessage skill invocation', () => {
 
   test('keeps unmarked synthetic instructions on the prompt route', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
     const instructions = [{ text: 'Resolve the prepared conflict first.', synthetic: true }];
 
@@ -1136,7 +1150,7 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls[0].additionalParts[0]).toEqual(instructions[0]);
   });
 
-  test('sends an unknown slash token as a plain message', async () => {
+  test('sends an unknown slash token as a plain message after live discovery finds nothing', async () => {
     await routeMessage({
       sessionId: 'session-skill',
       directory: '/skills/project',
@@ -1145,8 +1159,176 @@ describe('routeMessage skill invocation', () => {
       modelID: 'model-a',
     });
 
+    expect(liveLookupCalls).toEqual(['/skills/project']);
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendCommandCalls).toHaveLength(0);
+  });
+
+  test('expands the template of the session directory, not a same-named root command', async () => {
+    // A root project and its worktree can define the same command with
+    // different templates. The contextual prompt must use the worktree's.
+    useCommandsStore.setState({
+      commandsByDirectory: {
+        '/repo': [{ name: 'inspect', template: 'Root inspects $ARGUMENTS.' }],
+        '/repo/worktree': [{ name: 'inspect', template: 'Worktree inspects $ARGUMENTS.' }],
+      },
+    });
+
+    await routeMessage({
+      sessionId: 'session-worktree',
+      directory: '/repo/worktree',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [{ text: 'Resolve the prepared conflict first.', synthetic: true }],
+    });
+
+    expect(liveLookupCalls).toEqual([]);
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].text).toBe('Worktree inspects auth flow.');
+  });
+
+  test('does not match a skill or command cached for a different directory', async () => {
+    useSkillsStore.setState({
+      skillsByDirectory: { '/other/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'project', source: 'opencode' }] },
+    });
+    useCommandsStore.setState({
+      commandsByDirectory: { '/other/project': [{ name: 'grill-with-docs', template: 'Other $ARGUMENTS' }] },
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(liveLookupCalls).toEqual(['/skills/project']);
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+  });
+
+  test('dispatches a command that only live discovery knows', async () => {
+    liveLookup = async (directory) => directory === '/skills/project'
+      ? [{ name: 'deploy', template: 'Deploy $ARGUMENTS' }]
+      : [];
+
+    const route = await routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/deploy staging',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(route).toBe('command');
+    expect(liveLookupCalls).toEqual(['/skills/project']);
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('deploy');
+    expect(sendCommandCalls[0].arguments).toBe('staging');
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('fails the send instead of sending raw slash text when live discovery is rejected', async () => {
+    liveLookup = async () => { throw new Error('command list unavailable'); };
+
+    let error = null;
+    try {
+      await routeMessage({
+        sessionId: 'session-command',
+        directory: '/skills/project',
+        content: '/deploy staging',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('command list unavailable');
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+});
+
+describe('goal objective directory scoping', () => {
+  let originalSendMessage;
+  let originalGetSession;
+  let originalUpdateSession;
+  let originalFetch;
+  const metadataWrites = [];
+
+  beforeEach(() => {
+    metadataWrites.length = 0;
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/repo');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+    useSessionUIStore.setState({
+      currentSessionId: 'session-worktree',
+      currentSessionDirectory: '/repo/worktree',
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+    useCommandsStore.setState({
+      commands: [{ name: 'inspect', template: 'Root inspects $ARGUMENTS.' }],
+      commandsByDirectory: {
+        '/repo': [{ name: 'inspect', template: 'Root inspects $ARGUMENTS.' }],
+        '/repo/worktree': [{ name: 'inspect', template: 'Worktree inspects $ARGUMENTS.' }],
+      },
+    });
+    useSessionGoalArmStore.getState().setArmed(true, null);
+
+    originalSendMessage = opencodeClient.sendMessage;
+    originalGetSession = opencodeClient.getSession;
+    originalUpdateSession = opencodeClient.updateSession;
+    originalFetch = globalThis.fetch;
+    opencodeClient.sendMessage = async () => 'msg';
+    opencodeClient.getSession = async () => ({ id: 'session-worktree', metadata: {} });
+    opencodeClient.updateSession = async (sessionId, patch, directory) => {
+      metadataWrites.push({ sessionId, patch, directory });
+      return { id: sessionId, ...patch };
+    };
+    // The file-backed objective write fails here, so the objective stays inline.
+    globalThis.fetch = async () => new Response('', { status: 500 });
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.getSession = originalGetSession;
+    opencodeClient.updateSession = originalUpdateSession;
+    globalThis.fetch = originalFetch;
+    useSessionGoalArmStore.getState().setArmed(false, null);
+    useCommandsStore.setState({ commands: [], commandsByDirectory: {} });
+  });
+
+  test('a slash-command goal objective expands with the target directory template', async () => {
+    await useSessionUIStore.getState().sendMessage(
+      '/inspect auth flow',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-worktree', directory: '/repo/worktree' } },
+    );
+
+    expect(metadataWrites).toHaveLength(1);
+    expect(metadataWrites[0].directory).toBe('/repo/worktree');
+    expect(metadataWrites[0].patch.metadata.openchamber.goal.objective).toBe('Worktree inspects auth flow.');
   });
 });
 

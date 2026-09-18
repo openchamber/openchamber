@@ -17,7 +17,9 @@ import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
 import { coerceDiffScope, isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, useRangeKeyedCache, useBoundedDirectoryRetry } from './branchDiffScope';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
-import type { GitStatus } from '@/lib/api/types';
+import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
+import { GitPathUnavailableError, type GitPathUnavailableReason } from '@/lib/api/git-path-diff';
+import { SubmoduleDiffSummary } from './SubmoduleDiffSummary';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -91,7 +93,13 @@ type DiffData = {
     patch?: string;
     fileDiff?: FileDiffMetadata;
     contextMode?: DiffContextMode;
+    /** Set for a live working or staged diff of a submodule; its patch alone can be empty. */
+    submodule?: GitSubmoduleState | null;
 };
+/** An unavailable path is a stale or non-file status row, not a failed request. */
+type DiffLoadFailure =
+    | { kind: 'error'; message: string }
+    | { kind: 'unavailable'; reason: GitPathUnavailableReason };
 type DiffScope = 'all' | PendingDiffScope;
 
 type TurnSnapshotDiff = {
@@ -473,6 +481,7 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
 interface InlineDiffViewerProps {
   filePath: string;
   diff: DiffData;
+  staged: boolean;
   renderSideBySide: boolean;
   wrapLines: boolean;
   hunkActions?: DiffHunkActions;
@@ -481,6 +490,7 @@ interface InlineDiffViewerProps {
 const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
   filePath,
   diff,
+  staged,
   renderSideBySide,
   wrapLines,
   hunkActions,
@@ -489,6 +499,10 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
     () => getLanguageFromExtension(filePath) || 'text',
     [filePath]
   );
+
+  if (diff.submodule) {
+    return <SubmoduleDiffSummary state={diff.submodule} staged={staged} />;
+  }
 
   if (diff.isBinary) {
     return <BinaryDiffPlaceholder />;
@@ -582,13 +596,16 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const setDiffFileLayout = useUIStore((state) => state.setDiffFileLayout);
 
     const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
-    const [localDiffLoadError, setDiffLoadError] = React.useState<string | null>(null);
+    const [localDiffLoadFailure, setDiffLoadFailure] = React.useState<DiffLoadFailure | null>(null);
     const [isFetching, setIsLoading] = React.useState(false);
-    const diffLoadError = comparisonDiff ? (comparisonDiff.status === 'error' ? comparisonDiff.message : null) : localDiffLoadError;
+    const diffLoadFailure = React.useMemo<DiffLoadFailure | null>(() => {
+        if (!comparisonDiff) return localDiffLoadFailure;
+        return comparisonDiff.status === 'error' ? { kind: 'error', message: comparisonDiff.message } : null;
+    }, [comparisonDiff, localDiffLoadFailure]);
     const isLoading = comparisonDiff ? comparisonDiff.status === 'loading' : isFetching;
     const [hunkAction, setHunkAction] = React.useState<HunkBusyState>(null);
     const mutationInFlight = React.useRef(false);
-    const [canonicalPatch, setCanonicalPatch] = React.useState<{ scope: string; patch: string } | null>(null);
+    const [canonicalPatch, setCanonicalPatch] = React.useState<{ scope: string; patch: string; submodule: GitSubmoduleState | null } | null>(null);
     const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
     const [localDiffData, setLocalDiffData] = React.useState<DiffData | null>(null);
     const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
@@ -602,6 +619,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const hunkEligible = hunkActionsEnabled && !readOnlyActions && !initialDiffData && !comparisonDiff && !isImageFile(file.path);
     const patchScope = JSON.stringify([getRuntimeKey(), directory, file.path, staged, fileStatusKey, diffRetryNonce]);
     const actionPatch = canonicalPatch?.scope === patchScope ? canonicalPatch.patch : null;
+    const actionSubmodule = canonicalPatch?.scope === patchScope ? canonicalPatch.submodule : null;
 
     const diffData = React.useMemo<DiffData | null>(() => {
         if (comparisonDiff) return comparisonDiff.status === 'ready' ? comparisonDiff.data : null;
@@ -609,7 +627,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         if (staged) return stagedDiffData;
         if (localDiffData) return localDiffData;
         if (!cachedDiff) return null;
-        return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary, contextMode: 'full' };
+        return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary, submodule: cachedDiff.submodule, contextMode: 'full' };
     }, [comparisonDiff, cachedDiff, initialDiffData, localDiffData, staged, stagedDiffData]);
 
     const diffDataMatchesContextMode = diffData?.contextMode === desiredContextMode;
@@ -639,13 +657,13 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             setStagedDiffData(null);
         }
 
-        setDiffLoadError(null);
+        setDiffLoadFailure(null);
         lastDiffRequestRef.current = null;
     }, [fileStatusKey, staged, visible]);
 
     React.useEffect(() => {
         if (!visible || !isExpanded || !isMounted) return;
-        if (localDiffLoadError) return;
+        if (localDiffLoadFailure) return;
         if (!directory || comparisonDiff || initialDiffData || (diffData && diffDataMatchesContextMode && (!hunkEligible || actionPatch !== null))) {
             lastDiffRequestRef.current = null;
             setIsLoading(false);
@@ -657,7 +675,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             return;
         }
         lastDiffRequestRef.current = requestKey;
-        setDiffLoadError(null);
+        setDiffLoadFailure(null);
         setIsLoading(true);
 
         let cancelled = false;
@@ -666,7 +684,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         const displayRequest = isImageFile(file.path)
             ? git.getGitFileDiff(directory, { path: file.path, staged })
             : !loadFullFiles && actionPatch !== null
-                ? Promise.resolve({ diff: actionPatch })
+                ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
             : git.getGitDiff(directory, { path: file.path, staged, contextLines });
         const canonicalRequest = hunkEligible && loadFullFiles && actionPatch === null
             ? git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => response.diff)
@@ -688,10 +706,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     setCanonicalPatch(null);
                     throw new Error(t('diffView.hunk.unavailable'));
                 }
-                if (hunkEligible && patch !== null) setCanonicalPatch({ scope: patchScope, patch });
+                if (hunkEligible && patch !== null) setCanonicalPatch({ scope: patchScope, patch, submodule: response.submodule });
 
                 if ('diff' in response) {
-                    const nextDiff = createTextDiffDataFromPatch(file.path, response.diff, desiredContextMode);
+                    const nextDiff = { ...createTextDiffDataFromPatch(file.path, response.diff, desiredContextMode), submodule: response.submodule };
                     if (staged) {
                         setStagedDiffData(nextDiff);
                     } else {
@@ -702,6 +720,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         original: response.original ?? '',
                         modified: response.modified ?? '',
                         isBinary: response.isBinary,
+                        submodule: response.submodule,
                         contextMode: 'full' as const,
                     };
                     if (staged) {
@@ -714,9 +733,15 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             })
             .catch((error) => {
                 if (cancelled || runtimeKey !== getRuntimeKey()) return;
-                const message = error instanceof Error ? error.message : String(error);
-                setDiffLoadError(message);
                 setIsLoading(false);
+                if (error instanceof GitPathUnavailableError) {
+                    setDiffLoadFailure({ kind: 'unavailable', reason: error.reason });
+                    // The row came from a status listing that is now stale. A
+                    // cached or joined status read would return the same list.
+                    if (error.reason === 'path_not_found') void fetchStatus(directory, git, { force: true, silent: true });
+                    return;
+                }
+                setDiffLoadFailure({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
             }).finally(() => clearTimeout(timeout));
 
         return () => {
@@ -726,7 +751,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 lastDiffRequestRef.current = null;
             }
         };
-    }, [actionPatch, hunkEligible, patchScope, comparisonDiff, desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, file.path, fileStatusKey, git, initialDiffData, isExpanded, isMounted, loadFullFiles, localDiffLoadError, setDiff, staged, t, visible]);
+    }, [actionPatch, actionSubmodule, hunkEligible, patchScope, comparisonDiff, desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, fetchStatus, file.path, fileStatusKey, git, initialDiffData, isExpanded, isMounted, loadFullFiles, localDiffLoadFailure, setDiff, staged, t, visible]);
 
     const handleToggle = React.useCallback(() => {
         handleOpenChange(!isExpanded);
@@ -734,7 +759,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, [handleOpenChange, handleSelect, isExpanded]);
 
     const invalidatePatch = React.useCallback(() => {
-        setDiffLoadError(null);
+        setDiffLoadFailure(null);
         setCanonicalPatch(null);
         setLocalDiffData(null);
         setStagedDiffData(null);
@@ -743,7 +768,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, []);
 
     const handleHunkAction = React.useCallback(async (hunkIndex: number, action: HunkDiffAction) => {
-        if (!directory || !hunkEligible || isLoading || diffLoadError || mutationInFlight.current || hunkAction !== null) {
+        if (!directory || !hunkEligible || isLoading || diffLoadFailure || mutationInFlight.current || hunkAction !== null) {
             return;
         }
 
@@ -780,13 +805,13 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             mutationInFlight.current = false;
             setHunkAction((current) => (current?.index === hunkIndex && current.action === action ? null : current));
         }
-    }, [actionPatch, hunkEligible, isLoading, diffLoadError, directory, fetchStatus, file.path, git, hunkAction, invalidatePatch, staged, t]);
+    }, [actionPatch, hunkEligible, isLoading, diffLoadFailure, directory, fetchStatus, file.path, git, hunkAction, invalidatePatch, staged, t]);
 
     const hunkAnchors = React.useMemo(() => hunkEligible && actionPatch !== null ? getPatchHunkAnchors(actionPatch) : [], [actionPatch, hunkEligible]);
     const renderHunkActions = React.useCallback((index: number) => (
         <HunkActions index={index} staged={staged} busyHunk={hunkAction}
-            disabled={isLoading || Boolean(diffLoadError)} onAction={handleHunkAction} />
-    ), [diffLoadError, handleHunkAction, hunkAction, isLoading, staged]);
+            disabled={isLoading || Boolean(diffLoadFailure)} onAction={handleHunkAction} />
+    ), [diffLoadFailure, handleHunkAction, hunkAction, isLoading, staged]);
     const diffHunkActions = React.useMemo<DiffHunkActions | undefined>(() => hunkAnchors.length > 0
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
@@ -904,16 +929,43 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             </div>
             {isExpanded && (
                 <div className="relative bg-background overflow-hidden">
-                    {!isMounted && !diffLoadError ? (
+                    {!isMounted && !diffLoadFailure ? (
                         <div className="h-40 border border-border/40 bg-background/40" />
                     ) : null}
-                    {diffLoadError ? (
+                    {diffLoadFailure?.kind === 'unavailable' ? (
+                        <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
+                            <div className="typography-ui-label font-semibold text-foreground">
+                                {diffLoadFailure.reason === 'nested_repository'
+                                    ? t('diffView.unavailable.nestedRepositoryTitle')
+                                    : diffLoadFailure.reason === 'untracked_directory'
+                                        ? t('diffView.unavailable.untrackedDirectoryTitle')
+                                        : t('diffView.unavailable.missingTitle')}
+                            </div>
+                            <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
+                                {diffLoadFailure.reason === 'nested_repository'
+                                    ? t('diffView.unavailable.nestedRepositoryDescription')
+                                    : diffLoadFailure.reason === 'untracked_directory'
+                                        ? t('diffView.unavailable.untrackedDirectoryDescription')
+                                        : t('diffView.unavailable.missingDescription')}
+                            </div>
+                            {diffLoadFailure.reason === 'path_not_found' ? (
+                                <button
+                                    type="button"
+                                    className="typography-ui-label text-primary hover:underline"
+                                    onClick={invalidatePatch}
+                                >
+                                    {t('diffView.actions.retry')}
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
+                    {diffLoadFailure?.kind === 'error' ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
                                 {t('diffView.state.failedToLoadDiff')}
                             </div>
                             <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
-                                {diffLoadError}
+                                {diffLoadFailure.message}
                             </div>
                             <button
                                 type="button"
@@ -924,7 +976,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             </button>
                         </div>
                     ) : null}
-                    {isMounted && isLoading && !diffData && !diffLoadError ? (
+                    {isMounted && isLoading && !diffData && !diffLoadFailure ? (
                         <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <Icon name="loader-4" className="size-4 animate-spin" />
                             {t('diffView.state.loadingDiff')}
@@ -952,6 +1004,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             <InlineDiffViewer
                                 filePath={file.path}
                                 diff={diffData}
+                                staged={staged}
                                 renderSideBySide={renderSideBySide}
                                 wrapLines={wrapLines}
                                 hunkActions={diffHunkActions}
@@ -1302,21 +1355,39 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
 
         if (!status?.files) return [];
-        const diffStats = status.diffStats ?? {};
+        const diffStats = status.diffStats;
         const includeFile = activeDiffScope === 'staged'
             ? isStagedStatusFile
             : activeDiffScope === 'working'
                 ? isWorkingStatusFile
                 : () => true;
 
+        const statsForFile = (filePath: string): { insertions: number; deletions: number } => {
+            const staged = diffStats?.staged?.[filePath];
+            const working = diffStats?.working?.[filePath];
+            if (activeDiffScope === 'staged') {
+                return { insertions: staged?.insertions ?? 0, deletions: staged?.deletions ?? 0 };
+            }
+            if (activeDiffScope === 'working') {
+                return { insertions: working?.insertions ?? 0, deletions: working?.deletions ?? 0 };
+            }
+            return {
+                insertions: (staged?.insertions ?? 0) + (working?.insertions ?? 0),
+                deletions: (staged?.deletions ?? 0) + (working?.deletions ?? 0),
+            };
+        };
+
         return status.files
             .filter(includeFile)
-            .map((file) => ({
-                ...file,
-                insertions: diffStats[file.path]?.insertions ?? 0,
-                deletions: diffStats[file.path]?.deletions ?? 0,
-                isNew: isNewStatusFile(file),
-            }))
+            .map((file) => {
+                const stats = statsForFile(file.path);
+                return {
+                    ...file,
+                    insertions: stats.insertions,
+                    deletions: stats.deletions,
+                    isNew: isNewStatusFile(file),
+                };
+            })
             .sort((a, b) => a.path.localeCompare(b.path));
     }, [activeDiffScope, branchFiles, comparison.files, lastTurnDiffs, status]);
 
@@ -1826,13 +1897,15 @@ export const DiffView: React.FC<DiffViewProps> = ({
             let diffForNavigation = cachedDiffData;
             if (targetLine === null || !diffForNavigation) {
                 const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath, staged: activeDiffStaged });
-                diffForNavigation = {
+                const fetchedDiff = {
                     original: response.original ?? '',
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
+                    submodule: response.submodule,
                 };
+                diffForNavigation = fetchedDiff;
                 if (!activeDiffStaged) {
-                    setDiff(effectiveDirectory, filePath, diffForNavigation, runtimeKey);
+                    setDiff(effectiveDirectory, filePath, fetchedDiff, runtimeKey);
                 }
             }
 

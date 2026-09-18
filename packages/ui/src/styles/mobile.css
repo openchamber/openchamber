@@ -773,6 +773,20 @@
   to { opacity: 1; }
 }
 
+/* Pill ↔ full-composer morph (native iOS; see mobileComposerMorph.ts). While
+   the box carries data-composer-morph its height is animated inline, so it
+   clips instead of overflowing and its contents sit on the bottom edge: the
+   footer icon row and the model/agent row stay where the pill's rows were
+   and the editor block travels above them. flex-shrink: 0 keeps the children
+   at their natural size (a squeezed editor would distort instead of clip). */
+:root.oc-capacitor-app [data-composer-box][data-composer-morph] {
+  overflow: clip !important;
+  justify-content: flex-end;
+}
+:root.oc-capacitor-app [data-composer-box][data-composer-morph] > * {
+  flex-shrink: 0;
+}
+
 /* Voice overlay variant: the overlay BACKGROUND appears immediately (it rides
    the morphing shape), but its content stays hidden until the shape has mostly
    finished growing, then fades in — no clipped controls mid-morph. Timings

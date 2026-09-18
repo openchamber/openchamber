@@ -8,6 +8,7 @@ import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 import { applyConnectAttemptTimeout } from './networkDefaults';
+import { stopGitProcesses } from './bridge-git-process-runtime';
 
 let chatViewProvider: ChatViewProvider | undefined;
 
@@ -228,10 +229,10 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.window.onDidChangeWindowState((state) => {
-      chatViewProvider?.notifyWindowFocusChanged(state.focused);
-      sessionEditorProvider?.notifyWindowFocusChanged(state.focused);
-      agentManagerProvider?.notifyWindowFocusChanged(state.focused);
+    vscode.window.onDidChangeWindowState(() => {
+      chatViewProvider?.notifyViewerStateChanged();
+      sessionEditorProvider?.notifyViewerStateChanged();
+      agentManagerProvider?.notifyViewerStateChanged();
     })
   );
 
@@ -866,7 +867,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
   stopGlobalEventWatcher();
-  await openCodeManager?.stop();
+  await Promise.all([openCodeManager?.stop(), stopGitProcesses()]);
   openCodeManager = undefined;
   chatViewProvider = undefined;
   agentManagerProvider = undefined;

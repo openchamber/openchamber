@@ -5,7 +5,7 @@ import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdow
 import { getRevealLabelKey } from '@/lib/utils';
 import { formatMessageText } from '@/lib/messages/messageMarkdown';
 
-type SessionMessageRecord = { info: Message; parts: Part[] };
+export type SessionMessageRecord = { info: Message; parts: Part[] };
 
 export type ChildSessionExport = {
   title: string;
@@ -59,9 +59,18 @@ function formatMessageHeader(record: SessionMessageRecord): string {
   return details ? `**${label}**\n\n*${details}*` : `**${label}**`;
 }
 
+/**
+ * A message's text the way the Markdown export renders it. Guest message and
+ * session items carry the same text, so an extension sees what the export
+ * file would.
+ */
+export function formatMessageRecordText(record: SessionMessageRecord): string {
+  return formatMessageText(record.parts, { user: record.info.role === 'user' });
+}
+
 function formatMessageAsMarkdown(record: SessionMessageRecord): string {
   const role = formatMessageHeader(record);
-  const text = formatMessageText(record.parts, { user: record.info.role === 'user' });
+  const text = formatMessageRecordText(record);
 
   if (!text) return '';
   return `${role}\n\n${text}`;

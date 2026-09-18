@@ -109,6 +109,29 @@ const nonnegative = (value: number | undefined): number | null =>
 const add = (left: number | null, right: number | null): number | null =>
   left === null || right === null ? null : nonnegative(left + right);
 
+/**
+ * No provider streams anywhere near this fast; the quickest inference
+ * services top out around 3,000 tok/s. A rate above it means the measured
+ * window is broken, not that the model was quick.
+ */
+const MAX_PLAUSIBLE_TOKENS_PER_SECOND = 5_000;
+
+/**
+ * Tokens per second over a measured window, or null when the window cannot
+ * have produced them.
+ *
+ * The turn window is "step duration minus tool time". A step whose tool ran
+ * for nearly the whole step leaves a residual of a millisecond or two; real
+ * data shows such steps (a 560 ms step with a 559 ms tool). Divide a few
+ * hundred tokens by that and the panel reads ~392,250 tok/s (#3500).
+ * Showing nothing is more honest than showing that.
+ */
+const tokenRate = (tokens: number, durationMs: number): number | null => {
+  if (durationMs <= 0) return null;
+  const rate = nonnegative(tokens / (durationMs / 1000));
+  return rate !== null && rate <= MAX_PLAUSIBLE_TOKENS_PER_SECOND ? rate : null;
+};
+
 /** Text delivery rate for the final reply, not throughput of the agent loop. */
 function calculateResponseTokenRate(record: SessionMessageRecord): number | null {
   const { info, parts } = record;
@@ -129,8 +152,7 @@ function calculateResponseTokenRate(record: SessionMessageRecord): number | null
       || start < created || end > completed || end <= start) return null;
     intervals.push([start, end]);
   }
-  const duration = sumIntervalsDuration(mergeTimeIntervals(intervals));
-  return duration > 0 ? nonnegative(output / (duration / 1000)) : null;
+  return tokenRate(output, sumIntervalsDuration(mergeTimeIntervals(intervals)));
 }
 
 /**
@@ -264,8 +286,8 @@ export function getLatestCompletedTurnStats(
   const avgTtftMs = totalTtft === null ? null : totalTtft / stepStatsList.length;
 
   const totalGeneratedTokens = add(totalOutputTokens, totalReasoningTokens);
-  const tokensPerSecond = totalGeneratedTokens !== null && totalLlmDurationMs !== null && totalLlmDurationMs > 0
-    ? nonnegative(totalGeneratedTokens / (totalLlmDurationMs / 1000))
+  const tokensPerSecond = totalGeneratedTokens !== null && totalLlmDurationMs !== null
+    ? tokenRate(totalGeneratedTokens, totalLlmDurationMs)
     : null;
 
   const cacheHit = totalInputTokens !== null && totalCacheReadTokens !== null && totalCacheWriteTokens !== null ? computeCacheHitRate({

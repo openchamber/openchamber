@@ -1,5 +1,5 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
-import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { runSessionListNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
 import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
@@ -148,8 +148,8 @@ export async function listGlobalSessionPages(
             operation,
             caller: cursor === undefined ? "initial-page" : "pagination",
         });
-        const { response, payload } = await runBackgroundNetworkTask(() => retry(
-            async () => {
+        const { response, payload } = await retry(
+            () => runSessionListNetworkTask(async () => {
                 attempts += 1;
                 const response = await apiClient.experimental.session.list({
                     ...(options.directory ? { directory: options.directory } : {}),
@@ -160,10 +160,10 @@ export async function listGlobalSessionPages(
                 });
                 const payload = unwrapSessionList(response, "experimental.session.list")
                     .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
-                return { response, payload };
-            },
+                return { response: response.response, payload };
+            }),
             { attempts: 3, delay: 500, retryIf: () => true },
-        )).catch((error) => {
+        ).catch((error) => {
             finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
             throw error;
         });

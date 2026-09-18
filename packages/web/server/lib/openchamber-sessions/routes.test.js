@@ -90,6 +90,7 @@ vi.mock('@opencode-ai/sdk/v2', () => ({
 vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
   getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
+  resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory }),
 }));
 
 const createApp = (overrides = {}, options = {}) => {
@@ -355,6 +356,52 @@ describe('openchamber session routes', () => {
         model: { providerID: 'openai', modelID: 'gpt-5.5' },
         agent: 'build',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it.each([
+    ['', { projectId: 'proj_1' }],
+    ['', { directory: '/repo/app', worktree: { name: 'side-task' } }],
+    ['', { directory: '/repo/worktrees/side-task' }],
+    ['/ses_existing/send', { directory: '/repo/worktrees/side-task' }],
+    ['/ses_existing/fork', { directory: '/repo/worktrees/side-task' }],
+  ])('prefers project defaults for %s with %j', async (endpoint, scope) => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes('/prompt_async')) {
+        return { ok: true, text: async () => '' };
+      }
+      if (text.includes('/config/providers')) {
+        return { ok: true, json: async () => ({ providers: [{ id: 'openai', models: { 'gpt-5.5': { id: 'gpt-5.5' } } }] }) };
+      }
+      if (text.includes('/agent')) {
+        return { ok: true, json: async () => [{ name: 'build', mode: 'primary' }, { name: 'plan', mode: 'primary' }] };
+      }
+      if (text.includes('/config')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    globalThis.fetch = fetchMock;
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app', defaultAgent: 'plan' }],
+      }),
+    });
+    try {
+      const response = await request(app)
+        .post(`/api/openchamber/sessions${endpoint}`)
+        .send({ ...scope, prompt: 'Run this' })
+        .expect(200);
+
+      expect(response.body.agent).toBe('plan');
+      const promptCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/prompt_async'));
+      expect(JSON.parse(promptCall?.[1]?.body)).toMatchObject({ agent: 'plan' });
     } finally {
       globalThis.fetch = originalFetch;
     }

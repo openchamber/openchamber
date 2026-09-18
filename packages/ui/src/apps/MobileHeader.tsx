@@ -83,7 +83,7 @@ export const MobileHeader: React.FC<{
         <div className="flex h-[var(--oc-header-height,56px)] w-full items-center gap-1 px-2">
           <button
             type="button"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t('mobile.sessions.openSheetAria')}
             onClick={handleOpenSessions}
             style={{ touchAction: 'manipulation' }}
@@ -96,7 +96,7 @@ export const MobileHeader: React.FC<{
             ref={titleRef}
             type="button"
             className={cn(
-              'flex min-w-0 items-center rounded-lg px-2 py-1.5 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              'flex min-w-0 items-center rounded-lg px-2 py-1.5 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               compactTitle ? 'shrink' : 'flex-1',
             )}
             aria-label={t('sessions.switcher.openAria')}
@@ -133,7 +133,7 @@ export const MobileHeader: React.FC<{
 
           <button
             type="button"
-            className="relative flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="relative flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={hasUncommittedChanges
               ? t('mobile.header.openWorkspaceWithChangesAria')
               : t('mobile.header.openWorkspaceAria')}

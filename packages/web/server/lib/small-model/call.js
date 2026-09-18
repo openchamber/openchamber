@@ -20,6 +20,25 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
 const USER_AGENT = 'opencode/1.0 openchamber';
 
+// Providers whose endpoint lives inside their dedicated AI SDK package, so the
+// models.dev catalog carries no `api` URL and OpenCode reports none at runtime.
+// Each of these serves OpenAI-compatible `/chat/completions` at the URL below.
+const SDK_DEFAULT_BASE_URLS = new Map([
+  ['groq', 'https://api.groq.com/openai/v1'],
+  ['xai', 'https://api.x.ai/v1'],
+  ['mistral', 'https://api.mistral.ai/v1'],
+  ['cerebras', 'https://api.cerebras.ai/v1'],
+  ['togetherai', 'https://api.together.xyz/v1'],
+  ['deepinfra', 'https://api.deepinfra.com/v1/openai'],
+  ['perplexity', 'https://api.perplexity.ai'],
+  ['cohere', 'https://api.cohere.ai/compatibility/v1'],
+]);
+
+// Where `thinking: { type: 'disabled' }` is a real switch rather than an
+// unknown field (mirrors the gates in OpenCode's provider/transform.ts).
+const ZAI_ENDPOINT_HOSTS = ['api.z.ai', 'bigmodel.cn'];
+const MINIMAX_THINKING_ADAPTERS = new Set(['@ai-sdk/openai-compatible', '@ai-sdk/anthropic']);
+
 const mergeHeadersCaseInsensitive = (base, overrides) => {
   const merged = { ...base };
   for (const [name, value] of Object.entries(overrides || {})) {
@@ -765,7 +784,8 @@ export async function callSmallModel({ auth, catalog, workingDirectory, sessionI
   // selected model's endpoint OpenCode resolved at runtime, then to the
   // provider-level runtime endpoint. For a plugin provider, the runtime listing
   // is the only place those endpoints exist, and several are local proxies the
-  // plugin itself runs. The openai provider also respects
+  // plugin itself runs. Last comes SDK_DEFAULT_BASE_URLS, for providers whose
+  // endpoint only their SDK package knows. The openai provider also respects
   // provider.openai.options.baseURL — OpenCode itself uses the same config for
   // all providers including openai.
   const provider = getCatalogProvider(catalog, providerID);
@@ -779,7 +799,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, sessionI
         ?? runtimeProvider?.baseURL
         ?? (typeof provider?.api === 'string' && provider.api
           ? provider.api
-          : null);
+          : SDK_DEFAULT_BASE_URLS.get(providerID) ?? null);
   if (!baseURL) {
     throw new Error(`Provider "${providerID}" has no known API base URL`);
   }
@@ -790,11 +810,22 @@ export async function callSmallModel({ auth, catalog, workingDirectory, sessionI
   // parameter: unknown body fields 400 on some providers, so this stays an
   // explicit allowlist. Models without a switch (DeepSeek, Qwen, Kimi, …)
   // just get the generous output budget.
-  const lowerModel = modelID.toLowerCase();
-  const supportsThinkingToggle = providerID.includes('zai')
+  // GLM's switch belongs to the Z.ai/Zhipu endpoints, not to the model: the
+  // same GLM served by another provider (OpenCode Go) rejects the field. The
+  // host check keeps the switch for a custom-named provider pointed at them.
+  const servedByZai = providerID.includes('zai')
     || providerID.includes('zhipu')
-    || lowerModel.includes('glm')
-    || lowerModel.includes('minimax-m3');
+    || ZAI_ENDPOINT_HOSTS.some((host) => baseURL.includes(host));
+  // MiniMax M3's switch is understood only behind the adapters OpenCode sends
+  // it through. An adapter nobody reports (a custom provider) is OpenAI-
+  // compatible by OpenCode's own default.
+  const adapter = runtimeModel?.api?.npm
+    ?? provider?.models?.[modelID]?.provider?.npm
+    ?? provider?.npm
+    ?? null;
+  const minimaxSwitch = modelID.toLowerCase().includes('minimax-m3')
+    && (adapter === null || MINIMAX_THINKING_ADAPTERS.has(adapter));
+  const supportsThinkingToggle = servedByZai || minimaxSwitch;
   const extraBody = supportsThinkingToggle ? { thinking: { type: 'disabled' } } : undefined;
 
   return callOpenaiCompatible({

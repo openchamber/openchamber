@@ -25,7 +25,8 @@ import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
   getDesktopClampedX,
-  getDesktopClampedY,
+  getDesktopMenuY,
+  type DesktopMenuPlacement,
 } from './selectionMenuPosition';
 
 interface TextSelectionMenuProps {
@@ -35,6 +36,7 @@ interface TextSelectionMenuProps {
 interface MenuPosition {
   x: number;
   y: number;
+  placement: DesktopMenuPlacement;
   show: boolean;
 }
 
@@ -52,7 +54,7 @@ const normalizeDistilledInsight = (insight: string): string => (
 
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const { t } = useI18n();
-  const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
+  const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, placement: 'above', show: false });
   const [selectedText, setSelectedText] = React.useState('');
   const [selectedTextMarkdown, setSelectedTextMarkdown] = React.useState('');
   const [selectedMessageId, setSelectedMessageId] = React.useState<string | null>(null);
@@ -109,6 +111,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
   const menuHeightRef = React.useRef(DESKTOP_MENU_FALLBACK_HEIGHT_PX);
+  const anchorRectRef = React.useRef<DOMRect | null>(null);
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
@@ -179,6 +182,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
   const hideMenu = React.useCallback(() => {
     pendingSelectionRef.current = null;
+    anchorRectRef.current = null;
     activeAddToChatCleanupRef.current?.();
     activeAddToChatCleanupRef.current = null;
     setCommentRects(null);
@@ -203,17 +207,24 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     isMenuVisibleRef.current = false;
   }, []);
 
-  const getClampedX = React.useCallback((anchorX: number) => (
-    typeof window === 'undefined'
-      ? anchorX
-      : getDesktopClampedX(anchorX, window.innerWidth, menuWidthRef.current)
-  ), []);
-
-  const getClampedY = React.useCallback((anchorY: number) => (
-    typeof window === 'undefined'
-      ? anchorY
-      : getDesktopClampedY(anchorY, window.innerHeight, menuHeightRef.current)
-  ), []);
+  // The boundary is the scroller holding the message (the chat, or the btw
+  // panel body), not the message itself: bounding by the message pushed the
+  // menu onto selections in its first lines (#3596).
+  const getDesktopPosition = React.useCallback((rect: DOMRect) => {
+    const boundary = containerRef.current?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]');
+    const { y, placement } = getDesktopMenuY({
+      selectionTop: rect.top,
+      selectionBottom: rect.bottom,
+      menuHeight: menuHeightRef.current,
+      viewportHeight: window.innerHeight,
+      boundaryTop: boundary ? boundary.getBoundingClientRect().top : 0,
+    });
+    return {
+      x: getDesktopClampedX(rect.left + rect.width / 2, window.innerWidth, menuWidthRef.current),
+      y,
+      placement,
+    };
+  }, [containerRef]);
 
   const addMarkdownToChat = React.useCallback((markdownText: string) => {
     const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
@@ -239,22 +250,15 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       dismiss: hideMenu,
     });
 
-    // Position menu above the selection
-    const menuX = isMobile
-      ? rect.left + rect.width / 2
-      : getClampedX(rect.left + rect.width / 2);
-    const menuY = isMobile
-      ? rect.top - 10
-      : getClampedY(rect.top - 10);
+    anchorRectRef.current = rect;
 
     setSelectedText(plainText);
     setSelectedTextMarkdown(markdownText);
     setSelectedMessageId(messageId);
-    setPosition({
-      x: menuX,
-      y: menuY,
-      show: true,
-    });
+    // Mobile renders a bottom bar and ignores the coordinates.
+    setPosition(isMobile
+      ? { x: 0, y: 0, placement: 'above', show: true }
+      : { ...getDesktopPosition(rect), show: true });
     isMenuVisibleRef.current = true;
 
     if (shouldAnimateIn) {
@@ -267,7 +271,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         openRafRef.current = null;
       });
     }
-  }, [addMarkdownToChat, getClampedX, getClampedY, hideMenu, isMobile, position.show]);
+  }, [addMarkdownToChat, getDesktopPosition, hideMenu, isMobile, position.show]);
 
   React.useLayoutEffect(() => {
     if (!position.show || isMobile || !menuRef.current) {
@@ -288,34 +292,14 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     if (heightChanged) {
       menuHeightRef.current = measuredHeight;
     }
-    setPosition((prev) => ({
-      ...prev,
-      x: getClampedX(prev.x),
-      y: getClampedY(prev.y),
-    }));
+    const rect = anchorRectRef.current;
+    if (rect) {
+      setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
+    }
     // Entering comment mode and typing into the comment box both grow the
-    // popup, so remeasuring on those keeps the cached height (and the Y clamp
+    // popup, so remeasuring on those keeps the cached size (and the placement
     // built from it) honest.
-  }, [commentMode, commentText, getClampedX, getClampedY, isMobile, position.show]);
-
-  // The desktop popup hangs above its anchor, so a tall comment box near the
-  // top of the chat can climb over the app header. On the desktop shell the
-  // header is a window drag zone, which makes the overlapped part of the
-  // textarea untouchable, so the popup is pushed down until its top edge stays
-  // inside the chat container.
-  React.useLayoutEffect(() => {
-    if (!position.show || isMobile || !menuRef.current) {
-      return;
-    }
-
-    const container = containerRef.current;
-    const minTop = (container ? container.getBoundingClientRect().top : 0) + 4;
-    const menuTop = menuRef.current.getBoundingClientRect().top;
-    if (menuTop < minTop) {
-      const delta = minTop - menuTop;
-      setPosition((prev) => ({ ...prev, y: prev.y + delta }));
-    }
-  }, [containerRef, isMobile, position.show, position.y, commentMode, commentText]);
+  }, [commentMode, commentText, getDesktopPosition, isMobile, position.show]);
 
   React.useEffect(() => {
     if (!position.show || isMobile) {
@@ -323,18 +307,16 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     }
 
     const handleViewportResize = () => {
-      setPosition((prev) => ({
-        ...prev,
-        x: getClampedX(prev.x),
-        y: getClampedY(prev.y),
-      }));
+      const rect = anchorRectRef.current;
+      if (!rect) return;
+      setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
     };
 
     window.addEventListener('resize', handleViewportResize);
     return () => {
       window.removeEventListener('resize', handleViewportResize);
     };
-  }, [getClampedX, getClampedY, isMobile, position.show]);
+  }, [getDesktopPosition, isMobile, position.show]);
 
   const handleSelectionChange = React.useCallback(() => {
     // While the comment input is open, clicking or typing in it collapses the
@@ -620,7 +602,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         }}
         placeholder={t('chat.textSelection.comment.placeholder')}
         className={cn(
-          'flex-1 resize-none bg-transparent text-sm leading-5 text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)] placeholder:opacity-60',
+          'flex-1 resize-none bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60',
           // The width cap sizes the floating desktop pill; on mobile the pill
           // spans the bottom bar and the cap would strand slack space to the
           // right of the attach button.
@@ -769,7 +751,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       style={{
         left: position.x,
         top: position.y,
-        transform: 'translate(-50%, -100%)',
+        transform: position.placement === 'above' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
       }}
     >
       {commentMode ? (<>{commentHighlightOverlay}{commentInput}</>) : (
@@ -788,7 +770,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             className={cn(
               'px-3.5 py-1.5 rounded-full',
               'text-sm font-medium',
-              'text-[var(--surface-foreground)]',
+              'text-foreground',
               'hover:bg-[var(--interactive-hover)]',
               'transition-colors duration-150'
             )}
@@ -806,7 +788,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
                 className={cn(
                   'px-3.5 py-1.5 rounded-full',
                   'text-sm font-medium',
-                  'text-[var(--surface-foreground)]',
+                  'text-foreground',
                   'hover:bg-[var(--interactive-hover)]',
                   'transition-colors duration-150'
                 )}
@@ -829,7 +811,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
                 className={cn(
                   'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
                   'text-sm font-medium',
-                  'text-[var(--surface-foreground)]',
+                  'text-foreground',
                   'hover:bg-[var(--interactive-hover)] disabled:opacity-60 disabled:cursor-not-allowed',
                   'transition-colors duration-150'
                 )}

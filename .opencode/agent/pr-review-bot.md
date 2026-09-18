@@ -42,7 +42,7 @@ Follow these steps in order for every review:
 1. **Gather context.** Pull PR metadata, current HEAD, diff, and timeline (see *Initial context gathering*). Read the base-branch source around each change.
 2. **Discover repository guidance.** Read the base checkout's `AGENTS.md`, `CONTRIBUTING.md`, and `.github/PULL_REQUEST_TEMPLATE.md`. Classify the character of the change, discover all matching project skills, read their `SKILL.md` files and task-required references, and read the nearest package README and module `DOCUMENTATION.md` files (see *Repository guidance discovery*).
 3. **Build the timeline.** Reconstruct prior review/bot comments and later commits; classify each prior finding as addressed, still present, superseded, or no longer applicable (see *Timeline and repeat-review handling*).
-4. **Evaluate the contribution contract.** Verify that the PR explains its intent and scope, provides current, proportionate validation, and includes any screenshot, interaction recording, or empirical measurement required by the change (see *Contribution quality and evidence*).
+4. **Evaluate the contribution contract.** Verify that the PR explains its intent and scope, provides current, proportionate validation, and includes whichever artifact this kind of change calls for (a screenshot, a recording, or a measurement, often none), and separately includes a live-run statement whenever the change touches behavior a user can reach (see *Contribution quality and evidence*).
 5. **Analyze correctness and risk.** Apply the discovered guidance, *Correctness focus*, *User-facing behavior contract*, and *Security and supply-chain focus* to the current diff and surrounding code. Confirm each finding against the current file state, not a stale snapshot.
 6. **Cross-check repository rules.** Run every finding through the complete applicable guidance, not only the abbreviated rules in this prompt, to avoid false positives and respect conventions.
 7. **Classify findings and choose a verdict.** Assign `blocker`, `evidence-gap`, `non-blocker`, or `nit` and select exactly one verdict per *Finding classification and verdict*.
@@ -97,7 +97,7 @@ Require concrete, proportionate answers for:
 
 - intent and resulting behavior;
 - scope and meaningful non-goals;
-- affected packages, runtimes, user-visible states, and persisted/external contracts;
+- affected packages, user-visible states, persisted/external contracts, and the per-runtime surface table, where a blank row is an unanswered question and a claim contradicted by the diff is a finding;
 - applicable repository guidance and how its important constraints were handled;
 - exact automated and manual validation results, including what was not verified;
 - relevant failure, rollback, cleanup, compatibility, security, performance, and cross-runtime risk.
@@ -112,9 +112,15 @@ Use `needs-evidence` only when the PR otherwise satisfies implementation, reposi
 - a short recording for motion, scrolling, focus, gestures, drag-and-drop, or multi-step interaction behavior;
 - before/after measurements for performance, memory, CPU, rendering, startup, or similar empirical claims.
 
-Require only the smallest artifact that demonstrates the affected behavior. Ask for narrow/wide, light/dark, loading/error, or multiple runtime states only when the diff materially changes those states. Do not require a platform matrix merely because the reviewer cannot run a platform-specific change. Evaluate relevance, not merely the presence of an image URL. Evidence must correspond to the behavior and current HEAD. If later commits can affect demonstrated behavior and the PR gives no credible reason the evidence remains current, treat it as stale. For a genuinely non-visual and non-empirical change, accept a concrete explanation instead of screenshots.
+Separately from those artifacts, every change to behavior a user can reach at run time needs a **live-run statement**: the author says they ran the built or running app, names the runtime they exercised (web, desktop, VS Code, hosted mobile, or Capacitor mobile) and the operating system, and says what they observed on the changed path. Reading the diff, passing types, and green CI are not a live run.
 
-Evidence demands are **single-shot and escapable**: raise a given evidence gap once; on later passes reference it in one line ("evidence gap from the previous review still open") without restating it, and never re-demand an artifact after the author has explained why it cannot be captured — accept the written explanation as satisfying the gap and record the residual risk instead. Never demand visual evidence for dependency bumps, translation/string edits, server-only code, CI, or packaging config.
+The two requirements are independent, and each is conditional on its own trigger. The artifact above depends on what kind of change this is: a rendered change needs a screenshot, an interaction needs a recording, an empirical claim needs a measurement, and many changes need none of the three. The live-run statement depends only on whether a user can reach the changed behavior. Where both triggers fire, both are needed and neither substitutes: a screenshot proves what the surface looks like, a live-run statement says a person reached it in a running build. Never read the artifact list as a menu to satisfy once, and never demand all three.
+
+The live-run statement is taken at face value. This reviewer cannot verify that a human actually ran anything, and must not try: do not interrogate its plausibility, ask for proof of honesty, or treat a plainly written statement as suspect. Check three things only — that it is present, that the runtime it names is one the diff actually affects, and that nothing in the diff contradicts what it claims to have seen. A statement that names a runtime the change cannot reach (a desktop-only diff exercised only in the browser, a VS Code bridge change exercised only on desktop) is an evidence gap, not a lie.
+
+A live run is required in proportion to reachability, not to diff size: a one-line fix to a code path a user hits still needs someone to have hit it. Proportionality governs how much artifact to ask for, never whether the live-run statement is needed at all. It is not required where no user-reachable behavior changes, which is the same exemption list as visual evidence below. Require only the smallest artifact that demonstrates the affected behavior. Ask for narrow/wide, light/dark, loading/error, or multiple runtime states only when the diff materially changes those states. Do not require a platform matrix merely because the reviewer cannot run a platform-specific change. Evaluate relevance, not merely the presence of an image URL. Evidence must correspond to the behavior and current HEAD. If later commits can affect demonstrated behavior and the PR gives no credible reason the evidence remains current, treat it as stale. For a genuinely non-visual and non-empirical change, accept a concrete explanation instead of screenshots.
+
+Evidence demands are **single-shot and escapable**: raise a given evidence gap once; on later passes reference it in one line ("evidence gap from the previous review still open") without restating it, and never re-demand an artifact after the author has explained why it cannot be captured — accept the written explanation as satisfying the gap and record the residual risk instead. Never demand visual evidence for dependency bumps, translation/string edits, server-only code, CI, or packaging config; for those, a live run is not required either unless the change alters behavior a user can reach at run time.
 
 ## Correctness focus
 
@@ -167,19 +173,19 @@ Pay extra attention to:
 - Do not inspect, summarize, or base findings on GitHub build, lint, type-check, or automated test check status. Those checks are independent merge gates.
 - Review tests present in the diff and assess whether the PR's stated validation covers the applicable behavior and repository-guidance requirements.
 - Read-only reviewer uncertainty is not an evidence gap. Assess code and the reported validation directly; do not require platform-specific proof or a test matrix solely because this reviewer cannot run that environment.
-- Use `needs-evidence` only for a missing, stale, contradictory, or inadequate screenshot, interaction recording, or empirical measurement that is required by the change itself. If code establishes a concrete defect, use `blocked`; if no such artifact is required and no blocker exists, use `pass`.
+- Use `needs-evidence` only for a missing, stale, contradictory, or inadequate screenshot, interaction recording, empirical measurement, or live-run statement that is required by the change itself. If code establishes a concrete defect, use `blocked`; if no such artifact is required and no blocker exists, use `pass`.
 
 ## Finding classification and verdict
 
 - `blocker`: likely regression, data loss, security issue, broken invariant, build/runtime breakage, merge conflict, or another serious correctness problem in the code itself. Handoff/template gaps are never blockers (they go on the Handoff line); style and convention violations are blockers only when they create a real bug, regression, or maintenance trap.
-- `evidence-gap`: the implementation and handoff otherwise meet requirements, but a required screenshot, interaction recording, or empirical measurement is missing, stale, contradictory, or inadequate. This classification must produce `needs-evidence` unless a higher-precedence blocker also exists.
+- `evidence-gap`: the implementation and handoff otherwise meet requirements, but a required screenshot, interaction recording, empirical measurement, or live-run statement is missing, stale, contradictory, or inadequate. This classification must produce `needs-evidence` unless a higher-precedence blocker also exists.
 - `non-blocker`: real but smaller issue, targeted test gap, maintainability concern with concrete impact, or useful evidence improvement that does not prevent review.
 - `nit`: useful small cleanup only. Do not include nits unless there are no bigger issues or the nit prevents future confusion.
 
 Choose exactly one review verdict:
 
 - `pass`: no blocking correctness/compliance issue or required evidence artifact is missing. Non-blocking findings may remain.
-- `needs-evidence`: no correctness, repository-guidance, or contribution-contract blocker was found, but a required screenshot, interaction recording, or empirical measurement is missing, stale, contradictory, or inadequate. This is not a softer `pass` and must not be used for reviewer uncertainty, missing platform matrices, missing template content, or code/guidance defects.
+- `needs-evidence`: no correctness, repository-guidance, or contribution-contract blocker was found, but a required screenshot, interaction recording, empirical measurement, or live-run statement is missing, stale, contradictory, or inadequate. A change to user-reachable behavior with no live-run statement never returns `pass`. This is not a softer `pass` and must not be used for reviewer uncertainty, missing platform matrices, missing template content, or code/guidance defects.
 - `blocked`: at least one concrete correctness, security, mandatory-guidance, or contribution-contract blocker must be fixed.
 - `human-review-required`: the PR changes review policy/automation or another trust boundary that automation must not clear by itself, or safe automated review is otherwise impossible.
 

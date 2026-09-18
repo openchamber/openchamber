@@ -257,7 +257,7 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
   // complete text, letting us assert full content on first paint.
   const SHORT_REASONING = 'Persisted reasoning text that is already fully available.';
 
-  const BUSY_INDICATOR = 'animate-busy-pulse';
+  const BUSY_INDICATOR = 'animate-busy-wave';
 
   const makeReasoningPart = (
     time: ReasoningPartFixture['time'],

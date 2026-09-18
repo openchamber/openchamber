@@ -7,6 +7,7 @@ import {
   isInputHistoryLimit,
   isInputHistoryScope,
 } from './input-history-scope.js';
+import { isRoutingFeatureAvailable } from '../routing/feature-flag.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -231,6 +232,11 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.workStatusHiddenSectionsExplicit === 'boolean') {
       result.workStatusHiddenSectionsExplicit = candidate.workStatusHiddenSectionsExplicit;
+    }
+    if (Array.isArray(candidate.workStatusSectionOrder)) {
+      result.workStatusSectionOrder = [
+        ...new Set(candidate.workStatusSectionOrder.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
     }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
@@ -1006,6 +1012,8 @@ export const createSettingsHelpers = (dependencies) => {
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.
       agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // Same idea for Jev routing: absent from the picker and Settings unless the build has it.
+      routingFeatureAvailable: isRoutingFeatureAvailable(),
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

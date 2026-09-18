@@ -102,6 +102,7 @@ describe('createSessionOwnershipIndex', () => {
     );
 
     expect(ownership.bySessionId.get('windows-root')?.projectId).toBe('drive');
+    expect(ownership.bySessionId.get('windows-root')?.scopeDirectory).toBe('C:/');
   });
 
   test('resolves report-sized data once instead of once per project consumer', () => {

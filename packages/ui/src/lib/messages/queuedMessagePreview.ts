@@ -19,6 +19,8 @@ function contextPreview(payload: ContextPartPayload): string {
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             return payload.title.trim() || payload.url;
     }
 }
