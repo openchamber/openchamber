@@ -230,10 +230,11 @@ export function createMessageQueueRuntime({
   let writePromise = Promise.resolve();
   let stopped = false;
 
-  // A restart kills every run, so an unfinished assistant message older than
-  // this marker cannot be live evidence of a streaming turn — treating it as
-  // one strands restored queue items forever, because no completion event
-  // will ever arrive for a run that died with the previous server.
+  // An unfinished assistant message older than this marker is a run that died
+  // with the previous server, not a streaming turn: no completion event will
+  // ever arrive for it, so treating it as live strands restored queue items
+  // forever. A run that outlived the restart (external OpenCode) is still
+  // caught by the live status check, which runs first.
   const runtimeStartedAt = now();
 
   /** In-memory only — a restart has no in-flight sends. */
