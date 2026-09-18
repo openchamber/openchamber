@@ -145,6 +145,7 @@ export const createOpenChamberControlService = (dependencies) => {
     scheduledTaskService,
     browserControl = null,
     agentMemoryActions = null,
+    getGitAgentOperations = null,
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -464,6 +465,18 @@ export const createOpenChamberControlService = (dependencies) => {
           throw new OpenChamberControlError('Agent memory is not available on this server', 503);
         }
         return agentMemoryActions.execute(action, input, contextDirectory);
+      }
+      if (action.startsWith('git.')) {
+        const gitAgentOperations = getGitAgentOperations instanceof Function ? getGitAgentOperations() : null;
+        if (!gitAgentOperations) {
+          throw new OpenChamberControlError('Managed Git transfers are not available on this server', 503);
+        }
+        const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);
+        if (!directory) throw new OpenChamberControlError('directory is required', 400);
+        return gitAgentOperations.execute(action.slice('git.'.length), {
+          directory,
+          remote: asNonEmptyString(input.remote) || '',
+        });
       }
       if (action.startsWith('browser.')) {
         if (!browserControl) {

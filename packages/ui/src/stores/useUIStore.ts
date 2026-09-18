@@ -968,6 +968,11 @@ interface UIStore {
   sessionTabsEnabled: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
+  /**
+   * Whether OpenChamber answers Git in agent shells on this machine. A fact
+   * about where Git runs, so it never syncs from another device.
+   */
+  agentGitAuthorityEnabled: boolean;
   agentControlToolEnabled: boolean;
   agentWebToolEnabled: boolean;
   agentMemoryToolEnabled: boolean;
@@ -1176,6 +1181,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
+  setAgentGitAuthorityEnabled: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
@@ -1355,6 +1361,7 @@ export const useUIStore = create<UIStore>()(
         sessionTabsEnabled: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
+        agentGitAuthorityEnabled: true,
         agentControlToolEnabled: true,
         agentWebToolEnabled: true,
         agentMemoryToolEnabled: false,
@@ -2674,6 +2681,9 @@ export const useUIStore = create<UIStore>()(
         setShowOpenCodeUpdateNotifications: (value) => {
           set({ showOpenCodeUpdateNotifications: value });
         },
+        setAgentGitAuthorityEnabled: (value) => {
+          set({ agentGitAuthorityEnabled: value });
+        },
         setAgentControlToolEnabled: (value) => {
           set({ agentControlToolEnabled: value });
         },
@@ -3150,6 +3160,7 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
+          agentGitAuthorityEnabled: state.agentGitAuthorityEnabled,
           agentControlToolEnabled: state.agentControlToolEnabled,
           agentWebToolEnabled: state.agentWebToolEnabled,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,

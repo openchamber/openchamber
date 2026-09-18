@@ -275,16 +275,19 @@ describe('relay host-client integration', () => {
 
   it('tunnels an HTTP GET /health with only binary frames post-handshake', async () => {
     const identity = await buildIdentity();
+    let markHostConnected;
+    const hostConnected = new Promise((resolve) => { markHostConnected = resolve; });
     host = startRelayHost({
       relayUrl: `${relay.wsUrl}/`,
       identity,
       getLocalPort: () => origin.port,
-      onStatus: () => {},
+      onStatus: (status) => {
+        if (status.state === 'connected') markHostConnected();
+      },
       logger: { warn: () => {} },
     });
 
-    // Give the control socket a moment to connect before the client arrives.
-    await new Promise((r) => setTimeout(r, 200));
+    await hostConnected;
 
     const result = await runScriptedClient({
       relayUrl: relay.wsUrl,

@@ -60,6 +60,11 @@ both settings are `false`.
 - The tool description frames intent: created sessions and scheduled tasks are
   user-facing work the user follows up with, never a channel for the agent to
   delegate parts of its own current task.
+- `git.push`, `git.pull` and `git.fetch` exist so the agent has a transfer that
+  goes through the repository binding instead of a shell `git push` that runs
+  with the person's ambient credentials. Their descriptions say to use them
+  instead of the shell command, because a model that does not know the managed
+  path takes the one it already knows.
 - Optional behavior switches (`worktree`, `goal`, `agent`, `variant`, `wait`)
   state their default and an explicit "only when the user asks" rule so agents
   do not invent worktrees, goal mode, or waits the user never requested.
@@ -76,6 +81,11 @@ both settings are `false`.
 - Inputs map to a fixed action and parameter allowlist. There is no arbitrary
   CLI, shell, route, or URL forwarding.
 - Session/worktree deletion and project-path registration are not exposed.
+- Git transfers carry no credentials of their own. The binding decides the
+  account and transport, and anything needing a person's decision — an unbound
+  repository, a stale grant, an unacknowledged System Git transport, a branch
+  with no upstream — is refused with what to do instead, never decided for
+  them.
 - An aborted tool request propagates an abort signal into the shared service.
 
 ## Result contract

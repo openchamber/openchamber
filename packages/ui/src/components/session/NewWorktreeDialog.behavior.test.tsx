@@ -18,7 +18,7 @@ const uiState = { isMobile: false };
 const gitState = { fetchBranches: async () => undefined };
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
-const selectGitHubAuthState = <T,>(selector: (state: typeof githubAuthState) => T): T => selector(githubAuthState);
+const selectSourceControlAuthEntry = () => githubAuthState;
 const selectLinearAuthState = <T,>(selector: (state: typeof linearAuthState) => T): T => selector(linearAuthState);
 const selectUIState = <T,>(selector: (state: typeof uiState) => T): T => selector(uiState);
 const selectGitState = <T,>(selector: (state: typeof gitState) => T): T => selector(gitState);
@@ -92,7 +92,7 @@ mock.module('@/components/ui/dropdown-trigger', () => ({ dropdownTriggerVariants
 mock.module('@/lib/utils', () => ({ cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(' ') }));
 
 const actualProjectsStore = await import('@/stores/useProjectsStore');
-const actualGitHubAuthStore = await import('@/stores/useGitHubAuthStore');
+const actualSourceControlAuthStore = await import('@/stores/useSourceControlAuthStore');
 const actualLinearAuthStore = await import('@/stores/useLinearAuthStore');
 const actualUIStore = await import('@/stores/useUIStore');
 const actualGitStore = await import('@/stores/useGitStore');
@@ -101,9 +101,9 @@ mock.module('@/stores/useProjectsStore', () => ({
   ...actualProjectsStore,
   useProjectsStore: selectProjectState,
 }));
-mock.module('@/stores/useGitHubAuthStore', () => ({
-  ...actualGitHubAuthStore,
-  useGitHubAuthStore: selectGitHubAuthState,
+mock.module('@/stores/useSourceControlAuthStore', () => ({
+  ...actualSourceControlAuthStore,
+  useSourceControlAuthEntry: selectSourceControlAuthEntry,
 }));
 mock.module('@/stores/useLinearAuthStore', () => ({
   ...actualLinearAuthStore,

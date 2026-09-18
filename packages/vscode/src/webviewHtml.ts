@@ -43,6 +43,15 @@ const uniqueTokens = (values: Array<string | null | undefined>): string => {
   return Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ');
 };
 
+export const getCspBootstrapHtml = (): string => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none';">
+</head>
+<body></body>
+</html>`;
+
 export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const {
     webview,

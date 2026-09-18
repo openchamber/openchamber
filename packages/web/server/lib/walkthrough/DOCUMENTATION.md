@@ -54,11 +54,14 @@ written against staged code never silently re-anchors onto an unstaged edit.
 | `working-tree` (`all` \| `staged` \| `working`) | `staged`, `working` | Untracked files are fetched individually because `git diff` omits them |
 | `branch` | `branch` | `getRangeDiff` with `includeWorkingTree: true` compares the selected merge base with current files, including committed and local work in one net diff |
 | `commit` | `commit` | `getCommitDiff` compares the full selected commit hash with its first parent; root commits compare with an empty tree |
-| `pr` | `pr:<number>` | GitHub's committed pull-request diff, without local working-tree changes |
+| `pr` | `pr:<number>` | The provider's committed pull-request diff, without local working-tree changes. Every read carries a validated repository binding context |
 
 Changes and walkthrough resolve the current branch's base through
 `packages/ui/src/hooks/useBranchComparisonBase.ts`. An explicit choice in Changes
-outranks reflog detection. Both toolbars use
+outranks reflog detection. The resolved base is then qualified by
+`qualifyBaseRef` in `packages/ui/src/components/views/git/baseBranch.ts`: the
+range API names refs literally, and a base outside the remote the repository is
+bound to is not a comparison this repository can make. Both toolbars use
 `packages/ui/src/components/views/git/BranchComparisonSelector.tsx` to select or
 change the base directly. Walkthrough allows selecting Branch before a base is
 known and waits for a valid choice before loading or generating. Opening
@@ -90,14 +93,20 @@ PR mode uses the same searchable, paginated selector as Changes. Its list loads
 only while PR mode is visible. Selection ownership and handoff rules are in
 `packages/ui/src/stores/DOCUMENTATION.md`.
 
-PR sources may include `sourceRepo: { owner, repo }`. This qualifies both the
-GitHub request and the cache/job key as `pr:<owner>/<repo>:<number>`. Existing
-number-only sources retain `pr:<number>` and resolve the directory's repository.
-The PR panel forwards its resolved repository when opening walkthrough.
+PR sources may include `sourceRepo: { owner, repo }`. It qualifies the cache/job
+key as `pr:<owner>/<repo>:<number>`, so equal numbers in different repositories
+stay apart. Number-only sources keep `pr:<number>` and read the repository behind
+the bound primary remote. A named repository is honoured only inside the bound
+repository's network, the repository and the upstream it was forked from, which
+is what the bound pull request list reads with the same account. A name outside
+that network fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
+request. The PR panel forwards the project of the pull request it shows.
 
-`GET /api/walkthrough/pr-diff` accepts `directory` and a JSON `source` restricted
-to PRs. It returns GitHub's complete published diff as text, with no model
-readiness checks or generation. Successful empty patches return 200; auth,
+`GET /api/walkthrough/pr-diff` accepts `directory`, a JSON `source` restricted
+to PRs, and the same bound read-context fields as the other walkthrough routes.
+It validates that context against the binding and reads with its exact account;
+without one it reads nothing. It returns GitHub's complete published diff as
+text, with no model readiness checks or generation. Successful empty patches return 200; auth,
 GitHub and malformed-response failures remain errors. Walkthrough generation
 keeps its existing empty-diff refusal. UI comparison behavior is documented in
 `packages/ui/src/components/views/DOCUMENTATION.md`.
@@ -276,13 +285,17 @@ scope.
 
 **Cache entries** (`entries/<sha256>.json`) are immutable and content-addressed.
 The key covers walkthrough version, prompt version, repo root, source, provider,
-model, output language, and every file's path/status/hunk-ids. The key is computed from the
+model, output language, and every file's path/status/hunk-ids. PR keys also cover
+the validated source-control provider, normalized instance, immutable account ID,
+repository ID, binding revision, directory, trusted primary remote, and PR number. The key is computed from the
 *current* diff, so a hit means the walkthrough was written about exactly this
 code; there is no freshness question to ask of an entry, because staleness is a
 miss. Returning the working tree to an earlier state therefore costs nothing.
 
 **Pointers** (`pointers/<sha256(repoRoot + source)>.json`) are mutable and hold
-`{ cacheKey, generatedAt, repoRoot, sourceKey }`. They answer what the cache
+`{ cacheKey, generatedAt, repoRoot, sourceKey }`. PR pointer keys and payloads
+also contain the full validated read context. Scoped PR reads never consult old
+unscoped pointer files or cache entries. Pointers answer what the cache
 cannot: which walkthrough was last shown here, and has the code moved since. A
 pointer whose entry has been evicted reads as "no walkthrough" — truthful, and
 the next generation overwrites it.
@@ -350,7 +363,9 @@ A dropped connection and a deliberate cancel are indistinguishable at the
 socket, so tying generation to the request lifetime meant an accidental refresh
 threw away a minute of paid-for work. Instead:
 
-- Jobs live in a module-level map keyed by repository + source. A second
+- Jobs live in a module-level map keyed by repository + source. PR jobs add the
+  validated provider, normalized instance, immutable account ID, repository ID,
+  binding revision, directory, trusted primary remote, and PR number. A second
   `generate` for the same source **attaches to the running job** rather than
   starting a rival one — pressing the button again after a refresh costs
   nothing extra.
@@ -411,6 +426,18 @@ be used for this: it re-runs the whole git pipeline.
   `null`. Memory-only and safe to poll.
 - `POST /api/walkthrough/cancel` — `{ directory, source }`; aborts a running
   generation.
+
+For a PR source, all four routes also require flat `provider`, `instance`,
+`accountId`, `repositoryId`, `bindingRevision`, and `primaryRemote` fields in the
+query or JSON body. They do not accept a nested context object. The source-control
+binding service validates these immutable fields before walkthrough service,
+cache, job, credential, repository-coordinate, or provider work. The server
+currently accepts only a validated GitHub context. It resolves the exact bound
+account and trusted primary remote, with no active-account or default-remote
+fallback, and every successful PR response echoes the trusted `readContext`.
+An exact-account `401` reconciles the account through the source-control binding
+service before credential invalidation; `403` and network failures leave the
+account and binding intact.
 
 There is deliberately no delete route: regeneration covers the need, and an
 endpoint nothing calls is a maintenance surface that rots untested.

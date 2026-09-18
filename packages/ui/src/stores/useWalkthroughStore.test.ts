@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { WalkthroughResult, WalkthroughSource } from '@/lib/walkthrough/types';
+import type { SourceControlReadContext } from '@/lib/api/types';
+import type { WalkthroughResult, WalkthroughSource, WalkthroughTarget } from '@/lib/walkthrough/types';
 
-const SOURCE: WalkthroughSource = { kind: 'working-tree', scope: 'all' };
+const SOURCE = { source: { kind: 'working-tree', scope: 'all' } } satisfies WalkthroughTarget;
+type WorkingTreeResult = WalkthroughResult & { source: typeof SOURCE.source };
 
-const result = (overrides: Partial<WalkthroughResult> = {}): WalkthroughResult => ({
-  source: SOURCE,
+const result = (overrides: Partial<WorkingTreeResult> = {}): WorkingTreeResult => ({
+  source: SOURCE.source,
   walkthrough: null,
   hunks: [],
   hunkCount: 0,
@@ -26,6 +28,35 @@ const finished = result({
   generatedAt: '2026-08-02T00:00:00.000Z',
 });
 
+type PullRequestTarget = {
+  source: { kind: 'pr'; number: number };
+  context: Readonly<SourceControlReadContext>;
+};
+const PR_CONTEXT = {
+  provider: 'github',
+  instance: 'github.com',
+  accountId: 'account-a',
+  repositoryId: 'repo-1',
+  bindingRevision: 3,
+  directory: '/repo',
+  primaryRemote: 'origin',
+} satisfies SourceControlReadContext;
+const PR_TARGET_A: PullRequestTarget = {
+  source: { kind: 'pr', number: 17 },
+  context: PR_CONTEXT,
+};
+const PR_TARGET_B: PullRequestTarget = {
+  source: { kind: 'pr', number: 17 },
+  context: { ...PR_CONTEXT, accountId: 'account-b' },
+};
+const prResult = (target: PullRequestTarget): WalkthroughResult => ({
+  source: target.source,
+  readContext: target.context,
+  walkthrough: null,
+  hunks: [],
+  hunkCount: 0,
+});
+
 // Plain closures rather than mock helpers: bun's `mock()` is not typed with
 // vitest's `mockResolvedValue` family, and the repo already prefers this style.
 let readResult: WalkthroughResult = result();
@@ -35,12 +66,13 @@ let lastReadModel: string | undefined;
 let lastGenerateModel: string | undefined;
 let lastReadLanguage: string | undefined;
 let lastGenerateLanguage: string | undefined;
+let lastGenerationSignal: AbortSignal | undefined;
 
 mock.module('@/lib/walkthrough/api', () => ({
   fetchWalkthrough: async (
     _directory: string,
-    _source: WalkthroughSource,
-    options: { model?: string; language?: string } = {},
+    _target: WalkthroughTarget,
+    options: { model?: string; language?: string; signal?: AbortSignal } = {},
   ) => {
     lastReadModel = options.model;
     lastReadLanguage = options.language;
@@ -48,12 +80,13 @@ mock.module('@/lib/walkthrough/api', () => ({
   },
   generateWalkthrough: async (
     _directory: string,
-    _source: WalkthroughSource,
-    options: { model?: string; language?: string } = {},
+    _target: WalkthroughTarget,
+    options: { model?: string; language?: string; signal?: AbortSignal } = {},
   ) => {
     generateCalls += 1;
     lastGenerateModel = options.model;
     lastGenerateLanguage = options.language;
+    lastGenerationSignal = options.signal;
     return new Promise<WalkthroughResult>((resolve) => {
       releaseGeneration = () => resolve(finished);
     });
@@ -63,7 +96,8 @@ mock.module('@/lib/walkthrough/api', () => ({
   // makes the whole module fail to load, which reads as an unrelated crash.
   fetchWalkthroughStage: async () => null,
 }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'local' }));
+let runtimeKey = 'local';
+mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
 const { useWalkthroughStore, walkthroughSourceKey } = await import('./useWalkthroughStore');
 
@@ -73,15 +107,25 @@ test('PR cache and handoff identity include the selected repository', () => {
   expect(walkthroughSourceKey({ kind: 'pr', number: 42 })).toBe('pr:42');
   expect(walkthroughSourceKey(upstream)).toBe('pr:upstream/project:42');
   expect(walkthroughSourceKey(fork)).toBe('pr:fork/project:42');
-  useWalkthroughStore.getState().requestSource('/repo', upstream);
-  expect(useWalkthroughStore.getState().requestedSource['/repo']).toEqual(upstream);
+  const context = {
+    provider: 'github', instance: 'github.com', accountId: 'account-a', repositoryId: 'repo-1',
+    bindingRevision: 3, directory: '/repo', primaryRemote: 'origin',
+  } as const;
+  useWalkthroughStore.getState().requestTarget('/repo', { source: upstream, context });
+  expect(useWalkthroughStore.getState().getRequestedTarget('/repo')).toEqual({ source: upstream, context });
 });
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+beforeEach(() => {
+  runtimeKey = 'local';
+  lastGenerationSignal = undefined;
+});
+
 describe('useWalkthroughStore — reattaching to a running generation', () => {
   beforeEach(() => {
     useWalkthroughStore.getState().reset();
+    runtimeKey = 'local';
     readResult = result();
     generateCalls = 0;
     releaseGeneration = undefined;
@@ -171,7 +215,7 @@ describe('useWalkthroughStore — model selection', () => {
   });
 
   test('keeps choices apart per source', async () => {
-    const branch: WalkthroughSource = { kind: 'branch', baseRef: 'main', headRef: 'feature' };
+    const branch: WalkthroughTarget = { source: { kind: 'branch', baseRef: 'main', headRef: 'feature' } };
     useWalkthroughStore.getState().selectModel('/repo', SOURCE, 'anthropic/claude-haiku-4-5');
 
     expect(useWalkthroughStore.getState().getSelectedModel("/repo", branch)).toBe(undefined);
@@ -181,13 +225,13 @@ describe('useWalkthroughStore — model selection', () => {
 
   test('keeps commit walkthroughs separate and selecting one does not generate', () => {
     const generatedBefore = generateCalls;
-    const first: WalkthroughSource = { kind: 'commit', hash: 'a'.repeat(40) };
-    const second: WalkthroughSource = { kind: 'commit', hash: 'b'.repeat(40) };
+    const first: WalkthroughTarget = { source: { kind: 'commit', hash: 'a'.repeat(40) } };
+    const second: WalkthroughTarget = { source: { kind: 'commit', hash: 'b'.repeat(40) } };
     useWalkthroughStore.getState().selectModel('/repo', first, 'anthropic/claude-haiku-4-5');
-    useWalkthroughStore.getState().requestSource('/repo', second);
+    useWalkthroughStore.getState().requestTarget('/repo', second);
     expect(useWalkthroughStore.getState().getSelectedModel('/repo', first)).toBe('anthropic/claude-haiku-4-5');
     expect(useWalkthroughStore.getState().getSelectedModel('/repo', second)).toBeUndefined();
-    expect(useWalkthroughStore.getState().requestedSource['/repo']).toEqual(second);
+    expect(useWalkthroughStore.getState().getRequestedTarget('/repo')).toEqual(second);
     expect(generateCalls).toBe(generatedBefore);
   });
 });
@@ -220,7 +264,7 @@ describe('useWalkthroughStore — walkthrough language', () => {
   });
 
   test('keeps an explicit choice apart per source', () => {
-    const branch: WalkthroughSource = { kind: 'branch', baseRef: 'main', headRef: 'feature' };
+    const branch: WalkthroughTarget = { source: { kind: 'branch', baseRef: 'main', headRef: 'feature' } };
     useWalkthroughStore.getState().selectLanguage('/repo', SOURCE, 'ja');
 
     expect(useWalkthroughStore.getState().getSelectedLanguage('/repo', branch)).toBe(undefined);
@@ -243,5 +287,53 @@ describe('useWalkthroughStore — walkthrough language', () => {
     expect(lastGenerateLanguage).toBe('pl');
     releaseGeneration?.();
     await flush();
+  });
+});
+
+describe('useWalkthroughStore — target authority', () => {
+  beforeEach(() => {
+    useWalkthroughStore.getState().reset();
+    readResult = result();
+  });
+
+  afterEach(() => {
+    useWalkthroughStore.getState().reset();
+  });
+
+  test('separates entries and selections for two accounts reviewing the same PR', async () => {
+    useWalkthroughStore.getState().selectModel('/repo', PR_TARGET_A, 'anthropic/model-a');
+    useWalkthroughStore.getState().selectLanguage('/repo', PR_TARGET_A, 'uk');
+
+    readResult = prResult(PR_TARGET_A);
+    await useWalkthroughStore.getState().load('/repo', PR_TARGET_A);
+    readResult = prResult(PR_TARGET_B);
+    await useWalkthroughStore.getState().load('/repo', PR_TARGET_B);
+
+    expect(useWalkthroughStore.getState().getSelectedModel('/repo', PR_TARGET_B)).toBe(undefined);
+    expect(useWalkthroughStore.getState().getSelectedLanguage('/repo', PR_TARGET_B)).toBe(undefined);
+    expect(useWalkthroughStore.getState().getEntry('/repo', PR_TARGET_A).result?.readContext?.accountId).toBe('account-a');
+    expect(useWalkthroughStore.getState().getEntry('/repo', PR_TARGET_B).result?.readContext?.accountId).toBe('account-b');
+  });
+
+  test('does not expose requested targets or selections to another runtime', () => {
+    useWalkthroughStore.getState().requestTarget('/repo', PR_TARGET_A);
+    useWalkthroughStore.getState().selectModel('/repo', PR_TARGET_A, 'anthropic/model-a');
+
+    runtimeKey = 'remote';
+
+    expect(useWalkthroughStore.getState().getRequestedTarget('/repo')).toBe(undefined);
+    expect(useWalkthroughStore.getState().getSelectedModel('/repo', PR_TARGET_A)).toBe(undefined);
+  });
+
+  test('reset aborts active work and prevents its completion from restoring state', async () => {
+    void useWalkthroughStore.getState().generate('/repo', SOURCE);
+    await flush();
+
+    useWalkthroughStore.getState().reset();
+    expect(lastGenerationSignal?.aborted).toBe(true);
+
+    releaseGeneration?.();
+    await flush();
+    expect(useWalkthroughStore.getState().getEntry('/repo', SOURCE).status).toBe('idle');
   });
 });

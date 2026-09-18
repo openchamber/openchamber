@@ -1,5 +1,6 @@
 import type { Part } from '@opencode-ai/sdk/v2';
 import { readContextPart } from '@/lib/messages/contextParts';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
 const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
@@ -181,8 +182,8 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
                 if (synthetic) {
                     const contextPayload = readContextPart(part);
                     if (
-                        contextPayload?.kind === 'github-issue'
-                        || contextPayload?.kind === 'github-pr'
+                        contextPayload?.kind === 'repository-issue'
+                        || contextPayload?.kind === 'change-request'
                         || contextPayload?.kind === 'linear-issue'
                         || contextPayload?.kind === 'guest-issue'
                         || contextPayload?.kind === 'guest-pr'
@@ -212,12 +213,12 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
                         }
                         return {
                             type: 'file',
-                            mime: contextPayload.kind === 'github-issue'
+                            mime: contextPayload.kind === 'repository-issue'
                                 ? 'application/vnd.github.issue-link'
                                 : 'application/vnd.github.pull-request-link',
-                            filename: contextPayload.kind === 'github-issue'
+                            filename: contextPayload.kind === 'repository-issue'
                                 ? `Issue #${contextPayload.number}: ${contextPayload.title}`
-                                : `PR #${contextPayload.number}: ${contextPayload.title}`,
+                                : `${contextPayload.provider === 'gitlab' ? 'MR' : 'PR'} ${formatChangeRequestReference(contextPayload.provider, contextPayload.number)}: ${contextPayload.title}`,
                             url: contextPayload.url,
                         } as Part;
                     }

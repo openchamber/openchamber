@@ -229,6 +229,30 @@ const registerMkdir = (fsPromises) => {
   return getRoute('POST', '/api/fs/mkdir');
 };
 
+const registerClone = ({ fsPromises = {}, cloneRepository = vi.fn(), spawn = vi.fn() } = {}) => {
+  const missing = Object.assign(new Error('not found'), { code: 'ENOENT' });
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      stat: vi.fn(async () => { throw missing; }),
+      access: vi.fn(async () => { throw missing; }),
+      ...fsPromises,
+    },
+    spawn,
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+    cloneRepository,
+  });
+  return { handler: getRoute('POST', '/api/fs/clone'), cloneRepository, spawn };
+};
+
 const registerReveal = ({ fsPromises, spawn, platform = 'linux' }) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
@@ -302,11 +326,169 @@ const callMkdir = async (handler, body) => {
   return res;
 };
 
+const callClone = async (handler, body) => {
+  const res = createMockResponse();
+  await handler({ body: { unverifiedConfirmed: true, ...body } }, res);
+  return res;
+};
+
 const callReveal = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
   return res;
 };
+
+describe('fs clone', () => {
+  it('rejects legacy clients without explicit confirmation before filesystem or Git work', async () => {
+    const stat = vi.fn();
+    const { handler, cloneRepository } = registerClone({ fsPromises: { stat } });
+    for (const unverifiedConfirmed of [undefined, false, 'true']) {
+      const res = await callClone(handler, { remoteUrl: 'https://example.com/repo.git', destinationPath: '/new/repo', unverifiedConfirmed });
+      expect(res.statusCode).toBe(409);
+      expect(res.body.code).toBe('GIT_NETWORK_OPERATION_REQUIRED');
+    }
+    expect(stat).not.toHaveBeenCalled();
+    expect(cloneRepository).not.toHaveBeenCalled();
+  });
+
+  it('returns a retained-checkout setup response rather than a clone error after binding failure', async () => {
+    const { handler } = registerClone({ cloneRepository: async () => ({ state: 'partial', operationId: 'clone-one', completedSteps: ['checked-out'] }) });
+    const res = await callClone(handler, { remoteUrl: 'https://example.com/repo.git', destinationPath: '/new/repo' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ success: false, state: 'partial', setupRequired: true, path: '/new/repo', operationId: 'clone-one' });
+  });
+  it('delegates the exact resolved destination and selected identity without spawning Git', async () => {
+    const cloneRepository = vi.fn(async () => ({ state: 'succeeded', output: 'cloned' }));
+    const registered = registerClone({ cloneRepository });
+
+    const res = await callClone(registered.handler, {
+      remoteUrl: 'https://example.com/team/repository.git',
+      destinationPath: '/workspace/repos/repository',
+      gitIdentityId: 'identity-one',
+    });
+
+    expect(cloneRepository).toHaveBeenCalledWith({
+      unverifiedConfirmed: true,
+      remoteUrl: 'https://example.com/team/repository.git',
+      destinationPath: '/workspace/repos/repository',
+      gitIdentityId: 'identity-one',
+    });
+    expect(res.body).toEqual({ success: true, path: '/workspace/repos/repository', output: 'cloned' });
+    expect(registered.spawn).not.toHaveBeenCalled();
+  });
+
+  it('infers the repository name for a trailing separator', async () => {
+      const cloneRepository = vi.fn(async () => ({ state: 'succeeded' }));
+      const { handler } = registerClone({ cloneRepository });
+
+      const res = await callClone(handler, {
+        remoteUrl: 'git@example.com:team/repository.git',
+        destinationPath: '/workspace/clones/',
+      });
+
+      expect(cloneRepository).toHaveBeenCalledWith({
+      unverifiedConfirmed: true,
+      remoteUrl: 'git@example.com:team/repository.git',
+      destinationPath: '/workspace/clones/repository',
+      gitIdentityId: undefined,
+      });
+      expect(res.body).toEqual({ success: true, path: '/workspace/clones/repository', output: '' });
+  });
+
+  it('infers the repository name when destinationPath names an existing directory', async () => {
+    const cloneRepository = vi.fn(async () => ({ state: 'succeeded' }));
+    const { handler } = registerClone({
+      cloneRepository,
+      fsPromises: {
+        stat: vi.fn(async (targetPath) => {
+          if (targetPath === '/workspace/clones') return { isDirectory: () => true };
+          throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+        }),
+      },
+    });
+
+    await callClone(handler, {
+      remoteUrl: 'https://example.com/team/repository.git',
+      destinationPath: '/workspace/clones',
+    });
+
+    expect(cloneRepository).toHaveBeenCalledWith(expect.objectContaining({
+      destinationPath: '/workspace/clones/repository',
+    }));
+  });
+
+  it('treats a blank legacy identity selection as no identity', async () => {
+    const cloneRepository = vi.fn(async () => ({ state: 'succeeded' }));
+    const { handler } = registerClone({ cloneRepository });
+
+    await callClone(handler, {
+      remoteUrl: 'https://example.com/team/repository.git',
+      destinationPath: '/workspace/repository',
+      gitIdentityId: '   ',
+    });
+
+    expect(cloneRepository).toHaveBeenCalledWith(expect.objectContaining({ gitIdentityId: undefined }));
+  });
+
+  it('returns 409 without delegating when the exact clone target exists', async () => {
+    const cloneRepository = vi.fn();
+    const { handler, spawn } = registerClone({
+      cloneRepository,
+      fsPromises: {
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+        access: vi.fn(async () => undefined),
+      },
+    });
+
+    const res = await callClone(handler, {
+      remoteUrl: 'https://example.com/team/repository.git',
+      destinationPath: '/workspace/repository',
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Destination path already exists' });
+    expect(cloneRepository).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('redacts clone failures and does not log or spawn from the route', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const remoteUrl = 'https://user:secret@example.com/team/repository.git';
+    const destinationPath = '/private/work/repository';
+    const cloneRepository = vi.fn(async () => ({
+      state: 'failed',
+      error: { code: 'TRANSPORT_FAILED', message: `failed ${remoteUrl} at ${destinationPath}` },
+    }));
+    const { handler, spawn } = registerClone({ cloneRepository });
+
+    const res = await callClone(handler, { remoteUrl, destinationPath });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body.error).not.toContain('secret');
+    expect(res.body.error).not.toContain(destinationPath);
+    expect(error).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('maps invalid clone endpoints to a safe 400', async () => {
+    const cloneRepository = vi.fn(async () => {
+      throw Object.assign(new Error('private parser detail'), {
+        code: 'INVALID_GIT_NETWORK_OPERATION',
+        status: 400,
+      });
+    });
+    const { handler } = registerClone({ cloneRepository });
+
+    const res = await callClone(handler, {
+      remoteUrl: 'ext::run-command',
+      destinationPath: '/workspace/repository',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Repository URL is invalid' });
+  });
+});
 
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {
@@ -1444,8 +1626,10 @@ describe('fs stat directory error handling', () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'openchamber-fs-import-'));
     try {
       await mkdir(path.join(directory, 'fs'));
+      await mkdir(path.join(directory, 'git'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
       await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
+      await copyFile(new URL('../git/redaction.js', import.meta.url), path.join(directory, 'git/redaction.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',

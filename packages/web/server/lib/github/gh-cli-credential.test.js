@@ -6,12 +6,11 @@ mock.module('child_process', () => ({
   execFileSync: execFileSyncMock,
 }));
 
-const { clearGhCliTokenCache, getGhCliToken } = await import('./gh-cli-credential.js');
+const { getGhCliToken } = await import('./gh-cli-credential.js');
 
 describe('gh CLI credential lookup', () => {
   beforeEach(() => {
     execFileSyncMock.mockReset();
-    clearGhCliTokenCache();
   });
 
   test('hides the subprocess window on Windows', () => {
@@ -26,17 +25,12 @@ describe('gh CLI credential lookup', () => {
     });
   });
 
-  test('caches unavailable gh CLI result until cache is cleared', () => {
+  test('rechecks unavailable gh CLI authentication on every operation', () => {
     execFileSyncMock.mockImplementation(() => {
       throw new Error('gh unavailable');
     });
 
     expect(getGhCliToken()).toBeNull();
-    expect(getGhCliToken()).toBeNull();
-    expect(execFileSyncMock).toHaveBeenCalledTimes(1);
-
-    clearGhCliTokenCache();
-
     expect(getGhCliToken()).toBeNull();
     expect(execFileSyncMock).toHaveBeenCalledTimes(2);
   });

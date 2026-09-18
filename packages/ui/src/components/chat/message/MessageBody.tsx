@@ -61,6 +61,8 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import ShellBoundaryIndicator from './parts/ShellBoundaryIndicator';
+import { getShellOperationBoundary } from './parts/shellOperationBoundary';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
 
 
@@ -339,6 +341,7 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
     const [copiedOutput, setCopiedOutput] = React.useState(false);
     const copiedResetTimeoutRef = React.useRef<number | null>(null);
     const { t } = useI18n();
+    const shellOperation = getShellOperationBoundary('shell', 'user');
 
     const command = typeof part.shellAction?.command === 'string' ? part.shellAction.command.trim() : '';
     const status = typeof part.shellAction?.status === 'string' ? part.shellAction.status.trim().toLowerCase() : '';
@@ -376,6 +379,7 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
         <div className="mt-2">
             <div className="flex items-center gap-2 flex-wrap">
                 <span className="typography-meta font-semibold text-foreground">{t('chat.messageBody.shellCommand.title')}</span>
+                {shellOperation ? <ShellBoundaryIndicator operation={shellOperation} /> : null}
                 {status ? (
                     <span className={cn(
                         'inline-flex h-5 items-center rounded px-1.5 text-[11px] leading-none',

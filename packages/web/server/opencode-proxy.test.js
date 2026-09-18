@@ -88,8 +88,8 @@ describe('OpenCode proxy SSE forwarding', () => {
     upstream.get('/global/event', (_req, res) => {
       res.setHeader('Content-Type', 'text/event-stream');
       res.flushHeaders();
-      setTimeout(() => res.write(':upstream-alive\n\n'), 40);
-      setTimeout(() => res.write('data: still-alive\n\n'), 80);
+      setTimeout(() => res.write(':upstream-alive\n\n'), 20);
+      setTimeout(() => res.write('data: still-alive\n\n'), 40);
     });
     upstreamServer = await listen(upstream);
     const upstreamPort = upstreamServer.address().port;
@@ -100,10 +100,10 @@ describe('OpenCode proxy SSE forwarding', () => {
       os: {},
       path,
       OPEN_CODE_READY_GRACE_MS: 0,
-      SSE_HEARTBEAT_INTERVAL_MS: 10,
+      SSE_HEARTBEAT_INTERVAL_MS: 5,
       getSseUpstreamStallTimeoutMs: () => {
         stallTimeoutReads += 1;
-        return stallTimeoutReads === 1 ? 50 : 100;
+        return stallTimeoutReads <= 2 ? 1000 : 40;
       },
       getRuntime: () => ({
         openCodePort: upstreamPort,
@@ -120,7 +120,7 @@ describe('OpenCode proxy SSE forwarding', () => {
 
     const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event`, {
       headers: { Accept: 'text/event-stream' },
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(5000),
     });
 
     expect(response.status).toBe(200);

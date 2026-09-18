@@ -104,6 +104,7 @@ import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
 import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -328,6 +329,10 @@ const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'clien
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
 const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
+const worktreeBootstrapStore = createWorktreeBootstrapStore({
+  filePath: path.join(OPENCHAMBER_DATA_DIR, 'git-worktree-bootstrap.json'),
+  fsImpl: fsPromises,
+});
 
 const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   fsPromises,
@@ -1279,9 +1284,37 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
       Object.assign(managedEnv, await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent));
     }
-    return managedEnv;
+    // Git the agent runs itself answers to the repository binding on the hosts
+    // OpenChamber holds bindings on. Injects nothing when it holds none, and
+    // nothing at all when this machine's owner turned it off.
+    const gitAuthority = isAgentGitAuthorityEnabled(settings);
+    const gitCredentialEnv = gitAuthority
+      ? await featureRoutesRuntime.getGitAgentCredentialRuntime()
+        ?.prepareManagedOpenCodeEnv().catch(() => ({})) ?? {}
+      : {};
+    // The plugin's shell guard is armed only while the plugin itself is
+    // injected, because refusing a command without offering the managed action
+    // that replaces it would leave the agent with no way to do the work.
+    const shellBoundaryEnv = gitAuthority && Object.keys(managedEnv).length
+      ? featureRoutesRuntime.getGitShellBoundaryRuntime()?.prepareManagedOpenCodeEnv() ?? {}
+      : {};
+    return { ...managedEnv, ...gitCredentialEnv, ...shellBoundaryEnv };
   },
 });
+
+/**
+ * Whether OpenChamber answers Git in agent shells on this machine.
+ *
+ * The environment variable pins the answer and makes the setting read-only,
+ * the way OpenChamber's other operator variables behave: whoever starts the
+ * process decides, and a stored preference cannot quietly override them.
+ */
+const isAgentGitAuthorityEnabled = (settings) => {
+  const pinned = String(process.env.OPENCHAMBER_GIT_AGENT_AUTHORITY ?? '').trim().toLowerCase();
+  if (pinned === 'off' || pinned === 'false' || pinned === '0') return false;
+  if (pinned === 'on' || pinned === 'true' || pinned === '1') return true;
+  return settings?.agentGitAuthorityEnabled !== false;
+};
 
 const getOpenCodeUpgradeCapability = () => {
   const activeBinary = lastOpenCodeLaunchDiagnostics?.sourceBinary
@@ -1399,6 +1432,8 @@ const openChamberSessionService = createOpenChamberSessionService({
   waitForOpenCodeReady,
   emitSessionCreatedEvent,
   sessionKnowledgeRuntime,
+  worktreeBootstrapStore,
+  hydrateWorktreeCheckout: featureRoutesRuntime.hydrateBoundCheckout,
 });
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
@@ -1440,6 +1475,7 @@ const openChamberControlService = createOpenChamberControlService({
   sessionService: openChamberSessionService,
   scheduledTaskService,
   browserControl: browserControlBroker,
+  getGitAgentOperations: featureRoutesRuntime.getGitAgentOperations,
   agentMemoryActions: createAgentMemoryActions({
     agentMemoryRuntime,
     createError: (message, status) => new OpenChamberControlError(message, status),
@@ -1981,6 +2017,10 @@ async function main(options = {}) {
     // Dev-server discovery must not offer OpenChamber's own listeners back to
     // the user as something to preview.
     getOwnPorts: () => [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
+    getActivePort: () => {
+      const address = server?.address?.();
+      return address && Number.isInteger(address.port) ? address.port : null;
+    },
     devServerScanner,
     buildAugmentedPath,
     projectConfigRuntime,
@@ -1997,6 +2037,7 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    worktreeBootstrapStore,
     messageQueueRuntime,
     routingRuntime,
   });

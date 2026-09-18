@@ -577,6 +577,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
+    id: 'git.gitlab-account',
+    page: 'integrations',
+    titleKey: 'settings.gitlab.title',
+    descriptionKey: 'settings.gitlab.info',
+    keywords: ['gitlab', 'account', 'oauth', 'pat', 'merge request', 'issues', 'glab'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'git.gitlab-connect',
+    page: 'integrations',
+    titleKey: 'settings.gitlab.actions.connect',
+    keywords: ['gitlab', 'connect', 'add account', 'oauth', 'pat', 'token', 'instance'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'routing.token',
     page: 'routing',
     titleKey: 'settings.routing.token.label',
@@ -621,13 +636,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'git',
     titleKey: 'settings.gitIdentities.page.section.title',
     descriptionKey: 'settings.gitIdentities.page.empty.description',
-    keywords: ['identity', 'profile', 'author', 'email', 'credentials', 'signing', 'commit signing', 'ssh signing', 'gpg'],
+    keywords: ['identity', 'profile', 'author', 'email', 'credentials', 'account', 'transport', 'ssh', 'ssh key', 'signing', 'commit signing', 'ssh signing', 'gpg'],
   },
   {
     id: 'git.changes-view',
     page: 'git',
     titleKey: 'settings.openchamber.git.changesViewTitle',
     keywords: ['changes', 'flat list', 'tree view'],
+  },
+  {
+    id: 'git.agent-authority',
+    page: 'git',
+    titleKey: 'settings.openchamber.git.agentAuthority',
+    descriptionKey: 'settings.openchamber.git.agentAuthorityInfo',
+    keywords: ['agent', 'shell', 'credentials', 'transport', 'binding'],
   },
   {
     id: 'git.gitmoji',
@@ -1107,6 +1129,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.github.title',
     descriptionKey: 'settings.integrations.github.description',
     keywords: ['github', 'account', 'oauth', 'gh', 'cli', 'prs', 'pull request', 'issues', 'connect'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'git.github-connect',
+    page: 'integrations',
+    titleKey: 'settings.github.page.actions.connect',
+    keywords: ['github', 'connect', 'add account', 'oauth', 'device flow'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

@@ -105,6 +105,9 @@
     "githubScopes": {
       "scope": "instance"
     },
+    "gitlabClientId": {
+      "scope": "instance"
+    },
     "skillCatalogs": {
       "scope": "instance"
     },
@@ -112,6 +115,9 @@
       "scope": "instance"
     },
     "permissionAutoAccept": {
+      "scope": "instance"
+    },
+    "agentGitAuthorityEnabled": {
       "scope": "instance"
     },
     "agentControlToolEnabled": {

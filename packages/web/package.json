@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
+    "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
     "@opencode-ai/sdk": "1.18.31",

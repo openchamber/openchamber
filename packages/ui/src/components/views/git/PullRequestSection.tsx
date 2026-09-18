@@ -20,29 +20,40 @@ import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
-import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
 import { useUIStore } from '@/stores/useUIStore';
+import { useOpenSourceControlSettings } from '@/hooks/useOpenSourceControlSettings';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
+import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
-import { getPrContextKey, usePrContextStore } from '@/stores/usePrContextStore';
-import { summarizeCheckRuns } from '@/lib/githubChecks';
+import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { getSourceControlStatusKey, useGitHubPrStatusStore, type SourceControlStatus } from '@/stores/useGitHubPrStatusStore';
+import { getChangeRequestContextKey, useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import type {
-  GitHubPullRequest,
-  GitHubCheckRun,
-  GitHubAPI,
-  GitHubPullRequestStatus,
-  GitRemote,
+  CIRun,
+  CreateChangeRequestInput,
+  Project,
+  SourceControlAPI,
+  SourceControlCapabilities,
+  SourceControlExistingMutationTarget,
+  SourceControlReadContext,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { formatChangeRequestReference, getSourceControlBaseUrl, getSourceControlProviderLabel } from '@/lib/source-control/identity';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getDetectedUpstreamContextKey, loadDetectedUpstreamRepo } from './detectedUpstreamRepo';
+import {
+  hasUnknownMutationOutcomeCode,
+  reconcileUnknownMutationOutcome,
+} from './sourceControlMutationOutcome';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';
 type PrSegment = 'overview' | 'checks' | 'comments';
+type PullRequest = NonNullable<SourceControlStatus['pr']>;
 
 const PR_CHECKS_AUTO_REFRESH_MS = 35_000;
 
@@ -64,8 +75,6 @@ const isFailedConclusion = (conclusion?: string | null): boolean => {
   const normalized = typeof conclusion === 'string' ? conclusion.toLowerCase() : '';
   return Boolean(normalized) && !['success', 'neutral', 'skipped'].includes(normalized);
 };
-type DetectedUpstream = { owner: string; repo: string; url: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null };
-
 const statusColor = (state: string | undefined | null): string => {
   switch (state) {
     case 'success':
@@ -79,8 +88,8 @@ const statusColor = (state: string | undefined | null): string => {
   }
 };
 
-const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'open' | 'blocked' | 'merged' | 'closed' | null => {
-  const pr = status?.pr;
+const getPrVisualState = (status: SourceControlStatus | null): 'draft' | 'open' | 'blocked' | 'merged' | 'closed' | null => {
+  const pr = status?.changeRequest ?? status?.pr;
   if (!pr) {
     return null;
   }
@@ -93,7 +102,7 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
   if (pr.draft) {
     return 'draft';
   }
-  const checksFailed = status?.checks?.state === 'failure';
+  const checksFailed = (status?.ci?.summary ?? status?.checks)?.state === 'failure';
   const mergeableState = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
   const notMergeable = pr.mergeable === false || mergeableState === 'blocked' || mergeableState === 'dirty';
   if (checksFailed || notMergeable) {
@@ -103,10 +112,32 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
 };
 
 const PR_ACTION_REFRESH_DELAYS_MS = [2_000, 5_000] as const;
-// A manual refresh keeps its spinner visible at least this long: the request
-// often answers from the server cache within a few milliseconds, and a
-// spinner that never reaches the screen reads as "the button did nothing".
-const PR_MANUAL_REFRESH_MIN_SPIN_MS = 600;
+let fallbackMutationKey = 0;
+
+const createMutationKey = (): string => {
+  const generated = globalThis.crypto?.randomUUID?.();
+  if (generated) return generated;
+  fallbackMutationKey += 1;
+  return `source-control-${Date.now().toString(36)}-${fallbackMutationKey.toString(36)}`;
+};
+
+const createMutationSignature = (
+  operation: 'create' | 'update' | 'merge' | 'ready',
+  runtimeKey: string,
+  context: SourceControlReadContext,
+  details: Array<string | number | boolean | undefined>,
+): string => JSON.stringify([
+  operation,
+  runtimeKey,
+  context.provider,
+  context.instance,
+  context.directory,
+  context.repositoryId,
+  context.accountId,
+  context.bindingRevision,
+  context.primaryRemote,
+  ...details,
+]);
 
 const branchToTitle = (branch: string): string => {
   return branch
@@ -157,97 +188,27 @@ const remoteBranchToName = (value: string, remoteName: string | null): string =>
 
 const getPullRequestSnapshotKey = (directory: string, branch: string): string => `${directory}::${branch}`;
 
+const getExistingPullRequestTarget = (
+  project: Pick<Project, 'owner' | 'name'>,
+  pr: PullRequest,
+): SourceControlExistingMutationTarget => {
+  const target: SourceControlExistingMutationTarget = {
+    project: { owner: project.owner, name: project.name },
+    number: pr.number,
+    head: pr.head,
+    base: pr.base,
+  };
+  if (pr.headSha) target.headSha = pr.headSha;
+  return target;
+};
+
 type PullRequestDraftSnapshot = {
   title: string;
   body: string;
   draft: boolean;
   additionalContext: string;
   targetBaseBranch?: string;
-  selectedRemoteName?: string;
   activeSegment?: PrSegment;
-};
-
-const getTrackingRemoteName = (trackingBranch: string | null | undefined): string => {
-  const normalized = String(trackingBranch || '').trim();
-  if (!normalized) {
-    return '';
-  }
-
-  const slashIndex = normalized.indexOf('/');
-  if (slashIndex <= 0) {
-    return '';
-  }
-
-  return normalized.slice(0, slashIndex).trim();
-};
-
-const pickInitialPrRemote = (
-  remotes: GitRemote[],
-  options: { selectedRemoteName?: string; trackingBranch?: string }
-): GitRemote | null => {
-  if (remotes.length === 0) {
-    return null;
-  }
-
-  const selectedRemoteName = String(options.selectedRemoteName || '').trim();
-  if (selectedRemoteName) {
-    const fromSnapshot = remotes.find((remote) => remote.name === selectedRemoteName);
-    if (fromSnapshot) {
-      return fromSnapshot;
-    }
-  }
-
-  const trackingRemoteName = getTrackingRemoteName(options.trackingBranch);
-  if (trackingRemoteName) {
-    const maybeUpstream =
-      trackingRemoteName === 'origin'
-        ? remotes.find((remote) => remote.name === 'upstream')
-        : null;
-    if (maybeUpstream) {
-      return maybeUpstream;
-    }
-
-    const fromTracking = remotes.find((remote) => remote.name === trackingRemoteName);
-    if (fromTracking) {
-      return fromTracking;
-    }
-  }
-
-  const originRemote = remotes.find((remote) => remote.name === 'origin');
-  if (originRemote) {
-    return originRemote;
-  }
-
-  return remotes[0] ?? null;
-};
-
-const isEphemeralPrRemote = (name: string): boolean => name.startsWith('pr-');
-
-const rankRemotesForAutoSelect = (
-  remotes: GitRemote[],
-  trackingBranch?: string,
-): GitRemote[] => {
-  const trackingRemote = getTrackingRemoteName(trackingBranch);
-  const byName = new Map(remotes.map((remote) => [remote.name, remote]));
-  const ordered: GitRemote[] = [];
-  const pushUnique = (remote: GitRemote | null | undefined) => {
-    if (!remote) return;
-    if (ordered.some((item) => item.name === remote.name)) return;
-    ordered.push(remote);
-  };
-
-  if (trackingRemote) {
-    pushUnique(byName.get(trackingRemote));
-  }
-  pushUnique(byName.get('upstream'));
-  pushUnique(byName.get('origin'));
-
-  remotes
-    .filter((remote) => !isEphemeralPrRemote(remote.name))
-    .forEach((remote) => pushUnique(remote));
-  remotes.forEach((remote) => pushUnique(remote));
-
-  return ordered;
 };
 
 type TimelineCommentItem = {
@@ -266,54 +227,43 @@ const pullRequestDraftSnapshots = new Map<string, PullRequestDraftSnapshot>();
 
 const openExternal = openExternalUrl;
 
-function useDetectedUpstreamRepo(directory: string, github: GitHubAPI | undefined) {
-  const [detectedUpstream, setDetectedUpstream] = React.useState<DetectedUpstream | null>(null);
-  const [upstreamBranches, setUpstreamBranches] = React.useState<string[]>([]);
-  const attemptedDirectoryRef = React.useRef<string | null>(null);
+function useDetectedUpstreamRepo(
+  directory: string,
+  sourceControl: SourceControlAPI,
+  readContext: SourceControlReadContext | null,
+) {
+  const contextKey = readContext ? getDetectedUpstreamContextKey(readContext) : null;
+  const [state, setState] = React.useState<{
+    contextKey: string | null;
+    detectedUpstream: Project | null;
+    upstreamBranches: string[];
+  }>({ contextKey: null, detectedUpstream: null, upstreamBranches: [] });
 
   React.useEffect(() => {
-    setDetectedUpstream(null);
-    setUpstreamBranches([]);
-  }, [directory]);
-
-  React.useEffect(() => {
-    if (!directory || !github?.repoUpstream || attemptedDirectoryRef.current === directory) {
-      return;
-    }
-    attemptedDirectoryRef.current = directory;
+    if (!directory || !readContext || !contextKey) return;
 
     let cancelled = false;
     void (async () => {
       try {
-        const result = await github.repoUpstream(directory);
-        if (cancelled || !result?.isFork || !result.upstream) {
-          return;
-        }
-
-        setDetectedUpstream(result.upstream);
-        if (!github.repoBranches) {
-          return;
-        }
-
-        try {
-          const branches = await github.repoBranches(result.upstream.owner, result.upstream.repo);
-          if (!cancelled) {
-            setUpstreamBranches(branches);
-          }
-        } catch {
-          // Silently fail - branch list is best-effort.
-        }
+        const result = await loadDetectedUpstreamRepo(sourceControl, readContext);
+        if (!cancelled) setState({
+          contextKey,
+          detectedUpstream: result.upstream,
+          upstreamBranches: result.branches,
+        });
       } catch {
-        // Silently fail - upstream detection is best-effort.
+        // Preserve the last authoritative result for this context.
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [directory, github]);
+  }, [contextKey, directory, readContext, sourceControl]);
 
-  return { detectedUpstream, upstreamBranches };
+  return state.contextKey === contextKey
+    ? { detectedUpstream: state.detectedUpstream, upstreamBranches: state.upstreamBranches }
+    : { detectedUpstream: null, upstreamBranches: [] };
 }
 
 export const PullRequestSection: React.FC<{
@@ -321,30 +271,22 @@ export const PullRequestSection: React.FC<{
   branch: string;
   baseBranch: string;
   trackingBranch?: string;
-  remotes?: GitRemote[];
   remoteBranches?: string[];
   onGeneratedDescription?: () => void;
-}> = ({ directory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
+}> = ({ directory, branch, baseBranch, trackingBranch, remoteBranches = [], onGeneratedDescription }) => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const { github } = useRuntimeAPIs();
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
-  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const openSourceControlSettings = useOpenSourceControlSettings();
+  const { sourceControl } = useRuntimeAPIs();
+  const sourceControlAuthEntries = useSourceControlAuthStore((state) => state.entries);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
   const openContextSurface = useUIStore((state) => state.openContextSurface);
-  const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
+  const requestWalkthroughTarget = useWalkthroughStore((state) => state.requestTarget);
   // Mirrors the rail's gating: the surface is not available on mobile widths or
   // in VS Code, so neither is its entry point.
   const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
-
-  const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('integrations');
-    setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSettingsPage]);
 
   const snapshotKey = React.useMemo(() => getPullRequestSnapshotKey(directory, branch), [directory, branch]);
   const initialSnapshot = React.useMemo(
@@ -353,6 +295,10 @@ export const PullRequestSection: React.FC<{
   );
   const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
   const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
+  const beginActiveSourceControlContextsLoad = useGitHubPrStatusStore((state) => state.beginActiveContextsLoad);
+  const commitActiveSourceControlContexts = useGitHubPrStatusStore((state) => state.commitActiveContexts);
+  const releaseActiveSourceControlContexts = useGitHubPrStatusStore((state) => state.releaseActiveContexts);
+  const sourceControlContextsOwnerId = React.useId();
   const startPrStatusWatching = useGitHubPrStatusStore((state) => state.startWatching);
   const stopPrStatusWatching = useGitHubPrStatusStore((state) => state.stopWatching);
   const refreshPrStatus = useGitHubPrStatusStore((state) => state.refresh);
@@ -385,40 +331,106 @@ export const PullRequestSection: React.FC<{
 
   const [isContextOpen, setIsContextOpen] = React.useState(false);
   const [isContextSheetOpen, setIsContextSheetOpen] = React.useState(false);
-  const [selectedRemote, setSelectedRemote] = React.useState<GitRemote | null>(() =>
-    pickInitialPrRemote(remotes, {
-      selectedRemoteName: initialSnapshot?.selectedRemoteName,
-      trackingBranch,
-    })
+  const binding = useRepositoryBinding(directory, sourceControl);
+  const runtimeKey = binding.scope.runtimeKey;
+  React.useEffect(() => {
+    if (!directory) return;
+    const capturedRuntimeKey = binding.scope.runtimeKey;
+    const contextRequestId = beginActiveSourceControlContextsLoad(capturedRuntimeKey, directory, sourceControlContextsOwnerId);
+    const activeContexts = binding.contexts.filter((context) => getSourceControlReadContextAuthState(
+      sourceControlAuthEntries[getSourceControlAuthKey(context)], context,
+    ).connected);
+    commitActiveSourceControlContexts(capturedRuntimeKey, directory, sourceControlContextsOwnerId, contextRequestId, activeContexts);
+    return () => {
+      releaseActiveSourceControlContexts(capturedRuntimeKey, directory, sourceControlContextsOwnerId);
+    };
+  }, [beginActiveSourceControlContextsLoad, binding.contexts, binding.scope.runtimeKey, commitActiveSourceControlContexts, directory, releaseActiveSourceControlContexts, sourceControlAuthEntries, sourceControlContextsOwnerId]);
+  const readContexts = binding.contexts;
+  const readContext = readContexts[0] ?? null;
+  const selectedRemoteName = readContext?.primaryRemote ?? null;
+  const sourceControlAuthKey = React.useMemo(
+    () => readContext ? getSourceControlAuthKey(readContext) : '',
+    [readContext],
   );
+  const sourceControlAuthEntry = useSourceControlAuthStore((state) => state.entries[sourceControlAuthKey]);
+  const sourceControlAuthStatus = sourceControlAuthEntry?.status ?? null;
+  const sourceControlAuth = readContext
+    ? getSourceControlReadContextAuthState(sourceControlAuthEntry, readContext)
+    : { authChecked: sourceControlAuthEntry?.hasChecked ?? false, connected: false };
+  const sourceControlAuthChecked = sourceControlAuth.authChecked;
+  const [capabilityReload, setCapabilityReload] = React.useState(0);
+  const [capabilityState, setCapabilityState] = React.useState<
+    | { key: string; status: 'loading' | 'error'; capabilities: null }
+    | { key: string; status: 'ready'; capabilities: SourceControlCapabilities }
+  >({ key: '', status: 'loading', capabilities: null });
   const [useDetectedUpstream, setUseDetectedUpstream] = React.useState(false);
-  const { detectedUpstream, upstreamBranches } = useDetectedUpstreamRepo(directory, github);
+  const { detectedUpstream, upstreamBranches } = useDetectedUpstreamRepo(
+    directory,
+    sourceControl,
+    readContext,
+  );
+
+  React.useEffect(() => {
+    if (!readContext) return;
+    let cancelled = false;
+    const key = getSourceControlAuthKey(readContext);
+    setCapabilityState({ key, status: 'loading', capabilities: null });
+    void sourceControl.capabilities(readContext)
+      .then((capabilities) => {
+        if (!cancelled) setCapabilityState({ key, status: 'ready', capabilities });
+      })
+      .catch(() => {
+        if (!cancelled) setCapabilityState({ key, status: 'error', capabilities: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [capabilityReload, readContext, sourceControl]);
+
+  const currentCapabilityState = capabilityState.key === sourceControlAuthKey ? capabilityState : null;
+  const sourceControlCapabilities = currentCapabilityState?.status === 'ready'
+    ? currentCapabilityState.capabilities
+    : null;
+
+  const mergeMethods = React.useMemo<MergeMethod[]>(
+    () => sourceControlCapabilities?.mergeMethods ?? [],
+    [sourceControlCapabilities?.mergeMethods],
+  );
+  React.useEffect(() => {
+    if (mergeMethods.length > 0 && !mergeMethods.includes(mergeMethod)) {
+      setMergeMethod(mergeMethods[0]);
+    }
+  }, [mergeMethod, mergeMethods]);
 
   React.useEffect(() => {
     setUseDetectedUpstream(false);
   }, [directory]);
 
-  const hasUpstreamRemote = remotes.some((r) => r.name === 'upstream');
-  const isFork = hasUpstreamRemote || detectedUpstream !== null;
+  const isFork = detectedUpstream !== null;
   const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork));
 
   const prStatusKey = React.useMemo(
-    () => getGitHubPrStatusKey(directory, branch, selectedRemote?.name ?? null),
-    [directory, branch, selectedRemote?.name],
+    () => readContext ? getSourceControlStatusKey(readContext, branch) : '',
+    [branch, readContext],
   );
+  const mutationScopeKeyRef = React.useRef(prStatusKey);
+  mutationScopeKeyRef.current = prStatusKey;
+  const isMutationScopeCurrent = React.useCallback((capturedRuntimeKey: string, capturedStatusKey: string) => (
+    capturedRuntimeKey === getRuntimeKey() && capturedStatusKey === mutationScopeKeyRef.current
+  ), []);
   const statusEntry = useGitHubPrStatusStore((state) => state.entries[prStatusKey]);
 
   const isLoading = statusEntry?.isLoading ?? false;
-  const status = statusEntry?.status ?? null;
-  const error = statusEntry?.error ?? null;
+  const status = sourceControlAuth.connected ? statusEntry?.status ?? null : null;
+  const error = binding.error ? t('settings.gitlab.status.operationFailed') : statusEntry?.error ?? null;
   const isInitialStatusResolved = statusEntry?.isInitialStatusResolved ?? false;
 
   const availableBaseBranches = React.useMemo(() => {
-    const selectedRemoteName = useDetectedUpstream ? null : (selectedRemote?.name?.trim() || null);
+    const baseRemoteName = useDetectedUpstream ? null : selectedRemoteName;
     const unique = new Set<string>();
 
     for (const remoteBranch of remoteBranches) {
-      const branchName = remoteBranchToName(remoteBranch, selectedRemoteName);
+      const branchName = remoteBranchToName(remoteBranch, baseRemoteName);
       if (!branchName || branchName === 'HEAD') {
         continue;
       }
@@ -445,26 +457,7 @@ export const PullRequestSection: React.FC<{
     }
 
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, upstreamBranches, useDetectedUpstream]);
-
-  // Update selected remote when remotes change
-  React.useEffect(() => {
-    if (remotes.length === 0) {
-      if (selectedRemote) {
-        setSelectedRemote(null);
-      }
-      return;
-    }
-
-    if (!selectedRemote || !remotes.some((remote) => remote.name === selectedRemote.name)) {
-      setSelectedRemote(
-        pickInitialPrRemote(remotes, {
-          selectedRemoteName: initialSnapshot?.selectedRemoteName,
-          trackingBranch,
-        })
-      );
-    }
-  }, [initialSnapshot?.selectedRemoteName, remotes, selectedRemote, trackingBranch]);
+  }, [baseBranch, remoteBranches, selectedRemoteName, targetBaseBranch, upstreamBranches, useDetectedUpstream]);
 
   React.useEffect(() => {
     const normalizedBase = normalizeBranchRef(baseBranch);
@@ -493,16 +486,37 @@ export const PullRequestSection: React.FC<{
 
   const attemptedBodyHydrationRef = React.useRef<Set<string>>(new Set());
   const lastSyncedPrNumberRef = React.useRef<number | null>(null);
-  const didUserOverrideRemoteRef = React.useRef(false);
-  const autoRemoteProbeDoneRef = React.useRef<Set<string>>(new Set());
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
+  const mutationKeysRef = React.useRef(new Map<string, { key: string; inFlight: boolean }>());
+
+  const beginMutation = React.useCallback((signature: string): string | null => {
+    const existing = mutationKeysRef.current.get(signature);
+    if (existing?.inFlight) return null;
+    if (existing) {
+      existing.inFlight = true;
+      return existing.key;
+    }
+    const key = createMutationKey();
+    mutationKeysRef.current.set(signature, { key, inFlight: true });
+    return key;
+  }, []);
+
+  const finishMutation = React.useCallback((signature: string, key: string, retain: boolean) => {
+    const entry = mutationKeysRef.current.get(signature);
+    if (!entry || entry.key !== key) return;
+    if (retain) {
+      entry.inFlight = false;
+    } else {
+      mutationKeysRef.current.delete(signature);
+    }
+  }, []);
 
   // Auto-enable detected upstream when there's no explicit upstream remote
   React.useEffect(() => {
-    if (detectedUpstream && !hasUpstreamRemote) {
+    if (detectedUpstream) {
       setUseDetectedUpstream(true);
     }
-  }, [detectedUpstream, hasUpstreamRemote]);
+  }, [detectedUpstream]);
 
   // Set target base branch to upstream's default branch when using detected upstream
   React.useEffect(() => {
@@ -511,16 +525,23 @@ export const PullRequestSection: React.FC<{
     }
   }, [useDetectedUpstream, detectedUpstream?.defaultBranch]);
 
-  const pr = status?.pr ?? null;
+  const pr = status?.changeRequest ?? status?.pr ?? null;
+  const statusIdentity = status?.identity ?? readContext;
+  const statusProject = React.useMemo(() => status?.project ?? (status?.repo && statusIdentity
+    ? { ...status.repo, ...statusIdentity, id: `${status.repo.owner}/${status.repo.repo}`, name: status.repo.repo }
+    : null), [status?.project, status?.repo, statusIdentity]);
+  const projectSelector = React.useMemo(() => statusProject
+    ? { owner: statusProject.owner, name: statusProject.name }
+    : undefined, [statusProject]);
   // A closed/merged PR is the branch's history, not its live status: it still
   // deserves to be shown (you just merged it), but the branch is free again, so
   // the panel offers creating the next PR instead of a read-only detail view.
   const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
   const livePr = isHistoricalPr ? null : pr;
 
-  const prContextKey = livePr ? getPrContextKey(directory, livePr.number) : null;
-  const prContextEntry = usePrContextStore((state) => (prContextKey ? state.entries[prContextKey] : undefined));
-  const ensurePrContext = usePrContextStore((state) => state.ensure);
+  const prContextKey = livePr && readContext ? getChangeRequestContextKey(readContext, livePr.number, projectSelector) : null;
+  const prContextEntry = useChangeRequestContextStore((state) => (prContextKey ? state.entries[prContextKey] : undefined));
+  const ensurePrContext = useChangeRequestContextStore((state) => state.ensure);
   const prContext = prContextEntry?.result ?? null;
   const isLoadingPrContext = prContextEntry?.isLoading ?? false;
 
@@ -534,16 +555,16 @@ export const PullRequestSection: React.FC<{
 
   // Load the context the active segment needs; checks include details.
   React.useEffect(() => {
-    if (!livePr || !github?.prContext || activeSegment === 'overview') {
+    if (!livePr || !readContext || activeSegment === 'overview') {
       return;
     }
-    void ensurePrContext(github, directory, livePr.number, {
-      includeCheckDetails: activeSegment === 'checks',
-      sourceRepo: status?.repo ?? null,
+    void ensurePrContext(sourceControl, readContext, livePr.number, {
+      includeCIDetails: activeSegment === 'checks',
+      project: projectSelector,
     });
-  }, [activeSegment, directory, ensurePrContext, github, livePr, status?.repo]);
+  }, [activeSegment, ensurePrContext, livePr, projectSelector, readContext, sourceControl]);
 
-  const checks = status?.checks ?? null;
+  const checks = status?.ci?.summary ?? status?.checks ?? null;
   const checksArePending = (checks?.pending ?? 0) > 0;
 
   // The detailed run list (pulls/context) and the status aggregate (pr/status)
@@ -551,15 +572,14 @@ export const PullRequestSection: React.FC<{
   // the fresher, richer source whenever we have it — derive the aggregate from
   // it and push it into the status store so every consumer (header, badges,
   // git-view chip) shows the same numbers as the visible runs.
-  const contextCheckRuns = prContext?.checkRuns ?? null;
+  const contextCISummary = prContext?.ci?.summary ?? null;
   const contextFetchedAt = prContext?.fetchedAt;
   React.useEffect(() => {
-    if (!contextCheckRuns || contextCheckRuns.length === 0) {
+    if (!contextCISummary) {
       return;
     }
-    const derived = summarizeCheckRuns(contextCheckRuns);
     updatePrStatus(prStatusKey, (previous) => {
-      if (!previous?.pr) {
+      if (!previous?.changeRequest && !previous?.pr) {
         return previous;
       }
       // Never let older context data regress a fresher status snapshot.
@@ -568,44 +588,45 @@ export const PullRequestSection: React.FC<{
         && contextFetchedAt < previous.fetchedAt) {
         return previous;
       }
-      const current = previous.checks;
+      const current = previous.ci?.summary ?? previous.checks;
       const unchanged = current
-        && current.state === derived.state
-        && current.total === derived.total
-        && current.success === derived.success
-        && current.failure === derived.failure
-        && current.pending === derived.pending
-        && current.inProgress === derived.inProgress
-        && current.queued === derived.queued
-        && current.startedAt === derived.startedAt;
+        && current.state === contextCISummary.state
+        && current.total === contextCISummary.total
+        && current.success === contextCISummary.success
+        && current.failure === contextCISummary.failure
+        && current.pending === contextCISummary.pending
+        && current.inProgress === contextCISummary.inProgress
+        && current.queued === contextCISummary.queued
+        && current.startedAt === contextCISummary.startedAt;
       if (unchanged) {
         return previous;
       }
       return {
         ...previous,
-        checks: derived,
+        ci: prContext?.ci ?? { summary: contextCISummary },
+        checks: contextCISummary,
         // Adopt the context's freshness so a later stale status response
         // (older server stamp) is rejected by the store's freshness guard.
         ...(typeof contextFetchedAt === 'number' ? { fetchedAt: contextFetchedAt } : {}),
       };
     });
-  }, [contextCheckRuns, contextFetchedAt, prStatusKey, updatePrStatus]);
+  }, [contextCISummary, contextFetchedAt, prContext?.ci, prStatusKey, updatePrStatus]);
 
   // While checks run and the checks segment is visible, keep the detailed
   // run list fresh; the shared context store dedupes against other callers.
   React.useEffect(() => {
-    if (activeSegment !== 'checks' || !checksArePending || !pr || !github?.prContext) {
+    if (activeSegment !== 'checks' || !checksArePending || !pr || !readContext) {
       return;
     }
     const intervalId = window.setInterval(() => {
-      void ensurePrContext(github, directory, pr.number, {
-        includeCheckDetails: true,
-        sourceRepo: status?.repo ?? null,
+      void ensurePrContext(sourceControl, readContext, pr.number, {
+        includeCIDetails: true,
+        project: projectSelector,
         force: true,
       });
     }, PR_CHECKS_AUTO_REFRESH_MS);
     return () => window.clearInterval(intervalId);
-  }, [activeSegment, checksArePending, directory, ensurePrContext, github, pr, status?.repo]);
+  }, [activeSegment, checksArePending, ensurePrContext, pr, projectSelector, readContext, sourceControl]);
 
   // Coarse clock for "running for Nm" labels; only ticks while checks run.
   const [nowTick, setNowTick] = React.useState(() => Date.now());
@@ -618,13 +639,15 @@ export const PullRequestSection: React.FC<{
     return () => window.clearInterval(intervalId);
   }, [checksArePending]);
 
-  const currentPrBodyHydrationKey = pr ? `${directory}#${pr.number}` : null;
+  const currentPrBodyHydrationKey = pr && readContext
+    ? getChangeRequestContextKey(readContext, pr.number, projectSelector)
+    : null;
   const isHydratingCurrentPrBody = Boolean(
     currentPrBodyHydrationKey && hydratingPrBodyKey === currentPrBodyHydrationKey,
   );
 
   React.useEffect(() => {
-    if (!github?.prContext || !pr) {
+    if (!pr || !readContext) {
       return;
     }
 
@@ -632,7 +655,7 @@ export const PullRequestSection: React.FC<{
       return;
     }
 
-    const hydrationKey = `${directory}#${pr.number}`;
+    const hydrationKey = getChangeRequestContextKey(readContext, pr.number, projectSelector);
     if (attemptedBodyHydrationRef.current.has(hydrationKey)) {
       return;
     }
@@ -640,25 +663,25 @@ export const PullRequestSection: React.FC<{
     setHydratingPrBodyKey(hydrationKey);
 
     let cancelled = false;
-    void ensurePrContext(github, directory, pr.number, { sourceRepo: status?.repo ?? null })
+    void ensurePrContext(sourceControl, readContext, pr.number, { project: projectSelector })
       .then((ctx) => {
         if (cancelled) {
           return;
         }
-        const ctxPr = ctx?.pr;
+        const ctxPr = ctx?.changeRequest;
         if (!ctxPr) {
           return;
         }
         updatePrStatus(prStatusKey, (prev) => {
-          if (!prev?.pr || prev.pr.number !== pr.number) {
+          const previousPr = prev?.changeRequest ?? prev?.pr;
+          if (!prev || !previousPr || previousPr.number !== pr.number) {
             return prev;
           }
+          const updatedPr = { ...previousPr, body: ctxPr.body || '' };
           return {
             ...prev,
-            pr: {
-              ...prev.pr,
-              body: ctxPr.body || '',
-            },
+            changeRequest: prev.changeRequest ? { ...prev.changeRequest, body: ctxPr.body || '' } : prev.changeRequest,
+            pr: updatedPr,
           };
         });
       })
@@ -673,7 +696,7 @@ export const PullRequestSection: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [directory, ensurePrContext, github, pr, prStatusKey, status?.repo, updatePrStatus]);
+  }, [directory, ensurePrContext, pr, prStatusKey, projectSelector, readContext, sourceControl, updatePrStatus]);
 
   React.useEffect(() => {
     if (!pr) {
@@ -714,32 +737,33 @@ export const PullRequestSection: React.FC<{
     });
   }, [timeFormatPreference]);
 
-  const connectedGitHubLogin = React.useMemo(() => {
-    const login = githubAuthStatus?.user?.login;
-    return typeof login === 'string' ? login.trim() : '';
-  }, [githubAuthStatus]);
+  const connectedSourceControlLogin = readContext && sourceControlAuthStatus?.connected
+    ? sourceControlAuthStatus.accounts.find((account) => account.id === readContext.accountId)?.user.username.trim() ?? ''
+    : '';
 
   const selfMentionHighlightClass = React.useMemo(() => {
     return "[&_a[href*='oc-self-mention=1']]:!text-[var(--primary-base)] [&_a[href*='oc-self-mention=1']]:font-semibold [&_a[href*='oc-self-mention=1']]:!no-underline [&_a[href*='oc-self-mention=1']:hover]:!text-[var(--primary-hover)]";
   }, []);
 
   const linkifyMentionsMarkdown = React.useCallback((content: string) => {
-    const selfLoginLower = connectedGitHubLogin.toLowerCase();
+    if (!statusIdentity) return content;
+    const selfLoginLower = connectedSourceControlLogin.toLowerCase();
+    const providerBaseUrl = getSourceControlBaseUrl(statusIdentity);
     const mentionRegex = /(^|[^\w`])@([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38}))/g;
     return content.replace(mentionRegex, (_match, prefix: string, username: string) => {
       const mention = `@${username}`;
       const usernameLower = username.toLowerCase();
       const selfTag = selfLoginLower && usernameLower === selfLoginLower ? '?oc-self-mention=1' : '';
-      return `${prefix}[${mention}](https://github.com/${usernameLower}${selfTag})`;
+      return `${prefix}[${mention}](${providerBaseUrl}/${usernameLower}${selfTag})`;
     });
-  }, [connectedGitHubLogin]);
+  }, [connectedSourceControlLogin, statusIdentity]);
 
   const timelineComments = React.useMemo<TimelineCommentItem[]>(() => {
     const issue = (prContext?.issueComments ?? []).map((comment) => ({
       id: `issue-${comment.id}`,
       body: comment.body || '',
-      authorName: comment.author?.name || comment.author?.login || t('gitView.pr.comments.unknownAuthor'),
-      authorLogin: comment.author?.login || null,
+      authorName: comment.author?.name || comment.author?.username || t('gitView.pr.comments.unknownAuthor'),
+      authorLogin: comment.author?.username || null,
       avatarUrl: comment.author?.avatarUrl || null,
       createdAt: comment.createdAt,
       context: t('gitView.pr.comments.generalContext'),
@@ -750,8 +774,8 @@ export const PullRequestSection: React.FC<{
     const review = (prContext?.reviewComments ?? []).map((comment) => ({
       id: `review-${comment.id}`,
       body: comment.body || '',
-      authorName: comment.author?.name || comment.author?.login || t('gitView.pr.comments.unknownAuthor'),
-      authorLogin: comment.author?.login || null,
+      authorName: comment.author?.name || comment.author?.username || t('gitView.pr.comments.unknownAuthor'),
+      authorLogin: comment.author?.username || null,
       avatarUrl: comment.author?.avatarUrl || null,
       createdAt: comment.createdAt,
       context: t('gitView.pr.comments.reviewContext'),
@@ -799,11 +823,11 @@ export const PullRequestSection: React.FC<{
     });
   }, [pr?.number]);
 
-  const renderCheckRunSummary = React.useCallback((run: GitHubCheckRun, options?: { hideHeader?: boolean }) => {
+  const renderCheckRunSummary = React.useCallback((run: CIRun, options?: { hideHeader?: boolean }) => {
     const status = run.status || 'unknown';
     const conclusion = run.conclusion ?? undefined;
     const statusText = conclusion ? `${status} / ${conclusion}` : status;
-    const appName = run.app?.name || run.app?.slug;
+    const appName = run.application?.name || run.application?.slug;
     return (
       <div className="space-y-2">
         <div className={options?.hideHeader ? 'flex items-start justify-end gap-3' : 'flex items-start justify-between gap-3'}>
@@ -935,11 +959,7 @@ export const PullRequestSection: React.FC<{
   const [isAttachingComments, setIsAttachingComments] = React.useState(false);
 
   const sendFailedChecksToChat = React.useCallback(async () => {
-    if (!github?.prContext) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
-      return;
-    }
-    if (!directory || !pr) return;
+    if (!directory || !pr || !readContext) return;
     const target = resolveDraftTarget();
     if (!target) {
       return;
@@ -947,12 +967,15 @@ export const PullRequestSection: React.FC<{
 
     setIsAttachingChecks(true);
     try {
-      const context = await ensurePrContext(github, directory, pr.number, { includeCheckDetails: true, sourceRepo: status?.repo ?? null });
+      const context = await ensurePrContext(sourceControl, readContext, pr.number, {
+        includeCIDetails: true,
+        project: projectSelector,
+      });
       if (!context) {
         toast.error(t('gitView.pr.toast.loadChecksFailed'));
         return;
       }
-      const runs = context.checkRuns ?? [];
+      const runs = context.ci?.runs ?? [];
       const failed = runs.filter((r) => isFailedConclusion(r.conclusion));
 
       if (failed.length === 0) {
@@ -996,14 +1019,10 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsAttachingChecks(false);
     }
-  }, [directory, ensurePrContext, github, pr, resolveDraftTarget, status?.repo, t]);
+  }, [directory, ensurePrContext, pr, projectSelector, readContext, resolveDraftTarget, sourceControl, t]);
 
   const sendCommentsToChat = React.useCallback(async () => {
-    if (!github?.prContext) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
-      return;
-    }
-    if (!directory || !pr) return;
+    if (!directory || !pr || !readContext) return;
     const target = resolveDraftTarget();
     if (!target) {
       return;
@@ -1011,7 +1030,7 @@ export const PullRequestSection: React.FC<{
 
     setIsAttachingComments(true);
     try {
-      const context = await ensurePrContext(github, directory, pr.number, { sourceRepo: status?.repo ?? null });
+      const context = await ensurePrContext(sourceControl, readContext, pr.number, { project: projectSelector });
       if (!context) {
         toast.error(t('gitView.pr.toast.loadPrCommentsFailed'));
         return;
@@ -1030,7 +1049,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsAttachingComments(false);
     }
-  }, [attachCommentDraft, directory, ensurePrContext, github, pr, resolveDraftTarget, status?.repo, t, timelineComments]);
+  }, [attachCommentDraft, directory, ensurePrContext, pr, projectSelector, readContext, resolveDraftTarget, sourceControl, t, timelineComments]);
 
   const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
     const target = resolveDraftTarget();
@@ -1041,18 +1060,69 @@ export const PullRequestSection: React.FC<{
     attachCommentDraft(target, comment);
   }, [attachCommentDraft, resolveDraftTarget]);
 
-  const refresh = React.useCallback(async (options?: { force?: boolean; onlyExistingPr?: boolean; silent?: boolean; markInitialResolved?: boolean }) => {
-    await refreshPrStatus(prStatusKey, options);
-  }, [prStatusKey, refreshPrStatus]);
-
   const [isManualRefreshing, setIsManualRefreshing] = React.useState(false);
   const manualRefreshMountedRef = React.useRef(true);
   React.useEffect(() => {
     manualRefreshMountedRef.current = true;
-    return () => {
-      manualRefreshMountedRef.current = false;
-    };
+    return () => { manualRefreshMountedRef.current = false; };
   }, []);
+  const refresh = React.useCallback(async (options?: { force?: boolean; onlyExistingPr?: boolean; silent?: boolean; markInitialResolved?: boolean }) => {
+    await refreshPrStatus(prStatusKey, options);
+  }, [prStatusKey, refreshPrStatus]);
+
+  const scheduleActionRefresh = React.useCallback((capturedRuntimeKey: string, capturedStatusKey: string) => {
+    pendingActionRefreshTimersRef.current.forEach((timerId) => {
+      window.clearTimeout(timerId);
+    });
+    pendingActionRefreshTimersRef.current = PR_ACTION_REFRESH_DELAYS_MS.map((delayMs) => window.setTimeout(() => {
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
+      void refreshPrStatus(capturedStatusKey, { force: true, silent: true, markInitialResolved: true });
+    }, delayMs));
+  }, [isMutationScopeCurrent, refreshPrStatus]);
+
+  const reconcileUnknownOutcome = React.useCallback(async (
+    error: Error,
+    capturedRuntimeKey: string,
+    capturedStatusKey: string,
+  ): Promise<void> => {
+    await reconcileUnknownMutationOutcome({
+      error,
+      isCurrent: () => isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey),
+      refresh: () => refreshPrStatus(capturedStatusKey, { force: true, silent: true, markInitialResolved: true }),
+      scheduleRefresh: () => scheduleActionRefresh(capturedRuntimeKey, capturedStatusKey),
+    });
+  }, [isMutationScopeCurrent, refreshPrStatus, scheduleActionRefresh]);
+
+  React.useEffect(() => {
+    if (!readContext || !prStatusKey) return;
+    ensurePrStatusEntry(prStatusKey);
+    setPrStatusParams(prStatusKey, {
+      directory,
+      branch,
+      remoteName: readContext.primaryRemote,
+      canShow,
+      identity: readContext,
+      readContext,
+      sourceControl,
+      authChecked: sourceControlAuth.authChecked,
+      connected: sourceControlAuth.connected,
+    });
+  }, [
+    branch,
+    canShow,
+    directory,
+    ensurePrStatusEntry,
+    prStatusKey,
+    readContext,
+    sourceControl,
+    sourceControlAuth.authChecked,
+    sourceControlAuth.connected,
+    setPrStatusParams,
+  ]);
+
+  // A refresh often answers from the server cache within milliseconds, and a
+  // spinner that never reaches the screen reads as "the button did nothing".
+  const PR_MANUAL_REFRESH_MIN_SPIN_MS = 600;
   const refreshManually = React.useCallback(async () => {
     if (isManualRefreshing) return;
     setIsManualRefreshing(true);
@@ -1061,105 +1131,18 @@ export const PullRequestSection: React.FC<{
       await refresh({ force: true });
     } finally {
       const remaining = PR_MANUAL_REFRESH_MIN_SPIN_MS - (Date.now() - startedAt);
-      if (remaining > 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      }
-      if (manualRefreshMountedRef.current) {
-        setIsManualRefreshing(false);
-      }
+      if (remaining > 0) await new Promise((resolve) => window.setTimeout(resolve, remaining));
+      if (manualRefreshMountedRef.current) setIsManualRefreshing(false);
     }
   }, [isManualRefreshing, refresh]);
 
-  const scheduleActionRefresh = React.useCallback(() => {
-    pendingActionRefreshTimersRef.current.forEach((timerId) => {
-      window.clearTimeout(timerId);
-    });
-    pendingActionRefreshTimersRef.current = PR_ACTION_REFRESH_DELAYS_MS.map((delayMs) => window.setTimeout(() => {
-      void refresh({ force: true, silent: true, markInitialResolved: true });
-    }, delayMs));
-  }, [refresh]);
-
   React.useEffect(() => {
-    if (!github?.prStatus || !canShow || remotes.length <= 1) {
-      return;
-    }
-    if (didUserOverrideRemoteRef.current) {
-      return;
-    }
-    if (status?.pr) {
-      return;
-    }
-
-    const probeKey = `${snapshotKey}::${selectedRemote?.name ?? ''}`;
-    if (autoRemoteProbeDoneRef.current.has(probeKey)) {
-      return;
-    }
-    autoRemoteProbeDoneRef.current.add(probeKey);
-
-    const candidates = rankRemotesForAutoSelect(remotes, trackingBranch)
-      .filter((remote) => remote.name !== selectedRemote?.name);
-    if (candidates.length === 0) {
-      return;
-    }
-
-    let cancelled = false;
-    const run = async () => {
-      for (const candidate of candidates) {
-        if (cancelled) {
-          return;
-        }
-        try {
-          const next = await github.prStatus(directory, branch, candidate.name);
-          if (!next?.pr) {
-            continue;
-          }
-          if (cancelled) {
-            return;
-          }
-          setSelectedRemote((prev) => (prev?.name === candidate.name ? prev : candidate));
-          return;
-        } catch {
-          // ignore
-        }
-      }
-    };
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [branch, canShow, directory, github, remotes, selectedRemote?.name, snapshotKey, status?.pr, trackingBranch]);
-
-  React.useEffect(() => {
-    ensurePrStatusEntry(prStatusKey);
-    setPrStatusParams(prStatusKey, {
-      directory,
-      branch,
-      remoteName: selectedRemote?.name ?? null,
-      canShow,
-      github,
-      githubAuthChecked,
-      githubConnected: githubAuthStatus?.connected ?? null,
-    });
-  }, [
-    branch,
-    canShow,
-    directory,
-    ensurePrStatusEntry,
-    github,
-    githubAuthChecked,
-    githubAuthStatus?.connected,
-    prStatusKey,
-    selectedRemote?.name,
-    setPrStatusParams,
-  ]);
-
-  React.useEffect(() => {
+    if (!readContext || !prStatusKey) return;
     startPrStatusWatching(prStatusKey);
     return () => {
       stopPrStatusWatching(prStatusKey);
     };
-  }, [prStatusKey, startPrStatusWatching, stopPrStatusWatching]);
+  }, [prStatusKey, readContext, startPrStatusWatching, stopPrStatusWatching]);
 
   React.useEffect(() => {
     const snapshot = pullRequestDraftSnapshots.get(snapshotKey) ?? null;
@@ -1167,35 +1150,19 @@ export const PullRequestSection: React.FC<{
     setBody(snapshot?.body ?? '');
     setDraft(snapshot?.draft ?? false);
     setTargetBaseBranch(snapshot?.targetBaseBranch ? normalizeBranchRef(snapshot.targetBaseBranch) : normalizeBranchRef(baseBranch));
-    const nextRemote = pickInitialPrRemote(remotes, {
-      selectedRemoteName: snapshot?.selectedRemoteName,
-      trackingBranch,
-    });
-    setSelectedRemote((prev) => (prev?.name === nextRemote?.name ? prev : nextRemote));
-  }, [baseBranch, branch, remotes, snapshotKey, trackingBranch]);
+  }, [baseBranch, branch, snapshotKey]);
 
   React.useEffect(() => {
+    if (!readContext || !prStatusKey || !sourceControlAuth.connected) return;
     void refresh({ markInitialResolved: true });
-  }, [prStatusKey, refresh]);
+  }, [prStatusKey, readContext, refresh, sourceControlAuth.connected]);
 
   React.useEffect(() => {
-    if (!canShow || !selectedRemote?.name) {
+    if (!canShow || !readContext || !sourceControlAuth.connected) {
       return;
     }
     void refresh({ force: true, silent: true, markInitialResolved: true });
-  }, [canShow, refresh, selectedRemote?.name]);
-
-  React.useEffect(() => {
-    const resolvedRemoteName = status?.resolvedRemoteName?.trim();
-    if (!resolvedRemoteName || didUserOverrideRemoteRef.current) {
-      return;
-    }
-    const resolvedRemote = remotes.find((candidate) => candidate.name === resolvedRemoteName);
-    if (!resolvedRemote) {
-      return;
-    }
-    setSelectedRemote((prev) => (prev?.name === resolvedRemote.name ? prev : resolvedRemote));
-  }, [remotes, status?.resolvedRemoteName]);
+  }, [canShow, readContext, refresh, sourceControlAuth.connected]);
 
   React.useEffect(() => {
     // Coming back to the app is the moment a PR is most likely to have changed
@@ -1223,10 +1190,10 @@ export const PullRequestSection: React.FC<{
   }, [prStatusKey, refresh]);
 
   React.useEffect(() => {
-    if (githubAuthChecked && githubAuthStatus?.connected === false) {
+    if (sourceControlAuthChecked && !sourceControlAuth.connected) {
       void refresh({ force: true, silent: true, markInitialResolved: true });
     }
-  }, [githubAuthChecked, githubAuthStatus, refresh]);
+  }, [refresh, sourceControlAuth.connected, sourceControlAuthChecked]);
 
   React.useEffect(() => {
     if (!directory || !branch) {
@@ -1238,19 +1205,21 @@ export const PullRequestSection: React.FC<{
       draft,
       additionalContext,
       targetBaseBranch,
-      selectedRemoteName: selectedRemote?.name,
       activeSegment,
     });
-  }, [snapshotKey, title, body, draft, additionalContext, targetBaseBranch, selectedRemote?.name, directory, branch, activeSegment]);
+  }, [snapshotKey, title, body, draft, additionalContext, targetBaseBranch, directory, branch, activeSegment]);
 
   React.useEffect(() => {
-    const pendingActionRefreshTimers = pendingActionRefreshTimersRef.current;
     return () => {
-      pendingActionRefreshTimers.forEach((timerId) => {
+      pendingActionRefreshTimersRef.current.forEach((timerId) => {
         window.clearTimeout(timerId);
       });
       pendingActionRefreshTimersRef.current = [];
     };
+  }, [prStatusKey, runtimeKey]);
+
+  React.useEffect(() => () => {
+    mutationKeysRef.current.clear();
   }, []);
 
   const generateDescription = React.useCallback(async () => {
@@ -1263,7 +1232,9 @@ export const PullRequestSection: React.FC<{
       // "git log main..main" a no-op. The SHA points to the actual upstream commit.
       const baseRef = (useDetectedUpstream && detectedUpstream?.defaultBranchSha)
         ? detectedUpstream.defaultBranchSha
-        : targetBaseBranch;
+        : readContext
+          ? `${readContext.primaryRemote}/${targetBaseBranch}`
+          : targetBaseBranch;
       const payload: { base: string; head: string; context?: string; files?: string[] } = {
         base: baseRef,
         head: branch,
@@ -1286,11 +1257,11 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsGenerating(false);
     }
-  }, [additionalContext, branch, detectedUpstream?.defaultBranchSha, directory, isGenerating, onGeneratedDescription, targetBaseBranch, t, useDetectedUpstream]);
+  }, [additionalContext, branch, detectedUpstream?.defaultBranchSha, directory, isGenerating, onGeneratedDescription, readContext, targetBaseBranch, t, useDetectedUpstream]);
 
   const createPr = React.useCallback(async () => {
-    if (!github?.prCreate) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+    if (sourceControlCapabilities?.changeRequests !== true) {
+      toast.error(t('gitView.pr.toast.createPrFailed'), { description: t('gitView.pr.capabilitiesUnavailable') });
       return;
     }
     const trimmedTitle = title.trim();
@@ -1308,129 +1279,200 @@ export const PullRequestSection: React.FC<{
       toast.error(t('gitView.pr.toast.baseMustDifferFromHead'));
       return;
     }
+    const targetProject = useDetectedUpstream ? detectedUpstream : statusProject;
+    if (!readContext || !targetProject) {
+      toast.error(t('gitView.pr.toast.createPrFailed'), { description: t('gitView.pr.statusUnavailable') });
+      return;
+    }
 
+    const capturedRuntimeKey = getRuntimeKey();
+    const capturedStatusKey = prStatusKey;
+    const target = { owner: targetProject.owner, name: targetProject.name };
+    const payloadBody = body.trim() ? body : undefined;
+    const remote = useDetectedUpstream ? undefined : readContext.primaryRemote;
+    const headRemote = useDetectedUpstream ? readContext.primaryRemote : undefined;
+    const signature = createMutationSignature('create', capturedRuntimeKey, readContext, [
+      target.owner, target.name, branch, trimmedBase, trimmedTitle, payloadBody, draft, remote, headRemote,
+    ]);
+    const idempotencyKey = beginMutation(signature);
+    if (!idempotencyKey) return;
     setIsCreating(true);
+    let retainMutationKey = false;
+    let mutationSettled = false;
     try {
-      const trackingRemoteName = getTrackingRemoteName(trackingBranch);
-
-      const usingDetectedUpstream = useDetectedUpstream && detectedUpstream;
-
-      const pr = await github.prCreate({
-        directory,
+      const payload: CreateChangeRequestInput = {
+        ...readContext,
+        idempotencyKey,
+        target: { project: target, head: branch, base: trimmedBase },
         title: trimmedTitle,
-        head: branch,
-        base: trimmedBase,
-        ...(body.trim() ? { body } : {}),
         draft,
-        ...(usingDetectedUpstream
-          ? { targetRepo: { owner: detectedUpstream.owner, repo: detectedUpstream.repo }, headRemote: 'origin' }
-          : {
-              ...(selectedRemote ? { remote: selectedRemote.name } : {}),
-              ...(trackingRemoteName && trackingRemoteName !== selectedRemote?.name
-                ? { headRemote: trackingRemoteName }
-                : {}),
-            }),
-      });
+      };
+      if (payloadBody !== undefined) payload.body = payloadBody;
+      if (remote) payload.remote = remote;
+      if (headRemote) payload.headRemote = headRemote;
+      await sourceControl.changeRequestCreate(payload);
+      mutationSettled = true;
+      finishMutation(signature, idempotencyKey, false);
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
       toast.success(t('gitView.pr.toast.prCreated'));
-      updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
       await refresh({ force: true });
-      scheduleActionRefresh();
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
+      scheduleActionRefresh(capturedRuntimeKey, capturedStatusKey);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const error = e instanceof Error ? e : new Error(String(e));
+      retainMutationKey = hasUnknownMutationOutcomeCode(error);
+      const message = error.message;
       toast.error(t('gitView.pr.toast.createPrFailed'), { description: message });
+      if (retainMutationKey) await reconcileUnknownOutcome(error, capturedRuntimeKey, capturedStatusKey);
     } finally {
+      if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsCreating(false);
     }
-  }, [body, branch, detectedUpstream, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
+  }, [beginMutation, body, branch, detectedUpstream, draft, finishMutation, isMutationScopeCurrent, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
 
-  const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
-    if (!github?.prMerge) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+  const mergePr = React.useCallback(async (pr: PullRequest) => {
+    if (!readContext || !statusProject) {
+      toast.error(t('gitView.pr.toast.mergeFailed'), { description: t('gitView.pr.statusUnavailable') });
       return;
     }
+    const capturedRuntimeKey = getRuntimeKey();
+    const capturedStatusKey = prStatusKey;
+    const target = getExistingPullRequestTarget(statusProject, pr);
+    const signature = createMutationSignature('merge', capturedRuntimeKey, readContext, [
+      target.project.owner, target.project.name, target.number, target.head, target.base, target.headSha, mergeMethod,
+    ]);
+    const idempotencyKey = beginMutation(signature);
+    if (!idempotencyKey) return;
     setIsMerging(true);
+    let retainMutationKey = false;
+    let mutationSettled = false;
     try {
-      const result = await github.prMerge({ directory, number: pr.number, method: mergeMethod });
-      if (result.merged) {
+      const receipt = await sourceControl.changeRequestMerge({
+        ...readContext,
+        idempotencyKey,
+        target,
+        method: mergeMethod,
+      });
+      mutationSettled = true;
+      finishMutation(signature, idempotencyKey, false);
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
+      if (receipt.result.merged) {
         toast.success(t('gitView.pr.toast.prMerged'));
       } else {
-        toast.message(t('gitView.pr.toast.prNotMerged'), { description: result.message || t('gitView.pr.notMergeable') });
+        toast.message(t('gitView.pr.toast.prNotMerged'), { description: receipt.result.message || t('gitView.pr.notMergeable') });
       }
       await refresh({ force: true });
-      scheduleActionRefresh();
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
+      scheduleActionRefresh(capturedRuntimeKey, capturedStatusKey);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const error = e instanceof Error ? e : new Error(String(e));
+      retainMutationKey = hasUnknownMutationOutcomeCode(error);
+      const message = error.message;
       toast.error(t('gitView.pr.toast.mergeFailed'), { description: message });
+      if (retainMutationKey) await reconcileUnknownOutcome(error, capturedRuntimeKey, capturedStatusKey);
       if (pr.url) {
         void openExternal(pr.url);
       }
     } finally {
+      if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsMerging(false);
     }
-  }, [directory, github, mergeMethod, refresh, scheduleActionRefresh, t]);
+  }, [beginMutation, finishMutation, isMutationScopeCurrent, mergeMethod, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, statusProject, t]);
 
-  const markReady = React.useCallback(async (pr: GitHubPullRequest) => {
-    if (!github?.prReady) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+  const markReady = React.useCallback(async (pr: PullRequest) => {
+    if (!readContext || !statusProject) {
+      toast.error(t('gitView.pr.toast.markReadyFailed'), { description: t('gitView.pr.statusUnavailable') });
       return;
     }
+    const capturedRuntimeKey = getRuntimeKey();
+    const capturedStatusKey = prStatusKey;
+    const target = getExistingPullRequestTarget(statusProject, pr);
+    const signature = createMutationSignature('ready', capturedRuntimeKey, readContext, [
+      target.project.owner, target.project.name, target.number, target.head, target.base, target.headSha,
+    ]);
+    const idempotencyKey = beginMutation(signature);
+    if (!idempotencyKey) return;
     setIsMarkingReady(true);
+    let retainMutationKey = false;
+    let mutationSettled = false;
     try {
-      await github.prReady({ directory, number: pr.number });
+      await sourceControl.changeRequestReady({
+        ...readContext,
+        idempotencyKey,
+        target,
+      });
+      mutationSettled = true;
+      finishMutation(signature, idempotencyKey, false);
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
       toast.success(t('gitView.pr.toast.markedReady'));
       await refresh({ force: true });
-      scheduleActionRefresh();
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
+      scheduleActionRefresh(capturedRuntimeKey, capturedStatusKey);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const error = e instanceof Error ? e : new Error(String(e));
+      retainMutationKey = hasUnknownMutationOutcomeCode(error);
+      const message = error.message;
       toast.error(t('gitView.pr.toast.markReadyFailed'), { description: message });
+      if (retainMutationKey) await reconcileUnknownOutcome(error, capturedRuntimeKey, capturedStatusKey);
       if (pr.url) {
         void openExternal(pr.url);
       }
     } finally {
+      if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsMarkingReady(false);
     }
-  }, [directory, github, refresh, scheduleActionRefresh, t]);
+  }, [beginMutation, finishMutation, isMutationScopeCurrent, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, statusProject, t]);
 
-  const updatePr = React.useCallback(async (pr: GitHubPullRequest) => {
-    if (!github?.prUpdate) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
-      return;
-    }
-
+  const updatePr = React.useCallback(async (pr: PullRequest) => {
     const trimmedTitle = editTitle.trim();
     if (!trimmedTitle) {
       toast.error(t('gitView.pr.toast.titleRequired'));
       return;
     }
+    if (!readContext || !statusProject) {
+      toast.error(t('gitView.pr.toast.updatePrFailed'), { description: t('gitView.pr.statusUnavailable') });
+      return;
+    }
 
+    const capturedRuntimeKey = getRuntimeKey();
+    const capturedStatusKey = prStatusKey;
+    const target = getExistingPullRequestTarget(statusProject, pr);
+    const signature = createMutationSignature('update', capturedRuntimeKey, readContext, [
+      target.project.owner, target.project.name, target.number, target.head, target.base, target.headSha,
+      trimmedTitle, editBody,
+    ]);
+    const idempotencyKey = beginMutation(signature);
+    if (!idempotencyKey) return;
     setIsUpdating(true);
+    let retainMutationKey = false;
+    let mutationSettled = false;
     try {
-      const updated = await github.prUpdate({
-        directory,
-        number: pr.number,
+      await sourceControl.changeRequestUpdate({
+        ...readContext,
+        idempotencyKey,
+        target,
         title: trimmedTitle,
         body: editBody,
       });
-      updatePrStatus(prStatusKey, (prev) => (prev
-        ? {
-            ...prev,
-            pr: {
-              ...(prev.pr ?? pr),
-              ...updated,
-            },
-          }
-        : prev));
+      mutationSettled = true;
+      finishMutation(signature, idempotencyKey, false);
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
       setIsEditingPr(false);
       toast.success(t('gitView.pr.toast.prUpdated'));
       await refresh({ force: true });
-      scheduleActionRefresh();
+      if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
+      scheduleActionRefresh(capturedRuntimeKey, capturedStatusKey);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const error = e instanceof Error ? e : new Error(String(e));
+      retainMutationKey = hasUnknownMutationOutcomeCode(error);
+      const message = error.message;
       toast.error(t('gitView.pr.toast.updatePrFailed'), { description: message });
+      if (retainMutationKey) await reconcileUnknownOutcome(error, capturedRuntimeKey, capturedStatusKey);
     } finally {
+      if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsUpdating(false);
     }
-  }, [directory, editBody, editTitle, github, prStatusKey, refresh, scheduleActionRefresh, updatePrStatus, t]);
+  }, [beginMutation, editBody, editTitle, finishMutation, isMutationScopeCurrent, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, statusProject, t]);
 
   if (!canShow) {
     return (
@@ -1448,11 +1490,18 @@ export const PullRequestSection: React.FC<{
     );
   }
 
-  const originRepoUrl = status?.repo?.url || null;
+  const originRepoUrl = statusProject?.url || null;
   const repoUrl = (useDetectedUpstream && detectedUpstream?.url) ? detectedUpstream.url : originRepoUrl;
-  const canMerge = Boolean(status?.canMerge);
+  const capabilitiesReady = currentCapabilityState?.status === 'ready';
+  const capabilitiesUnavailable = currentCapabilityState?.status === 'error';
+  const canMerge = Boolean(
+    status?.canMerge
+    && sourceControlCapabilities?.mergeChangeRequests === true
+    && mergeMethods.includes(mergeMethod),
+  );
   const isConnected = Boolean(status?.connected);
-  const shouldShowConnectionNotice = githubAuthChecked && status?.connected === false;
+  const shouldShowConnectionNotice = Boolean(statusIdentity && sourceControlAuthChecked && status?.connected === false);
+  const providerName = statusIdentity ? getSourceControlProviderLabel(statusIdentity.provider) : null;
   const prVisualState = getPrVisualState(status);
   const prColorVar = prVisualState ? `var(--pr-${prVisualState})` : 'var(--status-info)';
   const prStateIconName = prVisualState === 'draft'
@@ -1483,7 +1532,7 @@ export const PullRequestSection: React.FC<{
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
-        <div className="@container/pr-actions flex items-start justify-between gap-2">
+        <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             {pr ? (
               <Button
@@ -1492,38 +1541,25 @@ export const PullRequestSection: React.FC<{
                 size="xs"
                 className="shrink-0"
                 onClick={() => void openExternal(pr.url)}
-                aria-label={t('gitView.pr.actions.openOnGitHubAria')}
+                aria-label={providerName
+                  ? t('gitView.pr.actions.openOnProviderAria', { provider: providerName })
+                  : t('gitView.header.openPullRequest')}
               >
                 <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: prColorVar }} />
-                {t('gitView.pr.actions.openOnGitHub')}
+                {providerName
+                  ? t('gitView.pr.actions.openOnProvider', { provider: providerName })
+                  : t('gitView.header.openPullRequest')}
               </Button>
             ) : (
               <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: 'var(--surface-muted-foreground)' }} />
             )}
             <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.pullRequest.title')}</h3>
             {pr ? (
-              <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
+              <span className="typography-meta text-muted-foreground truncate">{formatChangeRequestReference(statusIdentity?.provider, pr.number)}</span>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {pr && showWalkthroughAction ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                onClick={() => {
-                  requestWalkthroughSource(directory, { kind: 'pr', number: pr.number,
-                    sourceRepo: status?.repo ? { owner: status.repo.owner, repo: status.repo.repo } : undefined });
-                  openContextSurface(directory, 'walkthrough');
-                }}
-                aria-label={t('walkthrough.action.open')}
-              >
-                <Icon name="route" className="size-4" />
-                <span className="pr-actions__walkthrough-label typography-ui-label">
-                  {t('walkthrough.action.open')}
-                </span>
-              </Button>
-            ) : null}
+          <div className="flex shrink-0 items-center gap-1">
+            {isLoading || isManualRefreshing ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" /> : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1534,19 +1570,16 @@ export const PullRequestSection: React.FC<{
                   onClick={() => void refreshManually()}
                   aria-label={t('gitView.pr.actions.refreshAria')}
                 >
-                  {isLoading || isManualRefreshing
-                    ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
-                    : <Icon name="refresh" className="size-4 text-muted-foreground" />}
+                  <Icon name="refresh" className="size-4 text-muted-foreground" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent><p>{t('gitView.pr.actions.refresh')}</p></TooltipContent>
             </Tooltip>
-            <GitHubAccountControl className="h-7 w-7" />
           </div>
         </div>
 
         {pr ? (
-          <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="@container/pr-actions flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 typography-micro text-muted-foreground">
               <span style={{ color: prColorVar }}>{prStatusText}</span>
               {checks ? (
@@ -1555,14 +1588,38 @@ export const PullRequestSection: React.FC<{
                   {checksText}
                 </span>
               ) : null}
-              {trackingBranch && selectedRemote && trackingBranch.split('/')[0] !== selectedRemote.name ? (
+              {trackingBranch && selectedRemoteName && trackingBranch.split('/')[0] !== selectedRemoteName ? (
                 <span className="min-w-0 truncate">
-                  {trackingBranch.split('/')[0]} → {selectedRemote.name}
+                  {trackingBranch.split('/')[0]} → {selectedRemoteName}
                 </span>
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              {canMerge && pr.draft && pr.state === 'open' ? (
+              {showWalkthroughAction && readContext?.provider === 'github' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                  onClick={() => {
+                    requestWalkthroughTarget(directory, {
+                      source: {
+                        kind: 'pr',
+                        number: pr.number,
+                        ...(statusProject ? { sourceRepo: { owner: statusProject.owner, repo: statusProject.name } } : {}),
+                      },
+                      context: readContext,
+                    });
+                    openContextSurface(directory, 'walkthrough');
+                  }}
+                  aria-label={t('walkthrough.action.open')}
+                >
+                  <Icon name="route" className="size-4" />
+                  <span className="pr-actions__walkthrough-label typography-ui-label">
+                    {t('walkthrough.action.open')}
+                  </span>
+                </Button>
+              ) : null}
+              {canMerge && sourceControlCapabilities?.draftChangeRequests === true && pr.draft && pr.state === 'open' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -1590,9 +1647,9 @@ export const PullRequestSection: React.FC<{
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="squash">{t('gitView.pr.mergeMethod.squash')}</SelectItem>
-                      <SelectItem value="merge">{t('gitView.pr.mergeMethod.merge')}</SelectItem>
-                      <SelectItem value="rebase">{t('gitView.pr.mergeMethod.rebase')}</SelectItem>
+                      {mergeMethods.includes('squash') ? <SelectItem value="squash">{t('gitView.pr.mergeMethod.squash')}</SelectItem> : null}
+                      {mergeMethods.includes('merge') ? <SelectItem value="merge">{t('gitView.pr.mergeMethod.merge')}</SelectItem> : null}
+                      {mergeMethods.includes('rebase') ? <SelectItem value="rebase">{t('gitView.pr.mergeMethod.rebase')}</SelectItem> : null}
                     </SelectContent>
                   </Select>
                   <Tooltip>
@@ -1617,12 +1674,20 @@ export const PullRequestSection: React.FC<{
       </div>
 
       <div className={bodyClassName}>
-        {shouldShowConnectionNotice ? (
+        {capabilitiesUnavailable ? (
+          <div className="space-y-2 rounded-md border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3">
+            <div className="typography-ui-label text-[var(--status-error)]">{t('gitView.pr.capabilitiesUnavailable')}</div>
+            <Button variant="outline" size="sm" onClick={() => setCapabilityReload((value) => value + 1)}>
+              {t('settings.sourceControl.transport.retry')}
+            </Button>
+          </div>
+        ) : null}
+        {shouldShowConnectionNotice && providerName ? (
           <div className="space-y-2">
               <div className="typography-meta text-muted-foreground">
-              {t('gitView.pr.githubNotConnected')}
+              {t('gitView.pr.providerNotConnected', { provider: providerName })}
             </div>
-                <Button variant="outline" size="sm" onClick={openGitHubSettings} className="w-fit">
+                <Button variant="outline" size="sm" onClick={openSourceControlSettings} className="w-fit">
                   {t('gitView.pr.actions.openSettings')}
                 </Button>
               </div>
@@ -1632,6 +1697,9 @@ export const PullRequestSection: React.FC<{
               <div className="space-y-2">
                 <div className="typography-ui-label text-foreground">{t('gitView.pr.statusUnavailable')}</div>
                 <div className="typography-meta text-muted-foreground break-words">{error}</div>
+                {binding.error ? <Button variant="outline" size="sm" onClick={() => void binding.retry()} disabled={binding.status === 'loading'}>
+                  {t('settings.sourceControl.transport.retry')}
+                </Button> : null}
                 {repoUrl ? (
                   <Button variant="outline" size="sm" asChild className="w-fit">
                     <a href={repoUrl} target="_blank" rel="noopener noreferrer">
@@ -1643,7 +1711,7 @@ export const PullRequestSection: React.FC<{
               </div>
             ) : null}
 
-            {!pr && !isInitialStatusResolved && !error && !shouldShowConnectionNotice ? (
+            {!pr && !isInitialStatusResolved && !error && !shouldShowConnectionNotice && (binding.status === 'loading' || readContext) ? (
               <div className="flex items-center gap-2 typography-micro text-muted-foreground">
                 <Icon name="loader-4" className="size-4 animate-spin" />
                 {t('gitView.pr.checkingStatus')}
@@ -1686,7 +1754,7 @@ export const PullRequestSection: React.FC<{
                         {t('gitView.pr.draftMustBeReady')}
                       </div>
                     ) : null}
-                    {!canMerge ? (
+                    {!canMerge && capabilitiesReady ? (
                       <div className="typography-micro text-muted-foreground">{t('gitView.pr.noMergePermission')}</div>
                     ) : null}
                     <div className="flex items-start justify-between gap-2">
@@ -1833,9 +1901,9 @@ export const PullRequestSection: React.FC<{
                       </Button>
                     ) : null}
 
-                    {(prContext?.checkRuns?.length ?? 0) > 0 ? (
+                    {(prContext?.ci?.runs?.length ?? 0) > 0 ? (
                       <div className="flex flex-col gap-1.5">
-                        {(prContext?.checkRuns ?? []).map((run, idx) => {
+                        {(prContext?.ci?.runs ?? []).map((run, idx) => {
                           const runKey = `${run.id ?? 'run'}:${run.name}:${idx}`;
                           const isRunning = run.status === 'in_progress';
                           const isQueued = run.status === 'queued';
@@ -2019,7 +2087,7 @@ export const PullRequestSection: React.FC<{
                       size="xs"
                       className="shrink-0"
                       onClick={() => void openExternal(pr.url)}
-                      aria-label={t('gitView.pr.actions.openOnGitHubAria')}
+                      aria-label={t('gitView.pr.actions.openOnProviderAria', { provider: providerName })}
                     >
                       <Icon name="external-link" className="size-3.5" />
                     </Button>
@@ -2204,7 +2272,7 @@ export const PullRequestSection: React.FC<{
                     size="sm"
                     className="min-w-[7.5rem] justify-center gap-2"
                     onClick={createPr}
-                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch)}
+                    disabled={isCreating || !isConnected || sourceControlCapabilities?.changeRequests !== true || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch)}
                   >
                     <span className="inline-flex size-4 items-center justify-center">
                       {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="git-pull-request" className="size-4" />}

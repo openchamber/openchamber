@@ -235,6 +235,7 @@ export const SETTINGS_REGISTRY = {
   desktopLanAccessBlockedReason: field({ scope: 'instance', computed: true, surfaces: ['desktop'], parse: parseTrimmedString }),
   githubClientId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   githubScopes: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
+  gitlabClientId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   skillCatalogs: field<SkillCatalogConfig[]>({ scope: 'instance', parse: parseSkillCatalogs }),
   defaultGitIdentityId: field({ scope: 'instance', parse: parseTrimmedString }),
   permissionAutoAccept: field({
@@ -244,6 +245,7 @@ export const SETTINGS_REGISTRY = {
       revision: z.number().int().nonnegative().catch(0),
     })),
   }),
+  agentGitAuthorityEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentGitAuthorityEnabled', (v) => useUIStore.getState().setAgentGitAuthorityEnabled(v)) }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),

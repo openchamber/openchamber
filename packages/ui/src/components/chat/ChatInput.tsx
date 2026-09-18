@@ -1,4 +1,6 @@
 import React from 'react';
+import type { SourceControlProvider } from '@/lib/api/types';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -73,8 +75,8 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
-import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
+import { IssuePickerDialog } from '@/components/session/IssuePickerDialog';
+import { ChangeRequestPickerDialog } from '@/components/session/ChangeRequestPickerDialog';
 import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerDialog';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
@@ -245,9 +247,11 @@ const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
 };
 
 type LinkedReferenceAuthor = { login: string; avatarUrl?: string };
-type LinkedGitHubIssue = { number: number; title: string; url: string; contextText: string; author?: LinkedReferenceAuthor };
-type LinkedGitHubPr = {
+type LinkedRepositoryIssue = { number: number; title: string; url: string; contextText: string; author?: LinkedReferenceAuthor };
+type LinkedChangeRequest = {
+    provider: SourceControlProvider;
     number: number;
+    reference: string;
     title: string;
     url: string;
     head: string;
@@ -258,7 +262,7 @@ type LinkedGitHubPr = {
     author?: LinkedReferenceAuthor;
 };
 type LinkedLinearIssueRef = { identifier: string; title: string; url: string; contextText: string; author?: LinkedReferenceAuthor };
-type LinkedReferences = { issue: LinkedGitHubIssue | null; pr: LinkedGitHubPr | null; linear: LinkedLinearIssueRef | null };
+type LinkedReferences = { issue: LinkedRepositoryIssue | null; pr: LinkedChangeRequest | null; linear: LinkedLinearIssueRef | null };
 
 /**
  * Record what a session was pointed at, so the work-status panel can show it
@@ -934,31 +938,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
     const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
-    const [linkedIssue, setLinkedIssue] = React.useState<{
-        number: number;
-        title: string;
-        url: string;
-        contextText: string;
-        author?: { login: string; avatarUrl?: string };
-    } | null>(null);
-    const [linkedPr, setLinkedPr] = React.useState<{
-        number: number;
-        title: string;
-        url: string;
-        head: string;
-        base: string;
-        includeDiff: boolean;
-        instructionsText: string;
-        contextText: string;
-        author?: { login: string; avatarUrl?: string };
-    } | null>(null);
-    const [linkedLinearIssue, setLinkedLinearIssue] = React.useState<{
-        identifier: string;
-        title: string;
-        url: string;
-        contextText: string;
-        author?: { login: string; avatarUrl?: string };
-    } | null>(null);
+    const [linkedIssue, setLinkedIssue] = React.useState<LinkedRepositoryIssue | null>(null);
+    const [linkedPr, setLinkedPr] = React.useState<LinkedChangeRequest | null>(null);
+    const [linkedLinearIssue, setLinkedLinearIssue] = React.useState<LinkedLinearIssueRef | null>(null);
     const [attachDialogGuestId, setAttachDialogGuestId] = React.useState<string | null>(null);
     // The chip the attach dialog was opened from; null when opened from the + menu.
     const [attachDialogItem, setAttachDialogItem] = React.useState<AttachIssueRequest | null>(null);
@@ -1271,7 +1253,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ? { number: linked.issue.number, title: linked.issue.title, url: linked.issue.url, contextText: linked.issue.contextText }
                 : null,
             linkedPr: linked.pr
-                ? { number: linked.pr.number, title: linked.pr.title, url: linked.pr.url, instructions: linked.pr.instructionsText, context: linked.pr.contextText }
+                ? {
+                    provider: linked.pr.provider,
+                    number: linked.pr.number,
+                    title: linked.pr.title,
+                    url: linked.pr.url,
+                    instructions: linked.pr.instructionsText,
+                    context: linked.pr.contextText,
+                }
                 : null,
             linkedLinearIssue: linked.linear
                 ? { identifier: linked.linear.identifier, title: linked.linear.title, url: linked.linear.url, contextText: linked.linear.contextText }
@@ -1364,16 +1353,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // An instruction is derived from the text, and derived again on send.
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
-            if (payload.kind === 'github-issue') {
+            if (payload.kind === 'repository-issue') {
                 setLinkedIssue({ number: payload.number, title: payload.title, url: payload.url, contextText: part.text });
                 setLinkedPr(null);
                 setLinkedLinearIssue(null);
                 setLinkedGuestIssue(null);
-            } else if (payload.kind === 'github-pr') {
+            } else if (payload.kind === 'change-request') {
                 // The captured context is final: whatever diff it includes is
                 // already in the text, and the branches were not captured.
+                // Messages written before providers other than GitHub existed
+                // carry no provider, so the reference reads as GitHub's.
+                const provider = payload.provider ?? 'github';
                 setLinkedPr({
+                    provider,
                     number: payload.number,
+                    reference: formatChangeRequestReference(provider, payload.number),
                     title: payload.title,
                     url: payload.url,
                     head: '',
@@ -1769,7 +1763,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ? { number: linkedIssue.number, title: linkedIssue.title, url: linkedIssue.url, contextText: linkedIssue.contextText }
                 : null,
             linkedPr: !isBtwActive && linkedPr
-                ? { number: linkedPr.number, title: linkedPr.title, url: linkedPr.url, instructions: linkedPr.instructionsText, context: linkedPr.contextText }
+                ? { provider: linkedPr.provider, number: linkedPr.number, title: linkedPr.title, url: linkedPr.url, instructions: linkedPr.instructionsText, context: linkedPr.contextText }
                 : null,
             linkedLinearIssue: !isBtwActive && linkedLinearIssue
                 ? { identifier: linkedLinearIssue.identifier, title: linkedLinearIssue.title, url: linkedLinearIssue.url, contextText: linkedLinearIssue.contextText }
@@ -3369,7 +3363,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             ) : null}
             {linkedPr && !isVSCode ? (
                 <LinkedReferenceRow
-                    numberLabel={t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
+                    numberLabel={linkedPr.reference}
                     title={linkedPr.title}
                     url={linkedPr.url}
                     author={linkedPr.author}
@@ -3895,10 +3889,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         </form>
 
         {/* Issue Picker Dialog */}
-        <GitHubIssuePickerDialog
+        <IssuePickerDialog
             open={issuePickerOpen}
             onOpenChange={setIssuePickerOpen}
-            mode="select"
+            directory={currentSessionDirectoryForSync ?? currentDirectory ?? null}
             onSelect={(issue) => {
                 setLinkedIssue(issue);
                 setLinkedPr(null);
@@ -3906,9 +3900,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 setLinkedGuestIssue(null);
             }}
         />
-        <GitHubPrPickerDialog
+        <ChangeRequestPickerDialog
             open={prPickerOpen}
             onOpenChange={setPrPickerOpen}
+            directory={currentSessionDirectoryForSync ?? currentDirectory ?? null}
             onSelect={(pr) => {
                 setLinkedPr(pr);
                 setLinkedIssue(null);
@@ -4007,8 +4002,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             requestAnimationFrame(openIssuePicker);
                         }}
                     >
-                        <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithubIssue')}
+                        <Icon name="git-repository" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('session.issuePicker.title')}
                     </button>
                     <button
                         type="button"
@@ -4020,7 +4015,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         }}
                     >
                         <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithubPr')}
+                        {t('session.changeRequestPicker.title')}
                     </button>
                     {showLinearPicker ? (
                         <button

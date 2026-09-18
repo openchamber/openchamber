@@ -226,12 +226,6 @@ export async function deleteGitBranch(directory: string, payload: import('./api/
   return gitHttp.deleteGitBranch(directory, payload);
 }
 
-export async function deleteRemoteBranch(directory: string, payload: import('./api/types').GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.deleteRemoteBranch(directory, payload));
-  return gitHttp.deleteRemoteBranch(directory, payload);
-}
-
 const COMMIT_DIFF_FILE_LIMIT = 30;
 const COMMIT_DIFF_TOTAL_CHAR_LIMIT = 120_000;
 
@@ -1043,28 +1037,16 @@ export async function hasLocalIdentity(directory: string): Promise<boolean> {
 export async function setGitIdentity(
   directory: string,
   profileId: string
-): Promise<{ success: boolean; profile: import('./api/types').GitIdentityProfile }> {
+): Promise<{ success: boolean; profile: import('./api/types').GitIdentityProfile | null }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.setGitIdentity(directory, profileId);
   return gitHttp.setGitIdentity(directory, profileId);
-}
-
-export async function discoverGitCredentials(): Promise<import('./api/types').DiscoveredGitCredential[]> {
-  const runtime = getRuntimeGit();
-  if (runtime?.discoverGitCredentials) return runtime.discoverGitCredentials();
-  return gitHttp.discoverGitCredentials();
 }
 
 export async function getGlobalGitIdentity(): Promise<import('./api/types').GitIdentitySummary | null> {
   const runtime = getRuntimeGit();
   if (runtime?.getGlobalGitIdentity) return runtime.getGlobalGitIdentity();
   return gitHttp.getGlobalGitIdentity();
-}
-
-export async function getRemoteUrl(directory: string, remote?: string): Promise<string | null> {
-  const runtime = getRuntimeGit();
-  if (runtime?.getRemoteUrl) return runtime.getRemoteUrl(directory, remote);
-  return gitHttp.getRemoteUrl(directory, remote);
 }
 
 export async function getRemotes(directory: string): Promise<import('./api/types').GitRemote[]> {

@@ -30,6 +30,15 @@ const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+export const canonicalReadContext = (readContext) => readContext ? {
+  provider: readContext.provider,
+  instance: readContext.instance,
+  accountId: readContext.accountId,
+  repositoryId: readContext.repositoryId,
+  bindingRevision: readContext.bindingRevision,
+  directory: readContext.directory,
+  primaryRemote: readContext.primaryRemote,
+} : undefined;
 
 const ensureDir = (dir) => {
   try {
@@ -78,8 +87,8 @@ const readJson = (filePath) => {
  * Content-addressed key. Every input that can change the output is in here:
  * change any of them and you get a miss rather than a stale hit.
  */
-export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, language, files }) {
-  const canonical = JSON.stringify({
+export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, language, files, readContext }) {
+  const input = {
     walkthroughVersion: WALKTHROUGH_VERSION,
     promptVersion: PROMPT_VERSION,
     repoRoot,
@@ -93,12 +102,18 @@ export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, langua
     files: [...files]
       .map((file) => ({ path: file.path, status: file.status, hunkIds: file.hunks.map((hunk) => hunk.id) }))
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-  });
-  return sha256(canonical);
+  };
+  if (readContext) input.readContext = canonicalReadContext(readContext);
+  return sha256(JSON.stringify(input));
 }
 
 const entryPath = (cacheKey) => path.join(ENTRIES_DIR, `${cacheKey}.json`);
-const pointerPath = (repoRoot, sourceKey) => path.join(POINTERS_DIR, `${sha256(`${repoRoot}\0${sourceKey}`)}.json`);
+const pointerPath = (repoRoot, sourceKey, readContext) => path.join(
+  POINTERS_DIR,
+  `${sha256(readContext
+    ? JSON.stringify({ repoRoot, sourceKey, readContext: canonicalReadContext(readContext) })
+    : `${repoRoot}\0${sourceKey}`)}.json`,
+);
 
 const isWalkthroughEntry = (value) => Boolean(
   value
@@ -122,14 +137,17 @@ export function writeCachedWalkthrough(cacheKey, entry) {
   return written;
 }
 
-export function readPointer(repoRoot, sourceKey) {
-  const value = readJson(pointerPath(repoRoot, sourceKey));
+export function readPointer(repoRoot, sourceKey, readContext) {
+  const value = readJson(pointerPath(repoRoot, sourceKey, readContext));
   if (!value || typeof value !== 'object' || typeof value.cacheKey !== 'string') return null;
+  if (readContext && JSON.stringify(value.readContext) !== JSON.stringify(canonicalReadContext(readContext))) return null;
   return value;
 }
 
-export function writePointer(repoRoot, sourceKey, pointer) {
-  return writeJsonAtomic(pointerPath(repoRoot, sourceKey), pointer);
+export function writePointer(repoRoot, sourceKey, pointer, readContext) {
+  const value = { ...pointer };
+  if (readContext) value.readContext = canonicalReadContext(readContext);
+  return writeJsonAtomic(pointerPath(repoRoot, sourceKey, readContext), value);
 }
 
 /**

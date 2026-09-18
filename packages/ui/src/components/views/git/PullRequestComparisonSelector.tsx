@@ -46,14 +46,14 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
       <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
       <CommandGroup>
         {open && comparison.prs.map((pr) => {
-          const key = `${pr.sourceRepo?.owner}/${pr.sourceRepo?.repo}#${pr.number}`;
+          const key = `${pr.project.owner}/${pr.project.name}#${pr.number}`;
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>
             <div className="min-w-0 flex-1">
               <div className="truncate typography-ui-label" title={pr.title}>#{pr.number} {pr.title}</div>
-              <div className="truncate typography-meta text-muted-foreground">{pr.sourceRepo?.owner}/{pr.sourceRepo?.repo} · {pr.head} → {pr.base}</div>
+              <div className="truncate typography-meta text-muted-foreground">{pr.project.owner}/{pr.project.name} · {pr.head} → {pr.base}</div>
             </div>
-            {selected?.number === pr.number && selected.sourceRepo?.owner === pr.sourceRepo?.owner && selected.sourceRepo?.repo === pr.sourceRepo?.repo
+            {selected?.number === pr.number && selected.sourceRepo?.owner === pr.project.owner && selected.sourceRepo?.repo === pr.project.name
               && <Icon name="check" className="size-3.5" />}
           </CommandItem>;
         })}

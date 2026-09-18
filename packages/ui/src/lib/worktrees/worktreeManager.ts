@@ -3,10 +3,8 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import type { WorktreeMetadata } from '@/types/worktree';
-import {
-  deleteRemoteBranch,
-  git,
-} from '@/lib/gitApi';
+import { git } from '@/lib/gitApi';
+import { runBoundRemoteBranchDelete } from '@/lib/boundGitNetworkOperation';
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
@@ -18,6 +16,9 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
+  GitChangeRequestSourceRequest,
+  GitAPI,
+  SourceControlAPI,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
@@ -234,6 +235,8 @@ const toCreatePayload = (args: {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  expectedRevision?: string;
+  changeRequestSource?: GitChangeRequestSourceRequest;
   returnAfterDirectoryCreated?: boolean;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
@@ -253,20 +256,21 @@ const toCreatePayload = (args: {
     setupCommands: commands,
   });
 
-  return {
-    mode,
-    ...(worktreeName ? { worktreeName } : {}),
-    ...(branchName ? { branchName } : {}),
-    ...(existingBranch ? { existingBranch } : {}),
-    ...(startRef ? { startRef } : {}),
-    ...(startCommand ? { startCommand } : {}),
-    ...(args.setUpstream ? { setUpstream: true } : {}),
-    ...(args.upstreamRemote ? { upstreamRemote: args.upstreamRemote } : {}),
-    ...(args.upstreamBranch ? { upstreamBranch: args.upstreamBranch } : {}),
-    ...(args.ensureRemoteName ? { ensureRemoteName: args.ensureRemoteName } : {}),
-    ...(args.ensureRemoteUrl ? { ensureRemoteUrl: args.ensureRemoteUrl } : {}),
-    ...(args.returnAfterDirectoryCreated ? { returnAfterDirectoryCreated: true } : {}),
-  };
+  const payload: CreateGitWorktreePayload = { mode };
+  if (worktreeName) payload.worktreeName = worktreeName;
+  if (branchName) payload.branchName = branchName;
+  if (existingBranch) payload.existingBranch = existingBranch;
+  if (startRef) payload.startRef = startRef;
+  if (startCommand) payload.startCommand = startCommand;
+  if (args.setUpstream) payload.setUpstream = true;
+  if (args.upstreamRemote) payload.upstreamRemote = args.upstreamRemote;
+  if (args.upstreamBranch) payload.upstreamBranch = args.upstreamBranch;
+  if (args.ensureRemoteName) payload.ensureRemoteName = args.ensureRemoteName;
+  if (args.ensureRemoteUrl) payload.ensureRemoteUrl = args.ensureRemoteUrl;
+  if (args.expectedRevision) payload.expectedRevision = args.expectedRevision;
+  if (args.changeRequestSource) payload.changeRequestSource = args.changeRequestSource;
+  if (args.returnAfterDirectoryCreated) payload.returnAfterDirectoryCreated = true;
+  return payload;
 };
 
 /**
@@ -608,6 +612,8 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  expectedRevision?: string;
+  changeRequestSource?: GitChangeRequestSourceRequest;
   returnAfterDirectoryCreated?: boolean;
 };
 
@@ -648,6 +654,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     worktreeStatus: getWorktreeStatusFromBootstrap(created?.bootstrapStatus),
     headState: returnedBranch ? 'branch' : 'unborn',
     worktreeSource: 'created-for-session',
+    provenance: created.provenance,
   };
 
   if (created?.bootstrapStatus) {
@@ -715,12 +722,31 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   deleteRemoteBranch?: boolean;
   deleteLocalBranch?: boolean;
   remoteName?: string;
+  network?: {
+    sourceControl: Pick<SourceControlAPI, 'repositoryBinding'>;
+    git: Pick<GitAPI, 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
+    confirmSystemTransport?: () => boolean | Promise<boolean>;
+  };
 }): Promise<void> {
   const projectDirectory = normalizePath(project.path);
 
   const deleteRemote = Boolean(options?.deleteRemoteBranch);
   const deleteLocalBranch = options?.deleteLocalBranch === true;
-  const remoteName = options?.remoteName;
+  const remoteName = options?.remoteName?.trim();
+  const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
+  if (deleteRemote && (!branchName || !remoteName || !options?.network)) {
+    throw new Error('Remote branch deletion requires an exact tracked remote and runtime authority');
+  }
+  if (deleteRemote && branchName && remoteName && options?.network) {
+    await runBoundRemoteBranchDelete({
+      branch: branchName,
+      directory: projectDirectory,
+      remoteName,
+      sourceControl: options.network.sourceControl,
+      git: options.network.git,
+      confirmSystemTransport: options.network.confirmSystemTransport,
+    });
+  }
   const raw = await git.worktree.remove(projectDirectory, {
     directory: worktree.path,
     deleteLocalBranch,
@@ -766,8 +792,4 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     worktreeMetadata: updatedMetadata,
   });
 
-  const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
-  if (deleteRemote && branchName) {
-    await deleteRemoteBranch(projectDirectory, { branch: branchName, remote: remoteName }).catch(() => undefined);
-  }
 }

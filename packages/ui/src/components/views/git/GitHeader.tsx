@@ -4,6 +4,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,9 +23,12 @@ import type {
   GitHubChecksSummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { identityDisplayName } from '@/lib/source-control/identity';
+import { cn } from '@/lib/utils';
+import { describeIdentityApplicability, type IdentityApplicability } from '@/lib/source-control/applyIdentity';
 import { useDeviceInfo } from '@/lib/device';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
+type SyncAction = 'fetch' | 'sync' | 'publish' | null;
 
 interface GitHeaderProps {
   directory: string;
@@ -33,18 +37,27 @@ interface GitHeaderProps {
   remoteBranches: string[];
   branchInfo: Record<string, { ahead?: number; behind?: number }> | undefined;
   syncAction: SyncAction;
+  operationBlocked?: boolean;
   remotes: GitRemote[];
   onFetch: (remote: GitRemote) => void;
   onSync: (remote: GitRemote) => void;
+  onPublish: () => void;
+  onChooseSyncTargets: () => void;
   onRemoveRemote: (remote: GitRemote) => void;
   removingRemoteName: string | null;
   onCheckoutBranch: (branch: string) => void;
-  onCreateBranch: (name: string, remote?: GitRemote) => Promise<void>;
+  onCreateBranch: (name: string) => Promise<void>;
   onRenameBranch?: (oldName: string, newName: string) => Promise<void>;
   activeIdentityProfile: GitIdentityProfile | null;
   availableIdentities: GitIdentityProfile[];
   onSelectIdentity: (profile: GitIdentityProfile) => void;
   isApplyingIdentity: boolean;
+  /** What the binding cannot currently do, shown beside the identity it belongs to. */
+  identityAttention?: string | null;
+  identityApplicability?: (identity: GitIdentityProfile) => IdentityApplicability;
+  onConfigureRepository?: () => void;
+  /** Called when the identity menu opens, so connected accounts can be re-read before choosing. */
+  onIdentityMenuOpen?: () => void;
   isWorktreeMode: boolean;
   onOpenHistory?: () => void;
   onOpenGraph?: () => void;
@@ -72,6 +85,9 @@ const IDENTITY_ICON_MAP: Record<string, IconName> = {
   heart: 'heart',
   user: 'user-3',
   fingerprint: 'fingerprint',
+  // Identities made from a connected account carry the provider's mark.
+  github: 'github',
+  gitlab: 'gitlab-fill',
 };
 
 const IDENTITY_COLOR_MAP: Record<string, string> = {
@@ -115,6 +131,27 @@ interface IdentityDropdownProps {
   onSelect: (profile: GitIdentityProfile) => void;
   isApplying: boolean;
   iconOnly?: boolean;
+  /**
+   * Whether the repository's binding is doing what its identity says. Shown on
+   * the button because the identity is the only thing naming it now: an
+   * account that was revoked or a configuration changed underneath has to be
+   * visible somewhere, and here it sits beside what it is about.
+   */
+  attention?: string | null;
+  /** Opens what an identity does not carry: auxiliary grants, agent Git, reset. */
+  onConfigure?: () => void;
+  /**
+   * Whether each identity can serve this repository's remote. One that cannot
+   * — an account on another instance, a transport that cannot reach the
+   * address — stays listed with the reason, so the person sees why it is not
+   * offered rather than wondering where it went.
+   */
+  applicability?: (identity: GitIdentityProfile) => IdentityApplicability;
+  /** Lets a form give the trigger a field's width and border; the panel keeps its ghost button. */
+  triggerClassName?: string;
+  menuAlign?: 'start' | 'end';
+  /** Called when the menu opens, so connected accounts can be re-read before choosing. */
+  onOpen?: () => void;
 }
 
 export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
@@ -123,21 +160,28 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   onSelect,
   isApplying,
   iconOnly = false,
+  attention = null,
+  onConfigure,
+  applicability,
+  triggerClassName,
+  menuAlign = 'end',
+  onOpen,
 }) => {
   const { t } = useI18n();
   const isDisabled = isApplying || identities.length === 0;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => { if (open) onOpen?.(); }}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 min-w-0 max-w-[15rem] justify-start gap-1.5 px-2 py-1 typography-ui-label"
+              className={cn('h-8 min-w-0 max-w-[15rem] justify-start gap-1.5 px-2 py-1 typography-ui-label', triggerClassName)}
               style={{ color: getIdentityColor(activeProfile?.color) }}
               disabled={isDisabled}
+              aria-label={t('gitView.header.identityTooltip')}
             >
               {isApplying ? (
                 <Icon name="loader-4" className="size-4 animate-spin" />
@@ -150,16 +194,22 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
               )}
               {!iconOnly && (
                 <span className="git-identity-label min-w-0 flex-1 truncate text-left">
-                  {activeProfile?.name || t('gitView.header.noIdentity')}
+                  {activeProfile ? identityDisplayName(activeProfile, t) : t('gitView.header.noIdentity')}
                 </span>
               )}
+              {attention ? (
+                <Icon name="close-circle" className="size-3.5 shrink-0 text-[var(--status-error)]" />
+              ) : null}
               <Icon name="arrow-down-s" className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent sideOffset={8}>{t('gitView.header.identityTooltip')}</TooltipContent>
+        <TooltipContent sideOffset={8}>{attention ?? t('gitView.header.identityTooltip')}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-64">
+      {/* The list grows with the person's identities, and a trigger low on a
+          form leaves little room beneath it, so the menu scrolls inside
+          whatever height it is given rather than running past its own edge. */}
+      <DropdownMenuContent align={menuAlign} className="w-64 overflow-y-auto">
         {identities.length === 0 ? (
           <div className="px-2 py-1.5">
             <p className="typography-meta text-muted-foreground">
@@ -169,8 +219,9 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
         ) : (
           identities.map((profile) => {
             const isSelected = activeProfile?.id === profile.id;
+            const fit = applicability?.(profile) ?? { applicable: true as const };
             return (
-              <DropdownMenuItem key={profile.id} onSelect={() => onSelect(profile)}>
+              <DropdownMenuItem key={profile.id} disabled={!fit.applicable} onSelect={() => onSelect(profile)}>
                 <span className="flex items-center gap-2">
                   <IdentityIcon
                     icon={profile.icon}
@@ -179,10 +230,11 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
                   />
                   <span className="flex min-w-0 flex-col">
                     <span className="typography-ui-label text-foreground">
-                      {profile.name}
+                      {identityDisplayName(profile, t)}
                     </span>
                     <span className="typography-meta text-muted-foreground">
-                      {profile.userEmail}
+                      {!fit.applicable ? describeIdentityApplicability(fit, t)
+                        : profile.userEmail || t('gitView.identity.systemNoAuthor')}
                     </span>
                   </span>
                   {isSelected ? (
@@ -193,6 +245,15 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
             );
           })
         )}
+        {onConfigure ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onConfigure}>
+              <Icon name="settings-3" className="size-4" />
+              {t('gitView.context.configure')}
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -248,9 +309,12 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   remoteBranches,
   branchInfo,
   syncAction,
+  operationBlocked = false,
   remotes,
   onFetch,
   onSync,
+  onPublish,
+  onChooseSyncTargets,
   onRemoveRemote,
   removingRemoteName,
   onCheckoutBranch,
@@ -260,6 +324,10 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   availableIdentities,
   onSelectIdentity,
   isApplyingIdentity,
+  identityAttention = null,
+  identityApplicability: identityApplicabilityOf,
+  onConfigureRepository,
+  onIdentityMenuOpen,
   isWorktreeMode,
   onOpenHistory,
   onOpenGraph,
@@ -395,9 +463,13 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       remotes={remotes}
       onFetch={onFetch}
       onSync={onSync}
+      onPublish={onPublish}
+      onChooseSyncTargets={onChooseSyncTargets}
+      currentBranch={status.current}
+      hasTracking={Boolean(status.tracking)}
       onRemoveRemote={onRemoveRemote}
       removingRemoteName={removingRemoteName}
-      disabled={!status}
+      disabled={!status || operationBlocked}
       iconOnly={true}
 
       aheadCount={status.ahead}
@@ -415,13 +487,18 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   ) : null;
 
+  // The identity names the whole configuration a repository acts as, so the
+  // button says which one rather than only marking that there is one.
   const identityControl = (
     <IdentityDropdown
       activeProfile={activeIdentityProfile}
       identities={availableIdentities}
       onSelect={onSelectIdentity}
       isApplying={isApplyingIdentity}
-      iconOnly={true}
+      attention={identityAttention}
+      onConfigure={onConfigureRepository}
+      onOpen={onIdentityMenuOpen}
+      applicability={identityApplicabilityOf}
     />
   );
 
@@ -444,7 +521,6 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               currentBranchAhead={status.ahead}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
-              remotes={remotes}
               switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
             />
           )}
