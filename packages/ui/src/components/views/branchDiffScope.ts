@@ -63,15 +63,6 @@ export const coerceDiffScope = <T extends string>(
 ): T | 'working' => (scope === 'branch' && !branchScopeAvailable ? 'working' : scope);
 
 /**
- * Identity of one `base...head` range in one repository. Range-cache entries
- * are only valid within a single range: the same file path can carry different
- * content under a different base or head, so a cache keyed by path alone leaks
- * stale patches across branch and base switches.
- */
-export const branchRangeKey = (directory: string, base: string, head: string): string =>
-  JSON.stringify([directory, base, head]);
-
-/**
  * Bounded per-directory retry for a request whose failure leaves no result and
  * no signal beyond the in-flight flag settling back to false.
  *
@@ -141,16 +132,23 @@ export const useBoundedDirectoryRetry = (
  *   old `fetchEntry` promise resolves (or rejects) after the range switched.
  * - Reservations that never completed are released on cleanup so a later run
  *   retries those paths instead of showing the placeholder forever.
+ * - A revision change refreshes requested paths while retaining completed
+ *   same-range values until replacement. Unchanged revisions do no extra work;
+ *   closed paths refresh when requested again. Range switches hide old values
+ *   immediately, before effects run.
  */
 export const useRangeKeyedCache = <T>(
   rangeKey: string | null,
   pathsKey: string,
   fetchEntry: ((path: string) => Promise<T>) | null,
-  placeholder: T
+  placeholder: T,
+  revision = ''
 ): ReadonlyMap<string, T> => {
   const [entries, setEntries] = React.useState<Map<string, T>>(() => new Map());
   const entriesRef = React.useRef(entries);
   entriesRef.current = entries;
+  const completedRevisions = React.useRef(new Map<string, string>());
+  const entriesRangeKey = React.useRef<string | null>(null);
 
   // The fetcher is read through a ref so a caller passing an inline arrow (a
   // new function every render) cannot restart the fetch effect in a loop.
@@ -169,7 +167,8 @@ export const useRangeKeyedCache = <T>(
   }, []);
 
   React.useEffect(() => {
-    if (!rangeKey) return;
+    entriesRangeKey.current = rangeKey;
+    completedRevisions.current.clear();
     entriesRef.current = new Map();
     setEntries(entriesRef.current);
   }, [rangeKey]);
@@ -181,31 +180,34 @@ export const useRangeKeyedCache = <T>(
     }
     let cancelled = false;
     const pendingReservations = new Set<string>();
+    const revisions = completedRevisions.current;
 
     for (const path of pathsKey.split('\0')) {
-      if (entriesRef.current.has(path)) continue;
+      if (entriesRef.current.has(path) && revisions.get(path) === revision) continue;
       pendingReservations.add(path);
-      writeEntry(path, placeholder);
+      if (!entriesRef.current.has(path)) writeEntry(path, placeholder);
       fetcher(path)
         .then((value) => {
           if (cancelled) return;
           pendingReservations.delete(path);
+          revisions.set(path, revision);
           writeEntry(path, value);
         })
         .catch(() => {
           if (cancelled) return;
           // Release the reservation so a later run can retry this path.
           pendingReservations.delete(path);
+          revisions.delete(path);
           writeEntry(path, null);
         });
     }
     return () => {
       cancelled = true;
       for (const path of pendingReservations) {
-        writeEntry(path, null);
+        if (!revisions.has(path)) writeEntry(path, null);
       }
     };
-  }, [pathsKey, placeholder, rangeKey, writeEntry]);
+  }, [pathsKey, placeholder, rangeKey, revision, writeEntry]);
 
-  return entries;
+  return entriesRangeKey.current === rangeKey ? entries : new Map();
 };

@@ -35,6 +35,7 @@ import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
@@ -52,6 +53,7 @@ export type SessionTabMenuComponents = {
 
 export type SessionTabMenuArgs = {
   session: Session;
+  open: boolean;
   isActive: boolean;
   select: () => void;
   closeOtherTabs: () => void;
@@ -106,6 +108,7 @@ const SessionTabItem: React.FC<{
 
   // Session state for the dot and the hover tooltip.
   const sessionStatus = useGlobalSessionStatus(tab.id);
+  const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
   const isStreaming = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const unseenCount = useSessionUnseenCount(tab.id);
   const showUnread = unseenCount > 0 && !isActive && !isStreaming;
@@ -116,6 +119,7 @@ const SessionTabItem: React.FC<{
 
   const menuArgsFor = (components: SessionTabMenuComponents): SessionTabMenuArgs => ({
     session: tab.session,
+    open: menuOpen || contextMenuOpen,
     isActive,
     select: () => onSelect(tab),
     closeOtherTabs: () => closeOtherTabs(tab.id),
@@ -165,7 +169,7 @@ const SessionTabItem: React.FC<{
                     // after the click.
                     'session-tab group/session-tab relative flex h-7 w-full min-w-0 select-none items-center rounded-md px-2',
                     isActive
-                      ? 'bg-interactive-selection'
+                      ? 'bg-interactive-selection text-interactive-selection-foreground'
                       : cn(
                         'cursor-pointer text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                         overlayVisible && 'bg-interactive-hover text-foreground',
@@ -194,7 +198,9 @@ const SessionTabItem: React.FC<{
                         </div>
                       )}
                     </div>
-                    {showDot ? (
+                    {isAiRenaming ? (
+                      <Icon name="loader-4" className="ml-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
+                    ) : showDot ? (
                       <span
                         className={cn(
                           'ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full',

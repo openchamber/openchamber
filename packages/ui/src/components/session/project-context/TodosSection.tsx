@@ -197,7 +197,7 @@ export const TodosSection: React.FC<{
             type="button"
             onClick={handleClearCompletedTodos}
             disabled={disabled || completedTodoCount === 0}
-            className="typography-meta rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="typography-meta rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('rightSidebar.contextNotesTodo.todo.clearCompleted')}
           </button>
@@ -223,7 +223,7 @@ export const TodosSection: React.FC<{
           type="button"
           onClick={handleAddTodo}
           disabled={disabled || todoInputValue.trim().length === 0}
-          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={t('rightSidebar.contextNotesTodo.todo.addAria')}
           title={t('rightSidebar.contextNotesTodo.todo.addAria')}
         >
@@ -283,7 +283,7 @@ export const TodosSection: React.FC<{
                             className={cn(
                               'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-normal text-foreground',
                               isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                               todo.completed && 'text-muted-foreground line-through'
                             )}
                             title={isExpandedTodo ? undefined : todo.text}
@@ -299,7 +299,7 @@ export const TodosSection: React.FC<{
                             <button
                               type="button"
                               onClick={() => handleDeleteTodo(todo.id)}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               aria-label={t('rightSidebar.contextNotesTodo.todo.actions.delete', { text: todo.text })}
                               title={t('rightSidebar.contextNotesTodo.todo.actions.delete', { text: todo.text })}
                             >
@@ -310,7 +310,7 @@ export const TodosSection: React.FC<{
                                 <button
                                   type="button"
                                   disabled={sendingTodoId === todo.id}
-                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                                   aria-label={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
                                   title={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
                                 >

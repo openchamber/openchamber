@@ -45,6 +45,7 @@ const input = (overrides: Partial<OutgoingMessageInput> = {}): OutgoingMessageIn
     linkedIssue: null,
     linkedPr: null,
     linkedLinearIssue: null,
+    linkedGuestIssue: null,
     ...overrides,
 });
 
@@ -244,6 +245,70 @@ describe('synthetic context', () => {
             .toEqual({ kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
     });
 
+    test('a linked guest issue is sent as context', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedGuestIssue: {
+                providerId: 'hello',
+                id: 'HELLO-1',
+                title: 'Sample ticket',
+                url: 'https://example.com/HELLO-1',
+                contextText: 'guest body',
+            },
+        }), deps());
+        expect(result.additionalParts).toHaveLength(1);
+        expect(result.additionalParts[0].text).toBe('guest body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({
+                kind: 'guest-issue',
+                providerId: 'hello',
+                id: 'HELLO-1',
+                title: 'Sample ticket',
+                url: 'https://example.com/HELLO-1',
+            });
+    });
+
+    test('a linked guest issue keeps its opaque data in metadata only', () => {
+        const data = { status: 'open', comments: ['hi'] };
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedGuestIssue: {
+                providerId: 'hello',
+                id: 'HELLO-1',
+                title: 'Sample ticket',
+                url: 'https://example.com/HELLO-1',
+                contextText: 'guest body',
+                data,
+            },
+        }), deps());
+        expect(result.additionalParts[0].text).toBe('guest body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY]).toMatchObject({ kind: 'guest-issue', data });
+    });
+
+    test('a linked guest pull is sent as guest-pr context', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedGuestIssue: {
+                providerId: 'gitlab',
+                id: '!12',
+                title: 'Fix login',
+                url: 'https://gitlab.com/acme/app/-/merge_requests/12',
+                contextText: 'guest pr body',
+                thread: 'pull',
+            },
+        }), deps());
+        expect(result.additionalParts).toHaveLength(1);
+        expect(result.additionalParts[0].text).toBe('guest pr body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({
+                kind: 'guest-pr',
+                providerId: 'gitlab',
+                id: '!12',
+                title: 'Fix login',
+                url: 'https://gitlab.com/acme/app/-/merge_requests/12',
+            });
+    });
+
     test('synthetic texts precede the linked references', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'x',
@@ -319,6 +384,7 @@ describe('capturing composer context for the queue', () => {
         linkedIssue: null,
         linkedPr: null,
         linkedLinearIssue: null,
+        linkedGuestIssue: null,
         ...overrides,
     });
 

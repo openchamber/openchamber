@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.22.2",
+  "version": "1.24.1",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -10,11 +10,12 @@
     "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
     "electron-log": "^5.4.3",
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "electron": "^43.3.0",
+    "electron": "^43.7.0",
     "electron-builder": "^26.0.0",
     "node-abi": "^4.33.0"
   },
@@ -29,7 +30,7 @@
     "Linux: native x64 or arm64 host (no cross-arch packaging); FUSE/libfuse2 to run AppImages, or APPIMAGE_EXTRACT_AND_RUN=1"
   ],
   "scripts": {
-    "dev": "node ./scripts/electron-dev.mjs",
+    "dev": "bun ../../scripts/build-builtin-extensions.mjs && node ./scripts/electron-dev.mjs",
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
     "ensure:electron": "node ./scripts/ensure-electron.mjs",
@@ -54,6 +55,9 @@
   "build": {
     "appId": "dev.openchamber.desktop",
     "productName": "OpenChamber",
+    "asarUnpack": [
+      "node_modules/@openchamber/web/server/built-in-extensions/**/*"
+    ],
     "files": [
       "dist-bundle/main.mjs",
       "preload.mjs"
@@ -117,7 +121,7 @@
         "AppImage"
       ],
       "category": "Development",
-      "icon": "resources/icons/icon.png",
+      "icon": "resources/icons/app-icon.svg",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {

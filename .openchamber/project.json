@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "projectActions": [
+    {
+      "id": "5525a5ee-9c03-44d1-a401-1e4b9397765c",
+      "name": "DevHMR",
+      "command": "bun run dev:web:hmr",
+      "icon": "rocket"
+    }
+  ],
+  "plansDir": ".openchamber/plans"
+}

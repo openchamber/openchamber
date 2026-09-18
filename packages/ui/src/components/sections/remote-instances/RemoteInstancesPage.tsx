@@ -70,7 +70,7 @@ import {
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { loadDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const randomPort = (): number => {
@@ -354,20 +354,7 @@ const resolvePairingServerUrl = async (): Promise<string> => {
     return fallback;
   }
 
-  let response: Response;
-  try {
-    response = await runtimeFetch('/api/config/settings', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-  } catch {
-    return fallback;
-  }
-  if (!response.ok) return fallback;
-
-  const settings = (await response.json().catch(() => null)) as null | {
-    desktopLanAccessActive?: unknown;
-  };
+  const settings = await loadDesktopSettings();
   if (settings?.desktopLanAccessActive !== true) {
     return fallback;
   }

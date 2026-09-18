@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { reportSettingsSaveState } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import {
   Select,
@@ -30,6 +30,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
+import { resolveBehaviorPrompt, type BehaviorPromptSource } from './behaviorPrompt';
 
 const agentsMdResponseSchema = z.object({
   content: z.string(),
@@ -84,24 +85,9 @@ const RESPONSE_STYLE_OPTION_LABEL_KEYS: Record<ResponseStylePreset, I18nKey> = {
 };
 
 const saveBehaviorSetting = async (settings: Partial<DesktopSettings>, fallbackError: string) => {
-  reportSettingsSaveState('saving');
-  try {
-    const response = await runtimeFetch('/api/config/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(settings),
-    });
-
-    if (!response.ok) {
-      throw new Error(await readApiError(response, fallbackError));
-    }
-    reportSettingsSaveState('saved');
-  } catch (error) {
-    reportSettingsSaveState('error');
-    throw error;
+  const result = await updateDesktopSettings(settings);
+  if (!result.ok) {
+    throw new Error(fallbackError);
   }
 };
 
@@ -130,12 +116,8 @@ export const BehaviorPage: React.FC = () => {
 
     const load = async () => {
       try {
-        const [settingsRes, agentsMdRes] = await Promise.all([
-          runtimeFetch('/api/config/settings', {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-            signal: abort.signal,
-          }),
+        const [data, agentsMdRes] = await Promise.all([
+          loadDesktopSettings(),
           runtimeFetch('/api/behavior/agents-md', {
             method: 'GET',
             headers: { Accept: 'application/json' },
@@ -144,30 +126,37 @@ export const BehaviorPage: React.FC = () => {
         ]);
 
         let nextSettings: BehaviorSettingsState = DEFAULT_BEHAVIOR_SETTINGS;
-        if (settingsRes.ok) {
-          const data = await settingsRes.json();
+        let settingsGlobalBehaviorPrompt: string | undefined;
+        if (data) {
           nextSettings = {
             ...nextSettings,
             optimizeSystemPrompt: data.optimizeSystemPrompt === true,
             responseStyleEnabled: data.responseStyleEnabled === true,
             responseStylePreset: sanitizeResponseStylePreset(data.responseStylePreset),
-            responseStyleCustomInstructions: typeof data.responseStyleCustomInstructions === 'string'
-              ? data.responseStyleCustomInstructions
-              : '',
+            responseStyleCustomInstructions: data.responseStyleCustomInstructions ?? '',
           };
-          if (typeof data.globalBehaviorPrompt === 'string') {
-            nextSettings = { ...nextSettings, prompt: data.globalBehaviorPrompt };
+          if (data.globalBehaviorPrompt !== undefined) {
+            settingsGlobalBehaviorPrompt = data.globalBehaviorPrompt;
           }
         }
 
+        // AGENTS.md is the source of truth OpenCode reads at runtime, so an
+        // existing file is authoritative even when it is empty. The persisted
+        // copy (globalBehaviorPrompt) is only a fallback for a missing file or
+        // a failed read.
+        let promptSource: BehaviorPromptSource = { kind: 'missing' };
         if (agentsMdRes.ok) {
           const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
           if (abort.signal.aborted) return;
           setAgentsMdPath(agentsData.path ?? 'AGENTS.md');
-          if (!nextSettings.prompt.trim()) {
-            nextSettings = { ...nextSettings, prompt: agentsData.content };
+          if (agentsData.exists) {
+            promptSource = { kind: 'file', content: agentsData.content };
           }
         }
+        nextSettings = {
+          ...nextSettings,
+          prompt: resolveBehaviorPrompt(promptSource, settingsGlobalBehaviorPrompt),
+        };
 
         setPrompt(nextSettings.prompt);
         setOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);

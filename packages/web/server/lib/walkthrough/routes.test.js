@@ -18,6 +18,11 @@ describe('walkthrough routes', () => {
   let generateCalls = 0;
 
   const service = {
+    async getPullRequestDiff(directory, number, sourceRepo, options) {
+      lastArgs = { directory, number, sourceRepo, options };
+      if (number === 99) throw Object.assign(new Error('GitHub unavailable'), { statusCode: 503 });
+      return { patch: number === 1 ? '' : 'diff --git a/a.ts b/a.ts\n' };
+    },
     async getWalkthrough(args) {
       lastArgs = args;
       return { walkthrough: null, hunks: [], hunkCount: 0, generating: Boolean(job) };
@@ -82,6 +87,27 @@ describe('walkthrough routes', () => {
     const body = await (await pending).json();
 
     expect(body.walkthrough).toEqual({ title: 'DONE' });
+  });
+
+  it('serves the published PR snapshot with its repository, without generating', async () => {
+    const source = { kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } };
+    const before = generateCalls;
+    const response = await fetch(`${base}/api/walkthrough/pr-diff?directory=/repo&source=${encodeURIComponent(JSON.stringify(source))}`);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(await response.text()).toBe('diff --git a/a.ts b/a.ts\n');
+    expect(lastArgs).toEqual({ directory: '/repo', number: 42, sourceRepo: source.sourceRepo, options: { allowEmpty: true } });
+    expect(generateCalls).toBe(before);
+  });
+
+  it('distinguishes empty PRs, upstream failure, and invalid sources', async () => {
+    const request = (source) => fetch(`${base}/api/walkthrough/pr-diff?directory=/repo&source=${encodeURIComponent(JSON.stringify(source))}`);
+    const empty = await request({ kind: 'pr', number: 1 });
+    expect(empty.status).toBe(200);
+    expect(await empty.text()).toBe('');
+    expect((await request({ kind: 'pr', number: 99 })).status).toBe(503);
+    for (const source of [{ kind: 'pr', number: -1 }, { kind: 'branch', baseRef: 'main', headRef: 'feature' }, { kind: 'pr', number: 1, sourceRepo: { owner: '../bad', repo: 'repo' } }]) {
+      expect((await request(source)).status).toBe(400);
+    }
   });
 
   it('delivers the result to a client that reconnected after a refresh', async () => {

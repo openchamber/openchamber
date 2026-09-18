@@ -561,13 +561,13 @@ export const NotificationSettings: React.FC = () => {
               description={(
                 <>
                   {t('settings.notifications.page.template.variablesLabel')}{' '}
-                  <code className="text-[var(--primary-base)]">{'{project_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{worktree}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{branch}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{session_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{agent_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{model_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{last_message}'}</code>
+                  <code className="text-[var(--syntax-variable)]">{'{project_name}'}</code>{' '}
+                  <code className="text-[var(--syntax-variable)]">{'{worktree}'}</code>{' '}
+                  <code className="text-[var(--syntax-variable)]">{'{branch}'}</code>{' '}
+                  <code className="text-[var(--syntax-variable)]">{'{session_name}'}</code>{' '}
+                  <code className="text-[var(--syntax-variable)]">{'{agent_name}'}</code>{' '}
+                  <code className="text-[var(--syntax-variable)]">{'{model_name}'}</code>{' '}
+                  <code className="text-[var(--syntax-variable)]">{'{last_message}'}</code>
                 </>
               )}
             >

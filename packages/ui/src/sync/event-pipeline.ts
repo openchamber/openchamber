@@ -21,7 +21,13 @@ import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
-const FLUSH_FRAME_MS = 33
+// Paces a sustained event stream only: the first event after a quiet spell is
+// flushed at once, so a lone permission or status event is not delayed. Every
+// flush publishes the directory store and re-renders the streaming message,
+// while streamed text is shown at most every 100ms, so flushing faster than
+// that bought renders nobody sees. Measured at 300 characters per second,
+// 33ms cost six more points of renderer CPU for the same visible output.
+const FLUSH_FRAME_MS = 100
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
 const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8
@@ -51,7 +57,7 @@ export type EventPipelineInput = {
   sdk: OpencodeClient
   routeDirectory?: (directory: string, payload: Event) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
-  onReconnect?: () => void
+  onReconnect?: (details: { replayReset: boolean }) => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
   /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
@@ -69,6 +75,7 @@ export type EventPipeline = {
 
 type MessageStreamWsFrame = {
   type: "ready" | "event" | "error" | "backpressure"
+  replayReset?: boolean
   payload?: unknown
   eventId?: string
   directory?: string
@@ -452,7 +459,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onDisconnect?.(reason)
   }
 
-  const markConnected = () => {
+  const markConnected = (replayReset = false) => {
     disconnected = false
     consecutiveFailures = 0
     // Fire onReconnect on every successful connect — including the very
@@ -460,7 +467,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     // to be flipped positively; without this the send button throws
     // "Connection lost" until something else (HTTP health check) happens
     // to race a setState({isConnected: true}) through.
-    onReconnect?.()
+    onReconnect?.({ replayReset })
   }
 
   const enqueueEvent = (directory: string, payload: Event) => {
@@ -701,6 +708,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         }
 
         if (frame.type === "ready") {
+          // The retained suffix no longer covers our cursor. The normal
+          // reconnect callback repairs authoritative state; retire that cursor.
+          if (frame.replayReset === true) lastEventId = undefined
           opened = true
           readyAt = Date.now()
           if (readyTimer) {
@@ -708,7 +718,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
             readyTimer = undefined
           }
           streamErrorLogged = false
-          markConnected()
+          markConnected(frame.replayReset === true)
           return
         }
 

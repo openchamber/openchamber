@@ -9,14 +9,29 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 
 ## Model
 
+Full-screen extension pages are separate from this rail registry. `contributes.page` appears in one sidebar-header menu and uses `useUIStore.openGuestPageId`, the same mutually exclusive main-page lifecycle as Archive and Scheduled tasks. It mounts `PluginPane` with `surface="page"`, closes on runtime switch/uninstall/disable, and is not persisted. `openContextSurface` and the guest's `openSurface` cannot open a full-screen page. The entry-point restrictions below describe context-rail surfaces only.
+
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
+  Built-in modes stay a closed list. Installed guests add `plugin:${id}`
+  surfaces through `extras` on `sortContextSurfaces` /
+  `getVisibleContextRailSurfaces`. Do not copy guest types out of
+  `@openchamber/sdk`.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
 - `defaultWidthFraction` is the panel width as a fraction of the content area,
-  used until the user manually resizes that surface (manual widths are stored
-  per mode in `useUIStore.contextPanelByDirectory[dir].widthByMode`).
+  used until the user manually resizes that surface. Manual widths are stored
+  per mode in `useUIStore.contextPanelByDirectory[dir].widthFractionByMode`;
+  `widthByMode` retains the last pixel size until the available area is known.
+  Every surface, including walkthrough, restores both values on reload.
+  The file surface stores its full editor width under `file`. Without an
+  editor, the panel uses `contextEditorTreeWidth`, the same pixel width as the
+  docked file tree. Resizing the tree-only panel updates that shared tree width
+  without changing the full editor width. Old `file-tree` width entries are
+  discarded on hydration. Tree-only mode temporarily suspends panel expansion;
+  reopening the editor restores its previous expanded state. The tree stays
+  right-aligned at its saved width during the panel's collapse transition.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.
@@ -35,20 +50,31 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 
 ## Adding a surface
 
-1. Add a `ContextPanelMode` value in `useUIStore` (type union plus the
-   sanitizer whitelist in `sanitizeContextPanelTabs`).
-2. Register a descriptor here (icon, label key, availability, width fraction).
-3. Render the mode in `ContextPanel.tsx` (content dispatch, label, icon).
-4. Add label/hint i18n keys to every locale dictionary.
+1. Built-in: add a `ContextPanelMode` value in `packages/ui/src/lib/surfaces/modes.ts`
+   (the sanitizer uses `isContextPanelMode`). Register a descriptor here.
+   Render the mode in `ContextPanel.tsx`. Add label/hint i18n keys.
+2. Guest panel: ship a package with `openchamber.contributes.panel`. The host
+  lists it from `GET /api/guests` and renders `PluginPane`. Settings →
+  Extensions installs a folder path on that OpenChamber instance. A runtime
+  switch clears the catalog so a previous instance cannot leave a rail slot
+  from the last host. The rail paints `panel.icon` as a Remixicon glyph.
+  `contributes.attach: true` or `"panel"` puts a row on
+   the desktop/web chat + menu that opens `plugin:${id}`. `"dialog"` opens a
+   host window around the same iframe so the guest can pick an item and call
+   `attach`. New Worktree also opens that window for dialog guests. The guest
+   still owns the list and HTTP. VS Code and mobile omit the row. Do not add
+   a built-in mode for that guest.
 
-No new header buttons: the rail and `openContextSurface` are the only entry
-points for opening surfaces directly; deep links from chat/palette go through
-the `openContext*` actions in `useUIStore`.
+No new header buttons: the rail, `openContextSurface`, the composer +
+menu (`contributes.attach`), and New Worktree's guest icons are the entry
+points for opening surfaces or the attach window directly; deep links from
+chat/palette go through the `openContext*` actions in `useUIStore`.
 
 ## Invariants
 
 - Opening a surface must never require a control outside the rail, the
-  command palette, or an in-content link.
+  command palette, an in-content link, a composer + menu row from
+  `contributes.attach`, or New Worktree's guest icons for dialog attach.
 - Multi-instance and session-holding surfaces (file/editor, diff, browser,
   terminal) are keep-alive panes in `ContextPanel.tsx`. Switching these
   surfaces must not reset their state (open tabs, xterm session, scroll
@@ -57,6 +83,8 @@ the `openContext*` actions in `useUIStore`.
   the session stores. A closed panel mounts no chat iframe.
   Singleton surfaces (git, pr, linear, notes, plan, context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
+- Portalled menus and dialogs handle their own Escape key. The panel's capture
+  handler ignores their events so dismissing an overlay does not close the panel.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
   Linear is a desktop/web singleton on this rail. VS Code and mobile omit it

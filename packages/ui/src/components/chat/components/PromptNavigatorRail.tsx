@@ -529,8 +529,8 @@ export function PromptNavigatorRail({
                             // Nudge so the icon centers over the tick column
                             // (ticks sit at right-1 with a 10px base width).
                             '-mr-px mb-1.5 flex size-5 shrink-0 items-center justify-center rounded-full',
-                            'text-[var(--surface-mutedForeground)] transition-colors',
-                            'hover:bg-[var(--interactive-hover)]/60 hover:text-[var(--surface-foreground)]',
+                            'text-muted-foreground transition-colors',
+                            'hover:bg-interactive-hover/60 hover:text-foreground',
                             isLoadingOlder ? 'cursor-wait opacity-70' : undefined,
                         )}
                         aria-label={loadMoreLabel}
@@ -686,8 +686,8 @@ export function PromptNavigatorRail({
                                                             // leaving a ragged gap before a long next word.
                                                             'min-w-0 flex-1 line-clamp-2 [overflow-wrap:anywhere] typography-meta',
                                                             isActive
-                                                                ? 'text-[var(--interactive-selectionForeground)]'
-                                                                : 'text-[var(--surface-mutedForeground)]',
+                                                                ? 'text-interactive-selection-foreground'
+                                                                : 'text-muted-foreground',
                                                         )}
                                                     >
                                                         {prompt.preview.trim() || emptyPreviewLabel}

@@ -1,5 +1,10 @@
 import { EventEmitter } from 'events';
 import path from 'path';
+import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import * as nativeFs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
@@ -1385,7 +1390,11 @@ describe('fs stat directory scope (issue 3019)', () => {
       path: path.posix,
       fsPromises: {
         realpath: async (targetPath) => targetPath,
-        stat: async () => ({ isFile: () => true, size: 12 }),
+        stat: async (targetPath) => (
+          targetPath === '/repo-b'
+            ? { isDirectory: () => true, mtimeMs: 123 }
+            : { isFile: () => true, size: 12, mtimeMs: 456 }
+        ),
       },
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
@@ -1427,6 +1436,107 @@ describe('fs stat directory scope (issue 3019)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.isFile).toBe(true);
+  });
+
+});
+
+describe('fs stat directory error handling', () => {
+  it('loads in Node without workspace node_modules, as packaged desktop does', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'openchamber-fs-import-'));
+    try {
+      await mkdir(path.join(directory, 'fs'));
+      await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
+      await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
+      expect(() => execFileSync('node', [
+        '--input-type=module',
+        '--eval',
+        'await import(process.argv[1])',
+        pathToFileURL(path.join(directory, 'fs/routes.mjs')).href,
+      ], { cwd: directory, stdio: 'pipe' })).not.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('returns directory-missing reasons and permission errors for directory stat', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const enotdir = Object.assign(new Error('not a directory'), { code: 'ENOTDIR' });
+    const eacces = Object.assign(new Error('denied'), { code: 'EACCES' });
+    const stat = vi.fn(async (targetPath) => {
+      if (targetPath === '/repo-b') throw enoent;
+      if (targetPath === '/repo-b/file.txt/child') throw enotdir;
+      if (targetPath === '/repo-b/protected') throw eacces;
+      if (targetPath === '/repo-b/file.txt') return { isDirectory: () => false };
+      if (targetPath === '/repo-b/failure') throw new Error('unavailable');
+      return { isDirectory: () => true, mtimeMs: 1 };
+    });
+    const readdir = vi.fn(async () => []);
+    const callStat = async (handler, { headers = {}, query }) => {
+      const res = createMockResponse();
+      const req = {
+        url: `/api/fs/directory-stat?${new URLSearchParams(query)}`,
+        query,
+        get: (name) => headers[name.toLowerCase()] ?? undefined,
+      };
+      await handler(req, res);
+      return res;
+    };
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat,
+        readdir,
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const handler = getRoute('GET', '/api/fs/directory-stat');
+
+    const available = await callStat(handler, { query: { path: '/other-project' } });
+    expect(available.statusCode).toBe(200);
+    expect(available.body).toEqual({ isDirectory: true });
+    expect(available.getHeader('Cache-Control')).toBe('no-store');
+    expect(stat).toHaveBeenCalledTimes(1);
+
+    const invalid = await callStat(handler, { query: { path: ' ' } });
+    expect(invalid.statusCode).toBe(400);
+    expect(stat).toHaveBeenCalledTimes(1);
+
+    for (const query of ['path=/repo&path=/other', 'path[]=/repo', '']) {
+      const malformed = createMockResponse();
+      await handler({ url: `/api/fs/directory-stat?${query}` }, malformed);
+      expect(malformed.statusCode).toBe(400);
+    }
+    expect(stat).toHaveBeenCalledTimes(1);
+
+    const missing = await callStat(handler, { headers: { 'x-opencode-directory': '/repo-b' }, query: { path: '/repo-b', directory: 'true' } });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.body).toEqual({ error: 'Directory not found', reason: 'not-found' });
+
+    const notDir = await callStat(handler, { headers: { 'x-opencode-directory': '/repo-b' }, query: { path: '/repo-b/file.txt/child', directory: 'true' } });
+    expect(notDir.statusCode).toBe(400);
+    expect(notDir.body).toEqual({ error: 'Specified path is not a directory', reason: 'not-directory' });
+
+    const denied = await callStat(handler, { headers: { 'x-opencode-directory': '/repo-b' }, query: { path: '/repo-b/protected', directory: 'true' } });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
+
+    const file = await callStat(handler, { query: { path: '/repo-b/file.txt' } });
+    expect(file.statusCode).toBe(400);
+    expect(file.body.reason).toBe('not-directory');
+
+    const failure = await callStat(handler, { query: { path: '/repo-b/failure' } });
+    expect(failure.statusCode).toBe(500);
+    expect(failure.body).toEqual({ error: 'Failed to stat directory' });
+    expect(readdir).not.toHaveBeenCalled();
   });
 });
 
@@ -1477,6 +1587,40 @@ describe('fs managed chats root', () => {
     expect(res.body.chatsRoot).toBe('/srv/openchamber-chats');
   });
 
+  it('fails home lookup on permission errors and retries the next request', async () => {
+    const failure = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    let inaccessible = true;
+    const { home } = registerWithChatsRoot({ fsPromises: {
+      realpath: async directory => { if (inaccessible) throw failure; return directory; },
+    } });
+    const failed = createMockResponse();
+    await home(undefined, failed);
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).toEqual({ error: 'permission denied' });
+    inaccessible = false;
+    const recovered = createMockResponse();
+    await home(undefined, recovered);
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.body.chatsRoot).toBe('/home/user/.config/openchamber/chats');
+  });
+
+  it('keeps an accessible relocated root available when legacy alias lookup fails', async () => {
+    const { home } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/chat-alias',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/chat-alias') return '/storage/chats';
+          throw Object.assign(new Error('legacy root is inaccessible'), { code: 'EACCES' });
+        },
+      },
+    });
+    const response = createMockResponse();
+    await home(undefined, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.canonicalChatsRoot).toBe('/storage/chats');
+    expect(response.body.canonicalLegacyChatsRoot).toBeUndefined();
+  });
+
   it('allows mkdir inside the relocated chats root outside the active workspace', async () => {
     const mkdirCalls = [];
     const { mkdir } = registerWithChatsRoot({
@@ -1496,6 +1640,22 @@ describe('fs managed chats root', () => {
     expect(mkdirCalls).toEqual(['/srv/openchamber-chats/2026-08-25/session-a']);
   });
 
+  it('accepts a canonical relocated root even when the config root cannot be resolved', async () => {
+    const { mkdir } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/chat-alias',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/chat-alias') return '/storage/chats';
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        },
+      },
+    });
+    const response = createMockResponse();
+    await mkdir({ body: { path: '/storage/chats/day/session-a' } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.path).toBe('/storage/chats/day/session-a');
+  });
+
   it('still rejects mkdir outside the workspace and all managed roots', async () => {
     const { mkdir } = registerWithChatsRoot({ managedChatsRoot: '/srv/openchamber-chats' });
 
@@ -1504,5 +1664,70 @@ describe('fs managed chats root', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+  });
+});
+
+describe('canonical managed roots with real filesystem aliases', () => {
+  const setup = async (context, { relocated = false, caseAlias = false } = {}) => {
+    const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-canonical-chats-'));
+    context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+    const home = path.join(root, 'Home');
+    await nativeFs.mkdir(home);
+    const reportedHome = path.join(root, caseAlias ? 'home' : 'home-alias');
+    if (!caseAlias) await nativeFs.symlink(home, reportedHome, 'junction');
+    const config = path.join(reportedHome, '.config/openchamber');
+    const rawChats = relocated ? path.join(reportedHome, 'scratch/chats') : path.join(config, 'chats');
+    const canonicalHome = await nativeFs.realpath(home);
+    if (caseAlias && await nativeFs.realpath(reportedHome).catch(() => null) !== canonicalHome) {
+      context.skip('This volume distinguishes Home from home');
+    }
+    const canonicalChats = path.join(canonicalHome, relocated ? 'scratch/chats' : '.config/openchamber/chats');
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => reportedHome }, path, fsPromises: nativeFs,
+      normalizeDirectoryPath: value => value,
+      resolveProjectDirectory: async () => ({ directory: path.join(root, 'unrelated-project') }),
+      openchamberUserConfigRoot: config, managedChatsRoot: rawChats,
+    });
+    return { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome };
+  };
+
+  for (const relocated of [false, true]) {
+    it(`returns canonical paths before the ${relocated ? 'relocated' : 'default'} root exists and permits its lifecycle`, async context => {
+      const { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome } = await setup(context, { relocated });
+      const home = createMockResponse();
+      await getRoute('GET', '/api/fs/home')({}, home);
+      expect(home.body).toEqual({
+        home: reportedHome, chatsRoot: rawChats,
+        canonicalChatsRoot: canonicalChats,
+        canonicalLegacyChatsRoot: path.join(canonicalHome, '.config/openchamber/chats'),
+      });
+      await expect(nativeFs.stat(canonicalChats)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const directory = path.join(home.body.canonicalChatsRoot, 'day/session-a');
+      const created = createMockResponse();
+      await getRoute('POST', '/api/fs/mkdir')({ body: { path: directory } }, created);
+      expect(created.statusCode).toBe(200);
+      expect(await nativeFs.realpath(directory)).toBe(directory);
+      const deleted = createMockResponse();
+      await getRoute('POST', '/api/fs/delete')({ body: { path: directory } }, deleted);
+      expect(deleted.statusCode).toBe(200);
+      await expect(nativeFs.stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const legacy = createMockResponse();
+      await getRoute('POST', '/api/fs/mkdir')({ body: { path: path.join(rawChats, 'legacy-session') } }, legacy);
+      expect(legacy.statusCode).toBe(200);
+      expect((await nativeFs.stat(path.join(canonicalChats, 'legacy-session'))).isDirectory()).toBe(true);
+    });
+  }
+
+  it('reports on-disk home casing on a case-insensitive macOS volume', { skip: process.platform !== 'darwin' }, async context => {
+    const { getRoute, canonicalChats, rawChats, reportedHome } = await setup(context, { caseAlias: true });
+    const response = createMockResponse();
+    await getRoute('GET', '/api/fs/home')({}, response);
+    expect(response.body).toEqual({
+      home: reportedHome, chatsRoot: rawChats,
+      canonicalChatsRoot: canonicalChats, canonicalLegacyChatsRoot: canonicalChats,
+    });
   });
 });

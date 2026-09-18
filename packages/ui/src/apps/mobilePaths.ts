@@ -1,5 +1,7 @@
+import { normalizePath as normalizeDirectoryPath } from '@/lib/pathNormalization';
+
 export const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+  normalizeDirectoryPath(value) ?? '';
 
 export const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);

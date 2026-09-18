@@ -354,6 +354,10 @@ for (const file of allSrcFiles) {
   addIconNameFunctionReturns(content)
   addTypedIconNameRecords(content)
   addIconNameVariableAssignments(content)
+  // Shared constants can live outside JSX files and need no naming suffix.
+  for (const match of content.matchAll(/\b(?:const|let|var)\s+\w+\s*:\s*IconName\s*=\s*["']([a-z][a-z0-9-]*)["']/g)) {
+    addKebabIcon(match[1])
+  }
 }
 
 console.log(`Found ${usedIcons.size} unique remixicon names used in source`)

@@ -56,6 +56,9 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
   }
 
   const fsProxyPath = normalizeFsProxyPath(parsed.pathname);
+  if (parsed.pathname === '/api/fs/directory-stat') {
+    return buildProxyJsonError(501, 'Directory availability probes are not supported in the VS Code runtime');
+  }
   if (/^\/api\/openchamber\/sessions\/[^/]+\/markdown-image-grants$/.test(parsed.pathname)) {
     return buildProxyJsonError(501, 'Markdown image grants are not supported in the VS Code runtime');
   }

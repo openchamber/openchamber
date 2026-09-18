@@ -14,16 +14,54 @@ export const getDesktopClampedX = (anchorX: number, viewportWidth: number, menuW
   return Math.min(Math.max(anchorX, minX), maxX);
 };
 
-// The desktop menu renders with `transform: translate(-50%, -100%)`, so the
-// anchor Y marks the menu's bottom edge and the menu extends `menuHeight`
-// upward from it. The minimum keeps the whole menu below the top margin.
-export const getDesktopClampedY = (anchorY: number, viewportHeight: number, menuHeight: number): number => {
-  const minY = DESKTOP_MENU_SIDE_MARGIN_PX + menuHeight;
-  const maxY = viewportHeight - DESKTOP_MENU_SIDE_MARGIN_PX;
+export const DESKTOP_MENU_SELECTION_GAP_PX = 10;
 
-  if (minY > maxY) {
-    return viewportHeight / 2;
+export type DesktopMenuPlacement = 'above' | 'below';
+
+interface DesktopMenuYInput {
+  selectionTop: number;
+  selectionBottom: number;
+  menuHeight: number;
+  viewportHeight: number;
+  // Top edge of the area the menu may cover: the chat viewport, which keeps
+  // the menu off the header (a window drag zone on the desktop shell).
+  boundaryTop: number;
+}
+
+interface DesktopMenuY {
+  // With 'above' the anchor Y is the menu's bottom edge
+  // (`translate(-50%, -100%)`); with 'below' it is the menu's top edge.
+  y: number;
+  placement: DesktopMenuPlacement;
+}
+
+// The menu sits above the selection and flips below it when there is no room
+// above, so it never covers the text the user is about to copy. When neither
+// side has room (a selection filling the visible area, or one scrolled out of
+// view) the menu is clamped on screen instead.
+export const getDesktopMenuY = ({
+  selectionTop,
+  selectionBottom,
+  menuHeight,
+  viewportHeight,
+  boundaryTop,
+}: DesktopMenuYInput): DesktopMenuY => {
+  const minTop = Math.max(boundaryTop, 0) + DESKTOP_MENU_SIDE_MARGIN_PX;
+  const maxBottom = viewportHeight - DESKTOP_MENU_SIDE_MARGIN_PX;
+
+  const aboveY = selectionTop - DESKTOP_MENU_SELECTION_GAP_PX;
+  if (aboveY - menuHeight >= minTop && aboveY <= maxBottom) {
+    return { y: aboveY, placement: 'above' };
   }
 
-  return Math.min(Math.max(anchorY, minY), maxY);
+  const belowY = selectionBottom + DESKTOP_MENU_SELECTION_GAP_PX;
+  if (belowY >= minTop && belowY + menuHeight <= maxBottom) {
+    return { y: belowY, placement: 'below' };
+  }
+
+  if (minTop + menuHeight > maxBottom) {
+    return { y: viewportHeight / 2, placement: 'above' };
+  }
+
+  return { y: Math.min(Math.max(aboveY, minTop + menuHeight), maxBottom), placement: 'above' };
 };

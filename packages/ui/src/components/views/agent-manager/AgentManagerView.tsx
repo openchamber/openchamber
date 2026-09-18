@@ -10,12 +10,14 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import { useI18n } from '@/lib/i18n';
 
 interface AgentManagerViewProps {
   className?: string;
 }
 
 export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className }) => {
+  const { t } = useI18n();
   const { runtime } = useRuntimeAPIs();
   const isVSCodeRuntime = runtime.isVSCode;
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'disconnected'>(
@@ -32,7 +34,7 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
   const bootstrapAttemptAt = React.useRef<number>(0);
 
   const groups = useAgentGroupsStore((s) => s.groups);
-  const selectedGroupName = useAgentGroupsStore((s) => s.selectedGroupName);
+  const selectedGroupId = useAgentGroupsStore((s) => s.selectedGroupId);
   const selectGroup = useAgentGroupsStore((s) => s.selectGroup);
   const loadGroups = useAgentGroupsStore((s) => s.loadGroups);
 
@@ -40,8 +42,8 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
   const isCreatingMultiRun = useMultiRunStore((s) => s.isLoading);
 
   const selectedGroup = React.useMemo(
-    () => (selectedGroupName ? groups.find((g) => g.name === selectedGroupName) ?? null : null),
-    [groups, selectedGroupName],
+    () => (selectedGroupId ? groups.find((g) => g.id === selectedGroupId) ?? null : null),
+    [groups, selectedGroupId],
   );
 
   // VS Code connection bootstrap
@@ -86,8 +88,8 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
     void loadGroups();
   }, [currentDirectory, loadGroups]);
 
-  const handleGroupSelect = React.useCallback((groupName: string) => {
-    selectGroup(groupName);
+  const handleGroupSelect = React.useCallback((groupId: string) => {
+    selectGroup(groupId);
   }, [selectGroup]);
 
   const handleNewAgent = React.useCallback(() => {
@@ -101,22 +103,23 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
     const result = await createMultiRun(params);
 
     if (result) {
+      if (result.failedCount > 0) toast.error(t('multirun.launcher.toast.partialFailure', { failed: result.failedCount }));
       toast.success(`Agent group "${params.name}" created with ${result.sessionIds.length} session(s)`);
       // Refresh groups — new worktrees + sessions now exist
       await loadGroups();
-      selectGroup(result.groupSlug);
+      selectGroup(result.groupKey);
     } else {
       const error = useMultiRunStore.getState().error;
       toast.error(error || 'Failed to create agent group');
     }
-  }, [createMultiRun, loadGroups, selectGroup]);
+  }, [createMultiRun, loadGroups, selectGroup, t]);
 
   return (
     <div className={cn('flex h-full w-full bg-background', className)}>
       <div className="w-64 flex-shrink-0">
         <AgentManagerSidebar
           groups={groups}
-          selectedGroupName={selectedGroupName}
+          selectedGroupId={selectedGroupId}
           onGroupSelect={handleGroupSelect}
           onNewAgent={handleNewAgent}
         />

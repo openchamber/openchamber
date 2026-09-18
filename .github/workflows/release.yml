@@ -88,9 +88,20 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # Both packages are packed and published with bun so the
+      # `workspace:*` link from @openchamber/web to @openchamber/sdk is
+      # rewritten to the released version. npm leaves it in place and the
+      # published tarball then fails to install.
+      - name: Publish SDK to npm
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        working-directory: packages/sdk
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create npm tarball
         working-directory: packages/web
-        run: npm pack
+        run: bun pm pack
 
       - name: Upload npm tarball to release
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -104,9 +115,9 @@ jobs:
       - name: Publish to npm
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: packages/web
-        run: npm publish --access public
+        run: bun publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   build-desktop-electron-macos:
     needs: create-release

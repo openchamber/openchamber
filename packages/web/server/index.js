@@ -43,6 +43,7 @@ import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
   createMessageStreamWsRuntime,
+  resolveDeltaCoalesceWindowMs,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
   UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
 } from './lib/event-stream/index.js';
@@ -92,8 +93,11 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { stopAllGuestServices } from './lib/guests/service.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { migrateLegacyUserDirs } from './lib/data-dir-migration.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
 import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
@@ -111,12 +115,15 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
-import { createMcpReconnectRuntime } from './lib/mcp-reconnect/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import webPush from 'web-push';
+import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
+
+// Background CLI launches enter here in a fresh process, without CLI defaults.
+applyConnectAttemptTimeout();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -259,14 +266,20 @@ const normalizeManagedRemoteTunnelPresets = (...args) =>
 const normalizeManagedRemoteTunnelPresetTokens = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens(...args);
 const isUnsafeSkillRelativePath = (...args) => settingsNormalizationRuntime.isUnsafeSkillRelativePath(...args);
-const sanitizeTypographySizesPartial = (...args) =>
-  settingsNormalizationRuntime.sanitizeTypographySizesPartial(...args);
 const normalizeStringArray = (...args) => settingsNormalizationRuntime.normalizeStringArray(...args);
 const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
 const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
 const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
 
-const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
+// Every OpenChamber-owned file and folder hangs off one root: the default
+// `~/.config/openchamber`, or `OPENCHAMBER_DATA_DIR` when set. The user
+// folders (`projects/`, `themes/`, `speech-models/`) are copied into a custom
+// root once at startup (`migrateLegacyUserDirs`), because they used to ignore
+// the variable.
+const OPENCHAMBER_DEFAULT_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
+const OPENCHAMBER_USER_CONFIG_ROOT = process.env.OPENCHAMBER_DATA_DIR
+  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+  : OPENCHAMBER_DEFAULT_CONFIG_ROOT;
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
 // OPENCHAMBER_CHATS_DIR relocates managed chat worktrees — needed when the
@@ -287,11 +300,12 @@ const themeRuntime = createThemeRuntime({
 });
 
 const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
+const saveImportedTheme = (...args) => themeRuntime.saveImportedTheme(...args);
+const deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...args);
 
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let systemPromptRuntime = null;
-let mcpReconnectRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -305,9 +319,7 @@ const maybeCacheSessionInfoFromEvent = (...args) => notificationTemplateRuntime.
 const buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
 const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
 
-const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
-  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-  : path.join(os.homedir(), '.config', 'openchamber');
+const OPENCHAMBER_DATA_DIR = OPENCHAMBER_USER_CONFIG_ROOT;
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
@@ -345,7 +357,6 @@ const settingsHelpers = createSettingsHelpers({
   normalizeManagedRemoteTunnelHostname,
   normalizeManagedRemoteTunnelPresets,
   normalizeManagedRemoteTunnelPresetTokens,
-  sanitizeTypographySizesPartial,
   normalizeStringArray,
   sanitizeModelRefs,
   sanitizeSkillCatalogs,
@@ -484,6 +495,17 @@ const getUpstreamStallTimeoutMs = () => (
     : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
 );
 
+const movedUserDirs = await migrateLegacyUserDirs({
+  fsPromises,
+  path,
+  dataDir: OPENCHAMBER_USER_CONFIG_ROOT,
+  legacyRoot: OPENCHAMBER_DEFAULT_CONFIG_ROOT,
+  warn: (message) => console.warn(`[data-dir] ${message}`),
+});
+if (movedUserDirs.length > 0) {
+  console.log(`[data-dir] Copied ${movedUserDirs.join(', ')} into ${OPENCHAMBER_USER_CONFIG_ROOT}`);
+}
+
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
@@ -494,6 +516,7 @@ const projectContextRuntime = createProjectContextRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
 });
 
 const agentMemoryRuntime = createAgentMemoryRuntime({
@@ -871,6 +894,25 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
+  deltaCoalesceWindowMs: resolveDeltaCoalesceWindowMs(),
+});
+
+// OpenChamber-owned events for the UI control stream (SSE) plus the WS fan-out.
+// OpenCode's /global/event proxy cannot carry them.
+const broadcastOpenChamberUiEvent = createGlobalUiEventBroadcaster({
+  sseClients: uiOpenChamberEventClients,
+  wsClients: uiNotificationWsClients,
+  writeSseEvent,
+});
+
+// Jev model routing and the permission safety net. Dark unless
+// OPENCHAMBER_ROUTING_ENABLE is set; every failure keeps the user's own model
+// or the auto-accept reply it was asked about.
+const routingRuntime = createRoutingRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
@@ -880,6 +922,8 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
+  onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
 });
 permissionAutoAcceptRuntime.start();
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
@@ -893,7 +937,8 @@ const messageQueueRuntime = createMessageQueueRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   sessionKnowledgeRuntime,
-  broadcastGlobalUiEvent,
+  broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
+  resolvePromptBody: (body, target) => routingRuntime.resolvePromptBody(body, target),
   onPromptSent: (sessionId) => sessionRuntime.markUserMessageSent(sessionId),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
@@ -1230,14 +1275,11 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       ? await (agentToolRuntime?.prepareManagedOpenCodeEnv({ includeControl, includeWeb, includeMemory }) || {})
       : {};
 
-    // Each managed plugin appends itself to the config the previous one produced.
-    let configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
     if (settings?.optimizeSystemPrompt === true) {
-      ({ OPENCODE_CONFIG_CONTENT: configContent } = await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent));
+      const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
+      Object.assign(managedEnv, await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent));
     }
-    // Always on for managed OpenCode: it only retries servers OpenCode gave up on.
-    const mcpReconnectEnv = await mcpReconnectRuntime.prepareManagedOpenCodeEnv(configContent);
-    return { ...managedEnv, ...mcpReconnectEnv };
+    return managedEnv;
   },
 });
 
@@ -1324,14 +1366,14 @@ const resolveMemoryProjectId = createMemoryProjectResolver({
 });
 
 /**
- * Tells open panels that the agent changed what it remembers, so what it just
+ * Tells open panels that the service changed what it remembers, so what it just
  * stored is visible without reopening anything.
  */
 const emitAgentMemoryChangedEvent = (event) => {
   for (const client of uiOpenChamberEventClients) {
     try {
       writeSseEvent(client, {
-        type: 'openchamber:agent-memory-changed',
+        type: 'openchamber:service-memory-changed',
         properties: {
           scope: event.scope,
           ...(event.projectId ? { projectId: event.projectId } : {}),
@@ -1511,11 +1553,6 @@ async function main(options = {}) {
     path,
     dataDir: OPENCHAMBER_DATA_DIR,
   });
-  mcpReconnectRuntime = createMcpReconnectRuntime({
-    fsPromises,
-    path,
-    dataDir: OPENCHAMBER_DATA_DIR,
-  });
 
   // Pairing transports advertised to the create-device dialog. LAN reachability is
   // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
@@ -1642,6 +1679,12 @@ async function main(options = {}) {
   const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
     ? options.getDesktopRuntimeConfig
     : null;
+  const desktopUpdater = options.desktopUpdater
+    && typeof options.desktopUpdater.check === 'function'
+    && typeof options.desktopUpdater.install === 'function'
+    && typeof options.desktopUpdater.restart === 'function'
+    ? options.desktopUpdater
+    : null;
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -1676,7 +1719,10 @@ async function main(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning');
+      // The packaged desktop UI (openchamber-ui://) and the dev UI sit on a
+      // different origin, so every custom request header must be listed here or
+      // the browser refuses the request at preflight, before it reaches a route.
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,X-OpenChamber-Surface');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -1817,6 +1863,7 @@ async function main(options = {}) {
     getCachedZenModels,
     setAutoAcceptSession,
     agentToolRuntime,
+    desktopUpdater,
   });
   uiAuthController = bootstrapResult.uiAuthController;
   realtimeProxyRuntime = attachRealtimeProxy({
@@ -1907,6 +1954,8 @@ async function main(options = {}) {
     resolveGitBinaryForSpawn,
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
+    openchamberVersion: OPENCHAMBER_VERSION,
+    builtInExtensionsDir: options.builtInExtensionsDir,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
     managedChatsRoot: OPENCHAMBER_CHATS_DIR,
     normalizeDirectoryPath,
@@ -1914,6 +1963,8 @@ async function main(options = {}) {
     resolveOptionalProjectDirectory,
     validateDirectoryPath,
     readCustomThemesFromDisk,
+    saveImportedTheme,
+    deleteImportedTheme,
     refreshOpenCodeAfterConfigChange,
     getOpenCodeResolutionSnapshot,
     getOpenCodeUpgradeCapability,
@@ -1947,6 +1998,7 @@ async function main(options = {}) {
     writeSseEvent,
     permissionAutoAcceptRuntime,
     messageQueueRuntime,
+    routingRuntime,
   });
 
   const startupPipelineResult = await startupPipelineRuntime.run({
@@ -2051,7 +2103,7 @@ async function main(options = {}) {
         port: managed ? openCodePort : null,
       };
     },
-    stop: (shutdownOptions = {}) => {
+    stop: async (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       try {
@@ -2064,6 +2116,11 @@ async function main(options = {}) {
       } catch {
         // best-effort shutdown of the dictation worker
       }
+      // Guest services are child processes; leaving before SIGTERM lands
+      // (and the SIGKILL fallback fires) orphans them on the user's machine.
+      await stopAllGuestServices().catch(() => {
+        // best-effort teardown of guest service processes
+      });
       return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
     }
   };

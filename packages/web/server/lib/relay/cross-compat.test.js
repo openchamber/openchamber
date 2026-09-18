@@ -12,16 +12,42 @@ import {
   decodeTunnelFrame as jsDecode,
   encodeFrameBatch as jsEncodeBatch,
   encodeTunnelFrame as jsEncode,
+  decodeDeliveryAck,
 } from './tunnel-codec.js';
 import {
   decodeFrameBatch as tsDecodeBatch,
   decodeTunnelFrame as tsDecode,
   encodeFrameBatch as tsEncodeBatch,
   encodeTunnelFrame as tsEncode,
+  encodeDeliveryAck,
 } from '../../../../ui/src/lib/relay/tunnel-codec.ts';
 import { TunnelFrameType as TsFrameType } from '../../../../ui/src/lib/relay/protocol.ts';
 
 describe('relay JS-host <-> TS-client cross compatibility', () => {
+  it('negotiates flow control independently of batching, with legacy fallback on either side', async () => {
+    const keys = await generateEcdhKeyPair();
+    const pub = await exportPublicKeyJwk(keys.publicKey);
+    for (const batch of [false, true]) {
+      for (const clientFlow of [false, true]) {
+        for (const hostFlow of [false, true]) {
+          const client = await createClientHandshake(pub, { batch, flowControl: clientFlow });
+          const host = createHostHandshake(keys.privateKey, { batch, flowControl: hostFlow });
+          const ready = await host.handleText(client.helloText);
+          const established = await client.handleText(ready.replyText);
+          expect(ready.flowControl).toBe(clientFlow && hostFlow);
+          expect(established.flowControl).toBe(clientFlow && hostFlow);
+          expect(established.batch).toBe(batch);
+          expect((await host.handleText(client.helloText)).text).toBe(ready.replyText);
+        }
+      }
+    }
+    expect(JsFrameType).toEqual(TsFrameType);
+    for (const bytes of [0, 8197, 2 ** 32 + 17, Number.MAX_SAFE_INTEGER]) {
+      expect(decodeDeliveryAck(encodeDeliveryAck(bytes))).toBe(bytes);
+    }
+    expect(() => decodeDeliveryAck(new Uint8Array(7))).toThrow();
+    expect(() => decodeDeliveryAck(new Uint8Array(8).fill(255))).toThrow();
+  });
   it('completes a handshake and exchanges frames both ways', async () => {
     const hostKeys = await generateEcdhKeyPair();
     const hostPubJwk = await exportPublicKeyJwk(hostKeys.publicKey);

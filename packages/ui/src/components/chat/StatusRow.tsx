@@ -54,7 +54,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       {/* The glass chip lives here, not on the container: the root above is
           an inline-size query container, whose width ignores its children —
           a shrink-to-fit wrapper around it always collapsed to zero. */}
-      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3">
+      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3 [backdrop-filter:none]! [-webkit-backdrop-filter:none]!">
         <div className="flex items-center min-w-0 gap-2 overflow-x-hidden">
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder

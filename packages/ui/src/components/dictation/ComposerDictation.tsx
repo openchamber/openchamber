@@ -36,6 +36,9 @@ interface ComposerDictationProps {
     disabled?: boolean;
     onInsert: (text: string) => void;
     onInsertAndSend: (text: string) => void;
+    /** Called once when a dictation leaves idle, before any transcript exists,
+        so the host can record which draft the dictation belongs to. */
+    onStart?: () => void;
     /** Reports whether dictation is active (recording/transcribing/failed overlay shown). */
     onActiveChange?: (active: boolean) => void;
     /** Reports the height (px) the transcript needs, so the host can grow the
@@ -111,6 +114,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     disabled,
     onInsert,
     onInsertAndSend,
+    onStart,
     onActiveChange,
     onContentHeightChange,
     renderTrigger = true,
@@ -166,6 +170,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const statusRef = React.useRef(status);
     React.useEffect(() => {
         statusRef.current = status;
+    }, [status]);
+
+    // The transcript arrives long after the start; report the start itself so
+    // the host can keep the transcript with the draft that was on screen then.
+    const onStartRef = React.useRef(onStart);
+    React.useEffect(() => {
+        onStartRef.current = onStart;
+    }, [onStart]);
+    const wasIdleRef = React.useRef(true);
+    React.useLayoutEffect(() => {
+        const idle = status === 'idle';
+        if (wasIdleRef.current && !idle) {
+            onStartRef.current?.();
+        }
+        wasIdleRef.current = idle;
     }, [status]);
 
     // Layout effect on purpose: the host may expand/collapse the composer in
@@ -350,19 +369,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                     // shorthand `.overflow-hidden` to overflow-y:auto on touch
                     // devices, which painted a phantom scrollbar on Android.
                     className={cn(
-                        'absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
+                        // Exactly one glass surface while dictating (see the
+                        // .oc-dictation-overlay rule in design-system.css):
+                        // desktop mounts the overlay inside the glass box and
+                        // hides the box's other contents, so the overlay is
+                        // transparent; mobile mounts it beside the pill/box,
+                        // hides those, and the overlay is the glass itself.
+                        'oc-dictation-overlay absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
+                        isMobile && 'oc-glass-composer border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
                         // Mobile: the overlay surface shows instantly (riding the
                         // pill → voice morph), its content fades in only after the
                         // shape has grown — otherwise the controls paint clipped
                         // inside the still-small pill.
                         isMobile && 'oc-composer-morph-content-fade',
                     )}
-                    style={{
-                        borderRadius: radius,
-                        // Must match the composer box background exactly so the
-                        // overlay reads as the same surface, not a layer on top.
-                        backgroundColor: currentTheme.colors.surface.subtle,
-                    }}
+                    style={{ borderRadius: radius }}
                     role="dialog"
                     aria-label={t('chat.dictation.overlayAria')}
                 >

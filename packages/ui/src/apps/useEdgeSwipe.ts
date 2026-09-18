@@ -1,11 +1,12 @@
 import React from 'react';
 
 /**
- * Native-feeling edge swipes on the mobile chat: start a horizontal swipe from
+ * Native-feeling edge swipes on the mobile shell: start a horizontal swipe from
  * the very left/right screen edge and drag toward the centre.
  *
- * - Left edge → centre  = open the sessions drawer
- * - Right edge → centre = open the most recent overflow surface
+ * On the chat that opens a drawer (left edge → sessions, right edge →
+ * workspace); on an open drawer the mirrored swipe closes it (sessions drawer
+ * closes from the right edge, workspace drawer from the left edge).
  *
  * Only `touchstart`/`touchend` are observed (both passive), so this never
  * interferes with vertical chat scrolling or the horizontal scroll inside code
@@ -27,6 +28,9 @@ export interface EdgeSwipeOptions {
   onLeftEdgeSwipe?: () => void;
   /** Swipe that started at the right edge and travelled left. */
   onRightEdgeSwipe?: () => void;
+  /** Defaults to on. Flipping it re-attaches the listeners, which is what a
+      drawer needs: its element only exists (or only matters) while open. */
+  enabled?: boolean;
 }
 
 export const useEdgeSwipe = (
@@ -37,7 +41,10 @@ export const useEdgeSwipe = (
   const optionsRef = React.useRef(options);
   optionsRef.current = options;
 
+  const enabled = options.enabled ?? true;
+
   React.useEffect(() => {
+    if (!enabled) return;
     const element = ref.current;
     if (!element) return;
     const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
@@ -87,5 +94,5 @@ export const useEdgeSwipe = (
       element.removeEventListener('touchstart', onTouchStart);
       element.removeEventListener('touchend', onTouchEnd);
     };
-  }, [ref]);
+  }, [enabled, ref]);
 };

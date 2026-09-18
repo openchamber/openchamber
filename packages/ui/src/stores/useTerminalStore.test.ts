@@ -423,6 +423,20 @@ describe('terminal state reconciliation', () => {
     expect(buffer(tabId).chunks).toBe(previous);
   });
 
+  test('records the PTY size a snapshot was drawn for and treats a size change as a new snapshot', () => {
+    const tabId = setup();
+    useTerminalStore.getState().replaceBuffer('/repo', tabId, 'prompt', 8, { cols: 94, rows: 56 });
+    expect(buffer(tabId).chunks[0].size).toEqual({ cols: 94, rows: 56 });
+    const previous = buffer(tabId).chunks;
+    useTerminalStore.getState().replaceBuffer('/repo', tabId, 'prompt', 8, { cols: 94, rows: 56 });
+    expect(buffer(tabId).chunks).toBe(previous);
+    useTerminalStore.getState().replaceBuffer('/repo', tabId, 'prompt', 8, { cols: 80, rows: 24 });
+    expect(buffer(tabId).chunks).not.toBe(previous);
+    expect(buffer(tabId).chunks[0].size).toEqual({ cols: 80, rows: 24 });
+    useTerminalStore.getState().appendToBuffer('/repo', tabId, ' live', 9);
+    expect(buffer(tabId).chunks[1].size).toBe(undefined);
+  });
+
   test('caps multibyte scrollback by UTF-8 bytes', () => {
     const tabId = setup();
     useTerminalStore.getState().appendToBuffer('/repo', tabId, '界'.repeat(200_000), 1);

@@ -98,7 +98,7 @@ mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraftStore: () => ({ addDraft: () => undefined }) }));
 mock.module('@/components/terminal/TerminalViewport', () => ({
   TerminalViewport: React.forwardRef(function TerminalViewportMock(
-    { sessionKey, chunks, isVisible }: { sessionKey: string; chunks: unknown[]; isVisible: boolean },
+    { sessionKey, chunks, isVisible, onResize }: { sessionKey: string; chunks: unknown[]; isVisible: boolean; onResize: (cols: number, rows: number) => void },
     ref: React.ForwardedRef<{ focus: () => void; fit: () => void; getSelection: () => null }>,
   ) {
     React.useImperativeHandle(ref, () => ({
@@ -106,6 +106,11 @@ mock.module('@/components/terminal/TerminalViewport', () => ({
       fit: () => undefined,
       getSelection: () => null,
     }), []);
+    // A real surface reports its fitted grid once it is visible; a visible tab
+    // spawns its shell only after that report.
+    React.useEffect(() => {
+      if (isVisible) onResize(100, 30);
+    }, [isVisible, onResize]);
 
     return React.createElement('div', {
       'data-terminal-viewport': 'true',
@@ -303,7 +308,7 @@ describe('TerminalView project action tab indicator', () => {
     expect(ensureDirectoryCalls).not.toContain('/missing-repo');
     expect(createSessionCalls.length).toBe(0);
     expect(host.querySelector('[data-tabs-strip="terminal"]')).toBeNull();
-    expect(host.querySelector('[data-terminal-viewport="true"]')?.getAttribute('data-chunk-count')).toBe('0');
+    expect(host.querySelector('[data-terminal-viewport="true"]')).toBeNull();
   });
 
   test('includes the terminal directory in the viewport identity key', async () => {
@@ -376,7 +381,7 @@ describe('TerminalView project action tab indicator', () => {
     });
     connectBehavior = (_sessionId, handlers) => {
       void Promise.resolve().then(() => {
-        handlers.onEvent({ type: 'snapshot', data: snapshotData, sequence: 7, status: 'running' });
+        handlers.onEvent({ type: 'snapshot', data: snapshotData, sequence: 7, status: 'running', cols: 94, rows: 56 });
       });
       return { close: () => undefined };
     };
@@ -391,6 +396,7 @@ describe('TerminalView project action tab indicator', () => {
     expect(createSessionCalls.length).toBe(0);
     expect(readBufferContent('/repo', actionTab.id)).toBe(snapshotData);
     expect(useTerminalStore.getState().getBuffer('/repo', actionTab.id).lastSequence).toBe(7);
+    expect(useTerminalStore.getState().getBuffer('/repo', actionTab.id).chunks[0]?.size).toEqual({ cols: 94, rows: 56 });
     expect(replaceCount).toBe(1);
   });
 

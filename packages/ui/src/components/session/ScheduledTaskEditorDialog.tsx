@@ -395,7 +395,7 @@ const TimePill: React.FC<TimePillProps> = ({
   return (
     <div
       className={cn(
-        'inline-flex h-9 w-fit items-center gap-1 rounded-md border border-border bg-background focus-within:ring-1 focus-within:ring-interactive-focusRing focus-within:border-interactive-focusRing',
+        'oc-surface-elevated inline-flex h-9 w-fit items-center gap-1 rounded-md border border-border bg-surface-elevated focus-within:ring-1 focus-within:ring-ring focus-within:border-ring',
         use24Hour ? 'px-2' : 'pl-2 pr-1',
       )}
     >
@@ -1279,7 +1279,7 @@ export function ScheduledTaskEditorDialog(props: {
                   </button>
 
                   {isDatePickerOpen ? (
-                    <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[288px] rounded-xl border border-border bg-background p-3 shadow-sm">
+                    <div className="oc-surface-elevated absolute left-0 top-[calc(100%+6px)] z-50 w-[288px] rounded-xl border border-border bg-surface-elevated p-3 shadow-sm">
                       <div className="mb-2 flex items-center justify-between">
                         <button
                           type="button"
@@ -1340,7 +1340,7 @@ export function ScheduledTaskEditorDialog(props: {
                                 'h-8 rounded-md typography-ui-label',
                                 dayClass,
                                 isToday && !isSelected
-                                  ? 'ring-1 ring-inset ring-interactive-focusRing bg-interactive-hover/50'
+                                  ? 'ring-1 ring-inset ring-ring bg-interactive-selection text-interactive-selection-foreground'
                                   : '',
                                 isPast ? 'cursor-not-allowed opacity-45' : '',
                               ].join(' ')}

@@ -6,7 +6,7 @@ import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
 type FetchCall = { path: string; method: string; body: ReturnType<typeof JSON.parse> }
 let calls: FetchCall[] = []
 let activeRuntimeKey = "runtime-a"
-let respond: (call: FetchCall) => Response = () => new Response("{}", { status: 200 })
+let respond: (call: FetchCall) => Response | Promise<Response> = () => new Response("{}", { status: 200 })
 
 mock.module("@/lib/runtime-fetch", () => ({
   runtimeFetch: async (path: string, init?: RequestInit) => {
@@ -43,6 +43,15 @@ type ServerReply = {
 }
 
 const json = (value: ServerReply, status = 200) => new Response(JSON.stringify(value), { status })
+
+const deferredResponse = () => {
+  let complete: ((response: Response) => void) | undefined
+  const promise = new Promise<Response>((resolve) => { complete = resolve })
+  return { promise, resolve: (response: Response) => {
+    if (!complete) throw new Error("Deferred response was not initialized")
+    complete(response)
+  } }
+}
 
 const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
 const key = getMessageQueueKey(target)
@@ -82,6 +91,7 @@ const attachment: AttachedFile = {
 }
 
 beforeEach(() => {
+  useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
   activeRuntimeKey = "runtime-a"
   useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {} })
   calls = []
@@ -121,6 +131,137 @@ describe("server-owned message queue", () => {
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(["GET /api/message-queue"])
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["hello"])
     expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q1"])
+  })
+
+  test("hydrate keeps a queue newer than its snapshot", async () => {
+    applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "queued after the read started")])), "runtime-a")
+    respond = () => json({ revision: 9, sessions: [] })
+    await useMessageQueueStore.getState().hydrate()
+
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q1"])
+  })
+
+  test("context-only queue previews survive authoritative snapshots", async () => {
+    respond = () => json({ revision: 3, sessions: [session([serverItem("q1", "", { contextPreview: "Explain this quote" })])] })
+    await useMessageQueueStore.getState().hydrate()
+    const queued = useMessageQueueStore.getState().queuedMessages[key]?.[0]
+    expect(queued?.contextPreview).toBe("Explain this quote")
+    expect(queued?.content).toBe("")
+    expect(queued?.context).toBeUndefined()
+  })
+
+  test("resync can establish the initial snapshot before bootstrap", async () => {
+    activeRuntimeKey = "runtime-never-hydrated"
+    respond = () => json({ revision: 1, sessions: [] })
+    await useMessageQueueStore.getState().resync()
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a reconnect during the initial snapshot retains one trailing refresh", async () => {
+    const first = deferredResponse()
+    respond = () => calls.length === 1 ? first.promise : json({ revision: 12, sessions: [] })
+    const bootstrap = useMessageQueueStore.getState().hydrate()
+    const reconnect = useMessageQueueStore.getState().resync()
+    const secondReconnect = useMessageQueueStore.getState().resync()
+    expect(calls).toHaveLength(1)
+    first.resolve(json({ revision: 10, sessions: [session([serverItem("q1", "delivered after snapshot")])] }))
+    await Promise.all([bootstrap, reconnect, secondReconnect])
+    expect(calls).toHaveLength(2)
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+  })
+
+  test("concurrent bootstrap and recovery migrate a legacy message only once", async () => {
+    activeRuntimeKey = "runtime-legacy-recovery"
+    const legacyTarget = createMessageQueueTarget("session-1", "/repo", activeRuntimeKey)
+    if (!legacyTarget) throw new Error("Missing test target")
+    const legacyKey = getMessageQueueKey(legacyTarget)
+    useMessageQueueStore.setState({ queuedMessages: { [legacyKey]: [{ id: "local", content: "legacy", text: "legacy", createdAt: 1, sendConfig: { providerID: "p", modelID: "m" } }] } })
+    const upload = deferredResponse()
+    respond = (call) => call.method === "POST" ? upload.promise : json({ revision: 2, sessions: [] })
+    const bootstrap = useMessageQueueStore.getState().hydrate()
+    const recovery = useMessageQueueStore.getState().resync()
+    upload.resolve(json({ revision: 2, session: session([]) }))
+    await Promise.all([bootstrap, recovery])
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1)
+    expect(useMessageQueueStore.getState().queuedMessages[legacyKey]).toBeUndefined()
+  })
+
+  test("an empty snapshot prevents delayed responses from resurrecting omitted queues", async () => {
+    applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "queued")], "q1")), "runtime-a")
+    respond = () => json({ revision: 12, sessions: [] })
+    await useMessageQueueStore.getState().hydrate()
+    applyMessageQueueUpdatedEvent(updated(11, session([serverItem("q1", "stale")], "q1")), "runtime-a")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+    expect(useMessageQueueStore.getState().sendingIds[key]).toBeUndefined()
+    const other = { ...session([serverItem("q2", "unseen stale")]), sessionId: "unseen" }
+    applyMessageQueueUpdatedEvent(updated(11, other), "runtime-a")
+    expect(Object.keys(useMessageQueueStore.getState().queuedMessages)).toHaveLength(0)
+  })
+
+  test("recovery demand survives a failed in-flight snapshot", async () => {
+    const first = deferredResponse()
+    applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "delivered")])), "runtime-a")
+    respond = () => calls.length === 1 ? first.promise : json({ revision: 12, sessions: [] })
+    const bootstrap = useMessageQueueStore.getState().hydrate()
+    const recovery = useMessageQueueStore.getState().resync()
+    first.resolve(new Response(null, { status: 503 }))
+    await Promise.all([bootstrap, recovery])
+    expect(calls).toHaveLength(2)
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+  })
+
+  test("returning to a runtime migrates its unattempted legacy messages without repeating the first upload", async () => {
+    activeRuntimeKey = "runtime-partial-migration"
+    const legacyTarget = createMessageQueueTarget("session-1", "/repo", activeRuntimeKey)
+    if (!legacyTarget) throw new Error("Missing test target")
+    const legacyKey = getMessageQueueKey(legacyTarget)
+    useMessageQueueStore.setState({ queuedMessages: { [legacyKey]: ["first", "second"].map((id) => ({ id, content: id, text: id, createdAt: 1, sendConfig: { providerID: "p", modelID: "m" } })) } })
+    const first = deferredResponse()
+    respond = (call) => call.method === "POST"
+      ? calls.length === 1 ? first.promise : json({ revision: 2, session: session([]) })
+      : json({ revision: 3, sessions: [] })
+    const initial = useMessageQueueStore.getState().hydrate()
+    useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
+    activeRuntimeKey = "runtime-other"
+    first.resolve(json({ revision: 1, session: session([]) }))
+    await initial
+    activeRuntimeKey = "runtime-partial-migration"
+    await useMessageQueueStore.getState().hydrate()
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.body.item.content)).toEqual(["first", "second"])
+  })
+
+  test("a failed refresh preserves the projection and a later recovery retries", async () => {
+    applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "queued")])), "runtime-a")
+    respond = () => new Response(null, { status: 503 })
+    await expect(useMessageQueueStore.getState().resync()).rejects.toThrow()
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1)
+    respond = () => json({ revision: 12, sessions: [] })
+    await useMessageQueueStore.getState().resync()
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+  })
+
+  test("a runtime switch rejects an old snapshot and its pending recovery", async () => {
+    const old = deferredResponse()
+    respond = () => old.promise
+    const bootstrap = useMessageQueueStore.getState().hydrate()
+    const recovery = useMessageQueueStore.getState().resync()
+    useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
+    activeRuntimeKey = "runtime-b"
+    respond = () => json({ revision: 1, sessions: [] })
+    await useMessageQueueStore.getState().hydrate()
+    old.resolve(json({ revision: 99, sessions: [session([serverItem("q1", "old runtime")])] }))
+    await Promise.all([bootstrap, recovery])
+    expect(Object.keys(useMessageQueueStore.getState().queuedMessages)).toHaveLength(0)
+    expect(calls).toHaveLength(2)
+  })
+
+  test("resync drops a queue the server no longer lists", async () => {
+    respond = () => json({ revision: 3, sessions: [session([serverItem("q1", "queued")], "q1")] })
+    await useMessageQueueStore.getState().hydrate()
+
+    respond = () => json({ revision: 4, sessions: [] })
+    await useMessageQueueStore.getState().resync()
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
   })
 
   test("addToQueue shows the message at once and settles on the server's copy", async () => {
@@ -209,6 +350,7 @@ describe("server-owned message queue", () => {
       sendConfig: { providerID: "p", modelID: "m" },
     })
     expect(calls[0]?.body.item.context).toEqual(context)
+    expect(calls[0]?.body.item.contextPreview).toBe("Bug")
     // The projection carries no context; the server strips payloads from snapshots.
     expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]?.context).toBe(undefined)
 
@@ -268,6 +410,16 @@ describe("server-owned message queue", () => {
     expect(calls[0]?.method).toBe("POST")
     expect(taken.map((m) => m.content)).toEqual(["second"])
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q1"])
+  })
+
+  test("a failed take re-reads the server so a stale projection is cleared", async () => {
+    useMessageQueueStore.setState({ queuedMessages: { [key]: [{ id: "q1", content: "already delivered", text: "already delivered", createdAt: 1 }] } })
+    respond = (call) => (call.path.endsWith("/take")
+      ? new Response(JSON.stringify({ error: "queued message not found" }), { status: 404 })
+      : json({ revision: 12, sessions: [] }))
+    await expect(useMessageQueueStore.getState().takeForSend(target, "q1")).rejects.toThrow()
+
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
   })
 
   test("broadcasts update the projection but never move it backwards", () => {

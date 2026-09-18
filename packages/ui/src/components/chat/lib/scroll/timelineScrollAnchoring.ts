@@ -1,29 +1,17 @@
-// Anchored-turn scroll geometry for the chat timeline.
+// Scroll geometry for the chat timeline.
 //
-// The timeline has three mutually exclusive scroll modes:
+// The timeline has two mutually exclusive scroll modes:
 //
-//   • `following-end`      — stay pinned to the live edge as content grows.
-//   • `anchoring-new-turn` — the just-sent user message is parked near the TOP
-//     of the viewport and the reply streams into reserved space below it. The
-//     viewport does NOT move until the turn outgrows the usable viewport.
-//   • `free-scrolling`     — the user took over; nothing moves the scroll
+//   • `following-end`  — stay pinned to the live edge as content grows.
+//   • `free-scrolling` — the user took over; nothing moves the scroll
 //     position until they opt back in.
 //
 // This module is pure geometry: it reads measurements from the virtualized
-// list and answers "how far, if at all, must we scroll to reveal the end of
-// the anchored turn". Keeping it free of DOM and React makes the mode machine
-// testable without a renderer.
-//
-// "Usable viewport" is the visible height minus the composer overlay (the
-// composer floats over the list) minus the anchor offset, so a turn is only
-// considered overflowing when it genuinely cannot be read.
+// list and answers where the real content ends and whether the viewport is
+// there. Keeping it free of DOM and React makes the rules testable without a
+// renderer.
 
-export type TimelineScrollMode = 'following-end' | 'anchoring-new-turn' | 'free-scrolling';
-
-// Distance from the top of the viewport at which an anchored user message
-// parks. Small enough to read as "at the top", large enough not to collide
-// with the timeline's top fade.
-export const CHAT_LIST_ANCHOR_OFFSET = 16;
+export type TimelineScrollMode = 'following-end' | 'free-scrolling';
 
 export interface TimelineListMeasurementState {
     readonly data: readonly unknown[];
@@ -31,17 +19,6 @@ export interface TimelineListMeasurementState {
     readonly scrollLength: number;
     readonly positionAtIndex: (index: number) => number | undefined;
     readonly sizeAtIndex: (index: number) => number | undefined;
-}
-
-export interface AnchoredTurnMetrics {
-    readonly anchorTop: number;
-    readonly lastBottom: number;
-    readonly turnHeight: number;
-    readonly usableViewportHeight: number;
-    readonly visibleUsableBottom: number;
-    readonly overflowsUsableViewport: boolean;
-    readonly targetScrollToRevealEnd: number;
-    readonly scrollDeltaToRevealEnd: number;
 }
 
 export const getRowBottom = (
@@ -58,86 +35,33 @@ export const getRowBottom = (
     ) {
         return null;
     }
-    // Rows measured at zero height would make an anchored turn look empty and
-    // suppress the reveal scroll; treat them as one pixel tall instead.
+    // Rows measured at zero height would read as no content at all; treat
+    // them as one pixel tall instead.
     return top + Math.max(1, height);
 };
 
-export const getAnchoredTurnMetrics = ({
-    state,
-    anchorIndex,
-    composerOverlayHeight,
-    anchorOffset,
-}: {
-    readonly state: TimelineListMeasurementState;
-    readonly anchorIndex: number;
-    readonly composerOverlayHeight: number;
-    readonly anchorOffset: number;
-}): AnchoredTurnMetrics | null => {
-    if (state.data.length === 0) return null;
-
-    const boundedAnchorIndex = Math.max(0, Math.min(anchorIndex, state.data.length - 1));
-    const anchorTop = state.positionAtIndex(boundedAnchorIndex);
-    // The LAST row bottom, not the content length: the reserved anchored end
-    // space lives past it, and targeting that reserved tail would scroll the
-    // real content off the top.
-    const lastBottom = getRowBottom(state, state.data.length - 1);
-    if (typeof anchorTop !== 'number' || !Number.isFinite(anchorTop) || lastBottom === null) {
-        return null;
-    }
-
-    const usableViewportHeight = Math.max(
-        0,
-        state.scrollLength - composerOverlayHeight - anchorOffset,
-    );
-    const turnHeight = Math.max(0, lastBottom - anchorTop);
-    const visibleUsableBottom = state.scroll + usableViewportHeight;
-    const targetScrollToRevealEnd = Math.max(0, lastBottom - usableViewportHeight);
-    // Never negative: revealing the end must not scroll the timeline backwards.
-    const scrollDeltaToRevealEnd = Math.max(0, targetScrollToRevealEnd - state.scroll);
-
-    return {
-        anchorTop,
-        lastBottom,
-        turnHeight,
-        usableViewportHeight,
-        visibleUsableBottom,
-        overflowsUsableViewport: turnHeight > usableViewportHeight,
-        targetScrollToRevealEnd,
-        scrollDeltaToRevealEnd,
-    };
-};
-
-// The scroll offset that puts the LAST REAL ROW's bottom just above the
-// composer overlay. Distinct from the list's own end offset, which is derived
-// from the total content length: that length includes any reserved anchored
-// end space and, right after rows re-wrap on a width change, row sizes that
-// have not been re-measured yet. Scrolling to it then lands below the real
-// content and leaves a blank tail. `extraInset` reserves additional slack
-// below the content when a caller wants the row to sit clear of the edge.
+// The list footer (question and permission cards, error notices, the tail
+// spacer) renders after the last row and is part of the real content; the
+// list does not expose its size through getState, so the caller passes the
+// last reported value.
 export const resolveRealContentEndOffset = ({
     state,
     composerOverlayHeight,
-    extraInset = 0,
+    footerSize = 0,
 }: {
     readonly state: TimelineListMeasurementState;
     readonly composerOverlayHeight: number;
-    readonly extraInset?: number;
+    readonly footerSize?: number;
 }): number | null => {
     const lastIndex = state.data.length - 1;
     if (lastIndex < 0) return null;
     const lastBottom = getRowBottom(state, lastIndex);
     if (lastBottom === null) return null;
-    const visibleLength = Math.max(0, state.scrollLength - composerOverlayHeight - extraInset);
-    return Math.max(0, lastBottom - visibleLength);
+    const visibleLength = Math.max(0, state.scrollLength - composerOverlayHeight);
+    return Math.max(0, lastBottom + Math.max(0, footerSize) - visibleLength);
 };
 
-// "At the end" for follow purposes is a tight band, not the list's isNearEnd
-// (half a viewport): that band hid the scroll-to-bottom pill and re-armed
-// follow while the user had genuinely scrolled away, yanking them back on the
-// next stream chunk. Distance is measured against the full content length —
-// reserved anchored end space included — so a parked anchored turn counts as
-// the live edge.
+// Keep return-to-end detection in a tight band, rather than half a viewport.
 export const TIMELINE_FOLLOW_REARM_THRESHOLD_PX = 40;
 
 export const resolveTimelineIsAtEnd = (
@@ -160,32 +84,4 @@ export const resolveTimelineIsAtEnd = (
         return contentLength - (scroll + scrollLength) <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
     }
     return state.isNearEnd ?? state.isAtEnd;
-};
-
-export interface ChatListAnchoredEndSpace {
-    readonly anchorIndex: number;
-    readonly anchorOffset: number;
-}
-
-// Finds the anchored row from the BACK of the list: a retried or re-sent
-// message id can appear more than once, and the live one is always the last.
-export const resolveChatListAnchoredEndSpace = <Item, AnchorId>(
-    items: readonly Item[],
-    anchorId: AnchorId | null,
-    getAnchorId: (item: Item) => AnchorId | null,
-    options: { readonly anchorOffset?: number } = {},
-): ChatListAnchoredEndSpace | undefined => {
-    if (anchorId === null) return undefined;
-
-    for (let index = items.length - 1; index >= 0; index -= 1) {
-        const item = items[index];
-        if (item !== undefined && getAnchorId(item) === anchorId) {
-            return {
-                anchorIndex: index,
-                anchorOffset: options.anchorOffset ?? CHAT_LIST_ANCHOR_OFFSET,
-            };
-        }
-    }
-
-    return undefined;
 };

@@ -276,7 +276,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   const renderAuthorizationDetails = (authorization: OAuthAuthorization) => (
     <>
       {authorization.instructions && (
-        <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
+        <p className="typography-meta text-[var(--status-info-text)] bg-[var(--status-info-background)] px-2 py-1.5 rounded">
           {authorization.instructions}
         </p>
       )}

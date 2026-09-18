@@ -1,0 +1,100 @@
+---
+title: Konfiguracja w repozytorium
+description: Trzymaj akcje projektu, polecenia konfiguracji worktree, startery i plany w repozytorium, aby dostał je każdy, kto je pobierze.
+---
+
+# Konfiguracja w repozytorium
+
+Akcje projektu, polecenia konfiguracji worktree i startery szkicu domyślnie żyją w Twoich własnych ustawieniach OpenChamber. Nikt inny ich nie widzi. Jeśli chcesz, aby osoba z zespołu, która sklonuje repozytorium, dostała tę samą akcję serwera deweloperskiego i to samo `bun install` w każdym nowym worktree, przenieś te elementy do repozytorium.
+
+OpenChamber zapisuje je w pliku `.openchamber/project.json` w katalogu głównym repozytorium. Plik pojawia się dopiero wtedy, gdy przeniesiesz tam pierwszy element, i znika, gdy zabierzesz ostatni. Commituj go jak każdy inny plik.
+
+## Co gdzie trafia
+
+| Zostaje w Twoich ustawieniach | Można przenieść do repozytorium |
+|---|---|
+| Notatki i todo | Akcje projektu |
+| Zaplanowane zadania | Polecenia konfiguracji worktree |
+| Które akcje z repozytorium ukrywasz u siebie | Startery szkicu (przypięte polecenia i skille) |
+| Twoja odpowiedź o zaufaniu do poleceń z repozytorium | Plany |
+
+Notatki, todo i zaplanowane zadania są Twoje. Nigdy nie trafiają do repozytorium.
+
+## Przenoszenie elementu
+
+Otwórz **Settings → Projects** i wybierz projekt. Każda akcja i każde polecenie konfiguracji ma przycisk **Move to repository**, a każdy element pochodzący z repozytorium ma **Move to my settings**. Startery na ekranie nowej sesji pokazują tę samą parę po najechaniu. Plany mają ją w każdym wierszu karty Plany.
+
+Przeniesienie to po prostu przeniesienie. Element znika z jednego miejsca i pojawia się w drugim, nic nie jest duplikowane.
+
+Elementy z repozytorium mają odznakę **In repo**. Akcje z repozytorium można ukryć ze swojego menu przyciskiem **Hide for me**. To zmienia tylko Twoje menu, nie plik.
+
+## Plik
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Wymagany jest tylko `version`. Wszystkie pozostałe klucze są opcjonalne, a OpenChamber zapisuje tylko te, które coś zawierają.
+
+`setupWorktree` to lista poleceń powłoki, które OpenChamber uruchamia w nowym worktree zaraz po jego utworzeniu, po kolei. Użyj `$ROOT_PROJECT_PATH` jako ścieżki do głównego checkoutu. `setupWorktreeWait: true` sprawia, że OpenChamber czeka na te polecenia, zanim uruchomi sesję w worktree.
+
+`projectActions` to lista akcji w menu nagłówka. `id`, `name` i `command` są wymagane. `icon` jest opcjonalna i domyślnie jest to ikona play; OpenChamber zna nazwy `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` i `file`. `autoOpenUrl: true` otwiera adres wypisany przez polecenie, zobacz [Podgląd i serwery deweloperskie](/preview/). `platforms` ogranicza akcję do `macos`, `linux` lub `windows`. `runIn: "parent"` uruchamia akcję w głównym checkoucie zamiast w bieżącym worktree.
+
+`draftStarters` przypina polecenia i skille do ekranu nowej sesji. Każdy wpis ma postać `{ "type": "command" | "skill", "name": "..." }`, a samo polecenie lub skill musi istnieć w konfiguracji OpenCode tego repozytorium.
+
+`plansDir` to miejsce planów repozytorium. Pomiń go, aby używać `.openchamber/plans`. Zobacz niżej.
+
+Ten plik można pisać ręcznie. Klucz o złym kształcie unieważnia cały plik, a strona Projects mówi dlaczego, zamiast go po cichu zignorować.
+
+## Jak łączą się elementy z repozytorium i Twoje
+
+Najpierw uruchamiane są polecenia konfiguracji z repozytorium, potem Twoje. Zaznacz **Use only my setup commands** w sekcji Worktree, aby całkowicie pominąć polecenia z repozytorium.
+
+Akcje są łączone po `id`. Akcja w Twoich ustawieniach o tym samym id co akcja z repozytorium zastępuje ją. Startery są łączone po nazwie.
+
+Flaga oczekiwania pochodzi z Twoich ustawień, jeśli ją ustawisz, w przeciwnym razie z repozytorium.
+
+## Zaufanie
+
+Polecenia konfiguracji i akcje z repozytorium uruchamiają się na Twoim komputerze, a `git pull` może je zmienić. Dlatego za pierwszym razem, gdy któreś z nich ma się uruchomić, OpenChamber pokazuje dokładną treść poleceń i pyta. **Trust and run** zapamiętuje odpowiedź w tej instancji. **Not this time** uruchamia tylko Twoje własne polecenia.
+
+Odpowiedź jest związana z samymi poleceniami. Gdy pull zmieni polecenie z repozytorium, pytanie wraca dla nowej treści. Odpowiedź możesz zapomnieć przyciskiem **reset trust** w sekcji Worktree ustawień projektu.
+
+Przeniesienie własnego polecenia do repozytorium liczy się jako zaufanie, bo właśnie je widziałeś.
+
+## Plany w repozytorium
+
+Plany z karty Plany też mogą żyć w repozytorium jako pliki Markdown. Domyślny folder to `.openchamber/plans`. Ustaw **Plans folder** w ustawieniach projektu, aby użyć innego folderu w repozytorium, na przykład `docs/plans`, jeśli zespół już trzyma tam plany. Własny folder całkowicie zastępuje domyślny: OpenChamber czyta i zapisuje tylko w nim, więc przy zmianie przenieś istniejące pliki samodzielnie.
+
+Każdy plik `.md` w tym folderze pojawia się w karcie Plany, także pliki zapisane przez inne narzędzia. Edycja w OpenChamber zapisuje plik tak, jak go wpisałeś. Plan przeniesiony do repozytorium zachowuje tożsamość, więc sesje, do których był dołączony, nadal go znajdują.
+
+## Powiązane
+
+- [Akcje projektu](/project-actions/)
+- [Worktrees](/worktrees/)
+- [Notatki, todo i plany projektu](/notes-todos-plans/)

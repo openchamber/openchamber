@@ -144,13 +144,27 @@ mock.module('@/components/ui', () => ({
 mock.module('@/components/icon/Icon', () => ({ Icon: ({ name, className }: { name: string; className?: string }) => React.createElement('span', { 'data-icon': name, className }) }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ terminal, runtime: { isVSCode: false, platform: 'web' } }) }));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => mockedDeviceInfo }));
-mock.module('@/lib/desktop', () => ({ isDesktopShell: () => false }));
+// Modules under test import other desktop helpers too; keep the real ones.
+const desktop = await import('@/lib/desktop');
+mock.module('@/lib/desktop', () => ({ ...desktop, isDesktopShell: () => false }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTheme: { metadata: { variant: 'dark' }, colors: { surface: { background: '#000' }, syntax: { base: { foreground: '#fff' } } } } }) }));
 mock.module('@/stores/useDesktopSshStore', () => ({ useDesktopSshStore: useDesktopSshStoreMock }));
 mock.module('@/lib/url', () => ({ openExternalUrl: async (url: string) => { openExternalCalls.push(url); } }));
 mock.module('@/lib/openchamberConfig', () => ({
   getProjectActionsState: async () => mockedActionsState,
+  // The button loads the merged setup; the test's actions are personal, so nothing asks for trust.
+  getProjectSetup: async () => ({
+    trust: { hash: null, trusted: true },
+    setupWorktree: [],
+    setupWorktreeWait: false,
+    projectActions: mockedActionsState.actions.map((action) => ({ ...action, source: 'personal' })),
+    projectActionsPrimaryId: null,
+    draftStarters: [],
+    shared: { status: 'missing', path: '.openchamber/project.json', setupWorktree: [], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: null },
+    personal: { setupWorktree: [], setupWorktreeWait: null, setupWorktreeMode: 'append', projectActions: mockedActionsState.actions, projectActionsPrimaryId: null, draftStarters: [], hiddenSharedActionIds: [], sharedTrust: null },
+  }),
+  updateProjectSetup: async () => true,
 }));
 mock.module('@/lib/browser/announcedServers', () => ({ setAnnouncedDevServers: () => undefined }));
 mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => effectiveDirectory }));

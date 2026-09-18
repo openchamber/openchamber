@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearAppImageArgv0FromProcessEnv,
-  resolveLinuxPtyLaunch,
+  resolvePosixPtyLaunch,
   stripAppImageArgv0Leak,
 } from './inherited-env.js';
 
@@ -46,18 +46,17 @@ describe('clearAppImageArgv0FromProcessEnv', () => {
   });
 });
 
-describe('resolveLinuxPtyLaunch', () => {
-  it('wraps the shell with env -u ARGV0 on Linux', () => {
-    if (process.platform !== 'linux') return;
-    expect(resolveLinuxPtyLaunch('/bin/zsh', ['-l'])).toEqual({
+describe('resolvePosixPtyLaunch', () => {
+  it('wraps the shell with env -u for every host-private variable on POSIX', () => {
+    if (process.platform === 'win32') return;
+    expect(resolvePosixPtyLaunch('/bin/zsh', ['-l'])).toEqual({
       executable: expect.stringMatching(/\/env$/),
-      args: ['-u', 'ARGV0', '/bin/zsh', '-l'],
+      args: ['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '/bin/zsh', '-l'],
     });
   });
 
-  it('leaves non-Linux launches unchanged', () => {
-    if (process.platform === 'linux') return;
-    expect(resolveLinuxPtyLaunch('/bin/zsh', ['-l'])).toEqual({
+  it('leaves the launch unchanged with nothing to unset', () => {
+    expect(resolvePosixPtyLaunch('/bin/zsh', ['-l'], [])).toEqual({
       executable: '/bin/zsh',
       args: ['-l'],
     });

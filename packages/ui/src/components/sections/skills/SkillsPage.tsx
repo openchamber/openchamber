@@ -782,7 +782,7 @@ const SkillsInstalledPage: React.FC = () => {
                   value={newFileName}
                   onChange={(e) => setNewFileName(e.target.value)}
                   placeholder={t('settings.skills.page.fileDialog.field.filePathPlaceholder')}
-                  className="text-foreground placeholder:text-muted-foreground focus-visible:ring-[var(--primary-base)]"
+                  className="text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
                   disabled={editingFilePath !== null}
                 />
               </div>

@@ -1110,7 +1110,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
         return resolved;
       }
 
-      process.env.OPENCODE_BINARY = resolved;
+      // AppImage updates inherit process.env. Keep automatic desktop bundle
+      // selection local so the next app does not treat the old mount as an override.
+      if (process.env.OPENCHAMBER_RUNTIME !== 'desktop' || state.resolvedOpencodeBinarySource !== 'bundled') {
+        process.env.OPENCODE_BINARY = resolved;
+      }
       prependToPath(path.dirname(resolved));
       ensureOpencodeShimRuntime(resolved);
       state.resolvedOpencodeBinary = resolved;

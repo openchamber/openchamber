@@ -1,0 +1,121 @@
+---
+title: Exemplo
+description: Uma extensão completa do OpenChamber em três arquivos para copiar. Ela conecta um token do GitHub, lista repositórios e anexa um deles ao chat.
+---
+
+# Exemplo
+
+Estes três arquivos são uma extensão que funciona. Ela conecta um token do GitHub, lista seus repositórios e deixa você anexar um deles ao chat. Copie-os para uma pasta e depois troque a API e a lista pelas do seu próprio provedor. Para os campos do manifesto e a instalação, veja [Crie uma extensão](/sdk/); para cada método, veja [API do host](/sdk/host/).
+
+`package.json`:
+
+```json
+{
+  "name": "my-repos",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": { "path": "/user", "name": "login" },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "^1.24.0" }
+}
+```
+
+`panel/index.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html, body { margin: 0; height: 100%; } #root { height: 100%; padding: 12px; box-sizing: border-box; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
+```
+
+`panel/main.ts`:
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+import { applyHostReady, mountBanner, mountEmpty, mountList, mountSpinner } from "@openchamber/sdk/ui";
+
+type Repo = { full_name: string; html_url: string; description: string | null };
+
+const host = connectHost();
+const root = document.querySelector("#root")!;
+let mounted: Array<{ dispose: () => void }> = [];
+
+const clear = () => {
+  for (const block of mounted) block.dispose();
+  mounted = [];
+};
+
+let generation = 0;
+const paint = async (connected: boolean) => {
+  const currentGeneration = ++generation;
+  clear();
+  if (!connected) {
+    mounted.push(mountEmpty(root, {
+      title: "Not connected",
+      body: "Paste a GitHub token in Settings → Integrations → GitHub (token).",
+    }));
+    return;
+  }
+  const spinner = mountSpinner(root, { label: "Loading repositories" });
+  mounted.push(spinner);
+  try {
+    const result = await host.request({ method: "GET", path: "/user/repos", query: { per_page: "30", sort: "updated" } });
+    if (currentGeneration !== generation) return;
+    spinner.dispose();
+    if (result.status !== 200) {
+      mounted.push(mountBanner(root, { tone: "error", title: `GitHub answered ${result.status}` }));
+      return;
+    }
+    const repos = JSON.parse(result.body) as Repo[];
+    mounted.push(mountList(root, {
+      items: repos.map((repo) => ({ id: repo.full_name, title: repo.full_name, subtitle: repo.description ?? undefined })),
+      onSelect: (id) => {
+        const repo = repos.find((item) => item.full_name === id);
+        if (repo) void host.attach({ providerId: "my-repos", id: repo.full_name, title: repo.full_name, url: repo.html_url });
+      },
+    }));
+  } catch (error) {
+    if (currentGeneration !== generation) return;
+    spinner.dispose();
+    const text = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    mounted.push(mountBanner(root, { tone: "error", title: "Request failed", body: text }));
+  }
+};
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+});
+let previousConnection: string | undefined;
+host.onConnection((connection) => {
+  const key = JSON.stringify(connection);
+  if (key === previousConnection) return;
+  previousConnection = key;
+  void paint(connection.connected);
+});
+```
+
+Para instalar e atualizar por URL Git, faça commit de `panel/main.js` compilado junto com o HTML e o manifesto. O OpenChamber não instala dependências npm nem compila TypeScript na instalação. Versione o lockfile, coloque `node_modules/` no `.gitignore` e inclua as dependências do navegador no IIFE. Para lançar uma atualização, aumente a versão própria da extensão em `package.json`, compile novamente, faça commit e push. Escolha Update em Settings → Extensions. Uma URL fixada a uma tag Git permanece nessa tag.
+
+Compile a partir da pasta com `bunx openchamber-guest-bundle panel/main.ts panel/main.js` e depois adicione a pasta em Configurações → Extensões. Mais cinco exemplos (todos os controles de UI, uma lista de tarefas com ações e um comando de barra, um serviço local, um editor de arquivo de configuração, um pacote somente com ferramentas) estão em [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).

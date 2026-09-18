@@ -5,6 +5,10 @@ import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
+import { GuestHosts } from './GuestHosts';
+import { PluginPane } from './PluginPane';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -66,10 +70,17 @@ export const MainLayout: React.FC = () => {
     const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    const openGuestPageId = useUIStore((state) => state.openGuestPageId);
+    const guestPages = useGuestPages();
+    const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
+    React.useEffect(() => {
+        if (openGuestPageId && !guestPage) useUIStore.getState().setOpenGuestPage(null);
+    }, [openGuestPageId, guestPage]);
+    React.useEffect(() => subscribeRuntimeEndpointChanged(() => useUIStore.getState().setOpenGuestPage(null)), []);
     // Any full-page surface replacing the chat area. While open, the chat is
     // fully hidden (not just covered) so none of its floating chrome bleeds
     // through, and selecting a session or draft anywhere closes the surface.
-    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || Boolean(worktreesPageProjectId) || isMultiRunLauncherOpen;
+    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || Boolean(worktreesPageProjectId) || isMultiRunLauncherOpen || Boolean(guestPage);
 
     React.useEffect(() => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
@@ -158,6 +169,10 @@ export const MainLayout: React.FC = () => {
                                             <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
                                             <ErrorBoundary><ArchiveView /></ErrorBoundary>
                                             <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                                            {guestPage && <div className="absolute inset-0 z-10 bg-background">
+                                                <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
+                                                    onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
+                                            </div>}
                                         </main>
                                         <ContextPanel />
                                     </div>
@@ -166,6 +181,7 @@ export const MainLayout: React.FC = () => {
                             <div className="border-t border-border" data-page-scroll-lock="true">
                                 <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
                             </div>
+                            <ErrorBoundary><GuestHosts /></ErrorBoundary>
                         </div>
                     </div>
                 </div>

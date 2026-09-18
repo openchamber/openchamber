@@ -4,7 +4,7 @@ const listMock = mock(async () => ({ data: [] }));
 
 mock.module('../git/index.js', () => ({
   getRemotes: async () => [],
-  getStatus: async () => null,
+  getTrackingBranch: async () => null,
 }));
 
 mock.module('./repo/index.js', () => ({

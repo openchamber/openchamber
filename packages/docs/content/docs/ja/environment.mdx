@@ -25,6 +25,8 @@ OpenChamber Web サーバーのバインドアドレスです。他のマシン�
 
 OpenChamber のデータディレクトリを上書きします。デフォルトは `~/.config/openchamber` です。
 
+OpenChamber が保存するものはすべてこのディレクトリ配下にあります: 設定、認証、プロジェクト設定、テーマ、プラン、音声モデル。バージョン 1.23 より前にカスタムディレクトリを使っていたインスタンスでは、初回起動時に `projects`、`themes`、`speech-models` フォルダーが `~/.config/openchamber` からここへコピーされます。元のフォルダーはそのまま残り、マージはされません。
+
 ### `OPENCHAMBER_CHATS_DIR`
 
 プロジェクトを持たないチャット用に OpenChamber が作成する管理チャットディレクトリの場所を変更します。デフォルトは `~/.config/openchamber/chats` です。OpenChamber と OpenCode を別のユーザーで実行している場合は、OpenCode サーバーが読み取れるディレクトリを指定してください。既存のチャットは移動されません。

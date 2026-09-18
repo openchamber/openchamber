@@ -108,7 +108,7 @@ export async function getGitCommitSummaries(
   return result.commits;
 }
 
-export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
+export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitPathDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitDiff(directory, options);
   return gitHttp.getGitDiff(directory, options);
@@ -982,6 +982,15 @@ export async function getCommitFiles(
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getCommitFiles(directory, hash);
   return gitHttp.getCommitFiles(directory, hash);
+}
+
+export async function getGitCommitDiff(directory: string, options: import('./api/types').GetGitCommitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) {
+    if (!runtime.getGitCommitDiff) throw new Error('Commit comparisons are unavailable in this runtime');
+    return runtime.getGitCommitDiff(directory, options);
+  }
+  return gitHttp.getGitCommitDiff(directory, options);
 }
 
 export async function getCommitFileDiff(

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type ConfigResponse = { data: Record<string, unknown> };
+type ProvidersResponse = { data: { providers: []; default: { default: string } } };
+const providerResolvers: Array<(response: ProvidersResponse) => void> = [];
 
 (mock as unknown as { restore?: () => void }).restore?.();
 
@@ -29,6 +31,7 @@ const pathGetMock = mock(async () => {
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
+      providers: () => new Promise<ProvidersResponse>((resolve) => { providerResolvers.push(resolve); }),
       get: mock(() => {
         configCalls += 1;
         return new Promise<ConfigResponse>((resolve) => {
@@ -98,17 +101,59 @@ beforeEach(() => {
   fsHomeResponses.length = 0;
 });
 
+test('same-URL reconnect isolates provider requests and old completion cannot delete new deduplication', async () => {
+  const oldClient = opencodeClient.getSdkClient();
+  const oldRequest = opencodeClient.getProvidersForConfig('/same/path');
+  opencodeClient.reconnectToRuntimeBaseUrl();
+  expect(opencodeClient.getSdkClient()).not.toBe(oldClient);
+  const newRequest = opencodeClient.getProvidersForConfig('/same/path');
+  expect(providerResolvers).toHaveLength(2);
+  providerResolvers[0]({ data: { providers: [], default: { default: 'old' } } });
+  await oldRequest;
+  const joinedRequest = opencodeClient.getProvidersForConfig('/same/path');
+  expect(providerResolvers).toHaveLength(2);
+  providerResolvers[1]({ data: { providers: [], default: { default: 'new' } } });
+  expect((await newRequest).default.default).toBe('new');
+  expect((await joinedRequest).default.default).toBe('new');
+});
+
+test('Windows drive roots remain absolute in directory selection and SDK client identity', () => {
+  const previous = opencodeClient.getDirectory();
+  try {
+    opencodeClient.setDirectory('c:\\');
+    expect(opencodeClient.getDirectory()).toBe('C:/');
+    expect(opencodeClient.getScopedSdkClient('c:\\')).toBe(opencodeClient.getScopedSdkClient('C:/'));
+    expect(opencodeClient.getScopedSdkClient('C:/')).not.toBe(opencodeClient.getScopedSdkClient('C:'));
+  } finally {
+    opencodeClient.setDirectory(previous);
+  }
+});
+
+test('Windows separators and UNC representations share SDK clients without lowercasing directory names', () => {
+  expect(opencodeClient.getScopedSdkClient('c:\\Users\\Developer\\Project\\'))
+    .toBe(opencodeClient.getScopedSdkClient('C:/Users/Developer/Project'));
+  expect(opencodeClient.getScopedSdkClient('\\\\Server\\Share\\Project\\'))
+    .toBe(opencodeClient.getScopedSdkClient('//Server/Share/Project'));
+  expect(opencodeClient.getScopedSdkClient('/repo/Project'))
+    .not.toBe(opencodeClient.getScopedSdkClient('/repo/project'));
+});
+
+test('a drive-root system-info fallback stays absolute', async () => {
+  pathGetResults.push({ data: { directory: 'C:/' } });
+  expect((await opencodeClient.getSystemInfo()).homeDirectory).toBe('C:/');
+});
+
 describe('opencodeClient directory availability', () => {
-  type ProbeBody = { error?: string; reason?: string; entries?: never[] };
+  type ProbeBody = { error: string; reason?: string } | { isDirectory: boolean } | { isFile: boolean; size: number };
   const json = (status: number, body: ProbeBody): Response => new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
 
   test('stats the directory through the OpenChamber filesystem route, never through OpenCode path resolution', async () => {
-    runtimeFetchResults.push(json(200, { entries: [] }));
+    runtimeFetchResults.push(json(200, { isDirectory: true }));
     expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('available');
-    expect(runtimeFetchCalls).toEqual([{ path: '/api/fs/list', query: { path: '/private/deleted-worktree' } }]);
+    expect(runtimeFetchCalls).toEqual([{ path: '/api/fs/directory-stat', query: { path: '/private/deleted-worktree' } }]);
     expect(pathGetCalls).toBe(0);
   });
 
@@ -119,10 +164,19 @@ describe('opencodeClient directory availability', () => {
     runtimeFetchResults.push(json(400, { error: 'Specified path is not a directory', reason: 'not-directory' }));
     expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('missing');
 
+    runtimeFetchResults.push(json(200, { isFile: true, size: 12 }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
     runtimeFetchResults.push(json(404, { error: 'Not Found' }));
     expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
 
-    runtimeFetchResults.push(json(500, { error: 'Failed to list directory' }));
+    runtimeFetchResults.push(json(500, { error: 'Failed to stat path' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(json(403, { error: 'Access to directory denied', reason: 'os-permission' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(json(501, { error: 'Unsupported' }));
     expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
 
     runtimeFetchResults.push(new Error('offline'));

@@ -67,7 +67,7 @@ const MiniChatPresenceBridge: React.FC = () => {
 export function SyncRuntimeEffects({ embeddedBackgroundWorkEnabled }: {
   embeddedBackgroundWorkEnabled: boolean;
 }) {
-  useSessionAutoCleanup(embeddedBackgroundWorkEnabled);
+  useSessionAutoCleanup({ enabled: embeddedBackgroundWorkEnabled });
   // Web, desktop, and mobile hand the queue to the OpenChamber server, which
   // delivers it with or without a UI; only VS Code still sends from the UI.
   useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled && !isServerOwnedMessageQueue());

@@ -34,8 +34,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
 - `packages/web/server/lib/system-prompt/runtime.js`: opt-in managed OpenCode system-prompt optimizer materialization and plugin injection.
-- `packages/web/server/lib/mcp-reconnect/runtime.js`: always-on managed OpenCode plugin that reconnects MCP servers OpenCode marked `failed`, with per-server backoff.
-- `packages/web/server/lib/opencode/managed-plugin-config.js`: the one `OPENCODE_CONFIG_CONTENT` merge every managed plugin (agent tools, system prompt optimizer, MCP reconnect) appends itself through.
+- `packages/web/server/lib/opencode/managed-plugin-config.js`: the one `OPENCODE_CONFIG_CONTENT` merge every managed plugin (agent tools, system prompt optimizer) appends itself through.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
@@ -45,6 +44,28 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
+
+  `POST /api/config/themes` saves a converted VS Code palette. The runtime validates
+  literal colors and required authored roles, assigns a content-derived filename,
+  and publishes through a same-directory hard link so partial files and overwrites
+  are impossible. Identical retries reuse the existing file; a manually edited
+  collision returns 409. Temporary files are ignored by the loader and removed
+  after publication or failure. Non-missing-directory read failures propagate to
+  the route instead of returning an authoritative empty library.
+
+  The common request middleware parses theme POST bodies before these routes;
+  integration tests must use that middleware rather than an unrestricted test parser.
+  `DELETE /api/config/themes/:id` finds a valid regular JSON file by its metadata ID
+  inside the custom themes directory. IDs are never used as filenames. Hand-added
+  themes are supported; symlinks and bundled themes are outside deletion ownership.
+  Duplicate matching IDs fail explicitly. Missing themes are an idempotent success;
+  filesystem failures remain errors.
+  `theme-catalog.js` owns POST catalog search/package routes under
+  `/api/config/themes/catalog/`. It fetches only Open VSX and its Eclipse CDN over
+  HTTPS, validates redirects and checksums, and verifies packaged identity.
+  `theme-archive.js` reads selected JSON entries in memory with bounded decompression.
+  JSON includes and token references stay inside the package. Each failed variant
+  is reported separately so valid siblings remain available. No extension code runs.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
@@ -132,8 +153,12 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `killProcessOnPort(port)`
 
 Managed OpenCode launch also merges the environment returned by the agent-tool
-runtime, the opt-in system prompt optimizer, and the always-on MCP reconnect
-plugin, each appending its `file://` entry to the previous one's config. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
+runtime and the opt-in system prompt optimizer, each appending its `file://`
+entry to the previous one's config. OpenChamber adds no automatic MCP reconnect
+loop; recovery after a failed connection is manual for both local and remote
+servers. Previously generated reconnect plugin files are inert because managed
+launch no longer registers them. User-configured plugins remain user-owned.
+PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
 OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
@@ -153,9 +178,27 @@ Transport-triggered health checks share the periodic monitor's failure accountin
 
 Managed health failures are classified as `timeout`, `connection_refused`, `connection_reset`, `invalid_response`, or `error`. The lifecycle retains the latest counted failure with a bounded detail string and source. Managed process wrappers continue capturing a sanitized, bounded stderr tail after readiness and retain exit code/signal. Before replacing a managed process, lifecycle snapshots the reason, latest health failure, process diagnostics/aliveness, busy-session count, and timestamp into `lastOpenCodeRestartDiagnostics`; successful startup does not clear this snapshot, and `/health` exposes it for post-restart diagnosis without process environment or credentials.
 
+Managed process ownership starts at spawn. The registry and runtime process
+handle include children that have not announced readiness yet, so shutdown can
+stop an in-flight startup. Readiness timeout, malformed startup output, and
+health-probe errors close that child before retrying. Shutdown cancels further
+startup attempts. Closing a process is single-flight and unregisters it only
+after it exits.
+
+On Windows, managed teardown invokes the existing tree termination command
+before terminating the root. Calling `child.kill()` first loses the ancestry
+needed to find Git, shell, and MCP descendants. On POSIX, the managed child
+starts in its own process group and teardown escalates against that group even
+if the root has already exited. A tool ignoring SIGTERM must not survive just
+because the server closed its own pipes. The
+`lifecycle-process.test.js` regressions launch real parent/child fixtures and
+check PID exit plus registry cleanup. macOS results do not validate Windows
+ConPTY or Console Window Host behavior.
+
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
 - OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery.
+- Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
 - Returned API:
   - `applyLoginShellEnvSnapshot()`
   - `getLoginShellEnvSnapshot()`
@@ -212,7 +255,12 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
   - `persistSettings(changes)`
 - Persistent permission auto-accept policy is stored under `permissionAutoAccept`; execution ownership lives in `lib/permission-auto-accept/`.
 - Queued follow-up messages live in `<data-dir>/message-queue.json`, not in settings; execution ownership lives in `lib/message-queue/`.
-- Shared sidebar preferences are stored as validated top-level fields: `sidebarProjectDisplayMode`, `sidebarSessionGroupingMode`, `sidebarProjectSortOrder`, and `sidebarShowRecentSection`. Device-local picker selection and sticky-header state do not enter `settings.json`.
+- Shared sidebar preferences are stored as validated top-level fields: `sidebarProjectDisplayMode`, `sidebarSessionGroupingMode`, `sidebarProjectSortOrder`, and `sidebarShowRecentSection`. Device-local picker selection and sticky-header state do not enter either settings file.
+- Two files (`settings-files.js`): `settings.json` holds instance facts and any legacy or unknown keys; `preferences.json` beside it holds every key the generated registry snapshot (`settings-registry.json`) marks `profile`, as `{ version: 1, fields: { key: { value, updatedAt, surfaces? } } }`. Keys the snapshot marks `perSurface` are stored per surface kind: `GET`/`PUT /api/config/settings` read the client's kind from the `surface` query parameter (`settingsSurfaceOf`; the legacy `x-openchamber-surface` header is still honoured, but a header forces a CORS preflight that cross-origin shells and older instances refuse, so clients must not send one) (`web`, `desktop`, `vscode`, `mobile`; anything else means base), `persistSettings(changes, { surface })` writes a changed per-surface key under `surfaces[surface]` and never touches its base, and `readSettingsFromDisk({ surface })` resolves that kind's value first, the base otherwise. Callers without a surface (migrations, the seed, server-side feature writers) read and write the base. `readSettingsFromDisk()` returns the merged document and seeds `preferences.json` once from an existing `settings.json` (which it leaves intact). An existing `preferences.json` that fails to parse is a failure, not an empty profile: it is never seeded or overwritten, the merged read serves the instance part, and `persistSettings` drops profile keys with a warning until the file is fixed or removed. `writeSettingsToDisk(document)` splits by scope and writes `settings.json` as the instance part plus a copy of the profile's base values (`legacySettingsDocumentOf`): a build from before the split reads only that file, so a rollback keeps the user's preferences, while current builds ignore the copy because `preferences.json` wins in the merge; device keys are dropped from writes. Modules that read one profile key off the disk on a hot path use `readMergedSettingsSync`.
+
+## Public exports (settings-files.js)
+- `parsePreferencesDocument(raw)`, `serializePreferencesDocument(fields)`, `flattenPreferences(fields)`, `buildPreferencesFields(previousFields, document, now)`, `instancePartOf(document)`, `seedPreferencesFrom(document, now)`, `readMergedSettingsSync({ fs, path, settingsFilePath })`, `getSettingsScope(key)`, `isProfileSettingsKey(key)`, `isDeviceSettingsKey(key)`, `preferencesFilePathFor(settingsFilePath, path)`.
+- The VS Code extension host writes the same two files with the same shape (`packages/vscode/src/settings-files.ts`); format changes go to both.
 
 ## Public exports (settings-helpers.js)
 - `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.
@@ -323,6 +371,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
 
 ## Public exports (shutdown-runtime.js)
 - `createGracefulShutdownRuntime(dependencies)`: creates graceful shutdown runtime for managed OpenCode and web server teardown sequencing.
+- After stopping owned runtimes and OpenCode, HTTP shutdown closes active connections as well as the listener. A remaining SSE response must not hold Desktop open until its fallback deadline. Upgraded sockets remain the responsibility of their owning runtime.
 - Returned API:
   - `gracefulShutdown(options?)`
 
@@ -363,12 +412,37 @@ before starting managed OpenCode. The managed custom tool therefore receives
 an authoritative loopback callback URL even when OpenChamber binds port `0`.
 
 ## Public exports (openchamber-routes.js)
+Browser completion checks use `appType=web&updateStatus=true` to stay on the
+Desktop Host's native updater. A rejected native restart is retained in the
+server process and returned to these polls as `DESKTOP_UPDATE_RESTART_FAILED`;
+ordinary availability checks remain usable so a browser reload can offer a
+retry. Starting another installation clears the previous restart error.
+The shared UI's `lib/web-update.ts` parses install/check responses and waits
+for the installed native target version, rather than treating absence of a
+newer release as installation success. Poll requests have individual deadlines
+within a ten-minute overall deadline.
+
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:
   - `GET /api/openchamber/update-check`
   - `POST /api/openchamber/update-install`
+    - Desktop-managed hosts delegate authenticated Web update requests to the Electron main process, which checks, downloads, and applies the update through `electron-updater` before restarting the host.
     - Foreground servers running under a systemd user unit queue installation in
       a separate transient unit and restart the configured service afterwards.
       `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.
+    - On Windows the install-and-restart script is written to
+      `<data dir>/update-install.cmd` before the response and run with
+      `cmd.exe /c <file>`. A newline ends a `cmd.exe /c` command line, so the
+      same script passed as an argument ran nothing and exited 0; the batch
+      file keeps every line. The package-manager line is `call`ed because
+      npm, pnpm and yarn are `.cmd` shims that would otherwise end the script,
+      the pre-install pause is a loopback `ping` because `timeout` rejects a
+      detached child's stdin, and the file deletes itself on its last line
+      because the restart command carries the server's flags. If the file
+      cannot be written the route answers 500 and the server keeps running.
+      The listener is closed before the batch is spawned: on Windows the
+      detached child inherits the listening socket and would hold the port
+      for the whole batch, so the restart inside it failed with "port already
+      in use" and the update ended with no server.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
 
@@ -406,6 +480,16 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
   - Generic `/api/*` forwarding with hop-by-hop header filtering
   - Windows `/session` merge fallback path behavior
   - OpenCode readiness gate for proxied `/api` requests
+  - Worktree checkout gate before directory-scoped upstream reads and writes
+
+Git bootstrap must reach `git-ready` before OpenCode can cache a new worktree's
+project identity or config. Setup scripts may still be running; the optional UI
+setup wait remains separate. Failed or timed-out checkout returns 503 without
+forwarding. The shared draft creator keeps the project directory selected until
+creation returns, because preview paths have no bootstrap state.
+
+This server gate covers web, Electron, hosted mobile, and Capacitor connections.
+The VS Code extension owns its separate Git and proxy implementation.
 
 ## Public exports (watcher.js)
 - `createOpenCodeWatcherRuntime(dependencies)`: creates global event watcher runtime backed by the shared upstream SSE reader.

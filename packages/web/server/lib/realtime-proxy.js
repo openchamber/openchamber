@@ -200,6 +200,8 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
 
     const upstream = new WebSocket(resolved.target.toString(), {
       headers: resolved.requestHeaders,
+      // ws does not send Origin by default; protected upstreams require it.
+      origin: `${resolved.target.protocol === 'wss:' ? 'https:' : 'http:'}//${resolved.target.host}`,
     });
     const pending = [];
 
