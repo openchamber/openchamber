@@ -191,8 +191,10 @@ const TONE_COLOR: Record<Exclude<WorkStatusTone, 'default' | 'muted'>, string> =
 export const WorkStatusValue: React.FC<{
   children: React.ReactNode;
   tone?: WorkStatusTone;
-}> = ({ children, tone = 'default' }) => (
+  title?: string;
+}> = ({ children, tone = 'default', title }) => (
   <span
+    title={title}
     className={tone === 'muted' ? 'text-muted-foreground' : undefined}
     style={tone === 'default' || tone === 'muted' ? undefined : { color: TONE_COLOR[tone] }}
   >

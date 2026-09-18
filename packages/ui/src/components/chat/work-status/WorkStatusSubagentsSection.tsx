@@ -10,6 +10,7 @@ import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
+import { getSessionFailureKey, useSessionFailures } from '@/sync/session-failure-store';
 
 type Props = {
   sessionId: string | null;
@@ -29,6 +30,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   const liveSessions = useAllLiveSessions();
   const statuses = useAllSessionStatuses();
+  const failures = useSessionFailures();
   const children = React.useMemo(
     () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId) : []),
     [liveSessions, sessionId],
@@ -80,6 +82,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   if (children.length === 0) return null;
 
   const busyChildren = children.filter((child) => statuses[child.id]?.type === 'busy').length;
+  const failedChildren = children.filter((child) => failures.has(getSessionFailureKey(directory, child.id))).length;
 
   return (
     <WorkStatusCollapsibleSection
@@ -87,13 +90,16 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       title={t('chat.workStatus.section.subagents')}
       icon="ai-agent"
       defaultExpanded
-      summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
+      summary={failedChildren > 0
+        ? t('chat.workStatus.subagent.failedSummary', { count: failedChildren })
+        : busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
       <div className="max-h-56 overflow-y-auto">
         {children.map((child) => {
           const blocked = (permissions[child.id]?.length ?? 0) > 0;
           const asked = (questions[child.id]?.length ?? 0) > 0;
           const busy = statuses[child.id]?.type === 'busy';
+          const failure = failures.get(getSessionFailureKey(directory, child.id));
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           const childCost = perChildCost.get(child.id) ?? 0;
           return (
@@ -104,7 +110,9 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
               label={label}
               value={(
                 <>
-                  {blocked ? (
+                  {failure ? (
+                    <WorkStatusValue tone="error" title={failure.message ?? undefined}>{t('chat.workStatus.subagent.failed')}</WorkStatusValue>
+                  ) : blocked ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
                   ) : asked ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
