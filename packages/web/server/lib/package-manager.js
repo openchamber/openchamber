@@ -619,23 +619,23 @@ function isCommandAvailable(command) {
   }
 }
 
+function getGlobalListArgs(pm) {
+  switch (pm) {
+    case 'pnpm':
+      return ['list', '-g', '--depth=0', PACKAGE_NAME];
+    case 'yarn':
+      return ['global', 'list', '--depth=0'];
+    case 'bun':
+      return ['pm', 'ls', '-g'];
+    default:
+      return ['list', '-g', '--depth=0', PACKAGE_NAME];
+  }
+}
+
 function isPackageInstalledWith(pm) {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
-    let args;
-    switch (pm) {
-      case 'pnpm':
-        args = ['list', '-g', '--depth=0', PACKAGE_NAME];
-        break;
-      case 'yarn':
-        args = ['global', 'list', '--depth=0'];
-        break;
-      case 'bun':
-        args = ['pm', 'ls', '-g'];
-        break;
-      default:
-        args = ['list', '-g', '--depth=0', PACKAGE_NAME];
-    }
+    const args = getGlobalListArgs(pm);
 
     const result = spawnSync(pmCommand, args, {
       encoding: 'utf8',
@@ -651,20 +651,63 @@ function isPackageInstalledWith(pm) {
   }
 }
 
+// npm, bun and yarn print `name@version`; pnpm separates the name and the
+// version with whitespace. An optional `v` covers yarn listing formats.
+const GLOBAL_VERSION_PATTERN = /@openchamber\/web[@\s]+v?(\d[\w.+-]*)/;
+
 /**
- * Get the update command for the detected package manager
+ * Read the globally installed version of the package as reported by the
+ * package manager itself. Returns null when the listing cannot be read or
+ * parsed. The listing command may exit non-zero when the package is missing,
+ * so stdout is parsed regardless of the status.
  */
-export function getUpdateCommand(pm = detectPackageManager()) {
+function getInstalledGlobalVersion(pm) {
+  try {
+    const pmCommand = resolvePackageManagerCommand(pm);
+    const result = spawnSync(pmCommand, getGlobalListArgs(pm), {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10000,
+      ...getSpawnSyncBaseOptions(),
+    });
+    return String(result.stdout || '').match(GLOBAL_VERSION_PATTERN)?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalize a version string into an exact install target.
+ * Returns the plain version or null when the value is not a concrete version.
+ */
+function normalizeTargetVersion(value) {
+  const normalized = String(value ?? '').trim().replace(/^v/, '');
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized) ? normalized : null;
+}
+
+/**
+ * Get the update command for the detected package manager.
+ * When an exact target version is given, it is pinned in the spec instead of
+ * re-resolving the `latest` dist-tag at install time: the update check and the
+ * package manager see different metadata, and dist-tag resolution can lag the
+ * check behind a fresh release (stale packument cache, pnpm minimumReleaseAge).
+ */
+export function getUpdateCommand(pm = detectPackageManager(), options = {}) {
+  const targetVersion = normalizeTargetVersion(options.targetVersion);
+  if (options.targetVersion != null && !targetVersion) {
+    throw new Error(`Invalid target version for update: ${String(options.targetVersion)}`);
+  }
+  const versionSpec = targetVersion ? `@${targetVersion}` : '@latest';
   const pmCommand = quoteCommand(resolvePackageManagerCommand(pm));
   switch (pm) {
     case 'pnpm':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${PACKAGE_NAME}${versionSpec}`;
     case 'yarn':
-      return `${pmCommand} global add ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} global add ${PACKAGE_NAME}${versionSpec}`;
     case 'bun':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${PACKAGE_NAME}${versionSpec}`;
     default:
-      return `${pmCommand} install -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} install -g ${PACKAGE_NAME}${versionSpec}`;
   }
 }
 
@@ -799,10 +842,14 @@ export async function checkForUpdates(options = {}) {
 }
 
 /**
- * Execute the update (used by CLI)
+ * Execute the update (used by CLI).
+ * When an exact target version is given, the globally installed version is
+ * read back after the package manager exits: a zero exit status alone is not
+ * proof the target landed (stale dist-tag resolution, pnpm release-age policy),
+ * and the caller must not report success without the version matching.
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {
-  const command = getUpdateCommand(pm);
+  const command = getUpdateCommand(pm, { targetVersion: options.targetVersion });
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
     console.log(`Running: ${command}`);
@@ -814,8 +861,43 @@ export function executeUpdate(pm = detectPackageManager(), options = {}) {
     ...getSpawnSyncBaseOptions(),
   });
 
+  if (result.status !== 0) {
+    return {
+      success: false,
+      exitCode: result.status,
+      error: `Package manager exited with code ${result.status}`,
+    };
+  }
+
+  const targetVersion = normalizeTargetVersion(options.targetVersion);
+  if (!targetVersion) {
+    return {
+      success: true,
+      exitCode: result.status,
+      installedVersion: null,
+    };
+  }
+
+  const installedVersion = getInstalledGlobalVersion(pm);
+  if (!installedVersion) {
+    return {
+      success: false,
+      exitCode: result.status,
+      error: `Could not determine the globally installed ${PACKAGE_NAME} version after the update; not reporting success`,
+    };
+  }
+
+  if (compareVersions(installedVersion, targetVersion) !== 0) {
+    return {
+      success: false,
+      exitCode: result.status,
+      error: `Installed ${PACKAGE_NAME} version ${installedVersion} does not match target ${targetVersion}. The package manager may have resolved different metadata or filtered the release.`,
+    };
+  }
+
   return {
-    success: result.status === 0,
+    success: true,
     exitCode: result.status,
+    installedVersion,
   };
 }
