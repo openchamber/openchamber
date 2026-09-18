@@ -184,15 +184,15 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
 interface AgentManagerSidebarProps {
   className?: string;
   groups: AgentGroup[];
-  selectedGroupName?: string | null;
-  onGroupSelect?: (groupName: string) => void;
+  selectedGroupId?: string | null;
+  onGroupSelect?: (groupId: string) => void;
   onNewAgent?: () => void;
 }
 
 export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
   className,
   groups,
-  selectedGroupName,
+  selectedGroupId,
   onGroupSelect,
   onNewAgent,
 }) => {
@@ -207,7 +207,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
     const set = new Set<string>();
     for (const group of groups) {
       if (group.sessions.some((s) => allStatuses[s.id]?.type === 'busy')) {
-        set.add(group.name);
+        set.add(group.id);
       }
     }
     return set;
@@ -270,11 +270,11 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
       >
         {visibleGroups.map((group) => (
           <AgentGroupItem
-            key={group.name}
+            key={group.id}
             group={group}
-            isSelected={selectedGroupName === group.name}
-            isBusy={busyGroups.has(group.name)}
-            onSelect={() => onGroupSelect?.(group.name)}
+            isSelected={selectedGroupId === group.id}
+            isBusy={busyGroups.has(group.id)}
+            onSelect={() => onGroupSelect?.(group.id)}
           />
         ))}
 

@@ -492,73 +492,60 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           />
         ) : null}
 
-        {/* Tablet: the workspace lives inside an animated aside so landscape
-            gets a real sidebar. The drawer element keeps its position in the
-            tree across rotation — only its `variant` changes — so the mounted
-            panes (open diff, edited file, attached terminal) survive it. In
-            portrait the drawer portals itself out and this aside stays at 0. */}
-        {isTabletLayout ? (
-          <aside
-            ref={rightResize.asideRef}
+        {/* Keep the workspace in the same tree position across size classes.
+            Keyboard resizing and folding can both cross the tablet threshold;
+            neither should discard the open editor, its draft, or its focus.
+            Outside panel mode the drawer portals out and this aside stays at 0. */}
+        <aside
+          ref={rightResize.asideRef}
+          className={cn(
+            'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
+            !workspacePanelWidth && 'border-l-0',
+          )}
+          style={{
+            width: workspacePanelWidth,
+            minWidth: workspacePanelWidth,
+            maxWidth: workspacePanelWidth,
+            ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
+            overflowX: 'clip',
+            paddingTop: 'var(--oc-safe-area-top, 0px)',
+            transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
+            transitionDuration: '200ms',
+            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+          aria-hidden={!workspacePanelWidth}
+          data-page-scroll-lock="true"
+        >
+          <div
             className={cn(
-              'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-              !workspacePanelWidth && 'border-l-0',
+              'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+              rightResize.isResizing && 'pointer-events-none',
+              !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
             )}
-            style={{
-              width: workspacePanelWidth,
-              minWidth: workspacePanelWidth,
-              maxWidth: workspacePanelWidth,
-              ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
-              overflowX: 'clip',
-              paddingTop: 'var(--oc-safe-area-top, 0px)',
-              transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
-              transitionDuration: '200ms',
-              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-            aria-hidden={!workspacePanelWidth}
-            data-page-scroll-lock="true"
+            style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
           >
-            <div
-              className={cn(
-                'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-                rightResize.isResizing && 'pointer-events-none',
-                !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
-              )}
-              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
-            >
-              <ErrorBoundary>
-                <MobileWorkspaceDrawer
-                  open={workspaceOpen}
-                  onClose={closeWorkspace}
-                  tab={workspaceTab}
-                  onTabChange={setWorkspaceTab}
-                  pendingChangesDiff={pendingChangesDiff}
-                  onOpenPlan={setOpenPlan}
-                  onOpenMcpSettings={openMcpCreateSettings}
-                  variant={workspaceAsPanel ? 'panel' : 'drawer'}
-                />
-              </ErrorBoundary>
-            </div>
-            {workspacePanelWidth ? (
-              <IpadSidebarResizeHandle
-                side="right"
-                isResizing={rightResize.isResizing}
-                ariaLabel={t('sidebar.resize.rightPanelAria')}
-                handleProps={rightResize.handleProps}
+            <ErrorBoundary>
+              <MobileWorkspaceDrawer
+                open={workspaceOpen}
+                onClose={closeWorkspace}
+                tab={workspaceTab}
+                onTabChange={setWorkspaceTab}
+                pendingChangesDiff={pendingChangesDiff}
+                onOpenPlan={setOpenPlan}
+                onOpenMcpSettings={openMcpCreateSettings}
+                variant={workspaceAsPanel ? 'panel' : 'drawer'}
               />
-            ) : null}
-          </aside>
-        ) : (
-          <MobileWorkspaceDrawer
-            open={workspaceOpen}
-            onClose={closeWorkspace}
-            tab={workspaceTab}
-            onTabChange={setWorkspaceTab}
-            pendingChangesDiff={pendingChangesDiff}
-            onOpenPlan={setOpenPlan}
-            onOpenMcpSettings={openMcpCreateSettings}
-          />
-        )}
+            </ErrorBoundary>
+          </div>
+          {workspacePanelWidth ? (
+            <IpadSidebarResizeHandle
+              side="right"
+              isResizing={rightResize.isResizing}
+              ariaLabel={t('sidebar.resize.rightPanelAria')}
+              handleProps={rightResize.handleProps}
+            />
+          ) : null}
+        </aside>
 
         {/* Layered above the workspace drawer's Notes tab, which opened it. */}
         {openPlan ? (

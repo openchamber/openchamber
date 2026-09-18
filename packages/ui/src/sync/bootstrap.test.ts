@@ -22,7 +22,7 @@ const createSdk = (respond?: (url: URL) => Response | Promise<Response> | undefi
     const body = url.pathname === "/project/current" ? { id: "project-a" }
       : url.pathname === "/path" ? { directory, worktree: directory, state: "", config: "", home: "/home" }
       : url.pathname === "/config" ? { instructions: [directory] }
-      : url.pathname === "/session/status" || url.pathname === "/mcp" ? {}
+      : url.pathname === "/session/status" ? {}
       : url.pathname === "/vcs" ? { branch: "main" }
       : []
     return Response.json(body)
@@ -40,10 +40,9 @@ const inputFor = (sdk = createSdk(), state: Partial<State> = {}) => {
 }
 
 describe("bootstrapDirectory", () => {
-  for (const path of ["/config", "/mcp"]) {
-  test(`finishes session loading while ${path} is unresolved`, async () => {
+  test("finishes session loading while /config is unresolved", async () => {
     const blocked = deferred<Response>()
-    const input = inputFor(createSdk((url) => url.pathname === path ? blocked.promise : undefined))
+    const input = inputFor(createSdk((url) => url.pathname === "/config" ? blocked.promise : undefined))
     let initialized = false
     const bootstrap = bootstrapDirectory(input)
     void bootstrap.environment.then(() => { initialized = true })
@@ -57,7 +56,6 @@ describe("bootstrapDirectory", () => {
       expect(input.store.getState().status).toBe("complete")
     }
   })
-  }
 
   test("keeps session-list failure separate from successful environment initialization", async () => {
     const cached = [{
@@ -105,14 +103,19 @@ describe("bootstrapDirectory", () => {
     expect(input.store.getState().session_status).toBe(statuses)
   })
 
-  test("optional MCP failure preserves its previous state without failing core initialization", async () => {
-    const mcp: State["mcp"] = { server: { status: "connected" } }
-    const input = inputFor(createSdk((url) => url.pathname === "/mcp"
-      ? Response.json({ message: "MCP unavailable" }, { status: 400 }) : undefined), { mcp })
+  test("never reads MCP-initializing endpoints during directory initialization", async () => {
+    // Reading MCP status initializes the directory's entire stdio server
+    // fleet, and listing commands enumerates MCP prompts, which touches the
+    // same state. The sidebar declares bootstrap demand for every known
+    // project directory, so either read spawned a fleet per project at
+    // startup. MCP and command surfaces fetch on demand instead.
+    const requests: URL[] = []
+    const input = inputFor(createSdk((url) => { requests.push(url); return undefined }))
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("complete")
-    expect(input.store.getState().mcp).toBe(mcp)
+    expect(requests.some((url) => url.pathname === "/mcp")).toBe(false)
+    expect(requests.some((url) => url.pathname === "/command")).toBe(false)
   })
 
   test("rejects stale work before starting either phase", async () => {
@@ -171,7 +174,7 @@ describe("bootstrapDirectory", () => {
       const bootstrap = bootstrapDirectory(input)
       expect(await bootstrap.sessions).toBe("complete")
       expect(await bootstrap.environment).toBe("complete")
-      expect(requests).toHaveLength(10)
+      expect(requests).toHaveLength(8)
       expect(new Set(requests.map((url) => url.searchParams.get("directory")))).toEqual(new Set([directory]))
       expect(input.store.getState().path.directory).toBe(directory)
       expect(input.store.getState().config.instructions).toEqual([directory])

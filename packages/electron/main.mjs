@@ -277,6 +277,10 @@ const state = {
   backgroundShutdownPromise: null,
   sshShutdownPromise: null,
   installingUpdate: false,
+  // Latched from the moment an update install starts until the installer has
+  // been handed control or the install has failed. While it is set, no other
+  // path may end the process: the update sequence owns the exit.
+  updateInstallPending: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
@@ -427,6 +431,10 @@ const prepareForQuit = () => {
 };
 
 const performConfirmedQuit = async ({ relaunch = false } = {}) => {
+  if (state.updateInstallPending) {
+    log.info('[electron] quit suppressed: update install owns the exit');
+    return;
+  }
   if (state.quitInProgress) return;
   state.quitInProgress = true;
 
@@ -2509,7 +2517,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     }
     if (BrowserWindow.getAllWindows().length === 0) {
       if (process.platform !== 'darwin') {
-        if (state.installingUpdate) {
+        if (state.updateInstallPending) {
+          log.info('[electron] last window closed while an update install is pending; leaving the exit to the installer');
+        } else if (state.installingUpdate) {
+          log.info('[electron] last window closed after the installer took over; quitting');
           app.quit();
         } else {
           performConfirmedQuit();
@@ -3077,6 +3088,12 @@ const setupAutoUpdater = () => {
 // either take the app down or report why it did not.
 const UPDATE_INSTALL_GRACE_MS = 15_000;
 
+// Releasing terminals, the managed OpenCode child, and SSH sessions must not
+// hold the installer hostage: a stuck session would otherwise keep the app on
+// the old version forever. The backend's own stop() is already bounded; this
+// bounds everything the install path waits on, beyond the backend's 35s limit.
+const UPDATE_SHUTDOWN_TIMEOUT_MS = 40_000;
+
 /**
  * Hand the downloaded update to the platform installer and keep the IPC call
  * open until the app quits or the updater reports a failure, so a rejected
@@ -3085,8 +3102,15 @@ const UPDATE_INSTALL_GRACE_MS = 15_000;
  */
 const installDownloadedUpdate = () => new Promise((resolve, reject) => {
   let settled = false;
+  let graceTimer;
+
+  // Hold the process from here until the installer has control. Every quit
+  // path checks this, so closing the last window during shutdown can no longer
+  // end the app with the install still pending.
+  state.updateInstallPending = true;
 
   const rollbackQuitState = () => {
+    state.updateInstallPending = false;
     state.quitRequested = false;
     state.installingUpdate = false;
   };
@@ -3101,25 +3125,46 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
     reject(error instanceof Error ? error : new Error(String(error)));
   };
 
-  // Still running after the grace period: the install is underway and the app
-  // is shutting down, so release the pending IPC reply.
-  const graceTimer = setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    autoUpdater.off('error', fail);
-    resolve(null);
-  }, UPDATE_INSTALL_GRACE_MS);
-
   autoUpdater.on('error', fail);
 
   // Defer so the renderer's invoke channel is idle before the app starts
   // shutting down.
   setImmediate(async () => {
+    let shutdownTimer;
     try {
-      await shutdownBackgroundServices();
+      // Stop the backend first, then declare the quit intent, then hand over.
+      // The flags exist only to let the installer's own quit through the
+      // hide-on-close and confirmation guards, so nothing sets them while the
+      // app is still doing work that can fail.
+      await Promise.race([
+        shutdownBackgroundServices(),
+        new Promise((resolveTimeout) => {
+          shutdownTimer = setTimeout(() => {
+            log.warn('[electron] background shutdown timed out before update install; continuing');
+            resolveTimeout(null);
+          }, UPDATE_SHUTDOWN_TIMEOUT_MS);
+        }),
+      ]);
+      if (settled) return;
+      // Start the installer error window after terminal cleanup, which can
+      // legitimately take longer than UPDATE_INSTALL_GRACE_MS.
+      graceTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        autoUpdater.off('error', fail);
+        resolve(null);
+      }, UPDATE_INSTALL_GRACE_MS);
+      state.quitRequested = true;
+      state.installingUpdate = true;
+      state.quitConfirmationPending = false;
+      log.info('[electron] handing control to the platform installer');
       autoUpdater.quitAndInstall();
+      // The installer owns the exit from here; other quit paths may run again.
+      state.updateInstallPending = false;
     } catch (error) {
       fail(error);
+    } finally {
+      clearTimeout(shutdownTimer);
     }
   });
 });
@@ -4519,22 +4564,23 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       if (applyUpdate) {
-        // A previous restart click may still be installing. Squirrel accepts
+        // A previous restart click may still be installing: Squirrel accepts
         // one quitAndInstall() per app session, so a second call throws
         // SQRLUpdaterErrorInvalidState, and installDownloadedUpdate()'s
         // fail() path would roll the quit state back while the first install
-        // is still shutting the app down. Treat the duplicate click as part
-        // of the same restart instead of starting a second install.
-        if (state.installingUpdate) {
+        // is still in flight (#3670). updateInstallPending latches
+        // synchronously when the install starts and covers the backend-shutdown
+        // window; installingUpdate covers the tail after the installer has
+        // taken over the exit. A duplicate click joins the same restart
+        // instead of starting a second install.
+        if (state.updateInstallPending || state.installingUpdate) {
           log.info('[electron] desktop_restart ignored, update install already in flight');
           return null;
         }
-        // Match the working updater pattern closely: only bypass the macOS
-        // hide-on-close / quit-confirmation guards, leave the rest of the
-        // updater-driven quit/install sequence alone.
-        state.quitRequested = true;
-        state.installingUpdate = true;
-        state.quitConfirmationPending = false;
+        // The quit/install flags belong to installDownloadedUpdate(), which
+        // sets them once the backend is down and the installer is about to take
+        // over. Setting them here left a window in which closing the last
+        // window quit the app with the install still pending (#3027).
         if (state.mainWindow && !state.mainWindow.isDestroyed()) {
           try {
             debounceWindowStatePersist(state.mainWindow, true);
@@ -5362,7 +5408,12 @@ app.on('window-all-closed', () => {
   }
 
   if (process.platform !== 'darwin') {
+    if (state.updateInstallPending) {
+      log.info('[electron] window-all-closed while an update install is pending; leaving the exit to the installer');
+      return;
+    }
     if (state.installingUpdate) {
+      log.info('[electron] window-all-closed after the installer took over; quitting');
       app.quit();
     } else {
       performConfirmedQuit();

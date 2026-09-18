@@ -38,12 +38,75 @@ const extractSessionStatusUpdate = (payload) => {
   };
 };
 
+const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
+
 export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
   const sessionAttentionStates = new Map();
+  // Pending permission and question requests per session, kept from the same
+  // upstream stream. Clients that do not initialize a directory cannot read
+  // its pending list from OpenCode (that read creates an instance), so this
+  // map is their seed. Entries live until the matching reply, the session's
+  // deletion, or an OpenCode restart, which drops every pending request.
+  const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
+
+  const getOrCreatePendingRequests = (sessionId) => {
+    let entry = pendingRequestsBySession.get(sessionId);
+    if (!entry) {
+      entry = { permissions: new Map(), questions: new Map() };
+      pendingRequestsBySession.set(sessionId, entry);
+    }
+    return entry;
+  };
+
+  const settlePendingRequest = (kind, sessionId, requestId) => {
+    const entry = pendingRequestsBySession.get(sessionId);
+    if (!entry) return;
+    // OpenCode may omit the request ID on a reply; the session then has no
+    // pending request of that kind we can still vouch for.
+    if (requestId) entry[kind].delete(requestId);
+    else entry[kind].clear();
+    if (entry.permissions.size === 0 && entry.questions.size === 0) pendingRequestsBySession.delete(sessionId);
+  };
+
+  const processBlockingRequestPayload = (payload) => {
+    if (!payload || typeof payload.type !== 'string') return;
+    const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+    if (payload.type === 'permission.asked' || payload.type === 'question.asked') {
+      const sessionId = readRequestId(properties.sessionID);
+      const requestId = readRequestId(properties.id);
+      if (!sessionId || !requestId) return;
+      getOrCreatePendingRequests(sessionId)[payload.type === 'permission.asked' ? 'permissions' : 'questions'].set(requestId, properties);
+      return;
+    }
+    if (payload.type === 'permission.replied') {
+      settlePendingRequest('permissions', readRequestId(properties.sessionID), readRequestId(properties.requestID));
+      return;
+    }
+    if (payload.type === 'question.replied' || payload.type === 'question.rejected') {
+      settlePendingRequest('questions', readRequestId(properties.sessionID), readRequestId(properties.requestID));
+      return;
+    }
+    if (payload.type === 'session.deleted') {
+      const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
+      const sessionId = readRequestId(properties.sessionID) || readRequestId(info.id);
+      if (sessionId) pendingRequestsBySession.delete(sessionId);
+    }
+  };
+
+  const getPendingBlockingRequestsSnapshot = () => {
+    const result = {};
+    for (const [sessionId, entry] of pendingRequestsBySession) {
+      result[sessionId] = {
+        permissions: [...entry.permissions.values()],
+        questions: [...entry.questions.values()],
+      };
+    }
+    return result;
+  };
 
   const getOrCreateAttentionState = (sessionId) => {
     if (!sessionId || typeof sessionId !== 'string') return null;
@@ -307,6 +370,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       }
     }
 
+    // A restarted OpenCode forgot every pending request with the turns.
+    pendingRequestsBySession.clear();
     const eventId = `opencode-restart-${Date.now()}`;
     for (const sessionId of interruptedSessionIds) {
       updateSessionState(sessionId, 'idle', eventId, {
@@ -354,6 +419,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
   const processOpenCodeSsePayload = (payload) => {
+    processBlockingRequestPayload(payload);
     const update = extractSessionStatusUpdate(payload);
     if (!update) return;
 
@@ -379,6 +445,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     sessionActivityPhases.clear();
     sessionStates.clear();
     sessionAttentionStates.clear();
+    pendingRequestsBySession.clear();
     activeSessionCount = 0;
   };
 
@@ -387,6 +454,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     getSessionActivitySnapshot,
     getActiveSessionCount,
     getSessionStateSnapshot,
+    getPendingBlockingRequestsSnapshot,
     getSessionAttentionSnapshot,
     getSessionState,
     getSessionAttentionState,

@@ -2,9 +2,12 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import React from 'react';
 import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useNotificationStore } from '@/sync/notification-store';
 
-export type CollapsedActivityState = 'active' | 'unread' | null;
+// Ordered by how much the user is needed: a blocked turn outranks a running
+// one, which outranks something merely unread.
+export type CollapsedActivityState = 'permission' | 'question' | 'active' | 'unread' | null;
 
 const mergeCollapsedActivityStates = (
   current: CollapsedActivityState,
@@ -94,5 +97,20 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.unread]));
-  return active ?? unread;
+  // Pending requests come from the cross-directory index, which every
+  // directory feeds live and the host seeds, so a collapsed group in a project
+  // that was never opened still shows the request. Subtasks count too: a
+  // permission asked by a subagent blocks the whole family.
+  const blocked = useGlobalBlockingRequestsStore(React.useCallback((state): CollapsedActivityState => {
+    if (!enabled) return null;
+    let result: CollapsedActivityState = null;
+    for (const sessionId of ids.active) {
+      const pending = state.bySession.get(sessionId);
+      if (!pending) continue;
+      if (pending.permissions.length > 0) return 'permission';
+      if (pending.questions.length > 0) result = 'question';
+    }
+    return result;
+  }, [enabled, ids.active]));
+  return blocked ?? active ?? unread;
 };

@@ -193,16 +193,20 @@ mock.module("@/stores/useCommandsStore", () => ({
   useCommandsStore: {
     getState: () => ({
       commands: [],
+      commandsByDirectory: {},
     }),
   },
+  selectCommandsForDirectory: () => [],
 }))
 
 mock.module("@/stores/useSkillsStore", () => ({
   useSkillsStore: {
     getState: () => ({
       skills: [],
+      skillsByDirectory: {},
     }),
   },
+  selectSkillsForDirectory: () => [],
 }))
 
 mock.module("@/components/ui", () => ({

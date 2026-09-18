@@ -1,6 +1,7 @@
 // The backend owns PTYs and services as well as OpenCode. Give it a chance to
 // release all of them before Electron exits; the detached killer is a fallback.
-export async function stopEmbeddedServer(handle, { launchFallback, warn, timeoutMs = 10_000 }) {
+// Includes the terminal runtime's 20s grace plus OpenCode and HTTP teardown.
+export async function stopEmbeddedServer(handle, { launchFallback, warn, timeoutMs = 35_000 }) {
   if (!handle) return;
   let timer;
   try {

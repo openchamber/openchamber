@@ -1633,6 +1633,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
             <div
                 ref={attachComposerSlot}
+                // The mobile pill morph pins a floating slot for its tween.
+                data-composer-slot={floatingComposer ? 'floating' : 'flow'}
                 className={cn(
                     'z-10 flex min-h-0',
                     floatingComposer
@@ -1646,7 +1648,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 )}
             >
                 {!draftLayoutVisible && !isDesktopExpandedInput && sessionMessages.length > 0 && (
-                    <>
+                    /* One zero-height anchor on the slot's top edge for
+                       everything that floats above the composer, so the
+                       mobile keyboard slide and the pill morph move them as
+                       one rider with the box instead of leaving them to jump
+                       when the slot resizes (see mobileComposerMorph). */
+                    <div className="oc-composer-riders absolute bottom-full inset-x-0" data-composer-riders="true">
                         <ScrollToBottomButton
                             visible={timelineController.showScrollToBottom}
                             working={sessionIsWorking}
@@ -1702,7 +1709,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 </div>
                             </div>
                         ) : null}
-                    </>
+                    </div>
                 )}
                 {promptReadOnly ? (
                     <ReadOnlyPromptBanner />

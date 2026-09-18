@@ -36,6 +36,9 @@ interface ComposerDictationProps {
     disabled?: boolean;
     onInsert: (text: string) => void;
     onInsertAndSend: (text: string) => void;
+    /** Called once when a dictation leaves idle, before any transcript exists,
+        so the host can record which draft the dictation belongs to. */
+    onStart?: () => void;
     /** Reports whether dictation is active (recording/transcribing/failed overlay shown). */
     onActiveChange?: (active: boolean) => void;
     /** Reports the height (px) the transcript needs, so the host can grow the
@@ -111,6 +114,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     disabled,
     onInsert,
     onInsertAndSend,
+    onStart,
     onActiveChange,
     onContentHeightChange,
     renderTrigger = true,
@@ -166,6 +170,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const statusRef = React.useRef(status);
     React.useEffect(() => {
         statusRef.current = status;
+    }, [status]);
+
+    // The transcript arrives long after the start; report the start itself so
+    // the host can keep the transcript with the draft that was on screen then.
+    const onStartRef = React.useRef(onStart);
+    React.useEffect(() => {
+        onStartRef.current = onStart;
+    }, [onStart]);
+    const wasIdleRef = React.useRef(true);
+    React.useLayoutEffect(() => {
+        const idle = status === 'idle';
+        if (wasIdleRef.current && !idle) {
+            onStartRef.current?.();
+        }
+        wasIdleRef.current = idle;
     }, [status]);
 
     // Layout effect on purpose: the host may expand/collapse the composer in

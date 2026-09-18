@@ -24,6 +24,16 @@ description: Use when creating or modifying OpenChamber shared UI data access, O
 | Browser-owned authenticated URL | Runtime URL resolver and scoped URL auth |
 | SSE/WebSocket | Owning realtime transport; also load `relay-transport` |
 
+## Name The Surfaces Before Editing
+
+Before writing code that changes what a user can reach or do, write the surface list: every runtime this behavior exists on, and one line per runtime saying what happens there. Runtimes are web, Electron desktop, VS Code, hosted mobile, and Capacitor mobile.
+
+The step is done when no runtime is missing a line. "Not applicable" is a line; silence is not. A stable unsupported response is a valid outcome, an accidental fallthrough is not.
+
+Carry the list into the pull request description, which asks for the same table. It is the same artifact: written once while deciding, restated once while handing off. A surface you cannot answer for is the finding — say so in the list rather than leaving the row blank.
+
+This applies to any user-reachable behavior, not only shared UI data access. A sequence that spans native shell, server, and renderer has surfaces too; so does a capability that only one runtime implements today.
+
 ## Load References By Task
 
 | Task | Required reference |
@@ -95,7 +105,7 @@ Re-parse values obtained after a switch at their owning boundary. A type establi
 - OpenChamber routes win before generic proxy fallback.
 - Request fidelity, auth, abort, query, and body behavior are tested.
 - Browser/realtime auth uses narrow allowlists and scoped tokens.
-- Every applicable runtime has implementation or explicit unsupported behavior.
+- Every applicable runtime has implementation or explicit unsupported behavior, and the surface list written before editing has a line for each.
 - Runtime switching cannot reuse stale endpoint/auth/cache state.
 - Privileged Electron/extension behavior is enforced outside the renderer.
 - Focused transport, bridge, proxy, auth, and runtime tests pass; static type/lint checks alone are insufficient.

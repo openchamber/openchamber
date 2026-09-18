@@ -70,6 +70,7 @@ export interface ComposerFooterProps {
     onStartDictation: () => void;
     onDictationInsert: (text: string) => void;
     onDictationInsertAndSend: (text: string) => void;
+    onDictationStart: () => void;
     onDictationContentHeightChange: (height: number | null) => void;
     isBtw?: boolean;
     modelSessionId?: string | null;
@@ -116,6 +117,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         onStartDictation,
         onDictationInsert,
         onDictationInsertAndSend,
+        onDictationStart,
         onDictationContentHeightChange,
         isBtw = false,
         modelSessionId,
@@ -262,6 +264,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             sendIconSizeClass={sendIconSizeClass}
                             onInsert={onDictationInsert}
                             onInsertAndSend={onDictationInsertAndSend}
+                            onStart={onDictationStart}
                             onContentHeightChange={onDictationContentHeightChange}
                         /> : null}
                         <ComposerActionButtons

@@ -359,9 +359,13 @@ const buildGitEnv = async () => {
   return env;
 };
 
-const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false } = {}) => {
+const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false, stallTimeoutMs = 0 } = {}) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
+  // simple-git's block timeout kills the process once it has produced no
+  // output for this long. Opt-in per caller: a background read must never hold
+  // a limiter slot forever, while a silent long push or fetch must not be cut.
+  const timeout = stallTimeoutMs > 0 ? { block: stallTimeoutMs } : undefined;
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary || allowUnsafeSshCommand || allowUnsafeCredentialHelper
@@ -386,6 +390,7 @@ const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafe
     spawnOptions,
     binary,
     unsafe,
+    ...(timeout ? { timeout } : {}),
   });
 };
 
@@ -491,14 +496,14 @@ const resolveGitRepositoryRoot = async (directoryPath, git) => {
     : path.resolve(directoryPath, normalizedTopLevel);
 };
 
-const createRepositoryGitContext = async (directory) => {
+const createRepositoryGitContext = async (directory, gitOptions = {}) => {
   const directoryPath = normalizeDirectoryPath(directory);
   if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
     throw new Error('Git directory is required');
   }
-  const directoryGit = await createGit(directoryPath);
+  const directoryGit = await createGit(directoryPath, gitOptions);
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
-  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot, gitOptions);
   return { directoryPath, directoryGit, repoRoot, git };
 };
 
@@ -1014,13 +1019,16 @@ const isMissingDirectoryError = (error) => {
   return /directory that does not exist|does not exist|no such file or directory/i.test(text);
 };
 
-const runGitCommand = async (cwd, args) => {
+const runGitCommand = async (cwd, args, { timeoutMs = 0 } = {}) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
       env: await buildGitEnv(),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
+      // Only short probes pass a timeout; commands that legitimately run long
+      // (a fetch into a temporary clone) keep the default of none.
+      ...(timeoutMs > 0 ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
     });
     return {
       success: true,
@@ -2153,7 +2161,7 @@ export async function isGitRepository(directory) {
     return false;
   }
 
-  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir']);
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir'], { timeoutMs: GIT_PROBE_TIMEOUT_MS });
   return result.success;
 }
 
@@ -2282,6 +2290,18 @@ export async function setLocalIdentity(directory, profile) {
 // .gitignore.
 const UNTRACKED_DIRECTORY_EXPANSION_LIMIT = 1000;
 
+// A status read holds one of MAX_CONCURRENT_STATUS_READS slots until it
+// finishes. Git never gets a terminal here, but a process can still hang on
+// Windows (a locked index, a stuck filesystem monitor, an unreachable network
+// drive), and a hung process would hold its slot forever: four of them and no
+// status read runs again until someone kills them by hand. Every process the
+// read spawns is therefore killed when it stops producing output for this long,
+// and the read fails instead of wedging the limiter. Two minutes is far above
+// what a healthy read spends silent, even on a very large tree.
+const GIT_STATUS_STALL_TIMEOUT_MS = 120_000;
+const GIT_UNTRACKED_LISTING_STALL_TIMEOUT_MS = 60_000;
+const GIT_PROBE_TIMEOUT_MS = 30_000;
+
 // Untracked files under `dirPath` (repository-relative, trailing slash), read
 // from a streamed `ls-files` that is stopped once the bound is exceeded so a
 // huge directory is never listed in full. `paths` is complete when
@@ -2299,16 +2319,29 @@ const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
     let pending = '';
     let truncated = false;
     let settled = false;
+    let stallTimer = null;
     const finish = (error) => {
       if (settled) return;
       settled = true;
+      if (stallTimer) clearTimeout(stallTimer);
       if (error) {
         reject(error);
         return;
       }
       resolve({ paths, truncated });
     };
+    // A listing that goes silent is killed rather than left holding the
+    // status read (and its limiter slot) open.
+    const armStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+        finish(new Error(`git ls-files produced no output for ${GIT_UNTRACKED_LISTING_STALL_TIMEOUT_MS}ms in ${dirPath}`));
+      }, GIT_UNTRACKED_LISTING_STALL_TIMEOUT_MS);
+    };
+    armStallTimer();
     child.stdout.on('data', (chunk) => {
+      armStallTimer();
       if (truncated) return;
       pending += chunk.toString('utf8');
       const records = pending.split('\0');
@@ -2426,7 +2459,9 @@ async function readStatus(normalizedDirectory, lightMode) {
       throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
 
-    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory);
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory, {
+      stallTimeoutMs: GIT_STATUS_STALL_TIMEOUT_MS,
+    });
 
     // `-unormal` lists a directory with no tracked files as one `dir/` entry
     // and stops walking it at its first file. `-uall` would walk every file

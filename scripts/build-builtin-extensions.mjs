@@ -84,6 +84,8 @@ export const buildBuiltInExtensions = async ({ sourceRoot = path.join(repoRoot, 
       if (!inspected.ok || inspected.guest.id !== entry.id) throw new Error(`Built-in package failed validation: ${entry.id}`);
     }
     await fs.writeFile(path.join(staging, 'registry.json'), `${JSON.stringify(registry, null, 2)}\n`);
+    // mkdtemp creates an owner-only directory; runtime may use a different UID.
+    await fs.chmod(staging, 0o755);
     try { await fs.rename(outDir, previous); movedPrevious = true; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     try { await fs.rename(staging, outDir); }

@@ -262,6 +262,13 @@ and the send path reading the same grammar.
   The hook also selects the attachment draft before paint. `input-store.ts`
   owns its in-memory files and scoped send recovery, documented in
   `packages/ui/src/sync/DOCUMENTATION.md`.
+- `state/useDictationOrigin.ts` — a dictation belongs to the draft that was on
+  screen when recording started. The transcript arrives later, after the user
+  may have switched sessions in the one mounted composer. `ChatInput` records
+  the origin from `ComposerDictation`'s `onStart`, and a transcript whose
+  origin is no longer the rendered draft is appended to the origin's draft
+  through `restoreDraft`. It is not inserted or sent in the visible session,
+  including for **Insert and send**, and a toast says where it went.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation. It
@@ -350,6 +357,35 @@ frame where nothing is open.
 **Every timeout and `flushSync` in them has a reason recorded next to it, and
 none of them is verifiable outside a real device.** Change them only against
 hardware.
+
+`state/mobileComposerMorph.ts` plays the pill ↔ composer swap as a FLIP morph
+in the native iOS shell only, after t3code's resting-composer transition.
+The swap commits synchronously (`flushSync`); the glass box
+(`data-composer-box`) is then frozen at its old height and animated to the
+new one (WAAPI) with its rows anchored to the bottom edge, so the footer and
+model/agent rows stay where the pill's rows were; the prompt
+(`data-composer-morph-prompt`: the pill's text line or the editor block)
+travels from its old position to its new one, gained editor lines unfurl
+beneath it, and footer controls that exist only expanded fade in over the
+second half. The floating composer slot (`data-composer-slot="floating"`, in
+`ChatContainer`) is pinned for the tween at the height the transcript should
+see — the new one on expand, the old one on collapse — so its
+`ResizeObserver` publishes one final inset instead of chasing frames. The
+status row, recap hint and scroll-to-end button share one zero-height anchor
+on the slot's top edge (`data-composer-riders`, class `oc-composer-riders`):
+the keyboard choreography slides it as a mover and the morph moves it with the
+box's top edge through the individual `translate` property, so nothing above
+the composer jumps when the slot resizes. The
+motion starts on the `oc:keyboard-anim` event for its direction, runs on the
+shared keyboard timing (`lib/mobileKeyboardTiming.ts`) the composer slide
+also uses, and ends on `oc:keyboard-settled`; a fallback timer runs it alone
+without a keyboard. The transcript rides it through
+`lib/scroll/keyboardFollowGlide.ts` (owned by `useChatTimelineScroll`): the
+morph announces `oc:composer-morph` (`hold` with the slot's height delta,
+`glide` and `release` when it runs without a keyboard), the glide holds every
+automatic end write while a transition runs, lets the geometry land in one
+step, and drives scrollTop on the same curve. Mobile browsers, Android and
+reduced motion keep the instant swap.
 
 ## Testing
 

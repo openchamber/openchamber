@@ -251,11 +251,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 • {sessions.length}
               </span>
               {collapsedActivityState ? (
-                <CollapsedActivityIndicator
-                  state={collapsedActivityState}
-                  activeLabel={t('sessions.sidebar.session.status.active')}
-                  unreadLabel={t('sessions.sidebar.session.status.unread')}
-                />
+                <CollapsedActivityIndicator state={collapsedActivityState} />
               ) : null}
               {isCollapsed ? (
                 <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />

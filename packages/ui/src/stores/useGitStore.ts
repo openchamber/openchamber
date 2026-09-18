@@ -650,6 +650,40 @@ const toUnstagedStatusFile = (file: GitStatus['files'][number]): GitStatus['file
 const isCleanStatusFile = (file: GitStatus['files'][number]): boolean =>
   isBlankStatusCode(file.index) && isBlankStatusCode(file.working_dir);
 
+/**
+ * Mirrors an optimistic stage/unstage on the scoped line stats. Staging makes
+ * the index match the working tree and unstaging resets it to HEAD, so the
+ * path's whole known diff moves into the destination scope; an entry already
+ * there is merged. Without this the moved row reads the empty scope and shows
+ * +0/-0 until the delayed status reconcile lands.
+ */
+const moveDiffStatsScope = (
+  diffStats: NonNullable<GitStatus['diffStats']>,
+  paths: Set<string>,
+  direction: 'stage' | 'unstage',
+): NonNullable<GitStatus['diffStats']> => {
+  const staged = { ...diffStats.staged };
+  const working = { ...diffStats.working };
+  const [from, to] = direction === 'stage'
+    ? [working, staged] as const
+    : [staged, working] as const;
+
+  let moved = false;
+  for (const path of paths) {
+    const entry = from[path];
+    if (!entry) continue;
+    delete from[path];
+    const existing = to[path];
+    to[path] = {
+      insertions: (existing?.insertions ?? 0) + entry.insertions,
+      deletions: (existing?.deletions ?? 0) + entry.deletions,
+    };
+    moved = true;
+  }
+
+  return moved ? { staged, working } : diffStats;
+};
+
 const initialGitRuntimeKey = activeGitRuntimeKey;
 
 export const useGitStore = create<GitStore>()(
@@ -930,6 +964,10 @@ export const useGitStore = create<GitStore>()(
 
         bumpStatusMutationRevision(get().runtimeKey, directory);
 
+        const nextDiffStats = previousStatus.diffStats
+          ? moveDiffStatsScope(previousStatus.diffStats, normalizedPaths, direction)
+          : previousStatus.diffStats;
+
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
           ...dirState,
@@ -937,6 +975,7 @@ export const useGitStore = create<GitStore>()(
             ...previousStatus,
             files: nextFiles,
             isClean: nextFiles.length === 0,
+            diffStats: nextDiffStats,
           },
           indexRevision: dirState.indexRevision + 1,
           lastStatusChange: Date.now(),
