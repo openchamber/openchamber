@@ -26,7 +26,7 @@ describe('server-owned chat directories', () => {
     expect((await createChatDirectory(new Date(2026, 8, 5))).startsWith('/home/user/.config/openchamber/chats/2026-09-05/session-')).toBe(true);
   });
 
-  test('classifies only exact configured and actual legacy roots after warming', async () => {
+  test('classifies only configured and actual legacy roots after warming', async () => {
     expect(isChatDirectoryPath('/work/backup/.config/openchamber/chats/project')).toBe(false);
     await ensureChatsRootDirectory();
     expect(isChatDirectoryPath('/srv/chats/day/session-a')).toBe(true);
@@ -37,6 +37,16 @@ describe('server-owned chat directories', () => {
     expect(isChatDirectoryForHome('/other/.config/openchamber/chats/session-a', '/home/user')).toBe(false);
   });
 
+  test('matches case-variant chat paths without rewriting cached roots', async () => {
+    await ensureChatsRootDirectory();
+    expect(isChatDirectoryPath('/SRV/Chats/day/session-a')).toBe(true);
+    expect(isChatDirectoryPath('/HOME/USER/.CONFIG/OpenChamber/chats/day/session-a')).toBe(true);
+    expect(getChatsRootFromDirectory('/SRV/Chats/day/session-a')).toBe('/srv/chats');
+    expect(getChatsRootFromDirectory('/HOME/USER/.CONFIG/OpenChamber/chats/day/session-a')).toBe('/home/user/.config/openchamber/chats');
+    expect(isChatDirectoryForHome('/Users/Wayne/.config/openchamber/chats/2026-09-17/session-x', '/Users/wayne')).toBe(true);
+    expect(isChatDirectoryPath('/SRV/Chats-other/session-a')).toBe(false);
+  });
+
   test('deletes real descendants but never shared roots, lookalikes, or traversal paths', async () => {
     for (const path of ['/srv/chats', '/home/user/.config/openchamber/chats', '/work/backup/.config/openchamber/chats/project', '/srv/chats/../project']) {
       await deleteChatDirectory(path);
@@ -45,6 +55,15 @@ describe('server-owned chat directories', () => {
     await deleteChatDirectory('/srv/chats/day/session-a');
     await deleteChatDirectory('/home/user/.config/openchamber/chats/day/session-b');
     expect(deleteRequests()).toHaveLength(2);
+  });
+
+  test('refuses case-variant shared roots and deletes case-variant descendants', async () => {
+    await ensureChatsRootDirectory();
+    await deleteChatDirectory('/SRV/CHATS');
+    await deleteChatDirectory('/HOME/USER/.CONFIG/OpenChamber/chats');
+    expect(deleteRequests()).toHaveLength(0);
+    await deleteChatDirectory('/SRV/Chats/day/session-c');
+    expect(deleteRequests()).toHaveLength(1);
   });
 
   test('failed root lookup never creates or deletes, and the next attempt retries', async () => {

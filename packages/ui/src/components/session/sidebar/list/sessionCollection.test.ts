@@ -201,6 +201,24 @@ describe('projectSidebarCollection', () => {
       .map((entry) => entry.id)).toEqual(['project']);
   });
 
+  test('keeps a case-mismatched managed Chats session in the Chats projection', () => {
+    const managed = session('managed-case', '/HOME/.config/openchamber/chats/2026-08-24/session-case');
+    const project = session('project', '/workspace/a');
+
+    const projection = buildSidebarSessionProjection({
+      globalActiveSessions: [managed, project],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/a']),
+      isVSCode: false,
+      pinnedSessionIds: new Set(),
+      sessionOrderRanks: new Map(),
+    });
+
+    expect(projection.projectSessions.map((entry) => entry.id)).toEqual(['project']);
+    expect(projection.chatSessions.map((entry) => entry.id)).toEqual(['managed-case']);
+    expect(projection.orderedSessions.map((entry) => entry.id)).toContain('managed-case');
+  });
+
   test('keeps managed Chats out of the VS Code sidebar', () => {
     const managed = session('managed', '/home/.config/openchamber/chats/2026-08-24/session-managed');
 

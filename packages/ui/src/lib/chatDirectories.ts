@@ -16,9 +16,15 @@ function legacyRootForHome(home: string | null | undefined): string | null {
   return normalized ? joinPath(normalized, '.config', 'openchamber', 'chats') : null;
 }
 
+// Server-resolved roots can differ from persisted session directories only by
+// casing (macOS home casing), so membership ignores case. Callers still return
+// the cached root string unchanged; only the comparison is folded.
+const samePath = (left: string, right: string): boolean =>
+  left.toLowerCase() === right.toLowerCase();
+
 function isWithinRoot(directory: string, root: string): boolean {
   return !directory.split('/').some((part) => part === '..' || part === '.')
-    && (directory === root || directory.startsWith(`${root}/`));
+    && (samePath(directory, root) || directory.toLowerCase().startsWith(`${root.toLowerCase()}/`));
 }
 
 function cachedRoots(): ChatRoots | undefined {
@@ -94,7 +100,7 @@ export async function deleteChatDirectory(directory: string): Promise<void> {
   const roots = await getChatRoots();
   if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while deleting chat directory');
   // A session may own a descendant, never either shared chats root itself.
-  if (normalized === roots.configured || normalized === roots.legacy) return;
+  if (samePath(normalized, roots.configured) || samePath(normalized, roots.legacy)) return;
   if (!isWithinRoot(normalized, roots.configured) && !isWithinRoot(normalized, roots.legacy)) return;
   const response = await runtimeFetch('/api/fs/delete', {
     method: 'POST',
