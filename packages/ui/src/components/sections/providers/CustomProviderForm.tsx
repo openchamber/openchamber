@@ -11,8 +11,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
   CUSTOM_PROVIDER_PROTOCOLS,
   createEmptyCustomProviderForm,
@@ -25,6 +28,8 @@ import {
   type FieldErrors,
   type HeaderFieldErrors,
   type ModelFieldErrors,
+  type DiscoveredModel,
+  type DiscoverModelsErrorCode,
 } from './custom-provider-form';
 
 type CustomProviderFormProps = {
@@ -38,6 +43,19 @@ type CustomProviderFormProps = {
   onSubmit: (plan: CustomProviderPersistPlan) => void | Promise<void>;
   onCancel?: () => void;
   onDisconnect?: () => void | Promise<void>;
+};
+
+const DISCOVERY_ERROR_MESSAGES: Record<DiscoverModelsErrorCode, string> = {
+  INVALID_URL: 'settings.providers.page.custom.models.discoveryError.unknown',
+  SSRF_BLOCKED: 'settings.providers.page.custom.models.discoveryError.unknown',
+  AUTH_FAILED: 'settings.providers.page.custom.models.discoveryError.authFailed',
+  ACCESS_DENIED: 'settings.providers.page.custom.models.discoveryError.accessDenied',
+  ENDPOINT_NOT_FOUND: 'settings.providers.page.custom.models.discoveryError.endpointNotFound',
+  NETWORK_ERROR: 'settings.providers.page.custom.models.discoveryError.networkError',
+  TIMEOUT: 'settings.providers.page.custom.models.discoveryError.timeout',
+  INVALID_RESPONSE: 'settings.providers.page.custom.models.discoveryError.invalidResponse',
+  PROVIDER_ERROR: 'settings.providers.page.custom.models.discoveryError.providerError',
+  INTERNAL_ERROR: 'settings.providers.page.custom.models.discoveryError.unknown',
 };
 
 export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
@@ -61,6 +79,12 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
   const [modelErrors, setModelErrors] = React.useState<ModelFieldErrors[]>([]);
   const [headerErrors, setHeaderErrors] = React.useState<HeaderFieldErrors[]>([]);
   const seededEditProviderIdRef = React.useRef<string | null>(null);
+
+  // Model discovery state
+  const [discoveredModels, setDiscoveredModels] = React.useState<DiscoveredModel[]>([]);
+  const [discoveryLoading, setDiscoveryLoading] = React.useState(false);
+  const [discoveryError, setDiscoveryError] = React.useState<string | null>(null);
+  const [showModelSelector, setShowModelSelector] = React.useState(false);
 
   React.useEffect(() => {
     if (!initialValues) {
@@ -107,6 +131,124 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     });
   };
 
+  const handleFetchModels = async () => {
+    const baseURL = form.baseURL.trim();
+    if (!baseURL) {
+      setDiscoveryError(t('settings.providers.page.custom.error.baseURL.required'));
+      return;
+    }
+
+    setDiscoveryLoading(true);
+    setDiscoveryError(null);
+
+    try {
+      const apiKey = form.apiKey.trim();
+      const { env, key } = (() => {
+        const trimmed = apiKey;
+        if (!trimmed) return {};
+        const envMatch = trimmed.match(/^\{env:([^}]+)\}$/);
+        const env = envMatch?.[1]?.trim();
+        if (env) return { env };
+        return { key: trimmed };
+      })();
+
+      const headers: Record<string, string> = {};
+      for (const header of form.headers) {
+        const k = header.key.trim();
+        const v = header.value.trim();
+        if (k && v) headers[k] = v;
+      }
+
+      const response = await runtimeFetch('/api/provider/discover-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseURL, apiKey: key, env, headers }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const code = (data?.code as DiscoverModelsErrorCode) || 'INTERNAL_ERROR';
+        let messageKey = DISCOVERY_ERROR_MESSAGES[code] || DISCOVERY_ERROR_MESSAGES.INTERNAL_ERROR;
+        let message = t(messageKey);
+
+        if (code === 'ENDPOINT_NOT_FOUND' && data?.error) {
+          message = data.error;
+        } else if (code === 'PROVIDER_ERROR' && data?.error) {
+          message = t(messageKey, { message: data.error });
+        }
+
+        setDiscoveryError(message);
+        return;
+      }
+
+      const models: DiscoveredModel[] = (data.models ?? []).map((m: { id: string; name: string }) => {
+        const alreadyExists = form.models.some((existing) => existing.id.trim() === m.id);
+        return {
+          id: m.id,
+          name: m.name,
+          alreadyExists,
+          selected: alreadyExists,
+        };
+      });
+
+      setDiscoveredModels(models);
+      setShowModelSelector(true);
+    } catch {
+      setDiscoveryError(t(DISCOVERY_ERROR_MESSAGES.INTERNAL_ERROR));
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  };
+
+  const handleModelSelectionChange = (modelId: string, checked: boolean) => {
+    setDiscoveredModels((prev) =>
+      prev.map((m) => (m.id === modelId ? { ...m, selected: checked } : m)),
+    );
+  };
+
+  const handleSelectAll = () => {
+    setDiscoveredModels((prev) => prev.map((m) => ({ ...m, selected: true })));
+  };
+
+  const handleClearAll = () => {
+    setDiscoveredModels((prev) => prev.map((m) => ({ ...m, selected: false })));
+  };
+
+  const handleAddSelectedModels = () => {
+    const selectedModels = discoveredModels.filter((m) => m.selected);
+    const existingIds = new Set(form.models.map((m) => m.id.trim()).filter(Boolean));
+
+    const newModels = selectedModels
+      .filter((m) => !existingIds.has(m.id))
+      .map((m) => createModelRow().row);
+
+    if (newModels.length === 0 && selectedModels.every((m) => existingIds.has(m.id))) {
+      setShowModelSelector(false);
+      return;
+    }
+
+    setForm((prev) => {
+      const newRows = selectedModels
+        .filter((m) => !existingIds.has(m.id))
+        .map((m) => ({
+          row: createModelRow().row,
+          id: m.id,
+          name: m.name,
+        }));
+
+      return {
+        ...prev,
+        models: [...prev.models, ...newRows],
+      };
+    });
+
+    setModelErrors((prev) => [...prev, ...new Array(newModels.length).fill({})]);
+    setShowModelSelector(false);
+  };
+
+  const selectedCount = discoveredModels.filter((m) => m.selected).length;
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) {
@@ -129,6 +271,8 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     }
     await onSubmit(output.result);
   };
+
+  const canFetchModels = form.baseURL.trim().length > 0 && !discoveryLoading;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
@@ -207,14 +351,29 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
           label={t('settings.providers.page.custom.field.baseURL.label')}
           info={t('settings.providers.page.custom.field.baseURL.info')}
         >
-          <Input
-            value={form.baseURL}
-            onChange={(event) => setField('baseURL', event.target.value)}
-            placeholder={t('settings.providers.page.custom.field.baseURL.placeholder')}
-            className="h-8 rounded-md px-3 font-mono text-xs"
-            aria-invalid={Boolean(err.baseURL)}
-            aria-label={t('settings.providers.page.custom.field.baseURL.label')}
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              value={form.baseURL}
+              onChange={(event) => setField('baseURL', event.target.value)}
+              placeholder={t('settings.providers.page.custom.field.baseURL.placeholder')}
+              className="h-8 rounded-md px-3 font-mono text-xs flex-1"
+              aria-invalid={Boolean(err.baseURL)}
+              aria-label={t('settings.providers.page.custom.field.baseURL.label')}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal shrink-0"
+              onClick={handleFetchModels}
+              disabled={!canFetchModels || busy}
+              aria-label={t('settings.providers.page.custom.field.baseURL.fetchModelsAria')}
+            >
+              {discoveryLoading
+                ? t('settings.providers.page.custom.field.baseURL.fetchingModels')
+                : t('settings.providers.page.custom.field.baseURL.fetchModels')}
+            </Button>
+          </div>
           {err.baseURL ? <p className="mt-1 typography-meta text-[var(--status-error)]">{err.baseURL}</p> : null}
         </SettingsStackedField>
 
@@ -418,6 +577,98 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
               : t('settings.providers.page.custom.actions.save')}
         </Button>
       </div>
+
+      <Dialog open={showModelSelector} onOpenChange={setShowModelSelector}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>{t('settings.providers.page.custom.models.selectorTitle')}</DialogTitle>
+            <DialogDescription>{t('settings.providers.page.custom.models.selectorDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {discoveryError ? (
+              <p className="typography-meta text-[var(--status-error)]" role="alert">
+                {discoveryError}
+              </p>
+            ) : discoveredModels.length === 0 ? (
+              <p className="typography-meta text-muted-foreground text-center py-8">
+                {t('settings.providers.page.custom.models.noModelsFound')}
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="typography-micro text-muted-foreground">
+                    {t('settings.providers.page.custom.models.selectedCount', { selected: String(selectedCount), total: String(discoveredModels.length) })}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="!font-normal"
+                      onClick={handleSelectAll}
+                    >
+                      {t('settings.providers.page.custom.models.selectAll')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="!font-normal"
+                      onClick={handleClearAll}
+                    >
+                      {t('settings.providers.page.custom.models.clearAll')}
+                    </Button>
+                  </div>
+                </div>
+                <div className="max-h-[400px] overflow-y-auto space-y-1">
+                  {discoveredModels.map((model) => (
+                    <label
+                      key={model.id}
+                      className="flex items-center gap-3 p-2 rounded-md hover:bg-[var(--surface-muted)] transition-colors"
+                    >
+                      <Checkbox
+                        checked={model.selected}
+                        onChange={(checked) => handleModelSelectionChange(model.id, checked)}
+                        disabled={model.alreadyExists}
+                        ariaLabel={`${model.name} (${model.id})`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <span className="typography-body font-medium truncate block">{model.name}</span>
+                        <span className="typography-micro text-muted-foreground font-mono truncate block">{model.id}</span>
+                      </div>
+                      {model.alreadyExists && (
+                        <span className="typography-micro text-muted-foreground flex-shrink-0">
+                          {t('settings.providers.page.custom.models.nameLabel')} (existing)
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => setShowModelSelector(false)}
+            >
+              {t('settings.common.actions.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              className="!font-normal"
+              onClick={handleAddSelectedModels}
+              disabled={selectedCount === 0}
+            >
+              {t('settings.providers.page.custom.models.addSelected')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 };

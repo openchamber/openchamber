@@ -9,6 +9,8 @@ import {
   validateCustomProvider,
   type CustomProviderConfig,
   type CustomProviderFormState,
+  type DiscoveredModel,
+  type DiscoverModelsErrorCode,
 } from './custom-provider-form';
 
 const t = (key: string) => key;
@@ -368,5 +370,36 @@ describe('provider edit helpers', () => {
       project: { exists: false },
       custom: { exists: true },
     })).toBe('custom');
+  });
+});
+
+describe('model discovery types', () => {
+  test('DiscoveredModel type has correct structure', () => {
+    const model: DiscoveredModel = {
+      id: 'gpt-5',
+      name: 'GPT-5',
+      alreadyExists: false,
+      selected: true,
+    };
+    expect(model.id).toBe('gpt-5');
+    expect(model.name).toBe('GPT-5');
+    expect(model.alreadyExists).toBe(false);
+    expect(model.selected).toBe(true);
+  });
+
+  test('DiscoverModelsErrorCode includes all expected codes', () => {
+    const codes: DiscoverModelsErrorCode[] = [
+      'INVALID_URL',
+      'SSRF_BLOCKED',
+      'AUTH_FAILED',
+      'ACCESS_DENIED',
+      'ENDPOINT_NOT_FOUND',
+      'NETWORK_ERROR',
+      'TIMEOUT',
+      'INVALID_RESPONSE',
+      'PROVIDER_ERROR',
+      'INTERNAL_ERROR',
+    ];
+    expect(codes).toHaveLength(10);
   });
 });

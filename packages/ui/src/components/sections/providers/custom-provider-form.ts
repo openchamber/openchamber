@@ -60,6 +60,50 @@ export type HeaderFieldErrors = {
   value?: string;
 };
 
+/**
+ * Model discovered from provider /models endpoint.
+ */
+export type DiscoveredModel = {
+  id: string;
+  name: string;
+  /** Whether this model is already in the form's model list. */
+  alreadyExists: boolean;
+  /** User selection state. */
+  selected: boolean;
+};
+
+/**
+ * Request payload for model discovery.
+ */
+export type DiscoverModelsRequest = {
+  baseURL: string;
+  apiKey?: string;
+  env?: string;
+  headers?: Record<string, string>;
+};
+
+/**
+ * Success response from model discovery.
+ */
+export type DiscoverModelsResponse = {
+  models: Array<{ id: string; name: string }>;
+};
+
+/**
+ * Error codes from model discovery endpoint.
+ */
+export type DiscoverModelsErrorCode =
+  | 'INVALID_URL'
+  | 'SSRF_BLOCKED'
+  | 'AUTH_FAILED'
+  | 'ACCESS_DENIED'
+  | 'ENDPOINT_NOT_FOUND'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT'
+  | 'INVALID_RESPONSE'
+  | 'PROVIDER_ERROR'
+  | 'INTERNAL_ERROR';
+
 export type CustomProviderConfig = {
   npm: CustomProviderNpm;
   name: string;

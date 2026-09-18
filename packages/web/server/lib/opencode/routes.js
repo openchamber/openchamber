@@ -755,6 +755,34 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     }
   });
 
+  app.post('/api/provider/discover-models', async (req, res) => {
+    try {
+      const baseURL = typeof req.body?.baseURL === 'string' ? req.body.baseURL.trim() : '';
+      const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey : undefined;
+      const env = typeof req.body?.env === 'string' ? req.body.env : undefined;
+      const headers = req.body?.headers && typeof req.body.headers === 'object' ? req.body.headers : undefined;
+
+      if (!baseURL) {
+        return res.status(400).json({ error: 'Base URL is required', code: 'INVALID_URL' });
+      }
+
+      const { discoverModels, DiscoveryError } = await import('./model-discovery.js');
+
+      try {
+        const result = await discoverModels({ baseURL, apiKey, env, headers });
+        return res.json(result);
+      } catch (error) {
+        if (error instanceof DiscoveryError) {
+          return res.status(error.statusCode).json({ error: error.message, code: error.code });
+        }
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to discover models:', error);
+      return res.status(500).json({ error: error.message || 'Failed to discover models', code: 'INTERNAL_ERROR' });
+    }
+  });
+
   app.post('/api/opencode/directory', async (req, res) => {
     try {
       const requestedPath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
