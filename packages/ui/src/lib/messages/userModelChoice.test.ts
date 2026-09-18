@@ -132,6 +132,26 @@ describe('shouldPreserveManualModelOverride', () => {
       candidate: { providerID: undefined, modelID: undefined },
     })).toBe(true)
   })
+
+  test('[thinking-variant-reset] preserves manual override when only the variant differs (same model)', () => {
+    // Reproduces: user picks "deepseek-v4-flash" + "max" thinking, sends a
+    // message, and the historical message metadata reports no variant (or a
+    // different one). The model itself hasn't changed, so provider/model
+    // comparison alone said "no conflict" and let the variant silently reset.
+    expect(shouldPreserveManualModelOverride({
+      selectionSource: 'manual',
+      savedSessionModel: { providerId: 'deepseek', modelId: 'deepseek-v4-flash', variant: 'max' },
+      candidate: { providerID: 'deepseek', modelID: 'deepseek-v4-flash', variant: undefined },
+    })).toBe(true)
+  })
+
+  test('[thinking-variant-reset] does not preserve when model and variant both match', () => {
+    expect(shouldPreserveManualModelOverride({
+      selectionSource: 'manual',
+      savedSessionModel: { providerId: 'deepseek', modelId: 'deepseek-v4-flash', variant: 'max' },
+      candidate: { providerID: 'deepseek', modelID: 'deepseek-v4-flash', variant: 'max' },
+    })).toBe(false)
+  })
 })
 
 describe('extractUserModelChoice', () => {
