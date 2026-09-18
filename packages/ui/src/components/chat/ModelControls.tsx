@@ -21,7 +21,7 @@ import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
-import { getAgentColor } from '@/lib/agentColors';
+import { useAgentColors } from '@/hooks/useAgentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
@@ -42,6 +42,8 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { markStartupTrace } from '@/lib/startupTrace';
+import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
+import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import {
     findLatestUserModelChoice,
     shouldPreserveManualModelOverride,
@@ -327,6 +329,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const { isReady: canSelectAgent } = useOpenCodeReadiness('agents');
     const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
     const providers = useConfigStore((state) => state.providers);
+    const getAgentColor = useAgentColors();
     const currentProviderId = useConfigStore((state) => selection ? selection.model?.providerId ?? '' : state.currentProviderId);
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
     const effectiveCurrentVariant = useConfigStore((state) => state.currentVariant);
@@ -436,6 +439,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists();
+    // Auto routing: the server resolves `openchamber/auto` into a real model per
+    // send. Offered only while the server says it can honour it, in the main
+    // composer and in controlled selections (BTW) alike.
+    const autoReady = useRoutingStore(selectAutoReady);
+    const autoEntry = React.useMemo<ModelPickerEntry | null>(() => (autoReady
+        ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
+        : null), [autoReady, t]);
+    const isAutoSelected = isAutoModel(currentProviderId, currentModelId);
 
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     // The composer decides whether it renders the mobile layout from the UI
@@ -687,13 +698,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return 'model-missing';
             }
 
+            const isAuto = isAutoModel(providerId, modelId);
+            if (isAuto && !selectAutoReady(useRoutingStore.getState())) {
+                return 'provider-missing';
+            }
             const provider = providers.find(p => p.id === providerId);
-            if (!provider) {
+            if (!provider && !isAuto) {
                 return 'provider-missing';
             }
 
-            const providerModels = Array.isArray(provider.models) ? provider.models : [];
-            const modelExists = providerModels.find((m: ProviderModel) => m.id === modelId);
+            const providerModels = Array.isArray(provider?.models) ? provider.models : [];
+            const modelExists = isAuto || providerModels.find((m: ProviderModel) => m.id === modelId);
             if (!modelExists) {
                 return 'model-missing';
             }
@@ -916,18 +931,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             ? latestLoadedUserChoice.variant
             : undefined;
         const restoreAgentName = latestLoadedUserChoice.agent || currentAgentName || undefined;
-        // A message carrying no effort is not evidence that the user has none:
-        // a send under an explicit "Default" carries none either, and the echo
-        // of that very send arrives here. Keep what the session already
-        // recorded, and let a concrete historical effort replace it.
-        const restoredVariant = historicalVariant ?? (currentSessionId && restoreAgentName
+        // A saved choice may be newer than the last sent message, including an
+        // explicit Default. Reloading history must not replace that choice.
+        const savedVariant = currentSessionId && restoreAgentName
             ? getAgentModelVariantForSession(
                 currentSessionId,
                 restoreAgentName,
                 latestLoadedUserChoice.providerID,
                 latestLoadedUserChoice.modelID,
             )
-            : undefined);
+            : undefined;
+        const restoredVariant = savedVariant !== undefined ? savedVariant : historicalVariant;
         const applyResult = applyModelSelectionWithVariant(
             latestLoadedUserChoice.providerID,
             latestLoadedUserChoice.modelID,
@@ -989,9 +1003,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         }
                         return 'resolved';
                     }
-                    if (result === 'provider-missing') {
-                        return 'waiting';
-                    }
+                    return 'waiting';
                 } else if (currentAgentName !== savedAgentName) {
                     setAgent(savedAgentName);
                 }
@@ -1005,9 +1017,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     }
                     return 'resolved';
                 }
-                if (result === 'provider-missing') {
-                    return 'waiting';
-                }
+                return 'waiting';
             }
 
             for (const agent of agents) {
@@ -1027,9 +1037,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     }
                     return 'resolved';
                 }
-                if (result === 'provider-missing') {
-                    return 'waiting';
-                }
+                return 'waiting';
             }
 
             return 'continue';
@@ -1196,10 +1204,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         // user selection while drafting.
         if (!currentSessionId) {
             if (currentVariantSelection.override === undefined && !manualVariantSelectionRef.current) {
-                const desired = settingsDefaultVariant && availableVariants.includes(settingsDefaultVariant)
-                    ? settingsDefaultVariant
-                    : undefined;
-                setCurrentVariantOverride(desired ?? null, desired);
+                const desired = resolveInheritedVariantForModel(currentProviderId, currentModelId);
+                setCurrentVariantOverride(undefined, desired);
             }
             return;
         }
@@ -1326,8 +1332,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 }
                 return;
             }
-            if (!selection && !options?.applyVariant) {
-                // Add to recent models on successful selection.
+            if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
+                // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);
             }
             setAgentMenuOpen(false);
@@ -1352,6 +1358,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const getCurrentModelDisplayName = () => {
         if (!currentModelId) return t('chat.modelControls.selectModel');
+        if (isAutoSelected) return t('chat.modelControls.autoModel');
         const currentModel = models.find((m: ProviderModel) => m.id === currentModelId);
         return getModelDisplayName(currentModel, currentModelId) || t('chat.modelControls.selectModel');
     };
@@ -1745,18 +1752,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
                             className={cn(
                                 'flex flex-1 min-w-0 items-start gap-2 text-left',
-                                'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-lg'
+                                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-lg'
                             )}
                         >
                             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                                 <div className="flex min-w-0 items-center gap-1.5">
-                                    {showProviderLogo ? (
+                                    {isAutoModel(providerId, modelId) ? (
+                                        <Icon name="openchamber" className="size-3.5 flex-shrink-0" />
+                                    ) : showProviderLogo ? (
                                         <ProviderLogo providerId={providerId} className="size-3.5 flex-shrink-0" />
                                     ) : null}
                                     <span className="typography-meta font-medium text-foreground truncate">
                                         {getModelDisplayName(model)}
                                     </span>
-                                    {isSelected ? <Icon name="check" className="size-4 flex-shrink-0 text-primary" /> : null}
+                                    {isSelected ? <Icon name="check" className="size-4 flex-shrink-0 text-inherit" /> : null}
                                 </div>
                                 {contextText || indicatorIcons.length > 0 ? (
                                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden typography-micro text-muted-foreground">
@@ -1838,7 +1847,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             className={cn(
                                                 'inline-flex items-center rounded-full border px-2.5 py-1 typography-meta font-medium',
                                                 isVariantSelected
-                                                    ? 'border-primary/30 bg-primary/10 text-foreground'
+                                                    ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
                                                     : 'border-border/40 text-muted-foreground hover:bg-interactive-hover/50'
                                             )}
                                             aria-pressed={isVariantSelected}
@@ -1864,7 +1873,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         };
 
-        const hasResults = filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0;
+        const mobileAutoEntry = autoEntry && (normalizedQuery.length === 0 || getModelDisplayName(autoEntry.model).toLowerCase().includes(normalizedQuery.toLowerCase()))
+            ? autoEntry
+            : null;
+        const hasResults = Boolean(mobileAutoEntry) || filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0;
 
         return (
             <MobileOverlayPanel
@@ -1906,6 +1918,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             {t('chat.modelControls.noProvidersOrModelsFound')}
                         </div>
                     )}
+
+                    {mobileAutoEntry ? (
+                        <div className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] overflow-hidden">
+                            <div className="flex flex-col">
+                                {renderMobileModelRow({
+                                    model: mobileAutoEntry.model,
+                                    providerId: mobileAutoEntry.providerID,
+                                    modelId: mobileAutoEntry.modelID,
+                                    showProviderLogo: false,
+                                })}
+                            </div>
+                        </div>
+                    ) : null}
 
                     {/* Favorites Section for Mobile */}
                     {filteredFavorites.length > 0 && (
@@ -2054,13 +2079,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         type="button"
                         className={cn(
                             'flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-left',
-                            'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
-                            isDefault ? 'border-primary/30 bg-primary/10' : 'border-border/40'
+                            'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                            isDefault ? 'border-border bg-interactive-selection text-interactive-selection-foreground' : 'border-border/40'
                         )}
                         onClick={() => handleSelect(undefined)}
                     >
                         <span className="typography-meta font-medium text-foreground">{t('chat.modelControls.default')}</span>
-                        {isDefault && <Icon name="check" className="size-4 text-primary flex-shrink-0" />}
+                        {isDefault && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
                     </button>
 
                     {targetVariants.map((variant) => {
@@ -2073,13 +2098,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 type="button"
                                 className={cn(
                                     'flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-left',
-                                    'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
-                                    selected ? 'border-primary/30 bg-primary/10' : 'border-border/40'
+                                    'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                                    selected ? 'border-border bg-interactive-selection text-interactive-selection-foreground' : 'border-border/40'
                                 )}
                                 onClick={() => handleSelect(variant)}
                             >
-                                <span className="typography-meta font-medium text-foreground">{label}</span>
-                                {selected && <Icon name="check" className="size-4 text-primary flex-shrink-0" />}
+                                <span className="typography-meta font-medium text-inherit">{label}</span>
+                                {selected && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
                             </button>
                         );
                     })}
@@ -2108,17 +2133,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 type="button"
                                 className={cn(
                                     'flex w-full flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left',
-                                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                                     'touch-manipulation cursor-pointer transition-colors',
-                                    'active:bg-interactive-hover',
+                                    'active:bg-interactive-active',
                                     isSelected 
-                                        ? 'border-primary/50 bg-interactive-selection/20' 
+                                        ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
                                         : 'border-border/40 hover:bg-interactive-hover/50'
                                 )}
                                 onClick={() => handleAgentChange(agent.name)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <div className={cn('size-2.5 rounded-full flex-shrink-0', agentColor.class)} />
+                                    <div className={cn('size-2.5 rounded-full flex-shrink-0 agent-dot', agentColor.class)} />
                                     <span
                                         className="typography-ui-label font-semibold"
                                         style={isSelected ? { color: `var(${agentColor.var})` } : undefined}
@@ -2374,6 +2399,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 {readinessLabel}
                                             </span>
                                         </>
+                                    ) : isAutoSelected ? (
+                                        <Icon name="openchamber" className={cn(controlIconSize, 'flex-shrink-0')} />
                                     ) : currentProviderId ? (
                                         <>
                                             {/* Provider logos read smaller than the sprite icons
@@ -2437,6 +2464,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onSelect={handleSharedModelSelect}
                                 labels={modelPickerLabels}
                                 selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
+                                leadingEntry={autoEntry}
                                 hiddenModels={hiddenModels}
                                 onActiveKeyDown={handleModelPickerKeyDown}
                                 onActiveEntryChange={(entry) => { activeModelPickerEntryRef.current = entry; }}
@@ -2498,7 +2526,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </>
                         ) : (
                             <>
-                                {currentProviderId ? (
+                                {isAutoSelected ? (
+                                    <Icon name="openchamber" className={cn(controlIconSize, 'flex-shrink-0')} />
+                                ) : currentProviderId ? (
                                     <ProviderLogo
                                         providerId={currentProviderId}
                                         className={cn(controlIconSize, 'flex-shrink-0')}
@@ -2654,7 +2684,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderVariantSelector = () => {
-        if (!isReady || !hasVariants) {
+        if (!isReady || !hasVariants || isAutoSelected) {
             return null;
         }
 
@@ -2737,7 +2767,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 >
                                     <div className="flex items-center justify-between gap-2 w-full min-w-0">
                                         <span className="typography-meta font-medium text-foreground truncate min-w-0">{label}</span>
-                                        {selected && <Icon name="check" className="size-4 text-primary flex-shrink-0" />}
+                                        {selected && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
                                     </div>
                                 </DropdownMenuItem>
                             );
@@ -2953,15 +2983,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     {!inlineMobileSelection && renderVariantSelector()}
                     {renderModelSelector()}
                     {inlineMobileSelection && renderVariantSelector()}
-                    {!selection && renderAgentSelector()}
+                    {!selection && !isAutoSelected && renderAgentSelector()}
                 </div>
             </div>
 
             {renderMobileModelPanel()}
             {renderMobileVariantPanel()}
-            {!selection && renderMobileAgentPanel()}
+            {!selection && !isAutoSelected && renderMobileAgentPanel()}
             {renderMobileModelTooltip()}
-            {!selection && renderMobileAgentTooltip()}
+            {!selection && !isAutoSelected && renderMobileAgentTooltip()}
         </>
     );
 

@@ -15,7 +15,7 @@ interface SessionFolderItemProps<TSessionNode> {
    * indentation.
    */
   displayName?: string;
-  sessions: TSessionNode[];
+  sessions: readonly TSessionNode[];
   /** Sub-folders that belong directly to this folder */
   subFolderItems?: React.ReactNode;
   isCollapsed: boolean;
@@ -24,6 +24,7 @@ interface SessionFolderItemProps<TSessionNode> {
   onRename: (name: string) => void;
   onDelete: () => void;
   children?: React.ReactNode;
+  renderBody?: boolean;
   groupDirectory?: string | null;
   projectId?: string | null;
   mobileVariant?: boolean;
@@ -58,6 +59,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   onRename,
   onDelete,
   children,
+  renderBody = true,
   mobileVariant = false,
   alwaysShowActions = mobileVariant,
   isRenaming = false,
@@ -283,7 +285,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                     event.stopPropagation();
                     onNewSession();
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.folderItem.newSessionAria', { folderName: folder.name })}
                   title={t('sessions.sidebar.project.actions.newSession')}
                 >
@@ -297,7 +299,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                     event.stopPropagation();
                     handleStartRename();
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.folderItem.renameAria', { folderName: folder.name })}
                 >
                   <Icon name="pencil-ai" className="h-3.5 w-3.5" />
@@ -309,7 +311,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                   event.stopPropagation();
                   onDelete();
                 }}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={archivedBucket
                   ? t('sessions.sidebar.folderItem.deleteArchivedInFolderAria', { folderName: folder.name })
                   : t('sessions.sidebar.folderItem.deleteFolderAria', { folderName: folder.name })}
@@ -322,7 +324,7 @@ const SessionFolderItemBase = <TSessionNode,>({
       </div>
 
       {/* Folder body */}
-      {!isCollapsed ? (
+      {!isCollapsed && renderBody ? (
         <div className="pb-1">
           {/* Sub-folders first */}
           {subFolderItems}

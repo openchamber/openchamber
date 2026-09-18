@@ -1,4 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -611,11 +612,18 @@ export type CreateWorktreeArgs = {
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
+  const runtime = getRuntimeKey();
+  let cancelled = false;
+  const unsubscribe = subscribeRuntimeEndpointChanged(() => { cancelled = true; });
+  const assertCurrent = () => { if (cancelled || getRuntimeKey() !== runtime) throw new Error('Server changed during worktree creation'); };
+  try {
   const projectDirectory = normalizePath(project.path);
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  assertCurrent();
   const payload = toCreatePayload(args, projectDirectory);
 
   const created = await git.worktree.create(projectDirectory, payload);
+  assertCurrent();
   if (created?.sourceFetchFailed) {
     toast.warning(
       formatMessage(useI18nStore.getState().dictionary, 'session.newWorktree.toast.fetchSourceFailed'),
@@ -692,6 +700,9 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   });
 
   return metadata;
+  } finally {
+    unsubscribe();
+  }
 }
 
 export async function validateWorktreeCreate(project: ProjectRef, args: CreateWorktreeArgs): Promise<GitWorktreeValidationResult> {

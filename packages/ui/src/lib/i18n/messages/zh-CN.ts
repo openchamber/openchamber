@@ -2,6 +2,8 @@ import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': '使用 AI 重命名',
@@ -30,6 +32,8 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
+  ...routingI18n['zh-CN'],
+  ...pluginPanelI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',
@@ -1302,6 +1306,7 @@ export const dict: Record<I18nKey, string> = {
   'contextRail.surface.chat.description': '并排打开的会话',
   'contextRail.surface.notes': '项目知识',
   'contextRail.editorTree.toggle': '切换文件树',
+  'contextRail.editor.toggle': '切换文件编辑器',
   'contextPanel.browser.open': '打开浏览器面板',
   'contextPanel.browser.addressAria': '浏览器地址',
   'contextPanel.browser.history.label': '最近访问的地址',
@@ -1526,6 +1531,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.contextLimit': '上下文上限：{tokens}',
   'contextUsage.tooltip.outputLimit': '输出上限：{tokens}',
   'contextUsage.tooltip.cost': '成本：{cost}',
+  'contextUsage.compacted.description': '上下文已压缩。用量将在下一次回复后更新。',
   'contextSidebar.session.untitled': '未命名会话',
   'contextSidebar.empty.openSession': '请先打开会话以查看上下文。',
   'contextSidebar.section.context': '上下文',
@@ -1585,6 +1591,21 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.cleanWorkingTree': '工作区干净，没有可显示的改动',
   'diffView.state.noLastTurnChanges': '没有可显示的上一轮更改',
   'diffView.state.failedToLoadDiff': '加载差异失败',
+  'diffView.unavailable.missingTitle': '文件已不存在',
+  'diffView.unavailable.missingDescription': '它在变更列表加载后被删除。列表正在刷新。',
+  'diffView.unavailable.nestedRepositoryTitle': '独立的 Git 仓库',
+  'diffView.unavailable.nestedRepositoryDescription': '此文件夹有自己的 Git 历史。将其作为项目打开以查看变更。',
+  'diffView.unavailable.untrackedDirectoryTitle': '新文件文件夹',
+  'diffView.unavailable.untrackedDirectoryDescription': '此文件夹中的新文件太多，无法逐个列出。请暂存该文件夹，或者如果它不属于仓库，将其添加到 .gitignore。',
+  'diffView.submodule.title': '子模块',
+  'diffView.submodule.commitChanged': '提交 {from} → {to}',
+  'diffView.submodule.commitUnchanged': '仍在提交 {commit}',
+  'diffView.submodule.added': '位于提交 {commit} 的新子模块',
+  'diffView.submodule.removed': '子模块已移除，原为提交 {commit}',
+  'diffView.submodule.notCheckedOut': '未检出。记录的提交：{commit}',
+  'diffView.submodule.trackedChanges': '有未提交的变更',
+  'diffView.submodule.untrackedFiles': '有未跟踪的文件',
+  'diffView.submodule.conflict': '记录的提交存在合并冲突',
   'diffView.state.loadingDiff': '正在加载差异...',
   'diffView.state.loadingChanges': '正在加载变更...',
   'diffView.state.largeDiff': '大型差异（{count} 行变更）',
@@ -2429,6 +2450,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolOutputDialog.noOutputProduced': '没有产生输出',
   'chat.toolPart.lspErrors': 'LSP 错误',
   'chat.toolPart.moreErrors': '+{count} 个更多错误',
+  'chat.toolPart.moreRows': '+{count} 行更多',
   'chat.toolPart.error': '错误：',
   'chat.toolPart.awaitingResponse': '等待响应...',
   'chat.toolPart.noOutputProduced': '未产生输出',

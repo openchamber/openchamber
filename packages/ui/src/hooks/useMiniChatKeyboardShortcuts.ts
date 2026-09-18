@@ -93,6 +93,11 @@ export const useMiniChatKeyboardShortcuts = () => {
     },
     cycle_favorite_model_forward: () => cycleFavoriteModel(1),
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
+    toggle_dictation: () => {
+      if (hasActiveBtwComposer()) return false;
+      // Same event the main app dispatches; ComposerDictation listens for it.
+      window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+    },
   });
 
   React.useEffect(() => {

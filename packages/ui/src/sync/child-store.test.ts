@@ -13,7 +13,7 @@ import {
   getSyncPerformanceDiagnostics,
   setSyncPerformanceDiagnosticsEnabled,
 } from './performance-diagnostics';
-import { DIR_IDLE_TTL_MS } from './types';
+import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES } from './types';
 import { FilesystemError } from '@/lib/api/files-errors';
 
 const deferred = () => {
@@ -88,6 +88,33 @@ describe('ChildStoreManager directory lifecycle', () => {
 
       expect(manager.pinned('/workspace')).toBe(false);
       expect(manager.getChild('/workspace')).toBe(undefined);
+    } finally {
+      Date.now = originalDateNow;
+      manager.disposeAll();
+    }
+  });
+
+  test('keeps expanded off-screen directories alive while foreground demand exists', () => {
+    const manager = new ChildStoreManager();
+    const originalDateNow = Date.now;
+    let currentTime = 10_000;
+    Date.now = () => currentTime;
+    const directories = Array.from({ length: MAX_DIR_STORES + 5 }, (_, index) => `/workspace-${index}`);
+
+    try {
+      for (const directory of directories) {
+        manager.ensureChild(directory, { bootstrap: false }).setState({ status: 'complete' });
+      }
+      manager.setBootstrapDemand('expanded-sidebar', directories.map((directory) => ({
+        directory,
+        priority: 'expanded',
+        reason: 'project-expanded',
+      })));
+      currentTime += EVICTION_GRACE_MS + 1;
+
+      manager.runEviction();
+
+      expect(directories.every((directory) => manager.getChild(directory) !== undefined)).toBe(true);
     } finally {
       Date.now = originalDateNow;
       manager.disposeAll();

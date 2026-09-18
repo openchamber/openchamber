@@ -1,8 +1,10 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
+import { GuestHosts } from '@/components/layout/GuestHosts';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { toContextUsageReading } from '@/components/ui/contextUsageReading';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
@@ -18,7 +20,7 @@ import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
+import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tokenUtils';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
@@ -157,47 +159,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     : null;
   const contextLimit = limit && typeof limit.context === 'number' ? limit.context : 0;
   const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
-  const contextUsage = React.useMemo<SessionContextUsage | null>(() => {
-    if (!currentSessionId || currentSessionMessages.length === 0) {
-      return null;
-    }
-
-    type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-    let lastTokens: AssistantTokens | undefined;
-    let lastMessageId: string | undefined;
-
-    for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i];
-      if (message.role !== 'assistant') continue;
-      const tokens = (message as { tokens?: AssistantTokens }).tokens;
-      if (!tokens) continue;
-      const total = contextTokensFromBreakdown(tokens);
-      if (total > 0) {
-        lastTokens = tokens;
-        lastMessageId = message.id;
-        break;
-      }
-    }
-
-    if (!lastTokens) {
-      return null;
-    }
-
-    const totalTokens = contextTokensFromBreakdown(lastTokens);
-    const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
-    const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
-    const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
-
-    return {
-      totalTokens,
-      percentage,
-      contextLimit: contextLimit || 0,
-      outputLimit: outputLimit || undefined,
-      normalizedOutput,
-      thresholdLimit,
-      lastMessageId,
-    };
-  }, [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
+  const contextUsage = React.useMemo<SessionContextUsage | null>(() => (
+    currentSessionId ? buildSessionContextUsage(currentSessionMessages, contextLimit, outputLimit) : null
+  ), [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
@@ -208,31 +172,14 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return;
     }
 
-    if (contextUsage && contextUsage.totalTokens > 0) {
-      setStableContextUsage((prev) => {
-        if (
-          prev
-          && prev.totalTokens === contextUsage.totalTokens
-          && prev.percentage === contextUsage.percentage
-          && prev.contextLimit === contextUsage.contextLimit
-          && (prev.outputLimit ?? 0) === (contextUsage.outputLimit ?? 0)
-          && (prev.normalizedOutput ?? 0) === (contextUsage.normalizedOutput ?? 0)
-          && prev.thresholdLimit === contextUsage.thresholdLimit
-          && prev.lastMessageId === contextUsage.lastMessageId
-        ) {
-          return prev;
-        }
-        return contextUsage;
-      });
+    if (contextUsage) {
+      setStableContextUsage((prev) => (isSameContextUsage(prev, contextUsage) ? prev : contextUsage));
       return;
     }
 
     setStableContextUsage((prev) => (prev === null ? prev : null));
   }, [contextUsage, currentSessionId]);
 
-  const displayContextPercentage = stableContextUsage && stableContextUsage.contextLimit > 0
-    ? Math.min(999, (stableContextUsage.totalTokens / stableContextUsage.contextLimit) * 100)
-    : 0;
 
   const handleTogglePinned = React.useCallback(() => {
     const nextPinned = !pinned;
@@ -295,11 +242,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
         </button>
       </SessionSwitcherDropdown>
       <div className="min-w-0 flex-1" />
-      {stableContextUsage && stableContextUsage.totalTokens > 0 ? (
+      {stableContextUsage ? (
         <ContextUsageDisplay
-          totalTokens={stableContextUsage.totalTokens}
-          percentage={displayContextPercentage}
-          colorPercentage={stableContextUsage.percentage}
+          reading={toContextUsageReading(stableContextUsage)}
           contextLimit={stableContextUsage.contextLimit}
           outputLimit={stableContextUsage.outputLimit ?? 0}
           className="h-9 shrink-0 pl-1 pr-1 typography-ui-label"
@@ -356,6 +301,7 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDr
           </ChatSurfaceProvider>
         )}
       </main>
+      <GuestHosts />
     </div>
   );
 };

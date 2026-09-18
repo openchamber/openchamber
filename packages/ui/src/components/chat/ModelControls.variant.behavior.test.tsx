@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { create } from 'zustand';
+import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
+import { getThemeById } from '@/lib/theme/themes';
 
 /**
  * Restoring a session must not invent an effort choice.
@@ -197,7 +199,10 @@ mock.module('@/lib/messages/userModelChoice', () => ({
   ),
 }));
 
-mock.module('@/stores/useConfigStore', () => ({ useConfigStore }));
+mock.module('@/stores/useConfigStore', () => ({
+  useConfigStore,
+  selectCatalogLoadedForDirectory: (state: ConfigState, resource: 'models' | 'agents') => resource === 'models' ? state.providersLoaded : state.agentsLoaded,
+}));
 mock.module('@/sync/selection-store', () => ({ useSelectionStore }));
 mock.module('@/sync/session-ui-store', () => ({ useSessionUIStore }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore }));
@@ -245,7 +250,6 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({ useIsVSCodeRuntime: () => false }
 mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({ favoriteModelsList: [], recentModelsList: [] }) }));
 mock.module('@/hooks/useIsTextTruncated', () => ({ useIsTextTruncated: () => false }));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }));
-mock.module('@/lib/desktop', () => ({ isDesktopShell: () => false }));
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));
 
 const { ModelControls } = await import('./ModelControls');
@@ -319,10 +323,21 @@ const installDom = () => {
 const renderModelControls = async (props: React.ComponentProps<typeof ModelControls> = {}) => {
   const dom = installDom();
   const root = createRoot(dom.container);
+  const theme = getThemeById('openchamber-dark');
+  if (!theme) throw new Error('Expected built-in theme');
+  const themeContext: ThemeContextValue = {
+    currentTheme: theme, availableThemes: [theme], customThemeIds: [], customThemesLoading: false,
+    isSystemPreference: false, themeMode: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
+    setTheme: () => undefined, setSystemPreference: () => undefined, setThemeMode: () => undefined,
+    setLightThemePreference: () => undefined, setDarkThemePreference: () => undefined,
+    reloadCustomThemes: async () => undefined, importTheme: async () => theme, deleteImportedTheme: async () => undefined,
+  };
   await act(async () => root.render(
-    <I18nProvider>
-      <ModelControls {...props} />
-    </I18nProvider>,
+    <ThemeSystemContext.Provider value={themeContext}>
+      <I18nProvider>
+        <ModelControls {...props} />
+      </I18nProvider>
+    </ThemeSystemContext.Provider>,
   ));
   return {
     dom,
@@ -393,6 +408,35 @@ describe('ModelControls effort restore', () => {
       await cleanup();
     }
   });
+
+  test('a project draft inherits its own effort instead of the global default', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      currentVariant: 'high', settingsDefaultVariant: 'low',
+      currentVariantSelection: { override: undefined, inherited: 'high' },
+    });
+    const { cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      expect(useConfigStore.getState().currentVariantSelection.override).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  for (const savedVariant of ['high', null]) {
+    test(`a saved effort choice wins over older message history: ${savedVariant}`, async () => {
+      latestUserChoice = { id: 'old', agent: AGENT, providerID: PROVIDER_ID, modelID: MODEL_ID, variant: 'low' };
+      useSelectionStore.setState({ savedVariant });
+      const { cleanup } = await renderModelControls();
+      try {
+        expect(useSelectionStore.getState().savedVariant).toBe(savedVariant);
+        expect(useConfigStore.getState().currentVariant).toBe(savedVariant ?? undefined);
+      } finally {
+        await cleanup();
+      }
+    });
+  }
 
   for (const mobile of [false, true]) {
     test(`keeps loading labels until selections arrive (${mobile ? 'mobile' : 'desktop'})`, async () => {

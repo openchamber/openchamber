@@ -535,6 +535,11 @@ export class ChildStoreManager {
     return result
   }
 
+  private hasForegroundBootstrapDemand(directory: string): boolean {
+    const demand = this.aggregateBootstrapDemand(directory)
+    return Boolean(demand && demand.priority !== "background")
+  }
+
   private reconcileBootstrapQueue(): void {
     const directories = new Set<string>()
     for (const demands of this.bootstrapDemandsByOwner.values()) {
@@ -730,7 +735,7 @@ export class ChildStoreManager {
       !canDisposeDirectory({
         directory,
         hasStore: this.children.has(directory),
-        pinned: this.pinned(directory),
+        pinned: this.pinned(directory) || this.hasForegroundBootstrapDemand(directory),
         booting: this.bootstrapStates.get(directory) === "queued"
           || this.bootstrapStates.get(directory) === "running"
           || (this.isBooting?.(directory) ?? false),
@@ -763,10 +768,13 @@ export class ChildStoreManager {
   runEviction(skip?: string) {
     const stores = [...this.children.keys()]
     if (stores.length === 0) return
+    const protectedDirectories = new Set(stores.filter((directory) => (
+      this.pinned(directory) || this.hasForegroundBootstrapDemand(directory)
+    )))
     const list = pickDirectoriesToEvict({
       stores,
       state: this.lifecycle,
-      pins: new Set(stores.filter((d) => this.pinned(d))),
+      pins: protectedDirectories,
       max: MAX_DIR_STORES,
       ttl: DIR_IDLE_TTL_MS,
       graceMs: EVICTION_GRACE_MS,

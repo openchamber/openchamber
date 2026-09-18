@@ -682,6 +682,103 @@
       ]
     },
     {
+      "label": "Extensions",
+      "translations": {
+        "uk": "Розширення",
+        "zh-CN": "扩展",
+        "es": "Extensiones",
+        "pt-BR": "Extensões",
+        "ko": "확장",
+        "pl": "Rozszerzenia",
+        "fr": "Extensions",
+        "ja": "拡張機能",
+        "de": "Erweiterungen",
+        "tr": "Eklentiler"
+      },
+      "items": [
+        {
+          "label": "Use extensions",
+          "link": "/extensions/",
+          "translations": {
+            "uk": "Користування розширеннями",
+            "zh-CN": "使用扩展",
+            "es": "Usar extensiones",
+            "pt-BR": "Usar extensões",
+            "ko": "확장 사용하기",
+            "pl": "Korzystanie z rozszerzeń",
+            "fr": "Utiliser les extensions",
+            "ja": "拡張機能を使う",
+            "de": "Erweiterungen verwenden",
+            "tr": "Eklentileri kullanma"
+          }
+        },
+        {
+          "label": "Build an extension",
+          "link": "/sdk/",
+          "translations": {
+            "uk": "Зробити розширення",
+            "zh-CN": "构建扩展",
+            "es": "Crear una extensión",
+            "pt-BR": "Criar uma extensão",
+            "ko": "확장 만들기",
+            "pl": "Zbuduj rozszerzenie",
+            "fr": "Créer une extension",
+            "ja": "拡張機能を作る",
+            "de": "Eine Erweiterung bauen",
+            "tr": "Eklenti oluştur"
+          }
+        },
+        {
+          "label": "Host API",
+          "link": "/sdk/host/",
+          "translations": {
+            "uk": "API хоста",
+            "zh-CN": "宿主 API",
+            "es": "API del host",
+            "pt-BR": "API do host",
+            "ko": "호스트 API",
+            "pl": "API hosta",
+            "fr": "API host",
+            "ja": "ホスト API",
+            "de": "Host-API",
+            "tr": "Host API"
+          }
+        },
+        {
+          "label": "UI kit",
+          "link": "/sdk/ui/",
+          "translations": {
+            "uk": "UI-набір",
+            "zh-CN": "UI 套件",
+            "es": "Kit de UI",
+            "pt-BR": "Kit de UI",
+            "ko": "UI 키트",
+            "pl": "Zestaw UI",
+            "fr": "Kit UI",
+            "ja": "UI キット",
+            "de": "UI-Kit",
+            "tr": "UI kiti"
+          }
+        },
+        {
+          "label": "Example",
+          "link": "/sdk/example/",
+          "translations": {
+            "uk": "Приклад",
+            "zh-CN": "示例",
+            "es": "Ejemplo",
+            "pt-BR": "Exemplo",
+            "ko": "예제",
+            "pl": "Przykład",
+            "fr": "Exemple",
+            "ja": "サンプル",
+            "de": "Beispiel",
+            "tr": "Örnek"
+          }
+        }
+      ]
+    },
+    {
       "label": "Desktop",
       "translations": {
         "uk": "Десктоп",

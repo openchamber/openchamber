@@ -100,6 +100,7 @@ export function createTerminalRuntime({
   const pendingTerminations = new Set();
   const runtime = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
   let ptyProviderPromise = null;
+  let shutdownPromise = null;
   let wsServer = new WebSocketServer({ noServer: true, maxPayload: TERMINAL_WS_MAX_PAYLOAD_BYTES });
   const shellResolver = createTerminalShellResolver({ fs, path, searchPathFor, isExecutable, buildAugmentedPath });
 
@@ -282,6 +283,7 @@ export function createTerminalRuntime({
   };
 
   const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false, mode, command, purpose }) => {
+    if (shutdownPromise) throw new Error('Terminal runtime is shutting down');
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
     if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
     const normalizedShell = normalizeTerminalShell(shell);
@@ -507,10 +509,15 @@ export function createTerminalRuntime({
     const previousRestart = pendingSessionRestarts.get(session.id) ?? Promise.resolve();
     const restart = previousRestart.catch(() => {}).then(async () => {
       await validateCwd(cwd);
+      if (shutdownPromise || sessions.get(session.id) !== session) throw new Error('Terminal session was closed during restart');
       if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
       if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
       const oldProcess = session.process;
       const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell });
+      if (shutdownPromise || sessions.get(session.id) !== session) {
+        await terminateProcess(spawned.process, true);
+        throw new Error('Terminal session was closed during restart');
+      }
       session.process = spawned.process; session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.cwd = cwd; session.cols = cols; session.rows = rows;
       session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
       session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
@@ -560,9 +567,13 @@ export function createTerminalRuntime({
     }
   }, 5 * 60 * 1000);
 
-  const shutdown = async () => {
+  const stop = async () => {
     server.off('upgrade', upgradeHandler); clearInterval(idleSweep);
-    await Promise.allSettled([...pendingSessionRestarts.values()]);
+    for (const pending of pendingSessionCreates.values()) pending.cancelled = true;
+    await Promise.allSettled([
+      ...[...pendingSessionCreates.values()].map((pending) => pending.promise),
+      ...pendingSessionRestarts.values(),
+    ]);
     for (const session of sessions.values()) void terminateProcess(session.process, true);
     sessions.clear();
     await Promise.allSettled([...pendingTerminations]);
@@ -573,6 +584,10 @@ export function createTerminalRuntime({
       new Promise((resolve) => setTimeout(resolve, 1000)),
     ]);
     wsServer = null;
+  };
+  const shutdown = () => {
+    if (!shutdownPromise) shutdownPromise = stop();
+    return shutdownPromise;
   };
   return { shutdown };
 }

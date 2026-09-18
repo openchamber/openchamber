@@ -127,7 +127,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                 cwd: dir,
                 windowsHide: true,
-                stdio: ['ignore', 'pipe', 'pipe'],
+                // Diagnostics are unused here. An unread pipe can block Git forever.
+                stdio: ['ignore', 'pipe', 'ignore'],
               });
 
               let stdout = '';

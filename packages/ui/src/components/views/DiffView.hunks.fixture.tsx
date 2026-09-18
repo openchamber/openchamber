@@ -101,7 +101,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       }).join('')).join('');
   };
   const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 3, deletions: 3, isNew: false };
-  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: {} };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 3, deletions: 3 } } } };
   const base = createWebAPIs();
   const apis = { ...base, git: { ...base.git,
     checkIsGitRepository: async () => true,
@@ -110,8 +110,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       if (failReads) throw new Error('Refresh unavailable');
       if (options.contextLines === 3) normalReads += 1;
       const full = (options.contextLines ?? 3) > 3;
-      const response = { diff: makePatch(full, full ? fullVersion : currentVersion) };
-      if (deferVersions) return new Promise<{ diff: string }>((resolve) => {
+      const response = { diff: makePatch(full, full ? fullVersion : currentVersion), submodule: null };
+      if (deferVersions) return new Promise<{ diff: string; submodule: null }>((resolve) => {
         if (full) releaseFull = () => resolve(response);
         else releaseCanonical = () => resolve(response);
       });

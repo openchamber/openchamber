@@ -653,7 +653,7 @@ export function ScheduledTasksDialog() {
         // Master-detail: a scrollable project filter panel at the left, the
         // selected project's tasks at the right. The app Header shows the
         // surface title, so the page itself only carries the close affordance.
-        <div className="absolute inset-0 z-10 flex flex-col bg-background">
+        <div className="absolute inset-0 z-10 flex flex-col bg-surface-elevated">
           <div className="flex min-h-0 flex-1">
             <div className="flex w-60 flex-shrink-0 flex-col border-r border-border/50">
               <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
@@ -667,7 +667,7 @@ export function ScheduledTasksDialog() {
                     type="button"
                     onClick={() => selectProject(project.id)}
                     className={cn(
-                      'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                      'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       selectedProjectID === project.id
                         ? 'bg-interactive-selection text-foreground'
                         : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import { createOpencodeClient, type Session } from "@opencode-ai/sdk/v2/client"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
@@ -16,9 +16,11 @@ let nextCreateSessionCalls: Array<{ params: unknown; directory: string | null | 
 
 // Configurable current directory (used as fallback when no directoryOverride is set)
 let currentDirectory: string | null = null
+const runtimeSdkClient = createOpencodeClient()
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
+    getSdkClient: () => runtimeSdkClient,
     getDirectory: () => currentDirectory,
     setDirectory: mock(() => undefined),
     createSession: mock(async (params: unknown, directory?: string | null) => {

@@ -16,6 +16,12 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useI18n } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { Button } from '@/components/ui/button';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useUIStore } from '@/stores/useUIStore';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -41,6 +47,7 @@ type Props = {
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
+  const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
@@ -147,6 +154,20 @@ export function SidebarHeader(props: Props): React.ReactNode {
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.nav.archive')}</p></TooltipContent>
             </Tooltip>
+            {guestPages.length > 0 && <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" className="w-6 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
+                  <Icon name="apps" className={headerActionIconClass} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
+                {guestPages.map((guest) => <DropdownMenuItem key={guest.id} onSelect={() => useUIStore.getState().setOpenGuestPage(guest.id)}>
+                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
+                  <span>{guest.pageTitle ?? guest.name}</span>
+                </DropdownMenuItem>)}
+              </DropdownMenuContent>
+            </DropdownMenu>}
           </div>
 
           <div className="flex items-center gap-1.5">

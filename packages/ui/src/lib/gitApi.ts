@@ -108,7 +108,7 @@ export async function getGitCommitSummaries(
   return result.commits;
 }
 
-export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
+export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitPathDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitDiff(directory, options);
   return gitHttp.getGitDiff(directory, options);

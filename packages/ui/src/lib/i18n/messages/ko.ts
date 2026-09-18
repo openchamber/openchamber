@@ -2,6 +2,8 @@ import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': 'AI로 이름 변경',
@@ -30,6 +32,8 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n.ko,
   ...linearPanelI18n.ko,
+  ...routingI18n.ko,
+  ...pluginPanelI18n.ko,
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
   'terminalView.toast.selectionCopied': '출력을 복사했습니다',
@@ -1302,6 +1306,7 @@ export const dict: Record<I18nKey, string> = {
   'contextRail.surface.chat.description': '나란히 연 세션',
   'contextRail.surface.notes': '프로젝트 지식',
   'contextRail.editorTree.toggle': '파일 트리 표시 전환',
+  'contextRail.editor.toggle': '파일 편집기 표시 전환',
   'contextPanel.browser.open': '브라우저 패널 열기',
   'contextPanel.browser.addressAria': '브라우저 주소',
   'contextPanel.browser.history.label': '최근 주소',
@@ -1562,6 +1567,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.contextLimit': '컨텍스트 한도: {tokens}',
   'contextUsage.tooltip.outputLimit': '출력 한도: {tokens}',
   'contextUsage.tooltip.cost': '비용: {cost}',
+  'contextUsage.compacted.description': '컨텍스트가 압축되었습니다. 사용량은 다음 응답 후에 업데이트됩니다.',
   'contextSidebar.session.untitled': '제목 없는 세션',
   'contextSidebar.empty.openSession': '컨텍스트를 볼 세션을 여세요.',
   'contextSidebar.section.context': '컨텍스트',
@@ -1621,6 +1627,21 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.cleanWorkingTree': '워킹 트리가 깨끗합니다. 표시할 변경 사항이 없습니다.',
   'diffView.state.noLastTurnChanges': '표시할 마지막 턴 변경 사항이 없습니다.',
   'diffView.state.failedToLoadDiff': '변경사항을 불러오지 못했습니다',
+  'diffView.unavailable.missingTitle': '파일이 더 이상 존재하지 않습니다',
+  'diffView.unavailable.missingDescription': '변경 목록을 불러온 뒤 삭제되었습니다. 목록을 새로 고치는 중입니다.',
+  'diffView.unavailable.nestedRepositoryTitle': '별도의 Git 저장소',
+  'diffView.unavailable.nestedRepositoryDescription': '이 폴더에는 자체 Git 기록이 있습니다. 변경사항을 보려면 프로젝트로 여세요.',
+  'diffView.unavailable.untrackedDirectoryTitle': '새 파일 폴더',
+  'diffView.unavailable.untrackedDirectoryDescription': '이 폴더에는 새 파일이 너무 많아 하나씩 나열할 수 없습니다. 스테이지하거나, 저장소에 포함되지 않아야 한다면 .gitignore에 추가하세요.',
+  'diffView.submodule.title': '서브모듈',
+  'diffView.submodule.commitChanged': '커밋 {from} → {to}',
+  'diffView.submodule.commitUnchanged': '여전히 커밋 {commit}',
+  'diffView.submodule.added': '커밋 {commit}의 새 서브모듈',
+  'diffView.submodule.removed': '서브모듈이 제거됨, 이전 커밋 {commit}',
+  'diffView.submodule.notCheckedOut': '체크아웃되지 않음. 기록된 커밋: {commit}',
+  'diffView.submodule.trackedChanges': '커밋되지 않은 변경사항이 있습니다',
+  'diffView.submodule.untrackedFiles': '추적되지 않는 파일이 있습니다',
+  'diffView.submodule.conflict': '기록된 커밋에 병합 충돌이 있습니다',
   'diffView.state.loadingDiff': '변경사항 불러오는 중…',
   'diffView.state.loadingChanges': '변경 사항 로드 중…',
   'diffView.state.largeDiff': '큰 diff({count}개 변경 줄)',
@@ -2463,6 +2484,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolOutputDialog.noOutputProduced': '출력 없음',
   'chat.toolPart.lspErrors': 'LSP 오류',
   'chat.toolPart.moreErrors': '+오류 {count}개 더 보기',
+  'chat.toolPart.moreRows': '+행 {count}개 더 보기',
   'chat.toolPart.error': '오류:',
   'chat.toolPart.awaitingResponse': '응답 대기 중…',
   'chat.toolPart.noOutputProduced': '출력 없음',

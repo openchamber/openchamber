@@ -6,6 +6,8 @@ import type {
   GitBranch,
   GitLogResponse,
   GitIdentitySummary,
+  GitFileDiffResponse,
+  GitSubmoduleState,
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -36,13 +38,21 @@ type GitStatusRequestOptions = { mode?: 'light'; fresh?: boolean };
 // scan (`null`), or a runtime without the discovery route (`'unsupported'`).
 export type NestedRepoDiscovery = string[] | null | 'unsupported';
 
+/** Two-sided file contents; `submodule` is set when the path is a submodule, whose contents are only commit lines. */
+type CachedGitDiff = {
+  original: string;
+  modified: string;
+  isBinary?: boolean;
+  submodule: GitSubmoduleState | null;
+};
+
 interface DirectoryGitState {
   isGitRepo: boolean | null;
   status: GitStatus | null;
   branches: GitBranch | null;
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
-  diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  diffCache: Map<string, CachedGitDiff & { fetchedAt: number }>;
   indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
@@ -78,8 +88,8 @@ interface GitStore {
   restoreStatus: (directory: string, status: GitStatus | null) => void;
   bumpIndexRevision: (directory: string) => void;
 
-  getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
-  setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }, expectedRuntimeKey?: string) => void;
+  getDiff: (directory: string, filePath: string) => CachedGitDiff & { fetchedAt: number } | null;
+  setDiff: (directory: string, filePath: string, diff: CachedGitDiff, expectedRuntimeKey?: string) => void;
   clearDiffCache: (directory: string, filePaths?: string[]) => void;
   fetchAllDiffs: (directory: string, git: GitAPI) => Promise<void>;
   prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
@@ -108,12 +118,6 @@ interface GitStore {
   resetForRuntimeSwitch: (runtimeKey: string) => void;
 }
 
-interface GitFileDiffResponse {
-  original: string;
-  modified: string;
-  path: string;
-  isBinary?: boolean;
-}
 
 interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
@@ -374,10 +378,10 @@ const seedNestedRepoSelection = (runtimeKey: string): Map<string, string> => {
 
 // LRU eviction helper for diff cache
 const evictDiffCacheIfNeeded = (
-  diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>,
+  diffCache: Map<string, CachedGitDiff & { fetchedAt: number }>,
   maxEntries: number = DIFF_CACHE_MAX_ENTRIES,
   maxTotalSize: number = DIFF_CACHE_MAX_TOTAL_SIZE_BYTES
-): Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }> => {
+): Map<string, CachedGitDiff & { fetchedAt: number }> => {
   // Calculate total size
   let totalSize = 0;
   for (const entry of diffCache.values()) {
@@ -394,7 +398,7 @@ const evictDiffCacheIfNeeded = (
   const entries = Array.from(diffCache.entries())
     .sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
 
-  const newCache = new Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>();
+  const newCache = new Map<string, CachedGitDiff & { fetchedAt: number }>();
   let newTotalSize = 0;
 
   // Keep entries from newest to oldest until limits are reached
@@ -453,18 +457,22 @@ const haveDiffStatsChanged = (
   if (!previous && !next) return false;
   if (!previous || !next) return true;
 
-  const paths = new Set([...Object.keys(previous), ...Object.keys(next)]);
-  for (const path of paths) {
-    const prevEntry = previous[path];
-    const nextEntry = next[path];
+  for (const scope of ['staged', 'working'] as const) {
+    const previousScope = previous[scope] ?? {};
+    const nextScope = next[scope] ?? {};
+    const paths = new Set([...Object.keys(previousScope), ...Object.keys(nextScope)]);
+    for (const path of paths) {
+      const prevEntry = previousScope[path];
+      const nextEntry = nextScope[path];
 
-    if (!prevEntry && !nextEntry) continue;
-    if (!prevEntry || !nextEntry) return true;
-    if (
-      prevEntry.insertions !== nextEntry.insertions ||
-      prevEntry.deletions !== nextEntry.deletions
-    ) {
-      return true;
+      if (!prevEntry && !nextEntry) continue;
+      if (!prevEntry || !nextEntry) return true;
+      if (
+        prevEntry.insertions !== nextEntry.insertions ||
+        prevEntry.deletions !== nextEntry.deletions
+      ) {
+        return true;
+      }
     }
   }
 
@@ -549,21 +557,26 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
 
   // Only compare diffStats when light mode provides them (non-undefined)
   if (newStatus.diffStats !== undefined) {
-    const oldStats = oldStatus?.diffStats ?? {};
-    const newStats = newStatus.diffStats ?? {};
-    const allStatPaths = new Set<string>([...Object.keys(oldStats), ...Object.keys(newStats)]);
+    const oldStats = oldStatus?.diffStats;
+    const newStats = newStatus.diffStats;
 
-    for (const filePath of allStatPaths) {
-      const oldEntry = oldStats[filePath];
-      const newEntry = newStats[filePath];
+    for (const scope of ['staged', 'working'] as const) {
+      const oldScope = oldStats?.[scope] ?? {};
+      const newScope = newStats[scope] ?? {};
+      const allStatPaths = new Set<string>([...Object.keys(oldScope), ...Object.keys(newScope)]);
 
-      if (!oldEntry || !newEntry) {
-        changed.add(filePath);
-        continue;
-      }
+      for (const filePath of allStatPaths) {
+        const oldEntry = oldScope[filePath];
+        const newEntry = newScope[filePath];
 
-      if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
-        changed.add(filePath);
+        if (!oldEntry || !newEntry) {
+          changed.add(filePath);
+          continue;
+        }
+
+        if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
+          changed.add(filePath);
+        }
       }
     }
   }
@@ -1170,8 +1183,12 @@ export const useGitStore = create<GitStore>()(
             continue;
           }
           // Skip large files during prefetch — they'll be fetched on-demand when user clicks
-          const stats = diffStats?.[filePath];
-          if (stats && (stats.insertions + stats.deletions) > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
+          const stagedStats = diffStats?.staged?.[filePath];
+          const workingStats = diffStats?.working?.[filePath];
+          const changedLineCount =
+            (stagedStats?.insertions ?? 0) + (stagedStats?.deletions ?? 0)
+            + (workingStats?.insertions ?? 0) + (workingStats?.deletions ?? 0);
+          if (changedLineCount > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
             continue;
           }
           dedupedPaths.push(filePath);
@@ -1189,7 +1206,7 @@ export const useGitStore = create<GitStore>()(
         const token = startRequest(directory, 'diff');
 
         let nextIndex = 0;
-        const results: Array<{ path: string; diff: { original: string; modified: string; isBinary?: boolean } }> = [];
+        const results: Array<{ path: string; diff: CachedGitDiff }> = [];
 
         const takeNext = () => {
           const current = nextIndex;
@@ -1216,7 +1233,7 @@ export const useGitStore = create<GitStore>()(
             const response = await Promise.race([fetchPromise, timeoutPromise]);
             return {
               path: filePath,
-              diff: { original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary },
+              diff: { original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary, submodule: response.submodule },
             };
           } finally {
             clearTimeout(timeout);

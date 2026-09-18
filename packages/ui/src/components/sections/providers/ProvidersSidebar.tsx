@@ -216,7 +216,7 @@ const ProviderListItem: React.FC<{
       <button
         type="button"
         onClick={onSelect}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         tabIndex={0}
       >
         <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />

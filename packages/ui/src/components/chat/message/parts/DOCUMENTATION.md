@@ -33,7 +33,15 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - `toolPresentation.tsx`
   - Shared icon mapping for tool names (`getToolIcon`).
-  - Used by both `ProgressiveGroup.tsx` and `ToolPart.tsx`.
+  - Used by `ProgressiveGroup.tsx`, `ToolPart.tsx`, and `ToolOutputDialog.tsx`.
+  - Takes an optional extension rule (below) whose `icon` wins when the sprite carries it.
+
+- Extension tool presentations (`contributes.tools` in a guest manifest)
+  - The registry is `lib/guests/tool-presentation.ts`: `useGuestToolPresentation(part.tool)` / `resolveGuestToolPresentation` return the first matching rule of an active guest (exact `match` beats a suffix wildcard; first extension wins) or `null`. Rules are compiled once per catalog array; each part does one linear scan.
+  - The lookup always gets the **full** tool name OpenCode reported (`mcp.jira.search`); `normalizeToolName` still feeds every built-in switch, so built-in behavior is untouched when there is no rule.
+  - Hook points, each falling back to today's code when the rule is `null` or silent on that field: icon (`getToolIcon`), header title (`title` template, else `name`, else `getToolMetadata`), header subtitle (`subtitle` template replaces both the description and the justification text), and the expanded body (`output`: `text` / `code` / `json` / `markdown` / `table`, checked at the top of `renderResultContent` and inside `ToolScrollableTextOutput`; `auto` keeps detection). A `table` whose output is not an array or `{ items: [] }` falls through to detection.
+  - `GuestToolTable.tsx` draws the table with the same cell classes the markdown decorator gives assistant tables, capped at 200 rows with a count line.
+  - VS Code and mobile mark the guest catalog unsupported, so the registry is empty and nothing changes there.
 
 - `toolRenderUtils.ts`
   - Core classification helpers:
@@ -216,7 +224,7 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `normalizeUserDisplayParts.ts`. Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).
-- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`
+- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`, `GuestToolTable.tsx`
 - Reasoning/justification: `ReasoningPart.tsx`, `JustificationBlock.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`, `BusyDots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`

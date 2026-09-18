@@ -272,7 +272,7 @@ const NewWorktreeIconButton: React.FC<{
     <button
       type="button"
       className={cn(
-        'flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+        'flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
         className,
       )}
       aria-label={label}
@@ -298,7 +298,7 @@ const NewSessionIconButton: React.FC<{
   <button
     type="button"
     className={cn(
-      'flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+      'flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
       className,
     )}
     aria-label={label}
@@ -458,7 +458,7 @@ const SessionRenameForm: React.FC<{
       <button
         type="submit"
         aria-label={t('sessions.sidebar.session.rename.save')}
-        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         // Inline mins beat mobile.css's global 36px button touch-target floor
         // so the controls fit the 40px row.
         style={{ touchAction: 'manipulation', minHeight: 0, minWidth: 0 }}
@@ -469,7 +469,7 @@ const SessionRenameForm: React.FC<{
         type="button"
         onClick={onCancel}
         aria-label={t('sessions.sidebar.session.rename.cancel')}
-        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         style={{ touchAction: 'manipulation', minHeight: 0, minWidth: 0 }}
       >
         <Icon name="close" className="size-4" />
@@ -627,7 +627,7 @@ const SessionRow: React.FC<{
           <button
             type="button"
             tabIndex={revealed ? 0 : -1}
-            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             aria-label={t('mobile.sessions.archiveSessionAria', { title })}
             onClick={onArchive}
             style={{ touchAction: 'manipulation' }}
@@ -637,7 +637,7 @@ const SessionRow: React.FC<{
           <button
             type="button"
             tabIndex={revealed ? 0 : -1}
-            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             aria-label={t('mobile.sessions.renameSessionAria', { title })}
             onClick={onRequestRename}
             style={{ touchAction: 'manipulation' }}
@@ -679,7 +679,7 @@ const SessionRow: React.FC<{
         {aiRename.pending || isStreaming || showUnreadDot || (hasChildren && onToggleChildren) ? (
           <button
             type="button"
-            className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0, touchAction: 'manipulation' }}
             aria-label={aiRename.pending
               ? t('sessions.aiRename.generating')
@@ -723,7 +723,7 @@ const SessionRow: React.FC<{
           // height explicit. Two-line rows (search results with a context
           // subtitle) keep flexible height.
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-2.5 pr-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset',
+            'flex min-w-0 flex-1 items-center gap-2.5 pr-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
             contextLabel ? 'min-h-10 py-1' : 'h-9',
           )}
           style={{ paddingLeft: indent, touchAction: 'manipulation' }}
@@ -777,7 +777,7 @@ const ShowMoreRow: React.FC<{
   return (
     <button
       type="button"
-      className="flex min-h-9 w-full items-center gap-2 py-1 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      className="flex min-h-9 w-full items-center gap-2 py-1 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       style={{ paddingLeft: indent, touchAction: 'manipulation' }}
       onClick={onClick}
     >
@@ -795,7 +795,7 @@ const ShowFewerRow: React.FC<{
   return (
     <button
       type="button"
-      className="flex min-h-9 w-full items-center gap-2 py-1 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      className="flex min-h-9 w-full items-center gap-2 py-1 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       style={{ paddingLeft: indent, touchAction: 'manipulation' }}
       onClick={onClick}
     >
@@ -887,7 +887,7 @@ const SortableProjectRow: React.FC<{
         </button>
         <button
           type="button"
-          className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-xl px-1 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-xl px-1 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           onClick={onToggleExpanded}
           aria-expanded={expanded}
           aria-label={expanded
@@ -1634,7 +1634,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               action={
                 <button
                   type="button"
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 typography-ui-label text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 typography-ui-label text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => setDirectoryDialogOpen(true)}
                 >
                   <RiFolderAddLine className="size-4" />
@@ -1693,7 +1693,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       >
                         <button
                           type="button"
-                          className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                          className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                           onClick={() => handleSelectProject(project)}
                           style={{ touchAction: 'manipulation' }}
                         >
@@ -1754,7 +1754,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                     <div className="flex min-h-12 w-full items-center">
                       <button
                         type="button"
-                        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                         onClick={() => {
                           if (revealedRowId) {
                             handleRowKeyRevealedChange(revealedRowId, false);
@@ -1845,7 +1845,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           <button
                             type="button"
                             tabIndex={revealedRowId === `project:${node.project.id}` ? 0 : -1}
-                            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                             aria-label={t('mobile.sessions.editProjectAria', { label: node.project.label })}
                             onClick={() => {
                               setRevealedRowId(null);
@@ -1861,7 +1861,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       <div data-active-project={node.isActive || undefined} className="flex min-h-12 w-full items-center">
                         <button
                           type="button"
-                          className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                          className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                           onClick={() => {
                             if (revealedRowId) {
                               handleRowKeyRevealedChange(revealedRowId, false);
@@ -1935,7 +1935,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                     >
                                     <button
                                       type="button"
-                                      className="flex min-h-10 w-full items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                                      className="flex min-h-10 w-full items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                                       onClick={() => {
                                         if (revealedRowId) {
                                           handleRowKeyRevealedChange(revealedRowId, false);
@@ -2087,7 +2087,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 key={order}
                 type="button"
                 className={cn(
-                  'flex min-h-11 w-full items-center justify-between rounded-lg px-3 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+                  'flex min-h-11 w-full items-center justify-between rounded-lg px-3 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                   projectSortOrder === order ? 'text-primary' : 'text-foreground',
                 )}
                 onClick={() => {
@@ -2154,7 +2154,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
         <button
           type="button"
-          className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('mobile.surface.closeAria')}
           onClick={() => onOpenChange(false)}
           style={{ touchAction: 'manipulation' }}

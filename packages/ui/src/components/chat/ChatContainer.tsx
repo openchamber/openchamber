@@ -390,17 +390,18 @@ const ChatViewport = React.memo(({
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
-                composer covers, so the end of the transcript stays readable
-                above it; the extra gap is the breathing room between the last
-                row and the composer's top edge. The height comes from a CSS
-                variable the composer slot's observer writes directly, so a
-                growing composer resizes the footer without a list re-render;
-                the list's own footer observer then extends the content. */}
+                composer covers, plus any panel docked above it (queue, BTW),
+                so the end of the transcript stays readable above them; the
+                extra gap is the breathing room between the last row and the
+                top edge of whatever floats. Both heights come from CSS
+                variables written straight by observers, so a growing composer
+                or panel resizes the footer without a list re-render; the
+                list's own footer observer then extends the content. */}
             <div
                 className="flex-shrink-0"
                 style={{
                     height: floatingComposer
-                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + ${FLOATING_COMPOSER_GAP_PX}px)`
+                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + var(--chat-floating-panel-clearance, 0px) + ${FLOATING_COMPOSER_GAP_PX}px)`
                         : (isMobile ? '40px' : '10vh'),
                 }}
                 aria-hidden="true"

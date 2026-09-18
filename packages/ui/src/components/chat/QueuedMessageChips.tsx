@@ -16,6 +16,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useInputStore } from '@/sync/input-store';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
@@ -107,7 +108,10 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 
 export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
-    const [collapsed, setCollapsed] = React.useState(true);
+    // One shared preference, so the list stays open (or closed) across
+    // session switches instead of resetting with the queue key.
+    const collapsed = !useUIStore((state) => state.messageQueueExpanded);
+    const setMessageQueueExpanded = useUIStore((state) => state.setMessageQueueExpanded);
     const bodyId = React.useId();
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const queueKey = target ? getMessageQueueKey(target) : null;
@@ -169,7 +173,7 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setCollapsed((value) => !value)}
+                    onClick={() => setMessageQueueExpanded(collapsed)}
                     aria-expanded={!collapsed}
                     aria-controls={collapsed ? undefined : bodyId}
                     className="min-w-0 flex-1 shrink justify-start px-0 normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"

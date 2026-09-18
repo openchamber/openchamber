@@ -18,6 +18,7 @@ type AsChildRenderProps = {
 };
 
 type SelectPortalContextValue = {
+  isOpen: boolean;
   portalContainer: HTMLElement | null;
   collisionBoundary: Element | null;
   setPortalContainer: (container: HTMLElement | null) => void;
@@ -57,11 +58,12 @@ function Select<Value extends string = string>({
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const isOpen = open ?? uncontrolledOpen;
   const portalContextValue = React.useMemo<SelectPortalContextValue>(() => ({
+    isOpen,
     portalContainer,
     collisionBoundary,
     setPortalContainer,
     setCollisionBoundary,
-  }), [collisionBoundary, portalContainer]);
+  }), [collisionBoundary, isOpen, portalContainer]);
 
   const handleValueChange = React.useCallback(
     (value: unknown, eventDetails: SelectRootChangeEventDetails) => {
@@ -216,6 +218,38 @@ function SelectContent({
   const portalContext = React.useContext(SelectPortalContext);
   const alignItemWithTrigger = position === "item-aligned";
   const portalContainer = portalContext?.portalContainer ?? null;
+  // Floating UI bounds the viewport, but native status/home areas live inside
+  // that viewport. Include the app's resolved insets in collision sizing too.
+  const [collisionPadding, setCollisionPadding] = React.useState({ top: 8, right: 8, bottom: 8, left: 8 });
+
+  React.useLayoutEffect(() => {
+    if (!portalContext?.isOpen) return;
+    let frame = 0;
+    const measure = () => {
+      const styles = getComputedStyle(document.documentElement);
+      const inset = (side: string) => Math.max(0, Number.parseFloat(styles.getPropertyValue(`--oc-safe-area-${side}`)) || 0) + 8;
+      const next = { top: inset('top'), right: inset('right'), bottom: inset('bottom'), left: inset('left') };
+      setCollisionPadding((previous) => previous.top === next.top && previous.right === next.right
+        && previous.bottom === next.bottom && previous.left === next.left ? previous : next);
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    // Native safe-area updates can arrive after the viewport resize event.
+    const observer = new MutationObserver(scheduleMeasure);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+    window.addEventListener('resize', scheduleMeasure);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', scheduleMeasure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+      viewport?.removeEventListener('resize', scheduleMeasure);
+    };
+  }, [portalContext?.isOpen]);
 
   const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseSelect.Popup>['onKeyDown']> = (event) => {
     onKeyDown?.(event);
@@ -236,6 +270,7 @@ function SelectContent({
         side={side}
         align={align}
         collisionAvoidance={collisionAvoidance}
+        collisionPadding={collisionPadding}
         collisionBoundary={constrainToMain ? portalContext?.collisionBoundary ?? undefined : undefined}
         className="absolute z-[120] pointer-events-auto"
       >

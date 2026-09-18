@@ -2,9 +2,9 @@
   "metadata": {
     "id": "catppuccin-light",
     "name": "Catppuccin",
+    "variant": "light",
     "description": "Catppuccin",
     "version": "1.0.0",
-    "variant": "light",
     "tags": [
       "light",
       "palette"
@@ -13,11 +13,10 @@
   "colors": {
     "primary": {
       "base": "#7287FD",
+      "foreground": "#F5E0DC",
       "hover": "#8C99F6",
       "active": "#6677DD",
-      "foreground": "#F5E0DC",
-      "muted": "#7287FD80",
-      "emphasis": "#8C99F6"
+      "muted": "#7287FD80"
     },
     "surface": {
       "background": "#fff6f4",
@@ -31,11 +30,10 @@
     },
     "interactive": {
       "border": "#e4d9dc",
-      "borderHover": "#D6C4C8",
-      "borderFocus": "#AB97A1",
       "selection": "#ffffff",
       "selectionForeground": "#1F1F2A",
-      "focus": "#7287FD",
+      "borderHover": "#D6C4C8",
+      "borderFocus": "#AB97A1",
       "focusRing": "#7287FD40",
       "cursor": "#1F1F2A",
       "hover": "#ffffff8f",
@@ -44,31 +42,16 @@
     "status": {
       "error": "#D20F39",
       "errorForeground": "#F5E0DC",
-      "errorBackground": "#D20F3920",
-      "errorBorder": "#D20F3950",
       "warning": "#DF8E1D",
       "warningForeground": "#F5E0DC",
-      "warningBackground": "#DF8E1D20",
-      "warningBorder": "#DF8E1D50",
       "success": "#40A02B",
       "successForeground": "#F5E0DC",
-      "successBackground": "#40A02B20",
-      "successBorder": "#40A02B50",
       "info": "#04A5E5",
-      "infoForeground": "#F5E0DC",
-      "infoBackground": "#04A5E520",
-      "infoBorder": "#04A5E550"
-    },
-    "pr": {
-      "open": "#40A02B",
-      "draft": "#6C6F85",
-      "blocked": "#DF8E1D",
-      "merged": "#9572fd",
-      "closed": "#D20F39"
+      "infoForeground": "#F5E0DC"
     },
     "syntax": {
       "base": {
-        "background": "#F2D8D4",
+        "background": "#fbece9",
         "foreground": "#4C4F69",
         "comment": "#6C6F85",
         "keyword": "#7287FD",
@@ -81,34 +64,17 @@
       },
       "tokens": {
         "boolean": "#DF8E1D",
-        "class": "#7287FD",
         "className": "#7287FD",
         "commentDoc": "#B1A8B1",
         "constant": "#04A5E5",
         "decorator": "#DF8E1D",
-        "enum": "#7287FD",
-        "exception": "#D20F39",
-        "functionCall": "#7287FD",
-        "interface": "#DF8E1D",
-        "jsxTag": "#7287FD",
         "key": "#7287FD",
-        "keywordImport": "#D20F39",
-        "label": "#D20F39",
         "macro": "#04A5E5",
         "method": "#40A02B",
-        "module": "#D20F39",
-        "namespace": "#DF8E1D",
         "parameter": "#4C4F69",
-        "preprocessor": "#D20F39",
-        "punctuation": "#6C6F85",
-        "regex": "#40A02B",
         "storageModifier": "#04A5E5",
         "stringEscape": "#1F1F2A",
-        "struct": "#7287FD",
-        "tag": "#7287FD",
         "tagAttribute": "#DF8E1D",
-        "tagAttributeValue": "#40A02B",
-        "typeParameter": "#DF8E1D",
         "url": "#04A5E5",
         "variableGlobal": "#7287FD",
         "variableLocal": "#F9E8E4",
@@ -116,21 +82,22 @@
         "variableProperty": "#04A5E5"
       },
       "highlights": {
-        "diffAdded": "#40A02B",
         "diffAddedBackground": "#EDF5E6",
-        "diffModified": "#04A5E5",
         "diffModifiedBackground": "#E4E2F6",
-        "diffRemoved": "#D20F39",
         "diffRemovedBackground": "#FDE1E3",
         "lineNumber": "#C2AEB4",
         "lineNumberActive": "#1F1F2A"
       }
     },
+    "pr": {
+      "draft": "#6C6F85",
+      "merged": "#9572fd"
+    },
+    "chat": {
+      "userMessageBackground": "#ffffff",
+      "divider": "#E0CFD3"
+    },
     "markdown": {
-      "heading1": "#2e314a",
-      "heading2": "#2e314a",
-      "heading3": "#2e314a",
-      "heading4": "#2e314a",
       "link": "#04A5E5",
       "linkHover": "#7287FD",
       "inlineCode": "#1A7A05",
@@ -139,25 +106,13 @@
       "blockquoteBorder": "#E0CFD3",
       "listMarker": "#7287FD99"
     },
-    "chat": {
-      "userMessage": "#2e314a",
-      "userMessageBackground": "#ffffff",
-      "assistantMessage": "#4C4F69",
-      "assistantMessageBackground": "#F5E0DC",
-      "timestamp": "#6C6F85",
-      "divider": "#E0CFD3"
-    },
     "tools": {
-      "background": "#F2D8D480",
       "border": "#cbbec180",
-      "headerHover": "#FDEEEE",
       "icon": "#6C6F85",
       "title": "#4C4F69",
       "description": "#6C6F85",
       "edit": {
-        "added": "#40A02B",
         "addedBackground": "#40A02B25",
-        "removed": "#D20F39",
         "removedBackground": "#D20F3925",
         "lineNumber": "#C2AEB4"
       }

@@ -1,6 +1,8 @@
 import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict = {
   'sessions.aiRename.action': 'Yapay zekâ ile yeniden adlandır',
@@ -29,6 +31,8 @@ export const dict = {
   ...settingsDict,
   ...linearIssuePickerI18n.tr,
   ...linearPanelI18n.tr,
+  ...routingI18n.tr,
+  ...pluginPanelI18n.tr,
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
   'terminalView.toast.selectionCopied': 'Çıktı kopyalandı',
@@ -1277,6 +1281,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Yan yana açılan session',
   'contextRail.surface.notes': 'Proje bilgisi',
   'contextRail.editorTree.toggle': 'Dosya ağacını aç/kapat',
+  'contextRail.editor.toggle': 'Dosya düzenleyiciyi aç/kapat',
   'contextPanel.browser.open': 'Tarayıcı panelini aç',
   'contextPanel.browser.addressAria': 'Tarayıcı adresi',
   'contextPanel.browser.history.label': 'Son adresler',
@@ -1535,6 +1540,7 @@ export const dict = {
   'contextUsage.tooltip.contextLimit': 'Bağlam limiti: {tokens}',
   'contextUsage.tooltip.outputLimit': 'Çıktı limiti: {tokens}',
   'contextUsage.tooltip.cost': 'Maliyet: {cost}',
+  'contextUsage.compacted.description': 'Bağlam sıkıştırıldı. Kullanım bir sonraki yanıttan sonra güncellenecek.',
   'contextSidebar.session.untitled': 'Adsız Session',
   'contextSidebar.empty.openSession': 'Bağlamı incelemek için bir session açın.',
   'contextSidebar.section.context': 'Bağlam',
@@ -1594,6 +1600,21 @@ export const dict = {
   'diffView.state.cleanWorkingTree': 'Working tree temiz, görüntülenecek değişiklik yok',
   'diffView.state.noLastTurnChanges': 'Görüntülenecek son tur değişikliği yok',
   'diffView.state.failedToLoadDiff': 'Diff yüklenemedi',
+  'diffView.unavailable.missingTitle': 'Dosya artık yok',
+  'diffView.unavailable.missingDescription': 'Değişiklik listesi yüklendikten sonra kaldırıldı. Liste yenileniyor.',
+  'diffView.unavailable.nestedRepositoryTitle': 'Ayrı Git deposu',
+  'diffView.unavailable.nestedRepositoryDescription': 'Bu klasörün kendi Git geçmişi var. Değişikliklerini görmek için proje olarak açın.',
+  'diffView.unavailable.untrackedDirectoryTitle': 'Yeni dosyalar klasörü',
+  'diffView.unavailable.untrackedDirectoryDescription': 'Bu klasörde tek tek listelenemeyecek kadar çok yeni dosya var. Klasörü hazırlama alanına ekleyin ya da depoya ait değilse .gitignore dosyasına yazın.',
+  'diffView.submodule.title': 'Alt modül',
+  'diffView.submodule.commitChanged': 'Commit {from} → {to}',
+  'diffView.submodule.commitUnchanged': 'Hâlâ {commit} commit\'inde',
+  'diffView.submodule.added': '{commit} commit\'inde yeni alt modül',
+  'diffView.submodule.removed': 'Alt modül kaldırıldı, {commit} commit\'indeydi',
+  'diffView.submodule.notCheckedOut': 'Checkout yapılmadı. Kayıtlı commit: {commit}',
+  'diffView.submodule.trackedChanges': 'Commit edilmemiş değişiklikler var',
+  'diffView.submodule.untrackedFiles': 'İzlenmeyen dosyalar var',
+  'diffView.submodule.conflict': 'Kayıtlı commit üzerinde birleştirme çakışması',
   'diffView.state.loadingDiff': 'Diff yükleniyor...',
   'diffView.state.loadingChanges': 'Değişiklikler yükleniyor...',
   'diffView.state.largeDiff': 'Büyük diff ({count} değiştirilen satır)',
@@ -2399,6 +2420,7 @@ export const dict = {
   'chat.toolOutputDialog.noOutputProduced': 'Çıktı üretilmedi',
   'chat.toolPart.lspErrors': 'LSP hataları',
   'chat.toolPart.moreErrors': '+{count} hata daha',
+  'chat.toolPart.moreRows': '+{count} satır daha',
   'chat.toolPart.error': 'Hata:',
   'chat.toolPart.awaitingResponse': 'Yanıt bekleniyor...',
   'chat.toolPart.noOutputProduced': 'Çıktı üretilmedi',

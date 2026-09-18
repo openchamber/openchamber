@@ -11,6 +11,15 @@ kept at this root in `types.ts` and `utils.tsx`.
 - `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators.
 - `recent/` owns Recent and managed Chats activity projections.
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
+- `sessionSidebarRowModel.ts` owns the ordered, mode-neutral projection for
+  Chats, Recent, projects, groups, folders, sessions, status notices, empty
+  states, and reveal controls. `SessionSidebarRows.tsx` is the shared desktop
+  Web, Electron and VS Code sidebar row renderer. Normal and committed-search modes use the same
+  model and the same `@tanstack/react-virtual` instance.
+- `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
+  directories together. Chats uses the same `activity:chats` identity for status
+  and row projection, including a Chats-only sidebar. A successful list stops
+  loading independently of initialization; failures keep their retry/access actions.
 - Root session right-click and overflow menus expose `Move to worktree`: a submenu
   listing the canonical primary and linked worktree destinations, with the current
   target disabled and a separate `New worktree...` action. Opening the submenu
@@ -49,6 +58,24 @@ project tree, with no Recent projection. VS Code excludes worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
 
+Hosted mobile and Capacitor use their separate `MobileSessionsSheet` renderer.
+The shared directory-cache rules apply there, but this sidebar virtualizer does not.
+
+Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
+zone headers. The live header keeps one portal host as it moves between its
+virtual row placeholder and a stationary layer inside the native scroller,
+preserving its controls and menu state. The global virtualizer keeps the current
+and adjacent project/activity headers mounted and publishes each row's logical
+start for boundary measurement. Row and header resizing or virtual-start changes
+refresh cached boundaries; scrolling only compares those offsets
+and changes the DOM at a zone handoff. An inert, accessibility-hidden snapshot of
+the outgoing header fades over the incoming header for 150 ms. Reduced motion
+skips the fade. Project dragging temporarily returns headers to their sections
+without remounting controls. Reordering refreshes boundaries using layout offsets
+that include virtual positioning but exclude sortable transforms, so settling
+animations cannot leave stale header positions. The sidebar has no separate
+desktop-only top gradient or identity overlay.
+
 Directory demand always includes known project roots and worktrees. Visibility
 only changes priority. Row mounts must not start bootstrap work. Selection and
 activity subscriptions stay session-scoped so a structural list update does not
@@ -72,7 +99,9 @@ only on Enter. `SessionSearchInput` owns draft text locally; list owners receive
 only committed queries, so typing does not invalidate the session tree. Clearing
 the field resets the applied query immediately. IME confirmation and held Enter
 do not submit. Escape clears text first, then closes the sidebar search when
-already empty. Closing a retained mobile search discards unsubmitted text.
+already empty. Session rows receive one stable reset action rather than transient
+search-open or draft state. Closing a retained mobile search discards unsubmitted
+text.
 
 Sidebar and Recent queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
@@ -80,6 +109,11 @@ return no matches, without falling back to titles, directories, group labels,
 or folder names. Ancestors remain as tree context for a matching child. A matched
 node keeps its subtree for rendering and subtree actions. Only exact ID matches
 count toward the result total.
+
+Search changes model inputs, not renderer ownership. It forces project, group,
+folder, and activity rows open without changing the normal-mode collapse or
+show-more state. Closing search therefore restores the exact prior Chats,
+Recent, project, group, and folder projection.
 ID search does not include archived sessions. `ArchiveView` applies the same
 exact-ID rule to its own archived list. Other queries keep each view's existing
 matching and ordering. Search does not fetch sessions or broaden list membership.
@@ -95,6 +129,49 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - The sidebar does not subscribe its whole tree to the cross-directory live-session aggregate. Global create/structural/lifecycle snapshots drive rendered session metadata; the cached sync index only fills sessions not yet present globally and provides refresh fallback data. Row activity continues to come from the session-keyed live status index.
 - Session selection does not invalidate the sidebar orchestration component. Each mounted row selects only whether its own session ID is active, while parent expansion, project selection memory, and neighbor prefetch run in small effect-only subscribers.
 - Parent expansion is exclusively manual. Selecting or navigating to a subsession never expands its parent automatically. Project/worktree and `recent` trees use independent persisted context keys and receive separate stable projections, so expansion changes in one context neither invalidate nor change the other. The persisted storage key remains `v3`; older state mixed contexts and is not migrated into this contract.
+- The sidebar model flattens parent/child sessions into occurrence-keyed rows.
+  `SessionTreeItem` renders one row with `renderChildren={false}`; it must never
+  recursively mount descendants in the shared scroller. One preorder ID pool
+  plus index ranges supplies hidden descendants to subtree selection without
+  copying a descendant array for every ancestor.
+- The existing `ScrollableOverlay` is the sole scroll owner. The shared row
+  renderer measures variable-height rows, uses stable occurrence keys, keeps a
+  bounded pre-initialization window, and pins editing, focused, and open-menu
+  occurrences in its range extractor. The scroller publishes its DOM element
+  through callback-backed state so virtualization activates after every mount
+  without waiting for an unrelated render. Archived groups must not add a
+  nested virtualizer.
+- Sticky project/activity identity comes from model header descriptors and the
+  first visible virtual index, which keeps the live current and adjacent header
+  rows mounted. `CrossfadeZoneHeaders` uses their cached virtual layout offsets
+  for the visual handoff. DOM sentinels and intersection observers are not used.
+- Shift selection and Ctrl/Cmd+A consume the model's logical row order. API
+  session IDs are deduplicated only at the action boundary, after hidden
+  descendants have been included. Selection is cleared on runtime switch and
+  confirmed session deletion. Bulk destructive actions classify archive state
+  from the model's current session records at action time, never mounted DOM or
+  selection-time metadata. A confirmation owns an immutable ID and action
+  snapshot; changed targets or archive authority require confirmation again.
+  The current session map comes from unfiltered project sections, so collapsing
+  a project or entering search cannot hide authority for an existing selection.
+- Rename drafts stay parent-owned, while editing and menu lifecycles are keyed
+  by row occurrence. Duplicate Recent, project, and folder rows never open a
+  second rename input, and the owning occurrence remains mounted through menu
+  close completion.
+- Folder drops carry occurrence drag keys and owner-scoped targets. A drop is
+  accepted only when the current model marks every owner scope complete and
+  the source and target owner match. Archived rows and archived targets never
+  accept drops.
+- Session rows allow vertical touch panning before the long-press drag activates.
+  The TouchSensor owns movement only after activation; disabling touch panning on
+  the whole row prevents quick swipes from scrolling even when no drag starts.
+- `folders/SessionSidebarFolderItem.tsx` owns activity subscriptions for mounted
+  collapsed folder headers. It includes descendant activity and respects the
+  unread-subtask preference without mounting those sessions. Expanded and archived
+  folders do not derive hidden activity.
+- Single-project flat mode reveals 20 root sessions initially and 20 per Show
+  more; Show fewer resets to 20. Chats retains its own default reveal size. Reveal
+  controls change the logical list, not the viewport's bounded mounted window.
 - Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. Recent and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the mobile sessions sheet resolves the same lineage with `getDescendantIds` over its full active list rather than the rendered bucket. `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with a walk over the global active-plus-archived cache, so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
 - Sidebar selection holds the clicked row's viewport position across navigation-driven sidebar updates. Wheel or touch input cancels the hold immediately, so programmatic compensation never fights intentional scrolling.

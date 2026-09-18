@@ -1,6 +1,8 @@
 import { settingsDict } from './de.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict = {
   'sessions.aiRename.action': 'Mit KI umbenennen',
@@ -29,6 +31,8 @@ export const dict = {
   ...settingsDict,
   ...linearIssuePickerI18n.de,
   ...linearPanelI18n.de,
+  ...routingI18n.de,
+  ...pluginPanelI18n.de,
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',
@@ -1357,6 +1361,7 @@ export const dict = {
   'contextUsage.tooltip.contextLimit': 'Kontextlimit: {tokens}',
   'contextUsage.tooltip.outputLimit': 'Ausgabelimit: {tokens}',
   'contextUsage.tooltip.cost': 'Kosten: {cost}',
+  'contextUsage.compacted.description': 'Kontext komprimiert. Die Auslastung wird nach der nächsten Antwort aktualisiert.',
   'contextSidebar.session.untitled': 'Unbenannte Sitzung',
   'contextSidebar.empty.openSession': 'Öffnen Sie eine Sitzung, um den Kontext zu prüfen.',
   'contextSidebar.section.context': 'Kontext',
@@ -1416,6 +1421,21 @@ export const dict = {
   'diffView.state.cleanWorkingTree': 'Arbeitsverzeichnis ist sauber, keine Änderungen zum Anzeigen',
   'diffView.state.noLastTurnChanges': 'Keine Änderungen im letzten Zug zum Anzeigen',
   'diffView.state.failedToLoadDiff': 'Fehler beim Laden des Diffs',
+  'diffView.unavailable.missingTitle': 'Datei existiert nicht mehr',
+  'diffView.unavailable.missingDescription': 'Sie wurde entfernt, nachdem die Liste der Änderungen geladen wurde. Die Liste wird aktualisiert.',
+  'diffView.unavailable.nestedRepositoryTitle': 'Separates Git-Repository',
+  'diffView.unavailable.nestedRepositoryDescription': 'Dieser Ordner hat eine eigene Git-Historie. Öffne ihn als Projekt, um seine Änderungen zu sehen.',
+  'diffView.unavailable.untrackedDirectoryTitle': 'Ordner mit neuen Dateien',
+  'diffView.unavailable.untrackedDirectoryDescription': 'Dieser Ordner enthält zu viele neue Dateien, um sie einzeln aufzulisten. Stelle ihn bereit oder trage ihn in .gitignore ein, wenn er nicht ins Repository gehört.',
+  'diffView.submodule.title': 'Submodul',
+  'diffView.submodule.commitChanged': 'Commit {from} → {to}',
+  'diffView.submodule.commitUnchanged': 'Weiterhin auf Commit {commit}',
+  'diffView.submodule.added': 'Neues Submodul auf Commit {commit}',
+  'diffView.submodule.removed': 'Submodul entfernt, war auf Commit {commit}',
+  'diffView.submodule.notCheckedOut': 'Nicht ausgecheckt. Erfasster Commit: {commit}',
+  'diffView.submodule.trackedChanges': 'Hat nicht committete Änderungen',
+  'diffView.submodule.untrackedFiles': 'Hat nicht verfolgte Dateien',
+  'diffView.submodule.conflict': 'Merge-Konflikt beim erfassten Commit',
   'diffView.state.loadingDiff': 'Lade Diff...',
   'diffView.state.loadingChanges': 'Lade Änderungen...',
   'diffView.state.largeDiff': 'Großer Diff ({count} geänderte Zeilen)',
@@ -2237,6 +2257,7 @@ export const dict = {
   'chat.toolOutputDialog.noOutputProduced': 'Keine Ausgabe erzeugt',
   'chat.toolPart.lspErrors': 'LSP-Fehler',
   'chat.toolPart.moreErrors': '+{count} weitere Fehler',
+  'chat.toolPart.moreRows': '+{count} weitere Zeilen',
   'chat.toolPart.error': 'Fehler:',
   'chat.toolPart.awaitingResponse': 'Warte auf Antwort...',
   'chat.toolPart.noOutputProduced': 'Keine Ausgabe erzeugt',
@@ -3220,6 +3241,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Chatkontext',
   'contextRail.surface.notes': 'Projektwissen',
   'contextRail.editorTree.toggle': 'Editorbaum umschalten',
+  'contextRail.editor.toggle': 'Dateieditor umschalten',
   'sidebarFilesTree.actions.collapseAllTitle': 'Alle einklappen',
   'filesView.editor.cannotPreviewBinary': 'Binärdatei kann nicht in der Vorschau angezeigt werden',
   'filesView.editor.binaryFileDescription': 'Diese Datei ist binär und kann nicht als Text angezeigt werden.',

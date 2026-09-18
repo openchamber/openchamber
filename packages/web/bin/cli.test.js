@@ -832,7 +832,7 @@ describe('CLI HTTP helpers', () => {
     }
   });
 
-  it('retries UI-authenticated API requests with the stored instance password', async () => {
+  it.each(['oc_ui_session', 'oc_ui_session_3000'])('retries UI-authenticated API requests with the %s cookie', async (cookieName) => {
     await withTempOpenChamberDataDir(async () => {
       const port = 45678;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
@@ -844,11 +844,11 @@ describe('CLI HTTP helpers', () => {
           expect(JSON.parse(options.body)).toEqual({ password: 'secret' });
           return {
             ok: true,
-            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'oc_ui_session=session-token; Path=/; HttpOnly' : null },
+            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? `${cookieName}=session-token; Path=/; HttpOnly` : null },
             json: async () => ({ authenticated: true }),
           };
         }
-        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+        if (options.headers?.Cookie === `${cookieName}=session-token`) {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -866,6 +866,7 @@ describe('CLI HTTP helpers', () => {
 
         expect(response.ok).toBe(true);
         expect(body).toEqual({ ok: true });
+        expect(calls.at(-1).options.headers.Cookie).toBe(`${cookieName}=session-token`);
         expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
           '/api/openchamber/tunnel/start',
           '/auth/session',
@@ -877,7 +878,7 @@ describe('CLI HTTP helpers', () => {
     });
   });
 
-  it('prefers the stored instance password over a non-explicit env password', async () => {
+  it.each(['oc_ui_session', 'oc_ui_session_3000'])('uses the stored password and getSetCookie for %s', async (cookieName) => {
     await withTempOpenChamberDataDir(async () => {
       const port = 45679;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'stored-secret' }, null, 2));
@@ -887,11 +888,11 @@ describe('CLI HTTP helpers', () => {
           expect(JSON.parse(options.body)).toEqual({ password: 'stored-secret' });
           return {
             ok: true,
-            headers: { getSetCookie: () => ['oc_ui_session=session-token; Path=/; HttpOnly'] },
+            headers: { getSetCookie: () => [`${cookieName}=session-token; Path=/; HttpOnly`] },
             json: async () => ({ authenticated: true }),
           };
         }
-        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+        if (options.headers?.Cookie === `${cookieName}=session-token`) {
           return createMockJsonResponse({ ok: true });
         }
         return {

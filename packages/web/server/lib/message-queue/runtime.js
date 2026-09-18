@@ -211,6 +211,9 @@ export function createMessageQueueRuntime({
   sessionKnowledgeRuntime = null,
   broadcastGlobalUiEvent,
   onPromptSent,
+  // Turns the `openchamber/auto` model into a real one right before the send;
+  // absent means the queue never sees the sentinel.
+  resolvePromptBody = null,
   dataDir,
   fetchImpl = fetch,
   now = Date.now,
@@ -469,6 +472,7 @@ export function createMessageQueueRuntime({
       if (agent) body.agent = agent;
       if (variant) body.variant = variant;
       if (fileParts.length > 0) body.parts = fileParts;
+      await resolvePromptBody?.(body, { sessionId, directory });
       await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/command`, { directory, method: 'POST', body });
       return;
     }
@@ -503,6 +507,7 @@ export function createMessageQueueRuntime({
     if (agent) body.agent = agent;
     if (variant) body.variant = variant;
     body.parts = parts;
+    await resolvePromptBody?.(body, { sessionId, directory });
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, { directory, method: 'POST', body });
     if (knowledge.text && sessionKnowledgeRuntime) {
       // After the prompt is accepted, so a rejected dispatch carries it again.

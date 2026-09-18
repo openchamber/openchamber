@@ -57,11 +57,11 @@ export const getSessionNodesActivityState = (
 };
 
 type SessionActivityProps = {
-  nodes: SessionNode[];
+  nodes: readonly SessionNode[];
   includeUnreadSubtasks: boolean;
 };
 
-const collectActivityIds = (nodes: SessionNode[], includeUnreadSubtasks: boolean) => {
+const collectActivityIds = (nodes: readonly SessionNode[], includeUnreadSubtasks: boolean) => {
   const active = new Set<string>();
   const unread = new Set<string>();
   const visit = (node: SessionNode, isSubtask: boolean): void => {
@@ -78,7 +78,7 @@ export const useCollapsedSessionActivityState = ({
   includeUnreadSubtasks,
   enabled = true,
 }: SessionActivityProps & { enabled?: boolean }): CollapsedActivityState => {
-  const ids = React.useMemo(() => collectActivityIds(nodes, includeUnreadSubtasks), [includeUnreadSubtasks, nodes]);
+  const ids = React.useMemo(() => collectActivityIds(enabled ? nodes : [], includeUnreadSubtasks), [enabled, includeUnreadSubtasks, nodes]);
   const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {

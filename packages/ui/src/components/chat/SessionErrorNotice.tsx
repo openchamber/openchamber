@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useLatestSessionError } from '@/sync/notification-store';
 import { useDirectoryStore, useSessionStatus } from '@/sync/sync-context';
+import { readLastMessageState, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
   sessionId: string;
@@ -13,12 +14,6 @@ interface SessionErrorNoticeProps {
 // notice calls it a reply that never began.
 const UNANSWERED_AFTER_MS = 5_000;
 
-type LastMessageState = {
-  role: string;
-  timestamp: number;
-  hasError: boolean;
-} | null;
-
 // The last message of a session, with whether it already carries an error of
 // its own: an assistant message that OpenCode marked failed renders its error
 // inline, so the session-level notice must not repeat it.
@@ -28,19 +23,11 @@ const useLastMessageState = (sessionId: string, directory?: string): LastMessage
   const getSnapshot = React.useCallback((): LastMessageState => {
     if (!sessionId) return null;
     const messages = store.getState().message[sessionId];
-    const last = messages && messages.length > 0 ? messages[messages.length - 1] : null;
-    // SAFETY: store messages are SDK `Message` records; `error` is the optional
-    // assistant-message error the SDK types carry, read here only for presence.
-    const info = last as { role?: string; time?: { completed?: number; created?: number }; error?: unknown } | null;
-    if (!info) {
+    const next = readLastMessageState(messages && messages.length > 0 ? messages[messages.length - 1] : null);
+    if (!next) {
       cacheRef.current = null;
       return null;
     }
-    const next: LastMessageState = {
-      role: typeof info.role === 'string' ? info.role : '',
-      timestamp: info.time?.completed ?? info.time?.created ?? 0,
-      hasError: Boolean(info.error),
-    };
     const cached = cacheRef.current;
     if (cached && cached.role === next.role && cached.timestamp === next.timestamp && cached.hasError === next.hasError) {
       return cached;
@@ -75,7 +62,9 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
   // A user message that the session is idle on, with nothing after it for a
   // while, is a reply that never began: the send was accepted but OpenCode
   // produced neither a message nor an error for it.
-  const unansweredSince = !reportedError && isIdle && lastMessage?.role === 'user' ? lastMessage.timestamp : null;
+  const unansweredSince = !reportedError && isIdle && lastMessage?.role === 'user' && lastMessage.timestamp > 0
+    ? lastMessage.timestamp
+    : null;
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
     if (unansweredSince === null) return undefined;

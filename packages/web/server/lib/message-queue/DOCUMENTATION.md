@@ -22,6 +22,12 @@ session-knowledge runtime; routes registered in
 JSON bodies enabled in `opencode/core-routes.js`; stopped by
 `opencode/shutdown-runtime.js`.
 
+## Auto routing
+
+`resolvePromptBody` (the routing runtime) runs on the assembled body right
+before the prompt or command send, turning a queued `openchamber/auto` model
+into a real one. The queue captures the sentinel like any other send config.
+
 ## Item
 
 An item is what the UI would have sent itself, captured at queue time so the

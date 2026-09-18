@@ -141,11 +141,6 @@ type WaferPayload = {
   plan_tier?: string;
 };
 
-type CrofPayload = {
-  usable_requests?: number | null;
-  credits?: number | string;
-};
-
 type ClineWindowKind = {
   key: string;
   windowSeconds: number | null;
@@ -842,11 +837,6 @@ export const listConfiguredQuotaProviders = () => {
   const waferAuth = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai']));
   if (waferAuth && ((waferAuth as Record<string, unknown>).key || (waferAuth as Record<string, unknown>).token)) {
     configured.add('wafer');
-  }
-
-  const crofAuth = normalizeAuthEntry(getAuthEntry(auth, ['crof']));
-  if (crofAuth && ((crofAuth as Record<string, unknown>).key || (crofAuth as Record<string, unknown>).token)) {
-    configured.add('crof');
   }
 
   const clineAuth = normalizeAuthEntry(getAuthEntry(auth, ['cline-pass']));
@@ -2677,84 +2667,6 @@ const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-const CROF_USAGE_URL = 'https://crof.ai/usage_api/';
-
-const fetchCrofQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['crof'])) as Record<string, unknown> | null;
-  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
-
-  if (!apiKey) {
-    return buildResult({
-      providerId: 'crof',
-      providerName: 'CrofAI',
-      ok: false,
-      configured: false,
-      error: 'Not configured',
-    });
-  }
-
-  const timeoutSignal = AbortSignal.timeout(15_000);
-
-  try {
-    const response = await fetch(CROF_USAGE_URL, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Accept-Encoding': 'identity',
-      },
-      signal: timeoutSignal,
-    });
-
-    if (!response.ok) {
-      return buildResult({
-        providerId: 'crof',
-        providerName: 'CrofAI',
-        ok: false,
-        configured: true,
-        error: response.status === 401
-          ? 'Session expired — please re-authenticate with CrofAI'
-          : `API error: ${response.status}`,
-      });
-    }
-
-    const payload = await response.json() as CrofPayload;
-    const credits = toNumber(payload?.credits);
-    const valueLabel = credits !== null ? `$${formatMoney(credits)}` : null;
-
-    const windows: Record<string, UsageWindow> = {
-      credits: toUsageWindow({
-        usedPercent: null,
-        windowSeconds: null,
-        resetAt: null,
-        valueLabel,
-      }),
-    };
-
-    return buildResult({
-      providerId: 'crof',
-      providerName: 'CrofAI',
-      ok: true,
-      configured: true,
-      usage: { windows },
-    });
-  } catch (error) {
-    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
-    const isParseError = error instanceof SyntaxError;
-    return buildResult({
-      providerId: 'crof',
-      providerName: 'CrofAI',
-      ok: false,
-      configured: true,
-      error: isTimeout
-        ? 'Request timed out'
-        : isParseError
-          ? 'Invalid response from provider'
-          : (error instanceof Error ? error.message : 'Request failed'),
-    });
-  }
-};
-
 const CLINE_PASS_USAGE_URL = 'https://api.cline.bot/api/v1/users/me/plan/usage-limits';
 
 // Cline reports a rolling five-hour window, a rolling weekly window, and a
@@ -3188,8 +3100,6 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
     }
     case 'cursor':
       return fetchCursorQuota();
-    case 'crof':
-      return fetchCrofQuota();
     case 'cline-pass':
       return fetchClinePassQuota();
     case 'deepseek':

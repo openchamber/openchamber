@@ -24,11 +24,12 @@ import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
+import { clampContextEditorTreeWidth, useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
@@ -39,6 +40,7 @@ import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/run
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
+import { GuestIcon } from './GuestRailIcon';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
@@ -49,6 +51,10 @@ import {
   type EmbeddedSessionChatURLCacheEntry,
   type EmbeddedSessionRuntimeBootstrap,
 } from './contextPanelEmbeddedChat';
+const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
+import { useGuestsStore } from '@/lib/guests/store';
+import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
+import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
@@ -126,6 +132,10 @@ const getModeLabel = (
   if (mode === 'linear') return t('contextPanel.mode.linear');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
+  if (isPluginContextPanelMode(mode)) {
+    const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
+    return guest?.name ?? t('contextRail.surface.plugin');
+  }
   return t('contextPanel.mode.context');
 };
 
@@ -192,6 +202,12 @@ const getTabLabel = (
   return getModeLabel(tab.mode, t);
 };
 
+const ContextGuestIcon: React.FC<{ mode: ContextPanelMode }> = ({ mode }) => {
+  const surfaces = useGuestSurfaces();
+  const surface = surfaces.find((entry) => entry.mode === mode);
+  return <GuestIcon icon={surface?.icon ?? FALLBACK_GUEST_ICON} iconSrc={surface?.iconSrc} className="h-3.5 w-3.5" />;
+};
+
 const getTabIcon = (
   tab: { mode: ContextPanelMode; targetPath: string | null },
   faviconByOrigin: Record<string, string> = {},
@@ -242,6 +258,10 @@ const getTabIcon = (
     return <Icon name="chat-4" className="h-3.5 w-3.5" />;
   }
 
+  if (isPluginContextPanelMode(tab.mode)) {
+    return <ContextGuestIcon mode={tab.mode} />;
+  }
+
   if (tab.mode === 'browser') {
     const icon = browserFaviconFor(tab.targetPath ?? '', faviconByOrigin);
     // The page's own icon when it has reported one; the placeholder otherwise,
@@ -262,12 +282,10 @@ const browserFaviconFor = (url: string, faviconByOrigin: Record<string, string>)
   }
 };
 
-const EDITOR_TREE_MIN_WIDTH = 200;
-const EDITOR_TREE_MAX_WIDTH = 480;
-
 // The editor surface's file-tree column: docked on the right, resizable from
-// its left edge, and animated open/closed like the app sidebars.
-const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ visible, active }) => {
+// its left edge, and animated open/closed like the app sidebars. In tree-only
+// mode (`fill`), the panel collapses around this fixed-width, right-aligned column.
+const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean }> = ({ visible, active, fill = false }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
@@ -277,10 +295,6 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ vis
   const liveWidthRef = React.useRef<number | null>(null);
   const pointerIDRef = React.useRef<number | null>(null);
   const columnRef = React.useRef<HTMLDivElement | null>(null);
-
-  const clampTreeWidth = React.useCallback((value: number) => {
-    return Math.min(EDITOR_TREE_MAX_WIDTH, Math.max(EDITOR_TREE_MIN_WIDTH, Math.round(value)));
-  }, []);
 
   const applyLiveTreeWidth = React.useCallback((nextWidth: number) => {
     const column = columnRef.current;
@@ -313,7 +327,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ vis
       return;
     }
     const delta = startXRef.current - event.clientX;
-    const nextWidth = clampTreeWidth(startWidthRef.current + delta);
+    const nextWidth = clampContextEditorTreeWidth(startWidthRef.current + delta);
     if (liveWidthRef.current === nextWidth) {
       return;
     }
@@ -330,7 +344,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ vis
     } catch {
       // ignore
     }
-    const finalWidth = clampTreeWidth(liveWidthRef.current ?? width);
+    const finalWidth = clampContextEditorTreeWidth(liveWidthRef.current ?? width);
     pointerIDRef.current = null;
     liveWidthRef.current = null;
     setIsResizing(false);
@@ -343,11 +357,12 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ vis
     <div
       ref={columnRef}
       className={cn(
-        'relative h-full flex-shrink-0 overflow-hidden border-l border-border bg-background will-change-[width] motion-reduce:transition-none',
-        !visible && 'border-l-0',
+        'relative h-full flex-shrink-0 overflow-hidden bg-background will-change-[width] motion-reduce:transition-none',
+        fill && 'ml-auto',
       )}
       style={{
         width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
+        maxWidth: fill ? '100%' : undefined,
         ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
         overflowX: 'clip',
         transitionProperty: isResizing ? 'none' : 'width',
@@ -356,7 +371,11 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ vis
       }}
       aria-hidden={!visible}
     >
-      {visible && (
+      {/* Paint the divider without shifting tree content when the editor closes. */}
+      {visible && !fill && (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 z-20 w-px bg-border" />
+      )}
+      {visible && !fill && (
         <div
           className={cn(
             'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
@@ -377,7 +396,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ vis
           isResizing && 'pointer-events-none',
           !visible && 'pointer-events-none select-none opacity-0'
         )}
-        style={{ width: 'var(--oc-editor-tree-width)' }}
+        style={{ width: 'var(--oc-editor-tree-width)', maxWidth: fill ? '100%' : undefined }}
         aria-hidden={!visible}
       >
         <SidebarFilesTree visible={visible && active} />
@@ -472,7 +491,11 @@ export const ContextPanel: React.FC = () => {
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
+  const contextEditorTreeWidth = useUIStore((state) => state.contextEditorTreeWidth);
+  const setContextEditorTreeWidth = useUIStore((state) => state.setContextEditorTreeWidth);
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
+  const contextEditorVisible = useUIStore((state) => state.contextEditorVisible);
+  const toggleContextEditor = useUIStore((state) => state.toggleContextEditor);
   const openNewContextBrowserTab = useUIStore((state) => state.openNewContextBrowserTab);
   const faviconByOrigin = useBrowserFaviconStore((state) => state.byOrigin);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
@@ -481,9 +504,17 @@ export const ContextPanel: React.FC = () => {
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
-  const isExpanded = Boolean(isOpen && panelState?.expanded);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  const hasOpenEditorFile = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
+    [tabs],
+  );
+  // The editor column is shown for an open file unless the user hid it; the
+  // tree never hides alongside it, so a hidden tree forces the editor back.
+  const showsEditor = hasOpenEditorFile && (contextEditorVisible || !contextEditorTreeVisible);
   const activeModeForWidth = activeTab?.mode ?? null;
+  const isTreeOnly = activeModeForWidth === 'file' && !showsEditor;
+  const isExpanded = Boolean(isOpen && panelState?.expanded && !isTreeOnly);
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
   const manualWidthFraction = activeModeForWidth ? panelState?.widthFractionByMode?.[activeModeForWidth] : undefined;
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
@@ -492,14 +523,16 @@ export const ContextPanel: React.FC = () => {
   const effectiveManualWidth = manualWidthFraction != null && availablePanelAreaWidth != null
     ? Math.round(manualWidthFraction * availablePanelAreaWidth)
     : manualWidth;
-  const width = clampWidth(effectiveManualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const width = isTreeOnly
+    ? contextEditorTreeWidth
+    : clampWidth(effectiveManualWidth ?? Math.round(widthFraction * widthFallbackBase));
 
   // Convert legacy pixel-only preferences to a ratio the first time the
   // available area is known, so existing users also get responsive sizing.
   React.useEffect(() => {
-    if (!directoryKey || !activeModeForWidth || manualWidthFraction != null || manualWidth == null || availablePanelAreaWidth == null) return;
+    if (!directoryKey || !activeModeForWidth || isTreeOnly || manualWidthFraction != null || manualWidth == null || availablePanelAreaWidth == null) return;
     setContextPanelWidth(directoryKey, activeModeForWidth, manualWidth, availablePanelAreaWidth);
-  }, [activeModeForWidth, availablePanelAreaWidth, directoryKey, manualWidth, manualWidthFraction, setContextPanelWidth]);
+  }, [activeModeForWidth, availablePanelAreaWidth, directoryKey, isTreeOnly, manualWidth, manualWidthFraction, setContextPanelWidth]);
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -578,10 +611,10 @@ export const ContextPanel: React.FC = () => {
   }, []);
 
   const clampWidthForDrag = React.useCallback((nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
+    const clamped = isTreeOnly ? clampContextEditorTreeWidth(nextWidth) : clampWidth(nextWidth);
     const available = resizeAvailableWidthRef.current;
     return available === null ? clamped : Math.min(clamped, Math.max(1, available));
-  }, []);
+  }, [isTreeOnly]);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
     if (!isOpen || isExpanded || !directoryKey) {
@@ -611,12 +644,14 @@ export const ContextPanel: React.FC = () => {
       resizeFollowTimerRef.current = null;
     }
     document.documentElement.style.cursor = '';
-    if (directoryKey && activeModeForWidth) {
+    if (isTreeOnly) {
+      setContextEditorTreeWidth(finalWidth);
+    } else if (directoryKey && activeModeForWidth) {
       setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth, availableWidth ?? undefined);
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
+  }, [activeModeForWidth, clampWidthForDrag, directoryKey, isTreeOnly, setContextEditorTreeWidth, setContextPanelWidth, width]);
 
   // Window-level drag listeners: tracking the pointer via the 3px handle and
   // pointer capture is unreliable (capture can fail over iframes and a missed
@@ -688,6 +723,12 @@ export const ContextPanel: React.FC = () => {
 
   const handlePanelKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape') {
+      return;
+    }
+
+    // Portalled menus and dialogs own Escape even though their React events
+    // still pass through this panel's capture handler.
+    if (event.target instanceof Node && !event.currentTarget.contains(event.target)) {
       return;
     }
 
@@ -996,12 +1037,12 @@ export const ContextPanel: React.FC = () => {
     () => tabs.some((tab) => tab.mode === 'walkthrough'),
     [tabs],
   );
-  const hasFileTabs = React.useMemo(
-    () => tabs.some((tab) => tab.mode === 'file'),
+  const pluginTabs = React.useMemo(
+    () => tabs.filter((tab) => isPluginContextPanelMode(tab.mode)),
     [tabs],
   );
-  const hasOpenEditorFile = React.useMemo(
-    () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
+  const hasFileTabs = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'file'),
     [tabs],
   );
 
@@ -1104,6 +1145,20 @@ export const ContextPanel: React.FC = () => {
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         ) : null}
+        {isFileTabActive && hasOpenEditorFile ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={toggleContextEditor}
+            className="h-7 w-7 p-0"
+            title={t('contextRail.editor.toggle')}
+            aria-label={t('contextRail.editor.toggle')}
+            aria-pressed={showsEditor}
+          >
+            <Icon name="layout-left" className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
         {isFileTabActive ? (
           <Button
             type="button"
@@ -1118,17 +1173,19 @@ export const ContextPanel: React.FC = () => {
             <Icon name="layout-right" className="h-3.5 w-3.5" />
           </Button>
         ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleToggleExpanded}
-          className="h-7 w-7 p-0"
-          title={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
-          aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
-        >
-          {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
-        </Button>
+        {!isTreeOnly ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleToggleExpanded}
+            className="h-7 w-7 p-0"
+            title={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
+            aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
+          >
+            {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="ghost"
@@ -1233,18 +1290,21 @@ export const ContextPanel: React.FC = () => {
       <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
         {hasFileTabs ? (
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
-            <div className="h-full min-w-0 flex-1">
-              {hasOpenEditorFile ? (
-                <React.Suspense fallback={null}><FilesView mode="editor-only" visible={isOpen && isFileTabActive} /></React.Suspense>
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                  <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
-                  <div className="typography-ui-header text-foreground">{t('contextPanel.editorEmpty.title')}</div>
-                  <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.editorEmpty.description')}</div>
-                </div>
-              )}
-            </div>
-            <EditorTreeColumn visible={contextEditorTreeVisible} active={isOpen && isFileTabActive} />
+            {hasOpenEditorFile || !contextEditorTreeVisible ? (
+              // Hidden rather than unmounted so a hidden editor keeps its state.
+              <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
+                {hasOpenEditorFile ? (
+                  <React.Suspense fallback={null}><FilesView mode="editor-only" visible={isOpen && isFileTabActive && showsEditor} /></React.Suspense>
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                    <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
+                    <div className="typography-ui-header text-foreground">{t('contextPanel.editorEmpty.title')}</div>
+                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.editorEmpty.description')}</div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+            <EditorTreeColumn visible={contextEditorTreeVisible} active={isOpen && isFileTabActive} fill={!showsEditor} />
           </div>
         ) : null}
         {activeChatTab && activeChatSessionID && activeChatSrc ? (
@@ -1313,7 +1373,20 @@ export const ContextPanel: React.FC = () => {
             </React.Suspense>
           </div>
         ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
+        {pluginTabs.map((tab) => {
+          if (!isPluginContextPanelMode(tab.mode)) return null;
+          return (
+            <div
+              key={tab.id}
+              className={cn('absolute inset-0', activeTab?.id === tab.id ? 'block' : 'hidden')}
+            >
+              <React.Suspense fallback={null}>
+                <PluginPane mode={tab.mode} />
+              </React.Suspense>
+            </div>
+          );
+        })}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' && !(activeTab && isPluginContextPanelMode(activeTab.mode)) ? activeNonChatContent : null}
       </div>
       </div>
     </aside>

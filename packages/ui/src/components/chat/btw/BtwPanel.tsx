@@ -434,6 +434,7 @@ const BtwMessages: React.FC<{
             onScroll={onBodyScroll}
             size={32}
             data-scroll-shadow="true"
+            data-selection-menu-boundary="true"
             className="max-h-[min(55vh,520px)] min-h-0 overflow-y-auto px-3 py-1"
             style={maxHeight !== undefined ? { maxHeight } : undefined}
         >

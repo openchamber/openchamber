@@ -1619,7 +1619,8 @@ export const registerFsRoutes = (app, dependencies) => {
                 const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                   cwd: resolvedPath,
                   windowsHide: true,
-                  stdio: ['ignore', 'pipe', 'pipe'],
+                  // Diagnostics are unused here. An unread pipe can block Git forever.
+                  stdio: ['ignore', 'pipe', 'ignore'],
                 });
 
                 let stdout = '';

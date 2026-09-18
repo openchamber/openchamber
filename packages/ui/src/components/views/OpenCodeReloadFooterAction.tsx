@@ -108,7 +108,7 @@ export const OpenCodeReloadFooterAction: React.FC<OpenCodeReloadFooterActionProp
         className={cn(
           'flex w-full items-center gap-2 rounded-md overflow-hidden whitespace-nowrap',
           'h-11 px-3 sm:h-8 sm:px-2',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           hasPending
             ? 'bg-primary text-primary-foreground typography-ui-label font-semibold hover:bg-primary/90'
             : 'text-sm font-semibold text-sidebar-foreground/90 hover:text-sidebar-foreground hover:bg-interactive-hover',
@@ -175,7 +175,7 @@ export const OpenCodeReloadFooterAction: React.FC<OpenCodeReloadFooterActionProp
             <button
               type="button"
               onClick={() => setDontShowAgain((value) => !value)}
-              className="inline-flex items-center justify-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+              className="inline-flex items-center justify-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               aria-pressed={dontShowAgain}
             >
               {dontShowAgain

@@ -34,7 +34,7 @@ export const KnowledgeCard: React.FC<{
   return (
     <li
       className={cn(
-        'flex flex-col gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5',
+        'oc-surface-elevated flex flex-col gap-1 rounded-lg border border-[var(--interactive-border)] bg-surface-elevated px-2 py-1.5',
         !expanded && 'cursor-pointer hover:border-[var(--interactive-border)] hover:bg-interactive-hover/30',
       )}
       onClick={expanded ? undefined : onToggleExpanded}
@@ -65,7 +65,7 @@ export const KnowledgeCard: React.FC<{
             <button
               type="button"
               onClick={onToggleExpanded}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t('rightSidebar.contextNotesTodo.notes.actions.collapse')}
               title={t('rightSidebar.contextNotesTodo.notes.actions.collapse')}
             >

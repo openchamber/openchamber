@@ -55,7 +55,7 @@ export const SettingsInfoHint: React.FC<SettingsInfoHintProps> = ({
             setOpen((current) => !current);
           }}
           className={cn(
-            'inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+            'inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             className,
           )}
         >

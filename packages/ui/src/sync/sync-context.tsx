@@ -7,6 +7,7 @@ import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { isSurfaceAttended } from "@/lib/surfaceAttention"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
@@ -50,6 +51,7 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useRoutingStore } from "@/stores/useRoutingStore"
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
 import {
@@ -624,20 +626,16 @@ export function setExternallyViewedSession(directory: string, sessionId: string,
   externallyViewedSessions.set(key, Date.now() + EXTERNAL_VIEW_TTL_MS)
 }
 
-// The window must actually be focused for the active session to count as
-// "seen": if the app is minimized or in the background, a turn finishing in the
-// currently-selected session should still raise an unseen marker (in the tray
-// and in-app), since the user isn't looking at it.
-function isWindowFocused(): boolean {
-  return typeof document !== "undefined" && document.hasFocus()
-}
-
 function isViewedInCurrentSession(directory: string, sessionId?: string): boolean {
   if (!sessionId) return false
   if (
     _activeDirectory && _activeSession
     && directory === _activeDirectory && sessionId === _activeSession
-    && isWindowFocused()
+    // The user must actually see the surface for the active session to count
+    // as "seen": if the app is minimized, in the background, or (in VS Code)
+    // the chat view is hidden, a turn finishing in the selected session still
+    // raises an unseen marker.
+    && isSurfaceAttended()
   ) return true
   pruneExternallyViewedSessions()
   return externallyViewedSessions.has(viewedSessionKey(directory, sessionId))
@@ -1766,6 +1764,8 @@ export function handleEvent(
 
   if (payload.type === "permission.replied") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
+    // A request the routing safety net was holding is settled either way.
+    if (props.requestID) useRoutingStore.getState().releasePermission(props.requestID)
     const toastKey = getPermissionToastKey(props.sessionID, props.requestID)
     const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, props.sessionID, props.requestID)
     if (eventKey) pendingVSCodePermissionEvents.delete(eventKey)

@@ -55,7 +55,7 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void }> = ({ onOpenM
       <div className="flex shrink-0 items-center justify-end gap-1 px-2 pt-1">
         <button
           type="button"
-          className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={onOpenMcpSettings}
           aria-label={t('settings.mcp.sidebar.actions.addServerTitle')}
           title={t('settings.mcp.sidebar.actions.addServerTitle')}
@@ -65,7 +65,7 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void }> = ({ onOpenM
         </button>
         <button
           type="button"
-          className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={refresh}
           disabled={isRefreshing}
           aria-label={t('mcpDropdown.actions.refreshAria')}
@@ -226,7 +226,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         </div>
         <button
           type="button"
-          className="-mr-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="-mr-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('mobile.surface.closeAria')}
           onClick={onClose}
           style={{ touchAction: 'manipulation' }}

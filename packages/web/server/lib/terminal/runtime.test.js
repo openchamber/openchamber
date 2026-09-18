@@ -210,6 +210,51 @@ describe('terminal runtime', () => {
     } finally { await harness.runtime.shutdown(); }
   });
 
+  it('reaps a pending create during shutdown and rejects later creates', async () => {
+    const gate = deferred();
+    const harness = createHarness({ spawnDeferred: gate });
+    const create = harness.routes.post.get('/api/terminal/create');
+    const response = createResponse();
+    const creation = create({ body: { sessionId: 'pending', cwd: '/repo' } }, response);
+    const closing = harness.runtime.shutdown();
+    gate.resolve();
+    await Promise.all([creation, closing]);
+    expect(harness.processes).toHaveLength(1);
+    expect(harness.processes[0].killed).toBe(true);
+    expect(response.statusCode).toBe(400);
+    const later = createResponse();
+    await create({ body: { sessionId: 'later', cwd: '/repo' } }, later);
+    expect(later.statusCode).toBe(400);
+    expect(harness.processes).toHaveLength(1);
+    await harness.runtime.shutdown();
+  });
+
+  for (const removal of ['close', 'force-kill']) {
+    it(`reaps a replacement PTY when ${removal} wins a pending restart`, async () => {
+      const gate = { promise: Promise.resolve() };
+      const harness = createHarness({ spawnDeferred: gate });
+      try {
+        await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'terminal', cwd: '/repo' } }, createResponse());
+        const replacement = deferred();
+        gate.promise = replacement.promise;
+        const response = createResponse();
+        const restarting = harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'terminal' }, body: {} }, response);
+        await new Promise((resolve) => setImmediate(resolve));
+        const removed = createResponse();
+        if (removal === 'close') {
+          await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'terminal' } }, removed);
+        } else {
+          harness.routes.post.get('/api/terminal/force-kill')({ body: { sessionId: 'terminal' } }, removed);
+        }
+        replacement.resolve();
+        await restarting;
+        expect(harness.processes).toHaveLength(2);
+        expect(harness.processes.every((child) => child.killed)).toBe(true);
+        expect(response.statusCode).toBe(400);
+      } finally { await harness.runtime.shutdown(); }
+    });
+  }
+
   it('retains completed output when the replacement command fails to start', async () => {
     let available = true;
     const harness = createHarness({ fs: { promises: { stat: async () => ({ isDirectory: () => available }) } } });

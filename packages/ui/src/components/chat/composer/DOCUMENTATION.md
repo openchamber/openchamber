@@ -34,8 +34,9 @@ new-session drafts hide both queue and suggestion. Hiding the queue does not
 pause its delivery.
 
 The queue header toggles an `aria-expanded` disclosure with the current count.
-Its collapse state is local to the mounted runtime/directory/session queue key
-and survives temporary hiding behind BTW. Switching queue identity resets it.
+Its open/closed state is one persisted preference in `useUIStore`
+(`messageQueueExpanded`, open by default), shared by every session and
+surviving session switches and reloads.
 The expanded list retains its drag sensors, ordering, edit, send, and remove
 actions, and clamps to available space above the composer. It receives the
 composer's main-session queue target instead of resolving the global selection,
@@ -43,11 +44,11 @@ so embedded chat columns address their own queue.
 
 The shared frame measures its height and gap into the chat column's
 `--chat-floating-panel-clearance`. The floating status row and
-`ScrollToBottomButton` translate upward by that amount, and the column
+`ScrollToBottomButton` translate upward by that amount, the transcript's tail
+spacer grows by it (so the frame never covers the last rows), and the column
 carries `data-floating-panel` while any frame is mounted so the recap hint
-hides instead of landing over the transcript. Transcript height, insets, and
-scroll position remain unchanged. Unmounting clears the offset and the
-marker; resizing or collapsing the frame updates it.
+hides instead of landing over the transcript. Unmounting clears the offset
+and the marker; resizing or collapsing the frame updates it.
 
 ## Floating composer
 
@@ -77,9 +78,9 @@ surface on desktop and the overlay itself on mobile.
 | `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
 | `editor/` | The CodeMirror view that renders the language and owns the caret |
 | `state/` | Composer-local lifecycle state: ArrowUp/ArrowDown browsing, draft stash/restore, mobile shell, popup placement, draft targeting |
-| `submit/` | Turning what the user has into what gets sent |
+| `submit/` | Turning what the user has into what gets sent. `guestCommands.ts` routes an extension's slash command (`contributes.commands`) before anything is sent: `/name args` never reaches the model, the extension resolves it into a chip |
 | `attachments/` | Files: paths, drop payloads |
-| `ui/` | Presentation |
+| `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub, Linear, then guests with `contributes.attach`. `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. Message and session actions (`contributes.actions`) travel the same two roads with a `GuestMessageItem` / `GuestSessionItem` (`lib/guests/dialog-store.ts` `openGuestWithItem`); the dialog they open lives in `layout/GuestHosts.tsx`, not here, and an `attach` from it closes it through `handleGuestAttach`. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
 | `text.ts` | How inserted text meets the text already there |
 | `largeTextPaste.ts` | Detect large plain-text pastes and build virtual `.txt` files |
 | `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
@@ -185,10 +186,11 @@ makes WebKit re-measure them after every decoration redraw, and the composer
 rebuilds every decoration on every keystroke. That cost is felt worst during
 IME composition.
 
-The non-iOS native selection tint comes from `--primary`, not the selection
-token: themes define `--interactive-selection` with its own alpha, so mixing it
-with transparent again is nearly invisible. The iOS system overlay owns its
-visible selection fill.
+The non-iOS native selection uses `--interactive-selection` directly, including
+its authored alpha, with `--interactive-selection-foreground` for selected text.
+Do not dilute it again or substitute the primary action color. Both composer
+caret paths follow the elevated field foreground; the file editor/terminal cursor
+color may belong to a different background. The iOS system overlay owns its visible selection fill.
 
 The content element keeps the existing correction policy: on in the mobile UI,
 off elsewhere. CodeMirror also reads the attribute and reverts Apple and
@@ -224,6 +226,18 @@ and the send path reading the same grammar.
   mention, file mentions, and skill instruction were resolved when it was
   queued, never at delivery — and its context follows it before the next
   queued message.
+- Extension slash commands are routed first (`submit/guestCommands.ts`,
+  entries from `useGuestCommands` minus every name the composer already
+  knows, so an extension can never shadow a built-in, an OpenCode command, or
+  a skill). The command text is cleared and `runGuestCommand`
+  (`lib/guests/run-command.ts`) asks the extension: the rail pane if it is
+  mounted, otherwise a hidden headless `PluginPane` that `GuestHosts` mounts
+  for the call. A returned chip lands through
+  `useInputStore.setPendingGuestIssue`, the same slot a panel's `attach` uses;
+  `null` is an info toast; an error or 20s of silence restores the text and
+  shows an error toast. Queueing runs it instead of queueing, like a local
+  command. `CommandAutocomplete` lists the same entries with the extension's
+  name as their badge, and the language highlights them as known `/tokens`.
 - Local slash commands are planned by `submit/slashCommands.ts` before any
   attached context is consumed. Commands that act on session or UI state
   (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
@@ -245,6 +259,9 @@ and the send path reading the same grammar.
   them after loading that identity's draft. Selection alone is not enough:
   the deferred chat column can still show the source composer. Ordinary
   pending text insertions keep their existing path in `ChatInput`.
+  The hook also selects the attachment draft before paint. `input-store.ts`
+  owns its in-memory files and scoped send recovery, documented in
+  `packages/ui/src/sync/DOCUMENTATION.md`.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation. It
@@ -301,8 +318,12 @@ including in memory when persistence is disabled.
 Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
 caret at the end. BTW copies the main model/effort once, including explicit
 Default, and uses `plan` or the first selectable agent. Its controlled model
-path only writes BTW selections. Attachments, goals, expansion, shell, and
-agent selection and file/agent mention autocomplete are unavailable. Auto-accept is applied before the first send.
+path only writes BTW selections. Files attach as in the normal composer
+(picker, paste, drop) and live in the BTW draft identity's attachment slot,
+so they never mix with the main draft's files; the attach control offers
+only local files. Goals, expansion, shell, linked context (issues, PRs,
+guests), agent selection and file/agent mention autocomplete are
+unavailable. Auto-accept is applied before the first send.
 On mobile, model and effort controls sit in the input's upper-left row; the
 footer only contains auto-accept and send/stop controls.
 

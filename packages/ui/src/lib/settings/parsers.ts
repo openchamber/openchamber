@@ -336,6 +336,7 @@ const projectEntrySchema = z.object({
   // after each save and replaced it, which reset the rename form mid-typing
   // and dropped the defaults themselves (#3552).
   defaultModel: nonEmptyTrimmed.optional().catch(undefined),
+  defaultAgent: nonEmptyTrimmed.optional().catch(undefined),
   defaultVariant: nonEmptyTrimmed.optional().catch(undefined),
 });
 
@@ -363,6 +364,7 @@ export const parseProjects = fromSchema(
       if (parsed.data.addedAt !== undefined) project.addedAt = parsed.data.addedAt;
       if (parsed.data.lastOpenedAt !== undefined) project.lastOpenedAt = parsed.data.lastOpenedAt;
       if (parsed.data.defaultModel) project.defaultModel = parsed.data.defaultModel;
+      if (parsed.data.defaultAgent) project.defaultAgent = parsed.data.defaultAgent;
       if (parsed.data.defaultVariant) project.defaultVariant = parsed.data.defaultVariant;
       if (parsed.data.sidebarCollapsed !== undefined) project.sidebarCollapsed = parsed.data.sidebarCollapsed;
       result.push(project);

@@ -44,6 +44,28 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
+
+  `POST /api/config/themes` saves a converted VS Code palette. The runtime validates
+  literal colors and required authored roles, assigns a content-derived filename,
+  and publishes through a same-directory hard link so partial files and overwrites
+  are impossible. Identical retries reuse the existing file; a manually edited
+  collision returns 409. Temporary files are ignored by the loader and removed
+  after publication or failure. Non-missing-directory read failures propagate to
+  the route instead of returning an authoritative empty library.
+
+  The common request middleware parses theme POST bodies before these routes;
+  integration tests must use that middleware rather than an unrestricted test parser.
+  `DELETE /api/config/themes/:id` finds a valid regular JSON file by its metadata ID
+  inside the custom themes directory. IDs are never used as filenames. Hand-added
+  themes are supported; symlinks and bundled themes are outside deletion ownership.
+  Duplicate matching IDs fail explicitly. Missing themes are an idempotent success;
+  filesystem failures remain errors.
+  `theme-catalog.js` owns POST catalog search/package routes under
+  `/api/config/themes/catalog/`. It fetches only Open VSX and its Eclipse CDN over
+  HTTPS, validates redirects and checksums, and verifies packaged identity.
+  `theme-archive.js` reads selected JSON entries in memory with bounded decompression.
+  JSON includes and token references stay inside the package. Each failed variant
+  is reported separately so valid siblings remain available. No extension code runs.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
@@ -155,6 +177,23 @@ macOS `say` voice enumeration starts concurrently with server composition. The s
 Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the managed-process restart threshold using one cached unhealthy result; an exited managed process still restarts immediately.
 
 Managed health failures are classified as `timeout`, `connection_refused`, `connection_reset`, `invalid_response`, or `error`. The lifecycle retains the latest counted failure with a bounded detail string and source. Managed process wrappers continue capturing a sanitized, bounded stderr tail after readiness and retain exit code/signal. Before replacing a managed process, lifecycle snapshots the reason, latest health failure, process diagnostics/aliveness, busy-session count, and timestamp into `lastOpenCodeRestartDiagnostics`; successful startup does not clear this snapshot, and `/health` exposes it for post-restart diagnosis without process environment or credentials.
+
+Managed process ownership starts at spawn. The registry and runtime process
+handle include children that have not announced readiness yet, so shutdown can
+stop an in-flight startup. Readiness timeout, malformed startup output, and
+health-probe errors close that child before retrying. Shutdown cancels further
+startup attempts. Closing a process is single-flight and unregisters it only
+after it exits.
+
+On Windows, managed teardown invokes the existing tree termination command
+before terminating the root. Calling `child.kill()` first loses the ancestry
+needed to find Git, shell, and MCP descendants. On POSIX, the managed child
+starts in its own process group and teardown escalates against that group even
+if the root has already exited. A tool ignoring SIGTERM must not survive just
+because the server closed its own pipes. The
+`lifecycle-process.test.js` regressions launch real parent/child fixtures and
+check PID exit plus registry cleanup. macOS results do not validate Windows
+ConPTY or Console Window Host behavior.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
@@ -332,6 +371,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
 
 ## Public exports (shutdown-runtime.js)
 - `createGracefulShutdownRuntime(dependencies)`: creates graceful shutdown runtime for managed OpenCode and web server teardown sequencing.
+- After stopping owned runtimes and OpenCode, HTTP shutdown closes active connections as well as the listener. A remaining SSE response must not hold Desktop open until its fallback deadline. Upgraded sockets remain the responsibility of their owning runtime.
 - Returned API:
   - `gracefulShutdown(options?)`
 

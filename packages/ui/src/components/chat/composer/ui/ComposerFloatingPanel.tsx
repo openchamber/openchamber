@@ -24,8 +24,9 @@ export function ComposerFloatingPanel({ header, children, compact = false, role,
         // chrome that would end up over the panel (the recap hint) can hide.
         mountedPanels.set(column, (mountedPanels.get(column) ?? 0) + 1);
         column.setAttribute('data-floating-panel', 'true');
-        // Only the floating status/navigation overlays use this offset.
-        // Transcript dimensions and scroll insets remain unchanged.
+        // The floating status/navigation overlays translate up by this
+        // offset, and the transcript's tail spacer grows by it so the panel
+        // never covers the last rows.
         const update = () => {
             const gap = Number.parseFloat(getComputedStyle(panel).marginBottom) || 0;
             const clearance = `${Math.ceil(panel.getBoundingClientRect().height + gap)}px`;

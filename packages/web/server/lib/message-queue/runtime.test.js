@@ -58,7 +58,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolvePromptBody } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -79,6 +79,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     abortHoldMs: 50,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
+  if (resolvePromptBody) options.resolvePromptBody = resolvePromptBody;
   const runtime = createMessageQueueRuntime(options);
   return {
     runtime,
@@ -94,6 +95,36 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
 const settle = async (ms = 30) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+describe('auto routing', () => {
+  it('lets the routing hook rewrite the model of a queued prompt and a queued command', async () => {
+    const resolvePromptBody = vi.fn(async (body) => {
+      if (body.model?.modelID === 'auto') body.model = { providerID: 'openai', modelID: 'gpt-6-astra' };
+      if (body.model === 'openchamber/auto') body.model = 'openai/gpt-6-astra';
+      return null;
+    });
+    const { runtime, openCode, emit } = createRuntime({ resolvePromptBody });
+    runtime.start();
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    openCode.state.commands = [{ name: 'review', template: 'Review $ARGUMENTS' }];
+    const auto = { providerID: 'openchamber', modelID: 'auto', agent: 'build' };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'plain', text: 'plain', sendConfig: auto }));
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review src', text: '/review src', sendConfig: auto }));
+
+    openCode.state.statuses = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent.map((entry) => entry.body.model)).toEqual([
+      { providerID: 'openai', modelID: 'gpt-6-astra' },
+      'openai/gpt-6-astra',
+    ]);
+    expect(resolvePromptBody).toHaveBeenCalledTimes(2);
+    expect(resolvePromptBody.mock.calls[0][1]).toEqual({ sessionId: SESSION, directory: DIRECTORY });
+  });
+});
 
 describe('parseQueuedItemInput', () => {
   it('rejects an item the server could not deliver later', () => {

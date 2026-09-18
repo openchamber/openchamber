@@ -58,7 +58,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
               className={cn(
                 // Mirror Input sizing so headers align visually.
                 'text-foreground border border-border/80 appearance-none flex h-8 w-full min-w-0 rounded-lg bg-transparent px-3 py-1 outline-none',
-                'hover:border-input focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:border-primary/70',
+                'hover:border-input focus-visible:ring-1 focus-visible:ring-ring focus-visible:border-interactive-border-focus',
                 'flex items-center gap-1.5 text-left'
               )}
             >

@@ -171,6 +171,15 @@ subscribes to `currentProviderId` / `currentModelId` for the limits.
 `contextUsage.test.ts` pins the arithmetic — notably that the *latest*
 reporting assistant turn is the answer, not a sum across turns.
 
+Which message is "latest" is decided by `findLatestContextFill` in
+`stores/utils/tokenUtils.ts`, shared with the header, VS Code header, mini chat,
+mobile metadata and context sidebar. A finished compaction's own record
+(`summary: true`) is not a reading: its tokens describe the summarizing request,
+whose input is the pre-compaction history. Until a later response reports
+tokens, the fill is `compacted` and every surface shows a dash, never the older
+pre-compaction number. A compaction still running, or one that failed, has not
+changed the window, so the previous reading stays.
+
 Two further rules on this readout:
 
 - The displayed percentage is computed **unrounded**. `clampPercent` applies

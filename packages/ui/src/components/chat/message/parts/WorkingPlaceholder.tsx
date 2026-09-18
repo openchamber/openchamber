@@ -1,5 +1,4 @@
 import React from 'react';
-import { BusyDots } from './BusyDots';
 import { useI18n } from '@/lib/i18n';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -195,6 +194,19 @@ export function WorkingPlaceholder({
     return null;
   }
 
+  const providerLogo = hasProviderLogo && providerLogoSrc ? (
+    <img
+      src={providerLogoSrc}
+      alt=""
+      aria-hidden="true"
+      className="animate-status-logo inline-block h-3.5 w-3.5 mr-1.5 align-[-2px]"
+      style={{
+        filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
+      }}
+      onError={handleProviderLogoError}
+    />
+  ) : null;
+
   // Retry state: show countdown and attempt info
   if (retryInfo) {
     const attemptLabel = retryInfo.attempt && retryInfo.attempt > 1 ? ` (attempt ${retryInfo.attempt})` : '';
@@ -205,14 +217,14 @@ export function WorkingPlaceholder({
 
     return (
       <div
-        className="flex h-full items-center text-muted-foreground pl-0.5"
+        className="flex h-full items-center text-muted-foreground"
         role="status"
         aria-live="polite"
-        aria-label={`${retryText}...`}
+        aria-label={retryText}
       >
         <span className="typography-ui-header">
+          {providerLogo}
           {retryText}
-          <BusyDots />
         </span>
       </div>
     );
@@ -222,7 +234,7 @@ export function WorkingPlaceholder({
     return null;
   }
 
-  const trimmedModelName = typeof modelName === 'string' ? modelName.trim() : '';
+  const trimmedModelName = modelName?.trim() ?? '';
   const label = trimmedModelName.length > 0
     ? t('chat.statusRow.modelStatus', { model: trimmedModelName, status: displayedText })
     : displayedText.charAt(0).toUpperCase() + displayedText.slice(1);
@@ -241,20 +253,8 @@ export function WorkingPlaceholder({
       data-waiting={displayedPermission ? 'true' : undefined}
     >
       <span className="text-sm">
-        {hasProviderLogo && providerLogoSrc ? (
-          <img
-            src={providerLogoSrc}
-            alt=""
-            aria-hidden="true"
-            className="inline-block h-3.5 w-3.5 mr-1.5 align-[-2px]"
-            style={{
-              filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
-            }}
-            onError={handleProviderLogoError}
-          />
-        ) : null}
+        {providerLogo}
         {label}
-        <BusyDots />
       </span>
     </div>
   );

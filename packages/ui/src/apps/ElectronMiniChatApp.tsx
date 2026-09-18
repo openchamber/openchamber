@@ -9,6 +9,7 @@ import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -338,6 +339,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   useMiniChatKeyboardShortcuts();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
+  useRoutingSync();
   useRootScrollLock();
 
   return (

@@ -2,6 +2,8 @@ import type { I18nKey } from './en';
 import { settingsDict } from './es.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': 'Renombrar con IA',
@@ -30,6 +32,8 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n.es,
   ...linearPanelI18n.es,
+  ...routingI18n.es,
+  ...pluginPanelI18n.es,
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
   'terminalView.toast.selectionCopied': 'Salida copiada',
@@ -1302,6 +1306,7 @@ export const dict: Record<I18nKey, string> = {
   "contextRail.surface.chat.description": "Sesión abierta en paralelo",
   "contextRail.surface.notes": "Conocimiento del proyecto",
   "contextRail.editorTree.toggle": "Alternar árbol de archivos",
+  "contextRail.editor.toggle": "Alternar editor de archivos",
   "contextPanel.browser.open": "Abrir panel del navegador",
   "contextPanel.browser.addressAria": "Dirección del navegador",
   "contextPanel.browser.history.label": "Direcciones recientes",
@@ -1526,6 +1531,7 @@ export const dict: Record<I18nKey, string> = {
   "contextUsage.tooltip.contextLimit": "Límite de contexto: {tokens}",
   "contextUsage.tooltip.outputLimit": "Límite de salida: {tokens}",
   "contextUsage.tooltip.cost": "Costo: {cost}",
+  "contextUsage.compacted.description": "Contexto compactado. El uso se actualizará tras la próxima respuesta.",
   "contextSidebar.session.untitled": "Sesión sin título",
   "contextSidebar.empty.openSession": "Abrir una sesión para inspeccionar el contexto.",
   "contextSidebar.section.context": "Contexto",
@@ -1585,6 +1591,21 @@ export const dict: Record<I18nKey, string> = {
   "diffView.state.cleanWorkingTree": "Worktree limpio, no hay cambios para mostrar",
   "diffView.state.noLastTurnChanges": "No hay cambios del último turno para mostrar",
   "diffView.state.failedToLoadDiff": "No se pudo cargar la diferencia",
+  "diffView.unavailable.missingTitle": "El archivo ya no existe",
+  "diffView.unavailable.missingDescription": "Se eliminó después de cargar la lista de cambios. La lista se está actualizando.",
+  "diffView.unavailable.nestedRepositoryTitle": "Repositorio Git independiente",
+  "diffView.unavailable.nestedRepositoryDescription": "Esta carpeta tiene su propio historial de Git. Ábrela como proyecto para ver sus cambios.",
+  "diffView.unavailable.untrackedDirectoryTitle": "Carpeta con archivos nuevos",
+  "diffView.unavailable.untrackedDirectoryDescription": "Esta carpeta contiene demasiados archivos nuevos para listarlos uno por uno. Prepárala (stage) o añádela a .gitignore si no pertenece al repositorio.",
+  "diffView.submodule.title": "Submódulo",
+  "diffView.submodule.commitChanged": "Commit {from} → {to}",
+  "diffView.submodule.commitUnchanged": "Sigue en el commit {commit}",
+  "diffView.submodule.added": "Nuevo submódulo en el commit {commit}",
+  "diffView.submodule.removed": "Submódulo eliminado, estaba en el commit {commit}",
+  "diffView.submodule.notCheckedOut": "No está descargado. Commit registrado: {commit}",
+  "diffView.submodule.trackedChanges": "Tiene cambios sin confirmar",
+  "diffView.submodule.untrackedFiles": "Tiene archivos sin seguimiento",
+  "diffView.submodule.conflict": "Conflicto de fusión en el commit registrado",
   "diffView.state.loadingDiff": "Cargando diff...",
   "diffView.state.loadingChanges": "Cargando cambios...",
   "diffView.state.largeDiff": "Diff grande ({count} líneas modificadas)",
@@ -2429,6 +2450,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toolOutputDialog.noOutputProduced": "No se produjo ninguna salida",
   "chat.toolPart.lspErrors": "Errores LSP",
   "chat.toolPart.moreErrors": "+{count} errores más",
+  "chat.toolPart.moreRows": "+{count} filas más",
   "chat.toolPart.error": "Error:",
   "chat.toolPart.awaitingResponse": "Esperando respuesta...",
   "chat.toolPart.noOutputProduced": "No se produjo ninguna salida",

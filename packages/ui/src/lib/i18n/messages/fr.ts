@@ -1,6 +1,8 @@
 import { settingsDict } from './fr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict = {
   'sessions.aiRename.action': 'Renommer avec l’IA',
@@ -29,6 +31,8 @@ export const dict = {
   ...settingsDict,
   ...linearIssuePickerI18n.fr,
   ...linearPanelI18n.fr,
+  ...routingI18n.fr,
+  ...pluginPanelI18n.fr,
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',
   'terminalView.toast.selectionCopied': 'Sortie copiée',
@@ -1119,6 +1123,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Session ouverte côte à côte',
   'contextRail.surface.notes': 'Connaissances du projet',
   'contextRail.editorTree.toggle': 'Afficher/masquer l’arborescence de fichiers',
+  'contextRail.editor.toggle': 'Afficher/masquer l’éditeur de fichiers',
   'contextPanel.browser.open': 'Ouvrir le panneau du navigateur',
   'contextPanel.browser.addressAria': 'Adresse du navigateur',
   'contextPanel.browser.history.label': 'Adresses récentes',
@@ -1323,6 +1328,7 @@ export const dict = {
   'contextUsage.tooltip.contextLimit': 'Limite de contexte : {tokens}',
   'contextUsage.tooltip.outputLimit': 'Limite de sortie : {tokens}',
   'contextUsage.tooltip.cost': 'Coût : {cost}',
+  'contextUsage.compacted.description': 'Contexte compacté. L’utilisation sera mise à jour après la prochaine réponse.',
   'contextSidebar.session.untitled': 'Session sans titre',
   'contextSidebar.empty.openSession': 'Ouvrez une session pour inspecter le contexte.',
   'contextSidebar.section.context': 'Contexte',
@@ -1382,6 +1388,21 @@ export const dict = {
   'diffView.state.cleanWorkingTree': 'Worktree sans modifications, rien à afficher',
   'diffView.state.noLastTurnChanges': 'Aucun changement du dernier tour à afficher',
   'diffView.state.failedToLoadDiff': 'Échec du chargement du différentiel',
+  'diffView.unavailable.missingTitle': 'Le fichier n’existe plus',
+  'diffView.unavailable.missingDescription': 'Il a été supprimé après le chargement de la liste des modifications. La liste est en cours d’actualisation.',
+  'diffView.unavailable.nestedRepositoryTitle': 'Dépôt Git distinct',
+  'diffView.unavailable.nestedRepositoryDescription': 'Ce dossier a son propre historique Git. Ouvrez-le comme projet pour voir ses modifications.',
+  'diffView.unavailable.untrackedDirectoryTitle': 'Dossier de nouveaux fichiers',
+  'diffView.unavailable.untrackedDirectoryDescription': 'Ce dossier contient trop de nouveaux fichiers pour les lister un par un. Indexez-le ou ajoutez-le à .gitignore s’il n’a pas sa place dans le dépôt.',
+  'diffView.submodule.title': 'Sous-module',
+  'diffView.submodule.commitChanged': 'Commit {from} → {to}',
+  'diffView.submodule.commitUnchanged': 'Toujours sur le commit {commit}',
+  'diffView.submodule.added': 'Nouveau sous-module au commit {commit}',
+  'diffView.submodule.removed': 'Sous-module supprimé, était au commit {commit}',
+  'diffView.submodule.notCheckedOut': 'Non extrait. Commit enregistré : {commit}',
+  'diffView.submodule.trackedChanges': 'Contient des modifications non validées',
+  'diffView.submodule.untrackedFiles': 'Contient des fichiers non suivis',
+  'diffView.submodule.conflict': 'Conflit de fusion sur le commit enregistré',
   'diffView.state.loadingDiff': 'Chargement du différentiel...',
   'diffView.state.loadingChanges': 'Chargement des modifications...',
   'diffView.state.largeDiff': 'Diff volumineux ({count} lignes modifiées)',
@@ -2170,6 +2191,7 @@ export const dict = {
   'chat.toolOutputDialog.noOutputProduced': 'Aucune sortie n\'a été produite',
   'chat.toolPart.lspErrors': 'Erreurs LSP',
   'chat.toolPart.moreErrors': '+{count} plus d\'erreurs',
+  'chat.toolPart.moreRows': '+{count} lignes de plus',
   'chat.toolPart.error': 'Erreur:',
   'chat.toolPart.awaitingResponse': 'En attente de réponse...',
   'chat.toolPart.noOutputProduced': 'Aucune sortie produite',

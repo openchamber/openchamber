@@ -20,7 +20,9 @@
  */
 
 import { spawn } from "node:child_process"
+import { createWriteStream } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { finished } from "node:stream/promises"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -29,7 +31,8 @@ import process from "node:process"
 import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
-import { growthPerSecond, metricMap, round, summarizeLongTasks, summarizeTraceEvents } from "./perf/metrics.mjs"
+import { growthPerSecond, metricMap, round, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
+import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -67,6 +70,24 @@ Options:
   --profile-dir <path>     Reusable isolated Chrome profile
   --headed                 Show the browser (default: headless)
   --sampling-interval <us> CPU sampler interval (default: 200)
+  --thread-breakdown       Also trace scheduler, compositor and GPU categories,
+                           and report CPU per thread with the events that
+                           spent it. Names the work a main-thread profile
+                           cannot see. Adds trace overhead; leave it off when
+                           comparing long-task or busy figures between runs.
+  --save-trace             Also write the raw timeline to trace.json, which the
+                           DevTools Performance panel and Perfetto both open.
+  --process-cpu-only       Record per-process CPU with every in-page instrument
+                           off: no sampler, trace, probe or stream counters.
+                           The sampler and the trace run inside the renderer
+                           and inflate its CPU, so this is the figure to
+                           compare with what a process monitor shows a user.
+  --inject-css <css>       Add a stylesheet to the page before it loads. For
+                           attribution experiments only, such as switching an
+                           animation off to measure what it costs; the result
+                           describes a modified app and is labelled as such.
+  --inject-script <file>   Run a script in the page before it loads. Same
+                           purpose and the same labelling as --inject-css.
   --baseline <directory>   Compare against a previous run directory
   --budget-long-tasks <n>  Fail when long tasks exceed this count
   --budget-longest <ms>    Fail when the longest task exceeds this
@@ -97,6 +118,11 @@ const parseArgs = (argv) => {
     profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
     headless: true,
     samplingInterval: 200,
+    processCpuOnly: false,
+    threadBreakdown: false,
+    saveTrace: false,
+    injectCss: null,
+    injectScript: null,
     baseline: null,
     budgetLongTasks: null,
     budgetLongest: null,
@@ -109,6 +135,9 @@ const parseArgs = (argv) => {
     else if (value === "--headed") options.headless = false
     else if (value === "--json") options.json = true
     else if (value === "--keep-session") options.keepSession = true
+    else if (value === "--process-cpu-only") options.processCpuOnly = true
+    else if (value === "--thread-breakdown") options.threadBreakdown = true
+    else if (value === "--save-trace") options.saveTrace = true
     else if (value === "--url") options.url = argv[++index]
     else if (value === "--port") options.port = argv[++index]
     else if (value === "--dir") options.dir = argv[++index]
@@ -127,6 +156,8 @@ const parseArgs = (argv) => {
     else if (value === "--chrome") options.chrome = argv[++index]
     else if (value === "--profile-dir") options.profileDir = argv[++index]
     else if (value === "--sampling-interval") options.samplingInterval = Number(argv[++index])
+    else if (value === "--inject-css") options.injectCss = argv[++index]
+    else if (value === "--inject-script") options.injectScript = argv[++index]
     else if (value === "--baseline") options.baseline = argv[++index]
     else if (value === "--budget-long-tasks") options.budgetLongTasks = Number(argv[++index])
     else if (value === "--budget-longest") options.budgetLongest = Number(argv[++index])
@@ -191,6 +222,46 @@ const countRenderedMessages = async (client) => {
 }
 
 /**
+ * Reads which directory the app has active and which one owns the session.
+ *
+ * Streaming state is derived from the active directory's store. A session
+ * opened by URL from another directory still renders, but without it: the
+ * timeline then re-renders in full on every event flush instead of only its
+ * streaming tail. That is a different, more expensive code path from the one
+ * a user reaches by clicking a session, so a capture has to say which it took.
+ */
+const readDirectoryAlignment = async (client) => {
+  const raw = await evaluateValue(client, `JSON.stringify((() => {
+    const report = globalThis.__opencodeDebug?.diagnoseSessionDirectory?.()
+    return report ? { session: report.routedDirectory ?? null, active: report.details?.activeDirectory ?? null } : null
+  })())`)
+  try {
+    const parsed = JSON.parse(raw ?? "null")
+    return parsed ? { ...parsed, aligned: Boolean(parsed.session) && parsed.session === parsed.active } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Confirms that a response actually streamed.
+ *
+ * A provider that rejects the request leaves the session idle within a second
+ * and the user message rendered, which satisfies every other check in this
+ * file while measuring an empty stream.
+ */
+const readAssistantResponse = async (cliBase, sessionId) => {
+  const result = await runSessionCli(["messages", ...cliBase, "--session", sessionId], { timeoutMs: 30_000 })
+    .catch(() => null)
+  const assistant = (result?.messages ?? []).filter((message) => message.role === "assistant")
+  return {
+    responded: assistant.length > 0,
+    messages: assistant.length,
+    textCharacters: assistant.reduce((total, message) => total + (message.text?.length ?? 0), 0),
+  }
+}
+
+/**
  * Snapshots the animations the page is running right now.
  *
  * Compositing work shows up in a trace as `Layerize`/`Commit`/`PrePaint` with
@@ -228,15 +299,15 @@ const snapshotAnimations = async (client) => {
 }
 
 const REPORTED_METRICS = [
-  { key: "longTaskCount", label: "Long tasks (>50ms)", unit: "", lowerIsBetter: true },
-  { key: "longestTaskMs", label: "Longest task", unit: "ms", lowerIsBetter: true },
-  { key: "taskP95Ms", label: "Task p95", unit: "ms", lowerIsBetter: true },
-  { key: "taskP99Ms", label: "Task p99", unit: "ms", lowerIsBetter: true },
-  { key: "blockedPercent", label: "Time in long tasks", unit: "%", lowerIsBetter: true },
+  { key: "longTaskCount", fromTrace: true, label: "Long tasks (>50ms)", unit: "", lowerIsBetter: true },
+  { key: "longestTaskMs", fromTrace: true, label: "Longest task", unit: "ms", lowerIsBetter: true },
+  { key: "taskP95Ms", fromTrace: true, label: "Task p95", unit: "ms", lowerIsBetter: true },
+  { key: "taskP99Ms", fromTrace: true, label: "Task p99", unit: "ms", lowerIsBetter: true },
+  { key: "blockedPercent", fromTrace: true, label: "Time in long tasks", unit: "%", lowerIsBetter: true },
   { key: "mainThreadBusyPercent", label: "Main-thread busy", unit: "%", lowerIsBetter: true },
   { key: "recalcStylePerSecond", label: "Style recalcs/sec", unit: "", lowerIsBetter: true },
   { key: "layoutsPerSecond", label: "Layouts/sec", unit: "", lowerIsBetter: true },
-  { key: "framesPerSecond", label: "Animation frames/sec", unit: "", lowerIsBetter: false },
+  { key: "framesPerSecond", fromTrace: true, label: "Animation frames/sec", unit: "", lowerIsBetter: false },
   { key: "streamSeconds", label: "Stream duration", unit: "s", lowerIsBetter: true },
   { key: "renderedCharacters", label: "Rendered characters", unit: "", lowerIsBetter: false },
   { key: "busyMsPerKilochar", label: "Busy per 1k chars", unit: "ms", lowerIsBetter: true },
@@ -253,9 +324,15 @@ const printReport = (summary, baseline) => {
   const { metrics } = summary
   console.log(`\nStreaming profile — ${summary.metrics.streamSeconds}s response at ${summary.url}`)
   if (summary.label) console.log(`Label: ${summary.label}`)
+  if (summary.injectedCss) console.log(`MODIFIED APP — injected CSS: ${summary.injectedCss}`)
+  if (summary.injectedScript) console.log(`MODIFIED APP — injected script: ${summary.injectedScript}`)
   console.log(`Session: ${summary.sessionId}${summary.model ? `  Model: ${summary.model}` : ""}`)
   console.log("")
+  if (summary.instrumented === false) {
+    console.log("Uninstrumented run: trace, sampler and probe were off, so their metrics are omitted rather than shown as zero.\n")
+  }
   for (const metric of REPORTED_METRICS) {
+    if (metric.fromTrace && summary.instrumented === false) continue
     const current = metrics[metric.key]
     if (!baseline) {
       console.log(formatRow(metric.label, current, metric.unit))
@@ -268,6 +345,19 @@ const printReport = (summary, baseline) => {
       : (change < 0) === metric.lowerIsBetter ? "  improved" : "  WORSE"
     const changeText = change === null ? "n/a" : `${change > 0 ? "+" : ""}${change}`
     console.log(`${formatRow(metric.label, current, metric.unit).padEnd(42)} was ${String(previous ?? "n/a").padStart(10)}  ${changeText.padStart(9)}${marker}`)
+  }
+
+  const processCpu = summary.processCpu
+  if (processCpu?.processes?.length) {
+    console.log("\nCPU per process while streaming (% of one core, as a process monitor shows it):")
+    console.log(`  ${"avg".padStart(7)} ${"p90".padStart(7)} ${"max".padStart(7)}  process`)
+    for (const entry of processCpu.processes.filter((process) => process.cpuSeconds > 0).slice(0, 10)) {
+      console.log(`  ${String(entry.averagePercent).padStart(6)}% ${String(entry.p90Percent).padStart(6)}% ${String(entry.maxPercent).padStart(6)}%  ${entry.label}`)
+    }
+    console.log(`  ${String(processCpu.totalAveragePercent).padStart(6)}% ${String(processCpu.totalP90Percent).padStart(6)}% ${String(processCpu.totalMaxPercent).padStart(6)}%  all of the above`)
+    if (processCpu.serverProcessesResolved === 0) {
+      console.log("  The OpenChamber server process was not resolved, so server and OpenCode CPU is missing, not zero.")
+    }
   }
 
   console.log("\nTop self time while streaming:")
@@ -287,6 +377,16 @@ const printReport = (summary, baseline) => {
   console.log("\nWhere recorded time went (timeline trace):")
   for (const entry of summary.traceBreakdown?.slice(0, 14) ?? []) {
     console.log(`  ${String(entry.totalMs).padStart(9)} ms  ${String(entry.count).padStart(6)}x  max ${String(entry.maxMs).padStart(7)} ms  ${entry.name}`)
+  }
+
+  if (summary.threadBreakdown?.length) {
+    console.log("\nCPU per thread (exclusive thread time, all traced processes):")
+    for (const thread of summary.threadBreakdown) {
+      console.log(`  ${String(thread.cpuMs).padStart(9)} ms  ${thread.process} / ${thread.thread}`)
+      for (const event of thread.events.slice(0, 6)) {
+        console.log(`  ${" ".repeat(12)}${String(event.cpuMs).padStart(9)} ms  ${event.name}`)
+      }
+    }
   }
 
   const streamEntries = summary.streamPerformance?.entries ?? []
@@ -354,10 +454,14 @@ const main = async () => {
   const port = await reservePort()
   const chromeProcess = launchChrome({ chrome, profileDir, port, headless: options.headless })
   let client
+  let browserClient
   try {
     const pageTarget = await createPageTarget(port)
     client = new CdpClient(pageTarget.webSocketDebuggerUrl)
     await client.connect()
+    browserClient = await openBrowserClient(port)
+    const serverProcesses = await resolveServerProcesses(options.port)
+    const processCpu = createProcessCpuSampler({ browserClient, serverProcesses })
     await Promise.all([
       client.send("Page.enable"),
       client.send("Runtime.enable"),
@@ -366,7 +470,20 @@ const main = async () => {
       client.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }),
     ])
     await client.send("Network.setBypassServiceWorker", { bypass: true })
-    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildIdleProbeSource() })
+    const instrumented = !options.processCpuOnly
+    if (instrumented) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildIdleProbeSource() })
+    if (options.injectCss) {
+      await client.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: `document.addEventListener("DOMContentLoaded", () => {
+          const style = document.createElement("style")
+          style.textContent = ${JSON.stringify(options.injectCss)}
+          document.head.appendChild(style)
+        })`,
+      })
+    }
+    if (options.injectScript) {
+      await client.send("Page.addScriptToEvaluateOnNewDocument", { source: await readFile(resolve(options.injectScript), "utf8") })
+    }
     await client.send("Emulation.setDeviceMetricsOverride", {
       width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false,
     })
@@ -382,10 +499,17 @@ const main = async () => {
     await client.send("Page.navigate", { url: target.toString() })
     await loaded
     // The application's own stream counters are opt-in; enabling them before
-    // the recorded reload keeps their timeline aligned with the capture.
-    await evaluateValue(client, `
+    // the recorded reload keeps their timeline aligned with the capture. The
+    // Chrome profile is reused between runs, so an uninstrumented run has to
+    // clear the flags an earlier instrumented run left behind.
+    await evaluateValue(client, instrumented
+      ? `
       localStorage.setItem("openchamber_sync_perf", "1")
       localStorage.setItem("openchamber_stream_perf", "1")
+    `
+      : `
+      localStorage.removeItem("openchamber_sync_perf")
+      localStorage.removeItem("openchamber_stream_perf")
     `)
     if (options.expandProjects) {
       await expandProjects(client)
@@ -404,13 +528,15 @@ const main = async () => {
       await wait(options.settle * 1000)
     }
 
-    await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.start()`)
-    await evaluateValue(client, `window.__openchamberSyncPerformance?.reset()`)
-    await evaluateValue(client, `window.__openchamberStreamPerformance?.setEnabled(true)`)
-    await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
-    await client.send("Profiler.setSamplingInterval", { interval: options.samplingInterval })
-    await client.send("Profiler.start")
-    await client.send("Tracing.start", {
+    if (instrumented) {
+      await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.start()`)
+      await evaluateValue(client, `window.__openchamberSyncPerformance?.reset()`)
+      await evaluateValue(client, `window.__openchamberStreamPerformance?.setEnabled(true)`)
+      await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
+      await client.send("Profiler.setSamplingInterval", { interval: options.samplingInterval })
+      await client.send("Profiler.start")
+    }
+    if (instrumented) await client.send("Tracing.start", {
       transferMode: "ReportEvents",
       // `RunTask` is only emitted under the disabled-by-default timeline
       // category. Without it the capture silently reports zero long tasks.
@@ -419,11 +545,16 @@ const main = async () => {
         "disabled-by-default-devtools.timeline",
         "disabled-by-default-devtools.timeline.frame",
         "blink.user_timing",
+        // `toplevel` wraps every task on every thread of every process; the
+        // rest name what the compositor and the GPU process did inside them.
+        ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
       ].join(","),
     })
 
     const before = metricMap((await client.send("Performance.getMetrics")).metrics)
     const renderedBefore = await countRenderedMessages(client)
+    const directoryAlignment = options.viewSession ? null : await readDirectoryAlignment(client)
+    await processCpu.sample()
     const startedAt = Date.now()
 
     const sendArgs = [
@@ -454,6 +585,7 @@ const main = async () => {
         nodes: Number(current.Nodes ?? 0),
         taskDuration: round(Number(current.TaskDuration ?? 0), 3),
       })
+      await processCpu.sample()
       if (dispatchError) break
 
       // One mid-stream snapshot is enough to name a continuously running
@@ -476,6 +608,10 @@ const main = async () => {
     if (!becameIdle) console.warn(`WARNING: the session did not report idle within ${options.timeout}s; the capture is truncated.`)
 
     const streamEndedAt = Date.now()
+    // Closed before the tail so the per-process figures describe the stream
+    // itself and are not diluted by the quiet seconds recorded after it.
+    await processCpu.sample()
+    const assistantResponse = await readAssistantResponse(cliBase, sessionId)
     if (options.tail > 0) await wait(options.tail * 1000)
 
     const frameLiveness = await evaluateValue(client, `new Promise((resolveFrames) => {
@@ -493,18 +629,20 @@ const main = async () => {
     const elapsedSeconds = (Date.now() - startedAt) / 1000
     const renderedAfter = await countRenderedMessages(client)
     const after = metricMap((await client.send("Performance.getMetrics")).metrics)
-    const { profile } = await client.send("Profiler.stop")
+    const profile = instrumented ? (await client.send("Profiler.stop")).profile : null
 
-    const tracingComplete = client.once("Tracing.tracingComplete", 120_000)
-    let traceComplete = true
-    try {
-      await client.send("Tracing.end")
-      await tracingComplete
-    } catch (error) {
-      traceComplete = false
-      void tracingComplete.catch(() => undefined)
-      console.warn(`Chrome did not confirm trace completion; using the events collected so far: ${error.message}`)
-      await wait(2_000)
+    let traceComplete = instrumented
+    if (instrumented) {
+      const tracingComplete = client.once("Tracing.tracingComplete", 120_000)
+      try {
+        await client.send("Tracing.end")
+        await tracingComplete
+      } catch (error) {
+        traceComplete = false
+        void tracingComplete.catch(() => undefined)
+        console.warn(`Chrome did not confirm trace completion; using the events collected so far: ${error.message}`)
+        await wait(2_000)
+      }
     }
     unsubscribeTrace()
 
@@ -518,14 +656,19 @@ const main = async () => {
     // application's own message-list render counters firing.
     const messageListRendered = (streamPerformance?.entries ?? [])
       .some((entry) => entry.metric.startsWith("ui.message_list") && entry.count > 0)
+    const renderedCharacterGrowth = renderedAfter.characters - renderedBefore.characters
+    // A virtualised timeline keeps the mounted message count constant, so in a
+    // long session new text is the DOM signal and a new element is not. An
+    // uninstrumented run has no render counters and relies on the DOM signal
+    // together with the assistant-response check.
+    const domGrew = renderedAfter.messages > renderedBefore.messages || renderedCharacterGrowth > 0
     const renderedStream = options.viewSession
       ? true
-      : renderedAfter.messages > renderedBefore.messages && messageListRendered
-
-    const renderedCharacterGrowth = renderedAfter.characters - renderedBefore.characters
+      : domGrew && (messageListRendered || !instrumented)
 
     const tasks = summarizeLongTasks(traceEvents)
     const traceBreakdown = summarizeTraceEvents(traceEvents)
+    const threadBreakdown = options.threadBreakdown ? summarizeThreads(traceEvents) : null
     const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
     const perSecond = (name) => round(delta(name) / elapsedSeconds)
     const heapSamples = samples.map((sample) => sample.jsHeapUsedMb)
@@ -542,6 +685,11 @@ const main = async () => {
       model: dispatchResult?.model ? `${dispatchResult.model.providerID}/${dispatchResult.model.modelID}` : options.model,
       agent: dispatchResult?.agent ?? options.agent,
       reachedIdle: becameIdle,
+      instrumented,
+      directoryAlignment,
+      injectedCss: options.injectCss,
+      injectedScript: options.injectScript,
+      assistantResponse,
       renderedStream,
       renderedMessagesBefore: renderedBefore.messages,
       renderedMessagesAfter: renderedAfter.messages,
@@ -579,9 +727,11 @@ const main = async () => {
         heapGrowthMbPerSecond: growthPerSecond(samples, "jsHeapUsedMb"),
       },
       frameLiveness,
+      processCpu: processCpu.summarize(),
       runningAnimations: animationSnapshot ?? [],
-      cpuProfile: summarizeCpuProfile(profile),
+      cpuProfile: profile ? summarizeCpuProfile(profile) : null,
       traceBreakdown,
+      threadBreakdown,
       streamPerformance,
       syncCounters,
       scheduledWork: probe,
@@ -589,12 +739,37 @@ const main = async () => {
     }
 
     await writeFile(join(output, "session-summary.json"), JSON.stringify(summary, null, 2))
-    await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
+    if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
+    if (options.saveTrace && instrumented) {
+      // Streamed event by event: one JSON.stringify over a long capture exceeds
+      // the maximum string length.
+      const traceFile = createWriteStream(join(output, "trace.json"))
+      traceFile.write('{"traceEvents":[\n')
+      traceEvents.forEach((event, index) => traceFile.write(`${index === 0 ? "" : ",\n"}${JSON.stringify(event)}`))
+      traceFile.end("\n]}")
+      await finished(traceFile)
+    }
 
-    if (tasks.taskCount === 0) {
+    if (instrumented && tasks.taskCount === 0) {
       console.warn(
         "\nWARNING: the trace contained no RunTask events, so every long-task number below is a"
         + " placeholder zero rather than a measurement. Check the tracing categories before trusting them.",
+      )
+    }
+
+    if (directoryAlignment && !directoryAlignment.aligned) {
+      console.warn(
+        `\nWARNING: the app's active directory (${directoryAlignment.active}) is not the session's`
+        + ` (${directoryAlignment.session}), so the timeline re-rendered in full on every flush.`
+        + " Open the session's directory as the active project to measure the path a user takes.",
+      )
+    }
+
+    if (!assistantResponse.responded) {
+      console.warn(
+        "\nWARNING: the session went idle without an assistant message, so no response streamed."
+        + " The provider most likely rejected the request; check the OpenCode log and the --model value."
+        + " This capture measures nothing.",
       )
     }
 
@@ -620,6 +795,7 @@ const main = async () => {
     }
   } finally {
     client?.close()
+    browserClient?.close()
     if (!chromeProcess.killed) chromeProcess.kill("SIGTERM")
   }
 }
