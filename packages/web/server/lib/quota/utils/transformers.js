@@ -57,3 +57,13 @@ export const resolveWindowLabel = (windowSeconds) => {
   }
   return `${windowSeconds}s`;
 };
+
+// Zhipu/z.ai monitor APIs report credential failures inside an HTTP 200 body
+// ({ code: 401, success: false, msg }); without this check they parse as empty success.
+export const resolveBusinessError = (payload) => {
+  if (!payload || typeof payload !== 'object') return null;
+  if (payload.success === false || (typeof payload.code === 'number' && payload.code !== 200)) {
+    return payload.msg || payload.message || 'API request rejected';
+  }
+  return null;
+};
