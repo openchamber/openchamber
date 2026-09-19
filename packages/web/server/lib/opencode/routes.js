@@ -1,5 +1,6 @@
 import express from 'express';
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { resolveNpmRegistryRequest } from '../npm-registry-config.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -139,8 +140,9 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   };
 
   const fetchLatestOpenCodeVersionFromNpm = async () => {
-    const response = await fetch('https://registry.npmjs.org/opencode-ai/latest', {
-      headers: { Accept: 'application/json' },
+    const request = resolveNpmRegistryRequest('opencode-ai', 'latest');
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
