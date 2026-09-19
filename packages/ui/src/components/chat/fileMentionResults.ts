@@ -58,3 +58,14 @@ export function rankFileMentionResults(
     (scored) => scored.item,
   );
 }
+
+export function filterStaleRecentFiles<T extends { path: string }>(
+  files: readonly T[],
+  stalePaths: ReadonlySet<string>,
+): T[] {
+  if (stalePaths.size === 0) {
+    return [...files];
+  }
+  return files.filter((file) => !stalePaths.has(file.path));
+}
+
