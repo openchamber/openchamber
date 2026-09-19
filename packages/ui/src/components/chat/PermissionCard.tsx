@@ -133,6 +133,8 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
   }, [permission.sessionID, currentSessionId, sessions]);
 
   const handleResponse = async (response: PermissionResponse) => {
+    if (response === 'always' && permission.always.length === 0) return;
+
     setIsResponding(true);
 
     try {
@@ -453,7 +455,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
             </button>
 
-            {permission.always.length > 0 ? (
+            {permission.always.length > 0 && (
               <button
                 onClick={() => handleResponse('always')}
                 disabled={isResponding}
@@ -485,29 +487,6 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                     </span>
                   );
                 })()}
-              </button>
-            ) : (
-              <button
-                onClick={() => handleResponse('always')}
-                disabled={isResponding}
-                className={cn(
-                  "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
-                  "disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                style={{
-                  backgroundColor: 'rgb(var(--muted) / 0.5)',
-                  color: 'var(--muted-foreground)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.7)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.5)';
-                }}
-              >
-                <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-                Always Allow
-                <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd>
               </button>
             )}
 
