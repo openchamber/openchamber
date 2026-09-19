@@ -2308,6 +2308,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.themeMode.light.description': 'Immer helles Erscheinungsbild verwenden',
   'settings.openchamber.visual.option.themeMode.dark.description': 'Immer dunkles Erscheinungsbild verwenden',
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
+  'chat.message.userText.expandAria': 'Benutzernachricht ausklappen',
   ...linearIntegrationI18n.de,
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,

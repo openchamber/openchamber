@@ -2180,6 +2180,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.userMessageRendering.plain.label": "Звичайний текст",
   "settings.openchamber.visual.option.userMessageRendering.plain.description": "Показувати текст користувача зі збереженням пробілів і посилань.",
   "chat.message.userText.collapseAria": "Згорнути повідомлення користувача",
+  "chat.message.userText.expandAria": "Розгорнути повідомлення користувача",
   "settings.openchamber.visual.option.chatRenderMode.sorted.label": "Відсортовано",
   "settings.openchamber.visual.option.chatRenderMode.sorted.description": "Показувати готові повідомлення помічника без live-трансляції.",
   "settings.openchamber.visual.option.chatRenderMode.live.label": "Live",

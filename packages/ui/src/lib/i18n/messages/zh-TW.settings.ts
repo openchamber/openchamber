@@ -2087,6 +2087,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': '純文字',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': '保留空白和連結，以純文字渲染使用者文字。',
   'chat.message.userText.collapseAria': '收合使用者訊息',
+  'chat.message.userText.expandAria': '展開使用者訊息',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': '排序後顯示',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': '不進行即時串流顯示，待助理訊息完成後再渲染。',
   'settings.openchamber.visual.option.chatRenderMode.live.label': '即時顯示',

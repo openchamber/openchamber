@@ -2180,6 +2180,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': '纯文本',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': '保留空白和链接，以纯文本渲染用户文本。',
   'chat.message.userText.collapseAria': '折叠用户消息',
+  'chat.message.userText.expandAria': '展开用户消息',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': '排序后显示',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': '不进行实时流式显示，待助手消息完成后再渲染。',
   'settings.openchamber.visual.option.chatRenderMode.live.label': '实时显示',

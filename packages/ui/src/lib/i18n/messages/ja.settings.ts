@@ -2213,6 +2213,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'プレインテキスト',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'ユーザーテキストを空白とリンクを保持して表示。',
   'chat.message.userText.collapseAria': 'ユーザーメッセージを折りたたむ',
+  'chat.message.userText.expandAria': 'ユーザーメッセージを展開',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': 'ソート',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': '完了したアシスタントメッセージをライブストリーミングなしで表示。',
   'settings.openchamber.visual.option.chatRenderMode.live.label': 'ライブ',

@@ -1257,6 +1257,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Renderuj tekst użytkownika z zachowaniem białych znaków i linków.',
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'Zwykły tekst',
   'chat.message.userText.collapseAria': 'Zwiń wiadomość użytkownika',
+  'chat.message.userText.expandAria': 'Rozwiń wiadomość użytkownika',
   'settings.openchamber.visual.option.weekStart.auto.description': 'Używaj lokalnego początku tygodnia.',
   'settings.openchamber.visual.option.weekStart.auto.label': 'Auto',
   'settings.openchamber.visual.option.weekStart.monday.label': 'Poniedziałek',
