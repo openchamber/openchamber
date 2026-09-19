@@ -404,11 +404,14 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   }, [sessions, getWorktreeMetadata]);
 
   const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
+  // removeProjectWorktree updates this store after git removal. The sessionsKey
+  // refresh often runs earlier (archiveSessions), so subscribe here as well.
+  const publishedWorktrees = useSessionUIStore((state) => state.availableWorktrees);
   React.useEffect(() => {
     if (isGitRepoLocal && projectPath) {
       refreshWorktrees();
     }
-  }, [sessionsKey, isGitRepoLocal, projectPath, refreshWorktrees]);
+  }, [sessionsKey, publishedWorktrees, isGitRepoLocal, projectPath, refreshWorktrees]);
 
   const setupTooltip = (
     <SettingsInfoHint>
