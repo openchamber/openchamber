@@ -130,6 +130,13 @@ copy.
 exactly what gets sent, so nothing downstream serializes a rich document model
 back into a prompt.
 
+The composer intentionally disables CodeMirror EditContext through
+`ComposerEditorView`. Confirmed Android Chrome/Gboard testing found an IME
+failure on that path. Generic editors stay on normal `EditorView` behavior.
+The diagnostic query `?imeEditContext=off` remains available for comparison and
+can affect later generic views on the same page. The composer does not need a
+query for its production mitigation.
+
 The document is not, however, the string it was given: CodeMirror normalizes
 line endings, so a `\r\n` pair becomes one break and the document ends up
 shorter than the inserted string. **Never derive a caret position from the
@@ -388,6 +395,15 @@ step, and drives scrollTop on the same curve. Mobile browsers, Android and
 reduced motion keep the instant swap.
 
 ## Testing
+
+For issue #3514, load the page with `?imeTrace=1` or set
+`OPENCHAMBER_IME_TRACE=1` in local storage. The bounded metadata trace is
+available as `window.__OPENCHAMBER_IME_TRACE__`, or through
+`window.__opencodeDebug.getImeTrace()` and `copyImeTrace()`. It records event
+timing, types, ranges, lengths, and selection positions only. It never stores,
+logs, hashes, or serializes draft text, clipboard data, input data, or IME
+candidate text. Add `?imeEditContext=off` to disable CodeMirror EditContext for
+that page only. Neither option is persisted by the composer.
 
 The package has no DOM test environment, so coverage stops at the state and
 logic layers: the language, the submit assembly, path and drop handling, text
