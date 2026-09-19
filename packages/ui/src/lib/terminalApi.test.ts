@@ -11,7 +11,7 @@ mock.module('./runtime-auth', () => ({
 }));
 mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => { throw new Error('not used in tests'); } }));
 
-const { createTerminalSession, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
+const { appendTerminalProjection, createTerminalSession, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -376,6 +376,53 @@ describe('terminal transport', () => {
     const events: string[] = [];
     transport.subscribe('term-1', { onEvent: (event) => events.push(event.type) });
     expect(events).toEqual([]);
+    transport.dispose();
+  });
+
+  test('measures only the new projection chunk and trims on a UTF-8 boundary', () => {
+    const measured: string[] = [];
+    const measure = (value: string): number => {
+      measured.push(value);
+      return encoder.encode(value).byteLength;
+    };
+    const first = appendTerminalProjection('', 0, 'aaaa', 8, measure);
+    const second = appendTerminalProjection(first.value, first.bytes, 'bbbb', 8, measure);
+    measured.length = 0;
+    const overflowed = appendTerminalProjection(second.value, second.bytes, 'éé', 8, measure);
+    expect(overflowed).toEqual({ value: 'bbbbéé', bytes: 8 });
+    expect(measured).toEqual(['éé']);
+  });
+
+  test('does not re-encode retained projection history on each output message', async () => {
+    const socket = new FakeSocket();
+    const transport = new TerminalTransport({ refreshAuth: async () => '', openSocket: () => socket });
+    transport.subscribe('term-1', { onEvent: () => {} });
+    await tick();
+    socket.open();
+    await tick();
+    const retained = 'a'.repeat(512 * 1024);
+    socket.emit({ t: 'snapshot', v: 3, s: 'term-1', q: 0, history: retained, status: 'running' });
+    await tick();
+
+    const originalEncode = TextEncoder.prototype.encode;
+    const largeEncodes: number[] = [];
+    TextEncoder.prototype.encode = function encode(value?: string) {
+      if (String(value) === value && value.length >= 512 * 1024) largeEncodes.push(value.length);
+      return originalEncode.call(this, value);
+    };
+    try {
+      socket.emit({ t: 'output', v: 3, s: 'term-1', q: 1, d: 'tail' });
+      await tick();
+    } finally {
+      TextEncoder.prototype.encode = originalEncode;
+    }
+    expect(largeEncodes).toEqual([]);
+
+    const replay: string[] = [];
+    transport.subscribe('term-1', { onEvent: (event) => { if (event.type === 'snapshot') replay.push(event.data ?? ''); } });
+    expect(replay).toHaveLength(1);
+    expect(replay[0]?.endsWith('tail')).toBe(true);
+    expect(encoder.encode(replay[0] ?? '').byteLength).toBe(512 * 1024);
     transport.dispose();
   });
 

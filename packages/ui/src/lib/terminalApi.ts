@@ -16,6 +16,7 @@ type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
 type TerminalProjection = {
   sequence: number;
   history: string;
+  historyBytes: number;
   /** Current PTY size: what the server reported at attach, updated by every accepted resize. */
   cols?: number;
   rows?: number;
@@ -143,12 +144,64 @@ const responseError = async (response: Response, fallback: string): Promise<Erro
   return new TerminalRequestError(body?.error ?? fallback, body?.code ?? null);
 };
 
-const trimProjection = (value: string): string => {
-  const bytes = encoder.encode(value);
-  if (bytes.byteLength <= MAX_PROJECTION_BYTES) return value;
-  let start = bytes.byteLength - MAX_PROJECTION_BYTES;
-  while (start < bytes.byteLength && (bytes[start] & 0xc0) === 0x80) start += 1;
-  return decoder.decode(bytes.subarray(start));
+const utf8CodePointSize = (codePoint: number): number => {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+};
+
+const utf8ByteLength = (value: string): number => {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.codePointAt(index) ?? 0;
+    bytes += utf8CodePointSize(codePoint);
+    if (codePoint > 0xffff) index += 1;
+  }
+  return bytes;
+};
+
+type Utf8PrefixDrop = {
+  value: string;
+  dropped: number;
+};
+
+type Utf8BoundedText = {
+  value: string;
+  bytes: number;
+};
+
+const dropUtf8Prefix = (value: string, dropBytes: number): Utf8PrefixDrop => {
+  if (dropBytes <= 0) return { value, dropped: 0 };
+  let index = 0;
+  let dropped = 0;
+  while (index < value.length && dropped < dropBytes) {
+    const codePoint = value.codePointAt(index) ?? 0;
+    dropped += utf8CodePointSize(codePoint);
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return { value: value.slice(index), dropped };
+};
+
+export const appendTerminalProjection = (
+  history: string,
+  historyBytes: number,
+  chunk: string,
+  maxBytes = MAX_PROJECTION_BYTES,
+  measure: (value: string) => number = utf8ByteLength,
+): Utf8BoundedText => {
+  if (!chunk) return { value: history, bytes: historyBytes };
+  const chunkBytes = measure(chunk);
+  const total = historyBytes + chunkBytes;
+  if (total <= maxBytes) return { value: history + chunk, bytes: total };
+  const overflow = total - maxBytes;
+  if (overflow >= historyBytes) {
+    if (chunkBytes <= maxBytes) return { value: chunk, bytes: chunkBytes };
+    const trimmed = dropUtf8Prefix(chunk, chunkBytes - maxBytes);
+    return { value: trimmed.value, bytes: chunkBytes - trimmed.dropped };
+  }
+  const trimmed = dropUtf8Prefix(history, overflow);
+  return { value: trimmed.value + chunk, bytes: historyBytes - trimmed.dropped + chunkBytes };
 };
 
 const terminalSessionListSchema = z.object({ sessions: z.array(z.unknown()) });
@@ -375,9 +428,11 @@ export class TerminalTransport {
     const subscribers = this.subscribers.get(message.s);
     if (!subscribers) return;
     if (message.t === 'snapshot') {
+      const history = message.history ?? '';
       const projection: TerminalProjection = {
         sequence: message.q ?? 0,
-        history: message.history ?? '',
+        history,
+        historyBytes: utf8ByteLength(history),
         cols: message.cols,
         rows: message.rows,
         status: message.status,
@@ -398,9 +453,15 @@ export class TerminalTransport {
 
     const previous = this.projections.get(message.s);
     if (previous && message.q > previous.sequence) {
-      if (message.t === 'output') this.projections.set(message.s, { ...previous, sequence: message.q, history: trimProjection(previous.history + (message.r ?? message.d)) });
+      if (message.t === 'output') {
+        const appended = appendTerminalProjection(previous.history, previous.historyBytes, message.r ?? message.d);
+        this.projections.set(message.s, { ...previous, sequence: message.q, history: appended.value, historyBytes: appended.bytes });
+      }
       else if (message.t === 'exit') this.projections.set(message.s, { ...previous, sequence: message.q, status: 'exited', exitCode: message.exitCode, signal: message.signal ?? null });
-      else if (message.t === 'restarted') this.projections.set(message.s, { ...previous, sequence: message.q, history: message.history ?? '', status: 'running', mode: message.mode ?? previous.mode, purpose: message.purpose ?? previous.purpose, exitCode: undefined, signal: null });
+      else if (message.t === 'restarted') {
+        const history = message.history ?? '';
+        this.projections.set(message.s, { ...previous, sequence: message.q, history, historyBytes: utf8ByteLength(history), status: 'running', mode: message.mode ?? previous.mode, purpose: message.purpose ?? previous.purpose, exitCode: undefined, signal: null });
+      }
     }
     for (const sub of subscribers) {
       if (message.q <= sub.lastSequence) continue;
