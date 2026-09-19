@@ -995,6 +995,13 @@ export type GitHubPullRequestsListResult = {
   prs?: GitHubPullRequestSummary[];
   page?: number;
   hasMore?: boolean;
+  /**
+   * Set when free-text search matched PRs whose details could not be fully
+   * loaded, or when GitHub itself marked the search incomplete. Rows are still
+   * present whenever a search hit could be mapped. Absence means the page is
+   * complete for the hits that were returned.
+   */
+  incomplete?: boolean;
 };
 
 export type GitHubPullRequestContextResult = {

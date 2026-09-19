@@ -2030,6 +2030,7 @@ export const dict = {
   'session.githubPrPicker.actions.usePullRequest': 'Pull request #{number} kullan',
   'session.githubPrPicker.actions.openInGitHubAria': 'GitHub\'da aç',
   'session.githubPrPicker.actions.loadMore': 'Daha fazla yükle',
+  'session.githubPrPicker.notice.incomplete': 'Bu arama eksik. Eşleşen bazı pull request\'ler tam olarak yüklenemedi.',
   'session.newWorktree.title': 'Yeni Worktree',
   'session.newWorktree.mode.newBranch': 'Yeni Branch',
   'session.newWorktree.mode.existingBranch': 'Mevcut Branch',

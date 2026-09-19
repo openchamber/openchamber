@@ -2066,6 +2066,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubPrPicker.actions.usePullRequest': 'プルリクエスト #{number}を使用',
   'session.githubPrPicker.actions.openInGitHubAria': 'GitHubで開く',
   'session.githubPrPicker.actions.loadMore': 'さらに読み込む',
+  'session.githubPrPicker.notice.incomplete': 'この検索は不完全です。一致する一部のプルリクエストを完全に読み込めませんでした。',
   'session.newWorktree.title': '新しいワークツリー',
   'session.newWorktree.mode.newBranch': '新しいブランチ',
   'session.newWorktree.mode.existingBranch': '既存のブランチ',

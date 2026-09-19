@@ -23,6 +23,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { GitHubPrSearchIncompleteNotice } from './GitHubPrSearchIncompleteNotice';
 
 const parsePrNumber = (value: string): number | null => {
   const trimmed = value.trim();
@@ -85,6 +86,7 @@ export function GitHubPrPickerDialog({
   const [prs, setPrs] = React.useState<GitHubPullRequestSummary[]>([]);
   const [page, setPage] = React.useState(1);
   const [hasMore, setHasMore] = React.useState(false);
+  const [incomplete, setIncomplete] = React.useState(false);
   const [loadingPrNumber, setLoadingPrNumber] = React.useState<number | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
@@ -104,6 +106,7 @@ export function GitHubPrPickerDialog({
       setResult({ connected: false });
       setPrs([]);
       setHasMore(false);
+      setIncomplete(false);
       setPage(1);
       setError(null);
       return;
@@ -116,12 +119,14 @@ export function GitHubPrPickerDialog({
 
     setIsLoading(true);
     setError(null);
+    setIncomplete(false);
     try {
       const next = await github.prsList(projectDirectory, { page: 1 });
       setResult(next);
       setPrs(next.prs ?? []);
       setPage(next.page ?? 1);
       setHasMore(Boolean(next.hasMore));
+      setIncomplete(Boolean(next.incomplete));
       if (next.connected === false) {
         setError(null);
       }
@@ -144,6 +149,7 @@ export function GitHubPrPickerDialog({
     const controller = new AbortController();
     setIsLoading(true);
     setError(null);
+    setIncomplete(false);
 
     github.prsList(projectDirectory, { page: 1, query: debouncedQuery.trim() })
       .then((next) => {
@@ -152,6 +158,7 @@ export function GitHubPrPickerDialog({
         setPrs(next.prs ?? []);
         setPage(next.page ?? 1);
         setHasMore(Boolean(next.hasMore));
+        setIncomplete(Boolean(next.incomplete));
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
@@ -180,6 +187,7 @@ export function GitHubPrPickerDialog({
       setPrs((prev) => [...prev, ...(next.prs ?? [])]);
       setPage(next.page ?? nextPage);
       setHasMore(Boolean(next.hasMore));
+      setIncomplete((prev) => prev || Boolean(next.incomplete));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('session.githubPrPicker.toast.loadMoreFailed'), { description: message });
@@ -198,6 +206,7 @@ export function GitHubPrPickerDialog({
       setPrs([]);
       setPage(1);
       setHasMore(false);
+      setIncomplete(false);
       setIsLoading(false);
       return;
     }
@@ -210,6 +219,7 @@ export function GitHubPrPickerDialog({
       setResult({ connected: false });
       setPrs([]);
       setHasMore(false);
+      setIncomplete(false);
       setPage(1);
       setError(null);
     }
@@ -350,6 +360,12 @@ export function GitHubPrPickerDialog({
             <div className="text-center text-muted-foreground py-8 break-words">{error}</div>
           ) : null}
 
+          {incomplete && !isLoading && connected && github && projectDirectory ? (
+            <div className="px-0.5 py-2">
+              <GitHubPrSearchIncompleteNotice />
+            </div>
+          ) : null}
+
           {directNumber && projectDirectory && github && connected ? (
             <div
               className={cn(
@@ -370,7 +386,7 @@ export function GitHubPrPickerDialog({
             </div>
           ) : null}
 
-          {prs.length === 0 && !isLoading && connected && github && projectDirectory ? (
+          {prs.length === 0 && !incomplete && !isLoading && connected && github && projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">{debouncedQuery.trim() ? t('session.githubPrPicker.empty.noPullRequestsFound') : t('session.githubPrPicker.empty.noOpenPullRequestsFound')}</div>
           ) : null}
 
@@ -393,7 +409,9 @@ export function GitHubPrPickerDialog({
                     {pr.sourceRepo.owner}/{pr.sourceRepo.repo}
                   </span>
                 ) : null}
-                <p className="typography-meta text-muted-foreground truncate">{pr.head} → {pr.base}</p>
+                {pr.head || pr.base ? (
+                  <p className="typography-meta text-muted-foreground truncate">{pr.head} → {pr.base}</p>
+                ) : null}
               </div>
 
               <div className="flex-shrink-0 h-5 flex items-center mr-2">

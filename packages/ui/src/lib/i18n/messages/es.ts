@@ -2048,6 +2048,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubPrPicker.actions.usePullRequest": "Usar PR #{number}",
   "session.githubPrPicker.actions.openInGitHubAria": "Abrir en GitHub",
   "session.githubPrPicker.actions.loadMore": "Cargar más",
+  "session.githubPrPicker.notice.incomplete": "Esta búsqueda está incompleta. No se pudieron cargar por completo algunas pull requests coincidentes.",
   "session.newWorktree.title": "Nuevo worktree",
   "session.newWorktree.mode.newBranch": "Nueva rama",
   "session.newWorktree.mode.existingBranch": "Rama existente",

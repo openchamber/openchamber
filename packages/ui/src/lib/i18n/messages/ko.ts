@@ -2072,6 +2072,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubPrPicker.actions.usePullRequest': 'PR #{number} 사용',
   'session.githubPrPicker.actions.openInGitHubAria': 'GitHub에서 열기',
   'session.githubPrPicker.actions.loadMore': '더 불러오기',
+  'session.githubPrPicker.notice.incomplete': '이 검색은 불완전합니다. 일치하는 일부 끌어오기 요청을 완전히 불러오지 못했습니다.',
   'session.newWorktree.title': '새 워크트리',
   'session.newWorktree.mode.newBranch': '새 브랜치',
   'session.newWorktree.mode.existingBranch': '기존 브랜치',
