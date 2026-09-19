@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Виконайте цю команду в терміналі, а потім вставте токен нижче. Він може лише читати використання LLM-кредитів і діє 30 днів.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Токен оновлення',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Вставте токен',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'Ключ Platform API',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Для обліку використання потрібен ключ Platform API з консолі ZenMux. Ключ, який OpenCode використовує для чату, окремий і тут не застосовується.',
   'settings.providers.page.openCodeGo.saveFailed': 'Не вдалося перевірити дані OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'Дані OpenCode Go дійсні.',
   'settings.providers.page.openCodeGo.invalid': 'Дані OpenCode Go недійсні або протерміновані.',

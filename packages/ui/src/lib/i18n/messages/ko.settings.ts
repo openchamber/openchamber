@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': '터미널에서 이 명령을 실행한 다음 아래에 토큰을 붙여 넣으세요. LLM 크레딧 사용량만 읽을 수 있으며 30일 후 만료됩니다.',
   'settings.providers.page.quotaCredentials.refreshToken': '새로 고침 토큰',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '토큰 붙여넣기',
+  'settings.providers.page.quotaCredentials.platformApiKey': '플랫폼 API 키',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': '사용량을 보려면 ZenMux 콘솔의 플랫폼 API 키가 필요합니다. OpenCode가 채팅에 쓰는 키는 별도이며 여기서는 사용하지 않습니다.',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go 인증 정보를 검증할 수 없습니다.',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go 인증 정보가 유효합니다.',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go 인증 정보가 유효하지 않거나 만료되었습니다.',

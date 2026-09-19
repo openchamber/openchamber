@@ -26,5 +26,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'exe-dev', name: 'exe.dev' },
   { id: 'hyper', name: 'Charm Hyper' },
   { id: 'neuralwatt', name: 'NeuralWatt' },
+  { id: 'kilo', name: 'Kilo Code' },
+  { id: 'zenmux', name: 'ZenMux' },
   { id: 'xai', name: 'xAI' },
 ];

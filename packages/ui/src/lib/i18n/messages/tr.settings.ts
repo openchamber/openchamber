@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Bu komutu terminalde çalıştırın, ardından token\'ı aşağıya yapıştırın. Yalnızca LLM kredi kullanımını okuyabilir ve 30 gün sonra sona erer.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Yenileme token\'ı',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Token\'ı yapıştır',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'Platform API anahtarı',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Kullanım için ZenMux konsolundan bir Platform API anahtarı gerekir. OpenCode’un sohbet için kullandığı anahtar ayrıdır ve burada kullanılmaz.',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go kimlik bilgileri doğrulanamadı.',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go kimlik bilgileri geçerli.',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go kimlik bilgileri geçersiz veya süresi dolmuş.',

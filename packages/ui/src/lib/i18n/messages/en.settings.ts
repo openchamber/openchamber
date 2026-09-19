@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Run this command in your terminal, then paste the token below. It can only read LLM credit usage and expires after 30 days.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Refresh token',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Paste token',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'Platform API key',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Usage needs a Platform API key from the ZenMux console. The key OpenCode uses for chat is separate and is not used here.',
   'settings.providers.page.openCodeGo.saveFailed': 'Could not validate OpenCode Go credentials.',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go credentials are valid.',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go credentials are invalid or expired.',

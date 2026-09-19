@@ -5,12 +5,19 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-type ProviderId = 'exe-dev' | 'ollama-cloud' | 'cursor';
+type QuotaCredentialProviderId = 'exe-dev' | 'ollama-cloud' | 'cursor' | 'zenmux';
+
 type Status = { configured: boolean; secretMasked?: string };
-type CredentialPayload = { usageToken?: string; cookie?: string; accessToken?: string; refreshToken?: string };
+type CredentialPayload = {
+  usageToken?: string;
+  cookie?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  platformApiKey?: string;
+};
 const EXE_DEV_TOKEN_COMMAND = `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`;
 
-export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: string }> = ({ providerId, providerName }) => {
+export const QuotaCredentials: React.FC<{ providerId: QuotaCredentialProviderId; providerName: string }> = ({ providerId, providerName }) => {
   const { t } = useI18n();
   const [status, setStatus] = React.useState<Status | null>(null);
   const [values, setValues] = React.useState<CredentialPayload>({});
@@ -41,8 +48,12 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
         <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.exeDevTokenInstructions')}</p>
         <code className="typography-code block whitespace-pre-wrap break-all rounded bg-muted/50 px-2 py-1.5 text-xs text-foreground">{EXE_DEV_TOKEN_COMMAND}</code>
       </div>}
+      {providerId === 'zenmux' && (
+        <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.zenmuxInstructions')}</p>
+      )}
       {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'aid=...; __Secure-session=...')}
       {providerId === 'exe-dev' && field('usageToken', t('settings.providers.page.quotaCredentials.usageToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
+      {providerId === 'zenmux' && field('platformApiKey', t('settings.providers.page.quotaCredentials.platformApiKey'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.quotaCredentials.refreshToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       <div className="flex flex-wrap gap-2">

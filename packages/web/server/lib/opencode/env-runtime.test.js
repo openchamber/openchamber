@@ -412,7 +412,7 @@ describe('OpenCode env runtime', () => {
     process.env.SHELL = '/bin/zsh';
     delete process.env.OPENCODE_BINARY;
     const shellCalls = [];
-    const { runtime } = createRuntime({}, {
+    const { runtime, state } = createRuntime({}, {
       homedir: () => createTempDir('openchamber-empty-home-'),
       spawnSync: (command, args, options) => {
         shellCalls.push({ command, args, options });
@@ -420,8 +420,12 @@ describe('OpenCode env runtime', () => {
         return { status: null, signal: 'SIGTERM', error: new Error('spawnSync ETIMEDOUT'), stdout: '', stderr: '' };
       },
     });
+    // createRuntime seeds the cache to `null`, which skips probing. Clear it
+    // so this test actually runs the login-shell snapshot. CLI fallbacks such
+    // as /opt/homebrew/bin/opencode are a later, separate lookup.
+    state.cachedLoginShellEnvSnapshot = undefined;
 
-    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
     expect(shellCalls.length).toBeGreaterThan(0);
     for (const call of shellCalls) {
       expect(call.args).toContain('-lic');

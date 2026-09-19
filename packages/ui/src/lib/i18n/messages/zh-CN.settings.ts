@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': '在终端中运行此命令，然后在下方粘贴令牌。该令牌只能读取 LLM 积分用量，并将在 30 天后过期。',
   'settings.providers.page.quotaCredentials.refreshToken': '刷新令牌',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '粘贴令牌',
+  'settings.providers.page.quotaCredentials.platformApiKey': '平台 API 密钥',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': '查看用量需要 ZenMux 控制台中的平台 API 密钥。OpenCode 用于聊天的密钥是另一把，这里不会使用。',
   'settings.providers.page.openCodeGo.saveFailed': '无法验证 OpenCode Go 凭据。',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go 凭据有效。',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go 凭据无效或已过期。',

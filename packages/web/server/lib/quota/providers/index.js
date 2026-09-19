@@ -25,6 +25,8 @@ import * as zhipuaiCodingPlan from './zhipuai-coding-plan.js';
 import * as minimaxCodingPlan from './minimax-coding-plan.js';
 import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
 import * as neuralwatt from './neuralwatt.js';
+import * as kilo from './kilo.js';
+import * as zenmux from './zenmux.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
@@ -156,6 +158,18 @@ const registry = {
     providerName: neuralwatt.providerName,
     isConfigured: neuralwatt.isConfigured,
     fetchQuota: neuralwatt.fetchQuota
+  },
+  kilo: {
+    providerId: kilo.providerId,
+    providerName: kilo.providerName,
+    isConfigured: kilo.isConfigured,
+    fetchQuota: kilo.fetchQuota
+  },
+  zenmux: {
+    providerId: zenmux.providerId,
+    providerName: zenmux.providerName,
+    isConfigured: zenmux.isConfigured,
+    fetchQuota: zenmux.fetchQuota
   },
   xai: {
     providerId: xai.providerId,
