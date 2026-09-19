@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { getRuntimeApiBaseUrl, getRuntimeKey, initializeRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useConfigStore } from './useConfigStore';
-import { useQuotaStore } from './useQuotaStore';
+import { resolveQuotaDirectory, useQuotaStore } from './useQuotaStore';
 
 test('Electron dev loads usage through its same-origin proxy before Settings opens', async () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -25,7 +25,7 @@ test('Electron dev loads usage through its same-origin proxy before Settings ope
     if (path === '/api/config/settings?surface=desktop') {
       return Response.json({ usageDropdownProviders: ['codex'] });
     }
-    if (path === '/api/quota/codex') {
+    if (path.startsWith('/api/quota/codex?')) {
       return Response.json({
         providerId: 'codex', providerName: 'Codex', ok: true, configured: true, fetchedAt: 123,
         usage: { windows: { '5h': {
@@ -44,7 +44,10 @@ test('Electron dev loads usage through its same-origin proxy before Settings ope
     useQuotaStore.getState().resetForRuntimeSwitch();
     await useQuotaStore.getState().ensureLoadedForRuntime();
 
-    expect(requests).toEqual(['/api/config/settings?surface=desktop', '/api/quota/codex']);
+    expect(requests).toEqual([
+      '/api/config/settings?surface=desktop',
+      `/api/quota/codex?directory=${encodeURIComponent(resolveQuotaDirectory()!)}`,
+    ]);
     expect(getRuntimeKey()).toBe('local');
     expect(getRuntimeApiBaseUrl()).toBe('');
     expect(useQuotaStore.getState().loadedRuntimeKey).toBe('local');

@@ -89,7 +89,10 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       const { providerId } = req.params;
       if (!providerId) return res.status(400).json({ error: 'Provider ID is required' });
       const { fetchQuotaForProvider } = await getQuotaProviders();
-      res.json(await fetchQuotaForProvider(providerId));
+      const directory = typeof req.query.directory === 'string' && req.query.directory.trim()
+        ? req.query.directory.trim()
+        : undefined;
+      res.json(await fetchQuotaForProvider(providerId, { directory }));
     } catch (error) {
       console.error('Failed to fetch quota:', error);
       res.status(500).json({ error: error.message || 'Failed to fetch quota' });

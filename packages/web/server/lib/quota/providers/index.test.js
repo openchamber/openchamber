@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import * as google from './google/index.js';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './index.js';
@@ -22,5 +22,34 @@ describe('quota provider registry', () => {
     expect(first).toBe(second);
     await first;
     expect(fetchQuotaForProvider('unsupported-test-provider')).not.toBe(first);
+  });
+});
+
+describe('malformed usage-providers.json isolation', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.doUnmock('node:fs');
+    vi.restoreAllMocks();
+  });
+
+  it('a broken config file does not remove unrelated configured providers', async () => {
+    vi.doMock('node:fs', () => ({
+      default: {
+        readFileSync: () => {
+          throw new Error('broken json');
+        },
+      },
+      readFileSync: () => {
+        throw new Error('broken json');
+      },
+    }));
+    const registry = await import('./index.js');
+    expect(() => registry.listConfiguredQuotaProviders()).not.toThrow();
+    const result = await registry.fetchQuotaForProvider('codex');
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toContain('usage-providers.json');
   });
 });

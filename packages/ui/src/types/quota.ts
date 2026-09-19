@@ -38,8 +38,20 @@ export interface UsageWindows {
   windows: Record<string, UsageWindow>;
 }
 
+interface AccountUsage extends UsageWindows {
+  id: string;
+  label: string;
+  detail?: string;
+  current: boolean;
+  available: boolean;
+  status?: string;
+  error?: string;
+  planLabel?: string;
+}
+
 interface ProviderUsage extends UsageWindows {
   models?: Record<string, UsageWindows>;
+  accounts?: AccountUsage[];
 }
 
 export interface ProviderResult {

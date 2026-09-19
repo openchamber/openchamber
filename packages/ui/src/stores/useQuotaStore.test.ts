@@ -36,6 +36,8 @@ mock.module("@/stores/useConfigStore", () => ({
 }))
 
 const { useQuotaStore } = await import("./useQuotaStore")
+const { useSessionUIStore } = await import("@/sync/session-ui-store")
+const originalDirectoryResolver = useSessionUIStore.getState().getDirectoryForSession
 
 describe("Usage quotas are loaded once per ready instance", () => {
   beforeEach(() => {
@@ -43,6 +45,11 @@ describe("Usage quotas are loaded once per ready instance", () => {
     isInitialized = true
     fetched.length = 0
     quotaRequestsFail = false
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      getDirectoryForSession: originalDirectoryResolver,
+    })
     useQuotaStore.getState().resetForRuntimeSwitch()
   })
 
@@ -122,6 +129,18 @@ describe("Usage quotas are loaded once per ready instance", () => {
     ])
 
     expect(fetched.filter((path) => path.startsWith("/api/quota/"))).toHaveLength(1)
+  })
+
+  test("quota requests use the authoritative session worktree directory", async () => {
+    useSessionUIStore.setState({
+      currentSessionId: "session-worktree",
+      currentSessionDirectory: "/stale/project",
+      getDirectoryForSession: () => "/project/.worktrees/feature",
+    })
+
+    await useQuotaStore.getState().fetchProviderQuota("claude")
+
+    expect(fetched).toContain("/api/quota/claude?directory=%2Fproject%2F.worktrees%2Ffeature")
   })
 
   test("a switch drops the previous instance's display settings", async () => {

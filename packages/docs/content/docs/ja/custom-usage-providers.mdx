@@ -1,0 +1,73 @@
+---
+title: カスタム使用量プロバイダー
+description: 信頼できるローカルコマンドからアカウントとクォータのデータを提供する。
+---
+
+# カスタム使用量プロバイダー
+
+OpenChamber は、既存のプロバイダーについて、組み込みのクォータ取得の代わりにローカルコマンドを使用できます。認証プラグイン、認証情報ブローカー、アカウントプールが OpenChamber から直接読み取れない使用量データを保有している場合に便利です。
+
+OpenChamber のデータディレクトリに `usage-providers.json` を作成します:
+
+- macOS と Linux: `~/.config/openchamber/usage-providers.json`
+- カスタムサーバーデータディレクトリ: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+プロバイダー ID の下に argv 配列を設定します:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+リポジトリには実行可能な参照スクリプト `scripts/example-usage-provider.mjs` が用意されています。設定を直接そのスクリプトに向けて、マルチアカウントのレンダリングを確認できます:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+ターミナルの外で OpenChamber を起動する場合は、実行可能ファイルに絶対パスを使用してください。デスクトップアプリケーションはシェルの `PATH` を引き継がないことがあります。
+
+コマンドはシェルなしで実行され、アクティブなセッションのディレクトリを作業ディレクトリとして受け取ります。stdout に 1 つの JSON オブジェクトを出力する必要があります:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+各アカウントは、補助表示用のマスク済み `email` や、そのアカウントだけが失敗した場合の `error` を指定できます。`current` は折りたたまれた使用量表示に使われるアカウントを示します。利用できないアカウントが current として表示されることはありません。
+
+コマンドには 30 秒のタイムアウトと 1 MiB の出力上限があります。設定は通常の OpenChamber 設定の外部に保存されるため、接続されたクライアントが実行可能なコマンドを追加・変更することはできません。

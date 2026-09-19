@@ -48,13 +48,26 @@ export const pickUsageHeadline = (
   if (!quotaProviderId) return null;
 
   const group = groups.find((candidate) => normalize(candidate.providerId) === quotaProviderId);
-  if (!group || group.rows.length === 0) return null;
+  if (!group) return null;
+
+  const accounts = group.accounts ?? [];
+  if (accounts.length > 0) {
+    const current = accounts.find((account) => account.current && account.available);
+    if (!current || current.rows.length === 0) return null;
+    const row = pickShortestWindow(current.rows);
+    return row ? { group, row } : null;
+  }
+  if (group.rows.length === 0) return null;
 
   // Provider-level rows only: a model-scoped row describes one model, not the
   // provider the composer is pointed at.
   const providerRows = group.rows.filter((row) => !row.subtitle);
   const rows = providerRows.length > 0 ? providerRows : group.rows;
 
+  return { group, row: pickShortestWindow(rows) ?? rows[0] };
+};
+
+const pickShortestWindow = (rows: readonly UsageLimitRow[]): UsageLimitRow | null => {
   let best: UsageLimitRow | null = null;
   let bestSeconds = Number.POSITIVE_INFINITY;
   for (const row of rows) {
@@ -66,5 +79,5 @@ export const pickUsageHeadline = (
     }
   }
 
-  return { group, row: best ?? rows[0] };
+  return best ?? rows[0] ?? null;
 };

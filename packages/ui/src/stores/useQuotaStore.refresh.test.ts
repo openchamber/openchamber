@@ -58,7 +58,7 @@ describe('quota refresh failure is not empty success', () => {
   test('another provider succeeding does not clear a failed provider or its error', async () => {
     await useQuotaStore.getState().fetchProviderQuota('claude');
     handleRequest = async url => {
-      if (url.endsWith('/claude')) throw new Error('claude unreachable');
+      if (url.includes('/claude?')) throw new Error('claude unreachable');
       await pause();
       return json(result('codex'));
     };
@@ -134,6 +134,62 @@ describe('quota refresh failure is not empty success', () => {
     expect(useQuotaStore.getState().results).toBe(before.results);
     expect(useQuotaStore.getState().lastUpdated).toBe(before.lastUpdated);
     expect(useQuotaStore.getState().refreshErrors.claude).toBe('Provider API unavailable');
+  });
+
+  test('multi-account usage survives the response payload parse', async () => {
+    // Regression: z.object strips undeclared keys, so an undeclared `accounts`
+    // array used to vanish before any account-rendering path could read it.
+    handleRequest = async () => json({
+      ...result('codex'),
+      usage: {
+        windows: {},
+        accounts: [
+          {
+            id: 'acct-1',
+            label: 'Work Account',
+            detail: 'team',
+            current: true,
+            available: true,
+            status: 'Active',
+            planLabel: 'Pro',
+            windows: { '5h': {
+              usedPercent: 30, remainingPercent: 70, windowSeconds: 18000,
+              resetAfterSeconds: 500, resetAt: 2000, resetAtFormatted: null, resetAfterFormatted: null,
+            } },
+          },
+          {
+            id: 'acct-2',
+            label: 'Personal Account',
+            current: false,
+            available: false,
+            error: 'Benched here',
+            windows: {},
+          },
+        ],
+      },
+    });
+
+    const parsed = await fetchQuota('codex');
+    expect(parsed.usage?.accounts).toHaveLength(2);
+    expect(parsed.usage?.accounts?.[0]).toMatchObject({
+      id: 'acct-1',
+      label: 'Work Account',
+      current: true,
+      available: true,
+      status: 'Active',
+      planLabel: 'Pro',
+    });
+    expect(parsed.usage?.accounts?.[0].windows['5h']?.usedPercent).toBe(30);
+    expect(parsed.usage?.accounts?.[1]).toMatchObject({
+      id: 'acct-2',
+      label: 'Personal Account',
+      current: false,
+      available: false,
+      error: 'Benched here',
+    });
+    expect(parsed.usage?.accounts?.[1].windows).toEqual({});
+    expect(parsed.usage?.accounts?.[1].status).toBeUndefined();
+    expect(parsed.usage?.accounts?.[1].planLabel).toBeUndefined();
   });
 });
 
