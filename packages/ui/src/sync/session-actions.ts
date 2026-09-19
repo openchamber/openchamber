@@ -2045,11 +2045,9 @@ export async function dismissPermission(
  * PermissionNotFoundError also clears the stale entry from the child store via
  * {@link dismissPermission}.
  *
- * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
- * that need to send the next message right away (the chat send path) must also
- * queue the message so the OpenCode runner reaches `idle` — otherwise the new
- * prompt arrives while the run is still active and is discarded by the runner's
- * `ensureRunning`.
+ * Rejecting unblocks the agent's tool without guaranteeing an idle session.
+ * The chat caller preserves explicit Steer as a direct send and queues other
+ * follow-ups after dismissal. This helper does not choose message delivery.
  */
 export async function dismissOpenPermissionsForSession(sessionId: string): Promise<boolean> {
   if (!sessionId) return false
@@ -2185,11 +2183,9 @@ export async function rejectQuestion(
  * QuestionNotFoundError also clears the stale entry from the child store via
  * {@link rejectQuestion}.
  *
- * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
- * that need to send the next message right away (the chat send path) must also
- * abort the session so the OpenCode runner reaches `idle` — otherwise the new
- * prompt arrives while the run is still active and is discarded by the runner's
- * `ensureRunning`.
+ * Rejecting unblocks the agent's tool without guaranteeing an idle session.
+ * The chat caller preserves explicit Steer as a direct send and queues other
+ * follow-ups after dismissal. This helper does not abort the session.
  *
  * A successful reject clears the local store deterministically (see
  * {@link rejectQuestion}) so a lost `question.rejected` SSE event cannot leave
