@@ -225,45 +225,295 @@ Nice-to-have:
     title: 'Issue Review Instructions',
     group: 'GitHub',
     description: 'Hidden instructions attached when generating an issue review response.',
-    template: `Review this issue using the provided issue context.
+    template: `Review this issue semantically using the complete provided issue context.
 
-Process:
-- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
+Read the original issue, all follow-up comments, maintainer replies, linked or referenced context available to you, bot reviews, and later corrections before reaching conclusions. Later evidence may refine or invalidate earlier claims.
 
-Mode selection by type:
-- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
-- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
+First classify the issue:
+Type: bug | feature request | question/support | refactor | ops
 
-Output rules:
-- Compact output; pick ONE template below and omit the others.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed.
-- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
-- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
+Before producing the answer, normalize the actual issue contract from the whole thread. Do not reason from keywords or isolated statements.
 
-Templates (choose one):
-Bug:
-- Summary (1-2 sentences)
-- Likely cause (max 2)
-- Repro/diagnostics needed (max 3)
-- Fix approach (max 4 steps)
-- Verification (max 3)
+Silently determine:
+- intended outcome;
+- affected behavior / target;
+- scope and boundaries;
+- required vs preserved behavior;
+- observable symptom or requested capability;
+- relevant constraints;
+- unresolved references or ambiguities;
+- what semantic responsibility is involved.
 
-Feature:
-- Summary (1-2 sentences)
-- Requirements (max 4)
-- Unknowns/questions (max 4)
-- Proposed plan (max 5 steps)
-- Verification (max 3)
+Treat statements according to their semantic role:
+- requirement / expected behavior;
+- observed fact or reproduction evidence;
+- repository-confirmed fact;
+- root-cause hypothesis;
+- proposed mechanism or solution;
+- reviewer/bot finding;
+- unresolved assumption.
 
-Question/Support:
-- Summary (1-2 sentences)
-- Answer/guidance (max 6 lines)
-- Missing info (max 4)
+Claim authority is not claim truth.
 
-Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
+Do not treat a proposed fix, implementation suggestion, acceptance criterion, maintainer statement, reporter diagnosis, root-cause label, file named in the issue, or bot review as automatically correct. Re-derive relevant claims from repository evidence when possible.
+
+Keep evidence confidence separate:
+- repository-confirmed;
+- supported by reporter/runtime evidence but not independently reproduced;
+- inferred from confirmed evidence;
+- unverified.
+
+Never promote an unverified claim into a confirmed root cause, ownership claim, or implementation requirement.
+
+## Repository investigation
+
+- Gather the code, tests, configuration, documentation, call sites, data flow, and existing contracts needed to validate the issue.
+- Trace the affected path far enough to determine where behavior originates, where it is transformed, and where it is consumed.
+- Prefer repository evidence over assumptions from issue wording.
+- Do not invent files, APIs, architecture, behavior, tests, root causes, or constraints.
+
+For bugs, distinguish:
+1. symptom;
+2. reproduction / observed evidence;
+3. violated contract or invariant;
+4. confirmed and unconfirmed parts of the causal chain;
+5. semantic boundary / responsibility;
+6. architectural ownership, if established;
+7. implementation site and mechanism, if established.
+
+These are separate conclusions.
+
+## Correct-level analysis
+
+Determine the lowest semantic boundary at which the violated contract belongs.
+
+Reject a fix that only masks a downstream symptom when the violated contract belongs elsewhere.
+
+Possible responsibility boundaries include:
+- presentation / UI;
+- local component or caller;
+- shared abstraction;
+- state or data transformation;
+- API / protocol / persistence boundary;
+- configuration / runtime / infrastructure.
+
+Do not choose a broader boundary than evidence requires.
+
+Do not confuse:
+- semantic responsibility;
+- architectural ownership;
+- a shared chokepoint;
+- the helper currently implementing part of the behavior;
+- the exact edit location;
+- the implementation mechanism.
+
+They may all be different.
+
+A shared chokepoint or many callers can prove that downstream caller-local fixes may be incomplete. They do not by themselves prove that the chokepoint owns the contract or is the correct edit location.
+
+## Ownership evidence
+
+Treat architectural ownership as a claim requiring affirmative evidence.
+
+Before stating that a layer, service, module, helper, or file owns a contract, look for evidence such as:
+- repository documentation or explicit comments assigning responsibility;
+- producer/consumer direction of the contract;
+- which side holds the authoritative data or capability required to enforce it;
+- existing architecture consistently placing the same responsibility there;
+- API, protocol, or persistence boundaries defining responsibility for representation and interpretation.
+
+Issue-provided file names, root-cause labels, suggested fixes, proximity to the symptom, and shared usage are anchoring inputs, not ownership evidence. Re-derive ownership independently before reusing the issue's proposed boundary.
+
+When ownership spans a producer/consumer boundary, describe each side's responsibility separately. Do not collapse authoritative data production and downstream classification/consumption into a single owner.
+
+For example:
+- producer may own authoritative representation / normalization;
+- consumer may own interpretation / classification against that representation.
+
+If you name a concrete layer/module/file as the owner, cite the affirmative evidence establishing that ownership.
+
+If semantic responsibility is known but ownership or edit location is not established, say explicitly:
+\`semantic boundary established; ownership/edit location unresolved\`.
+
+Do not fill a required boundary section with the nearest plausible code location merely to make the analysis complete.
+
+Apply the same evidence standard to ownership and architectural-boundary claims as to root-cause claims.
+
+## Fix boundary vs implementation
+
+Finding the correct semantic or architectural boundary does NOT mean that the exact implementation site or mechanism is known.
+
+Determine first:
+- what semantic contract must become true;
+- which responsibility boundary is involved;
+- who owns each relevant side of that boundary, if established;
+- which consumers depend on it.
+
+Only then evaluate implementation mechanisms.
+
+Do not state that a specific helper, file, normalization strategy, platform branch, API change, or other mechanism is the correct fix unless evidence establishes that choice.
+
+If several mechanisms could satisfy the contract, state the required semantic outcome and keep the mechanism unresolved or identify verified candidates.
+
+## Contract analysis
+
+For the affected path, identify where relevant:
+- producer/input contract;
+- transformations;
+- consumer/output contract;
+- relevant invariants;
+- ownership of behavior;
+- error / fallback semantics.
+
+When the issue involves paths, identifiers, names, addresses, normalized values, canonical forms, or other alternate representations, reason in terms of semantic identity rather than textual equality.
+
+Two representations that are equivalent under the semantics of the runtime or system that owns them should be treated consistently by downstream consumers.
+
+Conversely, representations that are genuinely distinct under the owning system's semantics must remain distinct.
+
+Do not generalize a specific symptom such as casing, separators, canonicalization, aliases, or normalization into a broader equivalence rule unless the owning system actually defines those representations as equivalent.
+
+Check whether the issue or proposed solution changes public or implicit contracts, including:
+- API shape or semantics;
+- persisted data;
+- authentication/authorization;
+- configuration;
+- deployment/runtime behavior;
+- dependency expectations;
+- user-visible behavior relied on elsewhere.
+
+## Environment semantics
+
+Do not infer a runtime property solely from a broad environment label when that property can vary independently.
+
+Examples include filesystem semantics, capabilities, permissions, feature availability, architecture, transport behavior, or deployment configuration.
+
+\`platform == X\` does not by itself prove a filesystem, runtime, or capability property if that property can vary on that platform.
+
+Distinguish the environment executing or owning the affected operation from the environment rendering or controlling it. Client platform does not establish server/runtime filesystem or capability semantics.
+
+If a proposed mechanism depends on such a property, verify how the repository detects, canonicalizes, or represents it. Otherwise leave the mechanism unresolved.
+
+## Consumer / blast-radius analysis
+
+When a shared contract is involved, inspect relevant neighboring callers and consumers.
+
+Distinguish:
+- exposure: a consumer depends on the affected contract;
+- confirmed impact: the failing condition reaches that consumer and causes a concrete consequence.
+
+Do not claim every caller is broken merely because it uses the affected abstraction.
+
+Report additional impact only when the consequence can be traced.
+
+Use consumer sweeps to determine contract scope and regression risk, not to manufacture findings.
+
+## Scope safety
+
+A valid fix must solve the issue at the correct boundary while preserving unrelated behavior.
+
+Explicitly consider:
+- regression risk;
+- behavior that must remain unchanged;
+- edge cases exposed by the same contract;
+- duplicated logic that could make a local fix incomplete;
+- side effects outside the reported path.
+
+Do not expand scope merely because adjacent cleanup or refactoring is possible.
+
+## Suggested fixes
+
+Evaluate suggested fixes independently from the diagnosis.
+
+For each relevant proposed mechanism, ask:
+- Does it satisfy the actual contract?
+- Does it preserve valid distinctions?
+- Does it work under the real runtime/environment semantics?
+- Is there an existing repository pattern for this responsibility?
+- Does it introduce a broader semantic change than required?
+
+A proposed fix may be wrong even when the reported bug and root cause are correct.
+
+## Tests and verification
+
+Evaluate what evidence would prove both the diagnosis and the eventual fix:
+- reproduction or failing path;
+- focused tests at the violated contract boundary;
+- relevant regression tests;
+- preserved behavior / unaffected paths.
+
+Verify that a suggested test is compatible with the current repository surface. Do not propose importing or calling private/non-exported symbols unless the test can legitimately access them.
+
+Prefer testing the public or owning contract over an incidental private implementation detail.
+
+Never report a test, command, build, lint, type-check, reproduction, benchmark, or other validation as successful unless:
+- you actually executed it during this analysis; or
+- explicit execution evidence was provided in the issue/thread/context you inspected.
+
+The existence of a test file, script, CI configuration, or claimed command is not execution evidence.
+
+When reporting provided validation rather than your own execution, attribute it clearly.
+
+If the root cause, semantic boundary, ownership, implementation site, implementation mechanism, runtime semantics, or validation result cannot be verified, say exactly which part remains unresolved.
+
+Do not convert uncertainty into a likely fact merely to make the analysis complete.
+
+## Mode selection
+
+- Bug / Question/Support / Ops: deliver the analysis directly.
+- Feature request / Refactor with substantive unknowns: ask focused clarifying questions only when repository investigation cannot resolve a material contract/scope decision.
+- Do not ask questions for information that is useful but not required to establish the contract or next investigation step.
+
+## Output rules
+
+- Compact output.
+- No emojis.
+- No code snippets or fenced blocks.
+- Short inline identifiers are allowed.
+- Reference repository evidence with file paths and line ranges when available.
+- If exact lines are unavailable, cite the file and mark the location as approximate with the reason.
+- Keep the final analysis under approximately 300 words.
+- Analyze only. Do not implement changes.
+
+Choose exactly one template.
+
+Formatting:
+- Render each template item as a level-2 Markdown heading: \`## <section name>\`.
+- Put the section content below the heading, never on the same line.
+- Leave one blank line after each heading and between sections.
+- Use concise paragraphs for prose and Markdown bullets when a section contains multiple distinct items.
+- Keep bullet items on separate lines.
+- Do not collapse multiple template sections into one paragraph.
+- Keep the selected template's section order exactly as listed below.
+- Do not use inline section labels such as \`**Summary** text\`.
+- Markdown structure takes precedence over compactness.
+
+Templates:
+
+Bug: Summary; Contract / expected behavior; Evidence; Root cause; Fix boundary / ownership; Required outcome; Implementation status; Regression / side effects; Verification; Missing info.
+
+Feature: Summary; Requested contract; Existing behavior / architecture; Requirements; Boundary / ownership; Required outcome; Implementation options; Compatibility / side effects; Verification; Missing info.
+
+Question/Support: Summary; Relevant contract / behavior; Answer / guidance; Evidence; Missing info.
+
+Refactor: Summary; Current contract / ownership; Problem being addressed; Proposed boundary; Preserved behavior; Implementation constraints; Risks / side effects; Verification; Missing info.
+
+Ops: Summary; Expected runtime contract; Evidence / diagnostics; Failure boundary / ownership; Required outcome; Implementation status; Side effects; Verification; Missing info.
+
+For boundary/ownership sections:
+- distinguish semantic responsibility from architectural owner;
+- split producer and consumer ownership when applicable;
+- use \`semantic boundary established; ownership/edit location unresolved\` when evidence does not establish a concrete owner/site.
+
+For \`Implementation status\`, distinguish when appropriate:
+- mechanism verified;
+- candidate mechanism(s);
+- unresolved — required outcome known, implementation not established.
+
+End with:
+
+**Next actions:** <one concise sentence>.
+`,
   },
   {
     id: 'linear.issue.review.visible',
@@ -280,45 +530,295 @@ Do not implement changes until I confirm; end with: "Next actions: <1 sentence>"
     title: 'Linear Issue Review Instructions',
     group: 'Linear',
     description: 'Hidden instructions attached when generating a Linear issue review response.',
-    template: `Review this Linear issue using the provided issue context.
+    template: `Review this Linear issue semantically using the complete provided issue context.
 
-Process:
-- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
+Read the original issue, all follow-up comments, maintainer replies, linked or referenced context available to you, bot reviews, and later corrections before reaching conclusions. Later evidence may refine or invalidate earlier claims.
 
-Mode selection by type:
-- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
-- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
+First classify the issue:
+Type: bug | feature request | question/support | refactor | ops
 
-Output rules:
-- Compact output; pick ONE template below and omit the others.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed.
-- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
-- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
+Before producing the answer, normalize the actual issue contract from the whole thread. Do not reason from keywords or isolated statements.
 
-Templates (choose one):
-Bug:
-- Summary (1-2 sentences)
-- Likely cause (max 2)
-- Repro/diagnostics needed (max 3)
-- Fix approach (max 4 steps)
-- Verification (max 3)
+Silently determine:
+- intended outcome;
+- affected behavior / target;
+- scope and boundaries;
+- required vs preserved behavior;
+- observable symptom or requested capability;
+- relevant constraints;
+- unresolved references or ambiguities;
+- what semantic responsibility is involved.
 
-Feature:
-- Summary (1-2 sentences)
-- Requirements (max 4)
-- Unknowns/questions (max 4)
-- Proposed plan (max 5 steps)
-- Verification (max 3)
+Treat statements according to their semantic role:
+- requirement / expected behavior;
+- observed fact or reproduction evidence;
+- repository-confirmed fact;
+- root-cause hypothesis;
+- proposed mechanism or solution;
+- reviewer/bot finding;
+- unresolved assumption.
 
-Question/Support:
-- Summary (1-2 sentences)
-- Answer/guidance (max 6 lines)
-- Missing info (max 4)
+Claim authority is not claim truth.
 
-Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
+Do not treat a proposed fix, implementation suggestion, acceptance criterion, maintainer statement, reporter diagnosis, root-cause label, file named in the issue, or bot review as automatically correct. Re-derive relevant claims from repository evidence when possible.
+
+Keep evidence confidence separate:
+- repository-confirmed;
+- supported by reporter/runtime evidence but not independently reproduced;
+- inferred from confirmed evidence;
+- unverified.
+
+Never promote an unverified claim into a confirmed root cause, ownership claim, or implementation requirement.
+
+## Repository investigation
+
+- Gather the code, tests, configuration, documentation, call sites, data flow, and existing contracts needed to validate the issue.
+- Trace the affected path far enough to determine where behavior originates, where it is transformed, and where it is consumed.
+- Prefer repository evidence over assumptions from issue wording.
+- Do not invent files, APIs, architecture, behavior, tests, root causes, or constraints.
+
+For bugs, distinguish:
+1. symptom;
+2. reproduction / observed evidence;
+3. violated contract or invariant;
+4. confirmed and unconfirmed parts of the causal chain;
+5. semantic boundary / responsibility;
+6. architectural ownership, if established;
+7. implementation site and mechanism, if established.
+
+These are separate conclusions.
+
+## Correct-level analysis
+
+Determine the lowest semantic boundary at which the violated contract belongs.
+
+Reject a fix that only masks a downstream symptom when the violated contract belongs elsewhere.
+
+Possible responsibility boundaries include:
+- presentation / UI;
+- local component or caller;
+- shared abstraction;
+- state or data transformation;
+- API / protocol / persistence boundary;
+- configuration / runtime / infrastructure.
+
+Do not choose a broader boundary than evidence requires.
+
+Do not confuse:
+- semantic responsibility;
+- architectural ownership;
+- a shared chokepoint;
+- the helper currently implementing part of the behavior;
+- the exact edit location;
+- the implementation mechanism.
+
+They may all be different.
+
+A shared chokepoint or many callers can prove that downstream caller-local fixes may be incomplete. They do not by themselves prove that the chokepoint owns the contract or is the correct edit location.
+
+## Ownership evidence
+
+Treat architectural ownership as a claim requiring affirmative evidence.
+
+Before stating that a layer, service, module, helper, or file owns a contract, look for evidence such as:
+- repository documentation or explicit comments assigning responsibility;
+- producer/consumer direction of the contract;
+- which side holds the authoritative data or capability required to enforce it;
+- existing architecture consistently placing the same responsibility there;
+- API, protocol, or persistence boundaries defining responsibility for representation and interpretation.
+
+Issue-provided file names, root-cause labels, suggested fixes, proximity to the symptom, and shared usage are anchoring inputs, not ownership evidence. Re-derive ownership independently before reusing the issue's proposed boundary.
+
+When ownership spans a producer/consumer boundary, describe each side's responsibility separately. Do not collapse authoritative data production and downstream classification/consumption into a single owner.
+
+For example:
+- producer may own authoritative representation / normalization;
+- consumer may own interpretation / classification against that representation.
+
+If you name a concrete layer/module/file as the owner, cite the affirmative evidence establishing that ownership.
+
+If semantic responsibility is known but ownership or edit location is not established, say explicitly:
+\`semantic boundary established; ownership/edit location unresolved\`.
+
+Do not fill a required boundary section with the nearest plausible code location merely to make the analysis complete.
+
+Apply the same evidence standard to ownership and architectural-boundary claims as to root-cause claims.
+
+## Fix boundary vs implementation
+
+Finding the correct semantic or architectural boundary does NOT mean that the exact implementation site or mechanism is known.
+
+Determine first:
+- what semantic contract must become true;
+- which responsibility boundary is involved;
+- who owns each relevant side of that boundary, if established;
+- which consumers depend on it.
+
+Only then evaluate implementation mechanisms.
+
+Do not state that a specific helper, file, normalization strategy, platform branch, API change, or other mechanism is the correct fix unless evidence establishes that choice.
+
+If several mechanisms could satisfy the contract, state the required semantic outcome and keep the mechanism unresolved or identify verified candidates.
+
+## Contract analysis
+
+For the affected path, identify where relevant:
+- producer/input contract;
+- transformations;
+- consumer/output contract;
+- relevant invariants;
+- ownership of behavior;
+- error / fallback semantics.
+
+When the issue involves paths, identifiers, names, addresses, normalized values, canonical forms, or other alternate representations, reason in terms of semantic identity rather than textual equality.
+
+Two representations that are equivalent under the semantics of the runtime or system that owns them should be treated consistently by downstream consumers.
+
+Conversely, representations that are genuinely distinct under the owning system's semantics must remain distinct.
+
+Do not generalize a specific symptom such as casing, separators, canonicalization, aliases, or normalization into a broader equivalence rule unless the owning system actually defines those representations as equivalent.
+
+Check whether the issue or proposed solution changes public or implicit contracts, including:
+- API shape or semantics;
+- persisted data;
+- authentication/authorization;
+- configuration;
+- deployment/runtime behavior;
+- dependency expectations;
+- user-visible behavior relied on elsewhere.
+
+## Environment semantics
+
+Do not infer a runtime property solely from a broad environment label when that property can vary independently.
+
+Examples include filesystem semantics, capabilities, permissions, feature availability, architecture, transport behavior, or deployment configuration.
+
+\`platform == X\` does not by itself prove a filesystem, runtime, or capability property if that property can vary on that platform.
+
+Distinguish the environment executing or owning the affected operation from the environment rendering or controlling it. Client platform does not establish server/runtime filesystem or capability semantics.
+
+If a proposed mechanism depends on such a property, verify how the repository detects, canonicalizes, or represents it. Otherwise leave the mechanism unresolved.
+
+## Consumer / blast-radius analysis
+
+When a shared contract is involved, inspect relevant neighboring callers and consumers.
+
+Distinguish:
+- exposure: a consumer depends on the affected contract;
+- confirmed impact: the failing condition reaches that consumer and causes a concrete consequence.
+
+Do not claim every caller is broken merely because it uses the affected abstraction.
+
+Report additional impact only when the consequence can be traced.
+
+Use consumer sweeps to determine contract scope and regression risk, not to manufacture findings.
+
+## Scope safety
+
+A valid fix must solve the issue at the correct boundary while preserving unrelated behavior.
+
+Explicitly consider:
+- regression risk;
+- behavior that must remain unchanged;
+- edge cases exposed by the same contract;
+- duplicated logic that could make a local fix incomplete;
+- side effects outside the reported path.
+
+Do not expand scope merely because adjacent cleanup or refactoring is possible.
+
+## Suggested fixes
+
+Evaluate suggested fixes independently from the diagnosis.
+
+For each relevant proposed mechanism, ask:
+- Does it satisfy the actual contract?
+- Does it preserve valid distinctions?
+- Does it work under the real runtime/environment semantics?
+- Is there an existing repository pattern for this responsibility?
+- Does it introduce a broader semantic change than required?
+
+A proposed fix may be wrong even when the reported bug and root cause are correct.
+
+## Tests and verification
+
+Evaluate what evidence would prove both the diagnosis and the eventual fix:
+- reproduction or failing path;
+- focused tests at the violated contract boundary;
+- relevant regression tests;
+- preserved behavior / unaffected paths.
+
+Verify that a suggested test is compatible with the current repository surface. Do not propose importing or calling private/non-exported symbols unless the test can legitimately access them.
+
+Prefer testing the public or owning contract over an incidental private implementation detail.
+
+Never report a test, command, build, lint, type-check, reproduction, benchmark, or other validation as successful unless:
+- you actually executed it during this analysis; or
+- explicit execution evidence was provided in the issue/thread/context you inspected.
+
+The existence of a test file, script, CI configuration, or claimed command is not execution evidence.
+
+When reporting provided validation rather than your own execution, attribute it clearly.
+
+If the root cause, semantic boundary, ownership, implementation site, implementation mechanism, runtime semantics, or validation result cannot be verified, say exactly which part remains unresolved.
+
+Do not convert uncertainty into a likely fact merely to make the analysis complete.
+
+## Mode selection
+
+- Bug / Question/Support / Ops: deliver the analysis directly.
+- Feature request / Refactor with substantive unknowns: ask focused clarifying questions only when repository investigation cannot resolve a material contract/scope decision.
+- Do not ask questions for information that is useful but not required to establish the contract or next investigation step.
+
+## Output rules
+
+- Compact output.
+- No emojis.
+- No code snippets or fenced blocks.
+- Short inline identifiers are allowed.
+- Reference repository evidence with file paths and line ranges when available.
+- If exact lines are unavailable, cite the file and mark the location as approximate with the reason.
+- Keep the final analysis under approximately 300 words.
+- Analyze only. Do not implement changes.
+
+Choose exactly one template.
+
+Formatting:
+- Render each template item as a level-2 Markdown heading: \`## <section name>\`.
+- Put the section content below the heading, never on the same line.
+- Leave one blank line after each heading and between sections.
+- Use concise paragraphs for prose and Markdown bullets when a section contains multiple distinct items.
+- Keep bullet items on separate lines.
+- Do not collapse multiple template sections into one paragraph.
+- Keep the selected template's section order exactly as listed below.
+- Do not use inline section labels such as \`**Summary** text\`.
+- Markdown structure takes precedence over compactness.
+
+Templates:
+
+Bug: Summary; Contract / expected behavior; Evidence; Root cause; Fix boundary / ownership; Required outcome; Implementation status; Regression / side effects; Verification; Missing info.
+
+Feature: Summary; Requested contract; Existing behavior / architecture; Requirements; Boundary / ownership; Required outcome; Implementation options; Compatibility / side effects; Verification; Missing info.
+
+Question/Support: Summary; Relevant contract / behavior; Answer / guidance; Evidence; Missing info.
+
+Refactor: Summary; Current contract / ownership; Problem being addressed; Proposed boundary; Preserved behavior; Implementation constraints; Risks / side effects; Verification; Missing info.
+
+Ops: Summary; Expected runtime contract; Evidence / diagnostics; Failure boundary / ownership; Required outcome; Implementation status; Side effects; Verification; Missing info.
+
+For boundary/ownership sections:
+- distinguish semantic responsibility from architectural owner;
+- split producer and consumer ownership when applicable;
+- use \`semantic boundary established; ownership/edit location unresolved\` when evidence does not establish a concrete owner/site.
+
+For \`Implementation status\`, distinguish when appropriate:
+- mechanism verified;
+- candidate mechanism(s);
+- unresolved — required outcome known, implementation not established.
+
+End with:
+
+**Next actions:** <one concise sentence>.
+`,
   },
   {
     id: 'github.pr.checks.review.visible',
