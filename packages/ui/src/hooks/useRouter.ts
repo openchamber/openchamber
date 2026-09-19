@@ -186,8 +186,12 @@ export function useRouter(): void {
         return;
       }
 
+      // A null -> session transition is the app arriving at its first session
+      // (cold-launch restore or initial pick), not forward navigation from a
+      // real screen — replace so back doesn't land on a phantom no-op step.
+      const isInitialSessionPick = prevSessionId === null;
       prevSessionId = sessionId;
-      syncURLFromState();
+      syncURLFromState({ replace: isInitialSessionPick });
     });
 
     return unsubscribe;
