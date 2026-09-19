@@ -13,6 +13,7 @@ import { Radio } from '@/components/ui/radio';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Icon } from "@/components/icon/Icon";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
     SettingsSection,
     SettingsCheckboxRow,
@@ -389,66 +390,147 @@ const buildLocalTtsVoiceOptions = (models: DictationModelState[]): LocalTtsVoice
     return options;
 };
 
+const LocalTtsModelRow = ({
+    model,
+    requestingId,
+    request,
+    t,
+}: {
+    model: DictationModelState;
+    requestingId: string | null;
+    request: (modelId: string, method: 'POST' | 'DELETE') => Promise<void>;
+    t: ReturnType<typeof useI18n>['t'];
+}) => (
+    <div className="flex items-center gap-2 py-1.5">
+        <span className="typography-ui-label text-foreground">{model.description ?? model.id}</span>
+        {model.installed ? (
+            <>
+                <Icon
+                    name="checkbox-circle"
+                    className="h-4 w-4 text-[var(--status-success)]"
+                    aria-label={t('settings.voice.page.stt.modelInstalled')}
+                />
+                <Button
+                    variant="ghost"
+                    size="xs"
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-[var(--status-error)]"
+                    disabled={requestingId !== null}
+                    onClick={() => { void request(model.id, 'DELETE'); }}
+                    title={t('settings.voice.page.stt.modelDelete')}
+                    aria-label={t('settings.voice.page.stt.modelDelete')}
+                >
+                    <Icon name="delete-bin" className="h-4 w-4" />
+                </Button>
+            </>
+        ) : model.downloading ? (
+            <span className="flex items-center gap-1.5">
+                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                <span className="typography-ui-compact tabular-nums text-muted-foreground">
+                    {typeof model.downloadProgress === 'number' ? `${model.downloadProgress}%` : ''}
+                </span>
+            </span>
+        ) : (
+            <Button
+                variant="ghost"
+                size="xs"
+                className="h-6 w-6 p-0"
+                disabled={requestingId !== null}
+                onClick={() => { void request(model.id, 'POST'); }}
+                title={t('settings.voice.page.stt.modelDownload')}
+                aria-label={t('settings.voice.page.stt.modelDownload')}
+            >
+                <Icon name="download" className="h-4 w-4" />
+            </Button>
+        )}
+        {model.downloadError ? (
+            <span className="typography-meta text-[var(--status-error)]">{model.downloadError}</span>
+        ) : null}
+    </div>
+);
+
 const LocalTtsModelStatus = ({ models, requestingId, request }: ReturnType<typeof useLocalTtsModels>) => {
     const { t } = useI18n();
+    const [availableOpen, setAvailableOpen] = useState(false);
+    const [filter, setFilter] = useState('');
 
-    // The default English model is always listed; language models the server
-    // fetched on its own appear once they are installed or downloading, so
-    // the list shows what is on disk rather than the whole catalog.
-    const visible = models.filter((model) => model.id === LOCAL_TTS_MODEL_ID || model.installed || model.downloading);
-    if (visible.length === 0) {
+    if (models.length === 0) {
         return null;
     }
 
+    // Installed models plus anything currently downloading or in an error state
+    // stay inline where the user expects them; the rest of the catalog sits
+    // behind a collapse so the panel does not flood with 14 rows.
+    const inline: DictationModelState[] = [];
+    const available: DictationModelState[] = [];
+    for (const model of models) {
+        if (model.installed || model.downloading || model.downloadError) {
+            inline.push(model);
+        } else {
+            available.push(model);
+        }
+    }
+
+    const query = filter.trim().toLowerCase();
+    const filtered = query
+        ? available.filter((m) =>
+            (m.description ?? '').toLowerCase().includes(query) ||
+            m.id.toLowerCase().includes(query))
+        : available;
+
     return (
         <div className="flex flex-col">
-            {visible.map((model) => (
-                <div key={model.id} className="flex items-center gap-2 py-1.5">
-                    <span className="typography-ui-label text-foreground">{model.description ?? model.id}</span>
-                    {model.installed ? (
-                        <>
-                            <Icon
-                                name="checkbox-circle"
-                                className="h-4 w-4 text-[var(--status-success)]"
-                                aria-label={t('settings.voice.page.stt.modelInstalled')}
-                            />
-                            <Button
-                                variant="ghost"
-                                size="xs"
-                                className="h-6 w-6 p-0 text-muted-foreground hover:text-[var(--status-error)]"
-                                disabled={requestingId !== null}
-                                onClick={() => { void request(model.id, 'DELETE'); }}
-                                title={t('settings.voice.page.stt.modelDelete')}
-                                aria-label={t('settings.voice.page.stt.modelDelete')}
-                            >
-                                <Icon name="delete-bin" className="h-4 w-4" />
-                            </Button>
-                        </>
-                    ) : model.downloading ? (
-                        <span className="flex items-center gap-1.5">
-                            <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                            <span className="typography-ui-compact tabular-nums text-muted-foreground">
-                                {typeof model.downloadProgress === 'number' ? `${model.downloadProgress}%` : ''}
-                            </span>
-                        </span>
-                    ) : (
-                        <Button
-                            variant="ghost"
-                            size="xs"
-                            className="h-6 w-6 p-0"
-                            disabled={requestingId !== null}
-                            onClick={() => { void request(model.id, 'POST'); }}
-                            title={t('settings.voice.page.stt.modelDownload')}
-                            aria-label={t('settings.voice.page.stt.modelDownload')}
-                        >
-                            <Icon name="download" className="h-4 w-4" />
-                        </Button>
-                    )}
-                    {model.downloadError ? (
-                        <span className="typography-meta text-[var(--status-error)]">{model.downloadError}</span>
-                    ) : null}
-                </div>
+            {inline.map((model) => (
+                <LocalTtsModelRow
+                    key={model.id}
+                    model={model}
+                    requestingId={requestingId}
+                    request={request}
+                    t={t}
+                />
             ))}
+            {available.length > 0 ? (
+                <Collapsible open={availableOpen} onOpenChange={setAvailableOpen}>
+                    <CollapsibleTrigger className="group flex w-full items-center justify-between py-1 hover:bg-transparent">
+                        <div className="flex items-center gap-1.5 text-left">
+                            <span className="typography-ui-label font-normal text-foreground">
+                                {t('settings.voice.page.localTts.availableToDownload')}
+                            </span>
+                            <span className="typography-micro text-muted-foreground">
+                                ({available.length})
+                            </span>
+                        </div>
+                        <Icon
+                            name={availableOpen ? 'arrow-down-s' : 'arrow-right-s'}
+                            className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground"
+                        />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-1">
+                        <input
+                            type="text"
+                            value={filter}
+                            onChange={(e) => setFilter(e.target.value)}
+                            placeholder={t('settings.voice.page.localTts.filterPlaceholder')}
+                            aria-label={t('settings.voice.page.localTts.filterPlaceholder')}
+                            className={cn(VOICE_TEXT_INPUT_CLASS, 'mb-1')}
+                        />
+                        {filtered.length === 0 ? (
+                            <div className="typography-meta py-1.5 text-muted-foreground">
+                                {t('settings.voice.page.localTts.filterNoMatch')}
+                            </div>
+                        ) : (
+                            filtered.map((model) => (
+                                <LocalTtsModelRow
+                                    key={model.id}
+                                    model={model}
+                                    requestingId={requestingId}
+                                    request={request}
+                                    t={t}
+                                />
+                            ))
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+            ) : null}
         </div>
     );
 };
