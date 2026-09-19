@@ -45,7 +45,7 @@ import {
   resolveServeHost,
   resolveServeUiPassword,
 } from './cli.js';
-import { buildWindowsStartupTaskCommand } from './lib/cli-startup.js';
+import { buildSystemdUserService, buildWindowsStartupTaskCommand } from './lib/cli-startup.js';
 
 async function withTempOpenChamberDataDir(fn) {
   const previous = process.env.OPENCHAMBER_DATA_DIR;
@@ -1445,6 +1445,32 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
         await server.close();
       }
     });
+  });
+});
+
+describe('systemd user service unit builder', () => {
+  it('bounds the service cgroup so systemd-oomd cannot kill every in-flight turn', () => {
+    const unit = buildSystemdUserService({ port: 3000 });
+
+    expect(unit).toContain('[Service]');
+    expect(unit).toContain('Type=simple');
+    expect(unit).toContain('Restart=always');
+    expect(unit).toContain('RestartSec=5');
+    // Throttle before the hard cap so cargo/rustc spikes reclaim instead of
+    // taking down the whole openchamber.service cgroup (#3732).
+    expect(unit).toContain('MemoryHigh=50%');
+    expect(unit).toContain('MemoryMax=75%');
+    expect(unit).toContain('OOMScoreAdjust=-200');
+    expect(unit).toContain('OOMPolicy=continue');
+    expect(unit).toContain('ManagedOOMPreference=omit');
+  });
+
+  it('keeps the enable/install ExecStart contract', () => {
+    const unit = buildSystemdUserService({ port: 3000 });
+
+    expect(unit).toContain(`ExecStart="${process.execPath}"`);
+    expect(unit).toContain('[Install]');
+    expect(unit).toContain('WantedBy=default.target');
   });
 });
 

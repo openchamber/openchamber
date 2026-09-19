@@ -413,10 +413,31 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       signalCode: observedSignalCode ?? child.signalCode ?? null,
       stderrTail: getBoundedTextTail(sanitizeDiagnosticText(runtimeStderrTail), MANAGED_STDERR_TAIL_MAX_BYTES),
     });
+    let closing = false;
+    let unexpectedExitRecoveryStarted = false;
+    let becameReady = false;
     const recordManagedProcessExit = (code, signal) => {
       if (code !== null && code !== undefined) observedExitCode = code;
       if (signal !== null && signal !== undefined) observedSignalCode = signal;
       state.lastManagedOpenCodeProcess = getManagedProcessSnapshot();
+      // Intentional close and pre-ready crashes have their own paths. A ready
+      // child that dies under us must settle busy sessions immediately; waiting
+      // for the periodic health check leaves tools marked running (#3732).
+      if (closing || unexpectedExitRecoveryStarted || !becameReady) return;
+      if (state.isShuttingDown || state.isRestartingOpenCode) return;
+      unexpectedExitRecoveryStarted = true;
+      lastHealthProbeResult = null;
+      console.warn(
+        `[lifecycle] managed OpenCode process exited (code=${code} signal=${signal}); recovering sessions`,
+      );
+      try {
+        onOpenCodeRestarted?.();
+      } catch (error) {
+        console.warn('Failed to reconcile sessions after managed OpenCode exit:', error?.message ?? error);
+      }
+      void restartOpenCode('managed-process-exited').catch((error) => {
+        console.error(`[lifecycle] managed OpenCode exit recovery failed: ${error.message}`);
+      });
     };
     const attachRuntimeStderrCapture = () => {
       if (runtimeStderrAttached) return;
@@ -448,6 +469,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       get signalCode() { return observedSignalCode ?? child.signalCode; },
       get stderrTail() { return getManagedProcessSnapshot().stderrTail; },
       close() {
+        closing = true;
         if (!closePromise) closePromise = registration.then(() => closeManagedOpenCodeChild(child));
         return closePromise;
       },
@@ -521,6 +543,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     state.openCodeProcess = serverProcess;
     syncToHmrState();
     serverProcess.url = await readiness;
+    becameReady = true;
     await registration;
     return serverProcess;
   };
