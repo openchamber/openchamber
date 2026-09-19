@@ -2263,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': 'Працює…',
   'chat.btw.collapseAria': 'Згорнути панель btw',
   'chat.btw.draftHint': 'Поставте своє запитання',
+  'chat.btw.toolbar.askAria': 'Поставити тимчасове запитання (/btw)',
   'chat.btw.cancelAria': 'Скасувати це запитання BTW',
   'chat.btw.expandAria': 'Розгорнути панель btw',
   'chat.btw.promoteAria': 'Залишити як окрему сесію',

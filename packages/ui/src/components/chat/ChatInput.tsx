@@ -3912,6 +3912,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
+                        onExitBtw={handleExitBtw}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}
                         onAbort={handleAbort}

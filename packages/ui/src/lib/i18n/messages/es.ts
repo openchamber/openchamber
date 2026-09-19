@@ -2263,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': 'Trabajando…',
   'chat.btw.collapseAria': 'Contraer el panel btw',
   'chat.btw.draftHint': 'Haz tu pregunta',
+  'chat.btw.toolbar.askAria': 'Hacer una pregunta temporal (/btw)',
   'chat.btw.cancelAria': 'Cancelar esta pregunta BTW',
   'chat.btw.expandAria': 'Expandir el panel btw',
   'chat.btw.promoteAria': 'Conservar como sesión aparte',

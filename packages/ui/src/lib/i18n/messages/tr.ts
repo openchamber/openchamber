@@ -3343,6 +3343,7 @@ export const dict = {
   'chat.btw.working': 'Çalışıyor…',
   'chat.btw.collapseAria': 'btw panelini daralt',
   'chat.btw.draftHint': 'Sorunuzu sorun',
+  'chat.btw.toolbar.askAria': 'Geçici soru sor (/btw)',
   'chat.btw.cancelAria': 'Bu BTW sorusunu iptal et',
   'chat.btw.expandAria': 'btw panelini genişlet',
   'chat.btw.promoteAria': 'Ayrı bir session olarak sakla',

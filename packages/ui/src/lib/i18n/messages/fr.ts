@@ -2011,6 +2011,7 @@ export const dict = {
   'chat.btw.working': 'En cours…',
   'chat.btw.collapseAria': 'Réduire le panneau btw',
   'chat.btw.draftHint': 'Posez votre question',
+  'chat.btw.toolbar.askAria': 'Poser une question temporaire (/btw)',
   'chat.btw.cancelAria': 'Annuler cette question BTW',
   'chat.btw.expandAria': 'Développer le panneau btw',
   'chat.btw.promoteAria': 'Conserver comme session à part',

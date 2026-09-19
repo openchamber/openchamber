@@ -920,6 +920,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': 'Pracuje…',
   'chat.btw.collapseAria': 'Zwiń panel btw',
   'chat.btw.draftHint': 'Zadaj pytanie',
+  'chat.btw.toolbar.askAria': 'Zadaj tymczasowe pytanie (/btw)',
   'chat.btw.cancelAria': 'Anuluj to pytanie BTW',
   'chat.btw.expandAria': 'Rozwiń panel btw',
   'chat.btw.promoteAria': 'Zachowaj jako osobną sesję',

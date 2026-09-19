@@ -2073,6 +2073,7 @@ export const dict = {
   'chat.btw.working': 'Arbeitet…',
   'chat.btw.collapseAria': 'btw-Panel einklappen',
   'chat.btw.draftHint': 'Stelle deine Frage',
+  'chat.btw.toolbar.askAria': 'Temporäre Frage stellen (/btw)',
   'chat.btw.cancelAria': 'Diese BTW-Frage verwerfen',
   'chat.btw.expandAria': 'btw-Panel ausklappen',
   'chat.btw.promoteAria': 'Als eigene Sitzung behalten',
