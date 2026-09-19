@@ -515,6 +515,8 @@ VS Code intentionally has no managed Chats mode. It neither reads nor writes the
 
 A session's own directory is not a target choice. "New session in the current directory" forwards the current session's directory even when that session is a managed chat, and a chat scratch directory names no project, so those overrides resolve to a chat draft. Treating one as an explicit project target is how a plus pressed inside a chat opened a project draft.
 
+A live directory that names no registered project is not a target choice either: an implicit, user-initiated open stays on the managed Chat target for that draft and leaves the recorded project target untouched. Delayed stale-directory recovery repairs only project drafts, so it cannot replace that Chat target or its remembered project target.
+
 When creating a draft in `handleDirectoryEvent`, **only clone the state fields the event will mutate**. Never spread all fields eagerly.
 
 ```typescript

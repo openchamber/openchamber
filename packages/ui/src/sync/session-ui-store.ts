@@ -841,6 +841,11 @@ const resolveCreatableDraftDirectory = async (
 }
 
 const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Promise<void> => {
+  // A managed Chat deliberately has no project directory. Its live directory
+  // may still point at an unregistered external path, which is not a stale
+  // project target for this recovery to repair.
+  if (openedDraft.target !== "project") return
+
   const resolved = await resolveCreatableDraftDirectory(openedDraft, openedDraft.directoryOverride)
   if (resolved.status !== "ok") return
   const recovered = normalizePath(resolved.directory ?? null)
@@ -849,6 +854,7 @@ const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Pr
 
   const currentDraft = useSessionUIStore.getState().newSessionDraft
   if (!currentDraft.open) return
+  if (currentDraft.target !== "project") return
   if (currentDraft.preserveDirectoryOverride === true) return
   if (currentDraft.pendingWorktreeRequestId) return
   if (normalizePath(currentDraft.directoryOverride) !== original) return
@@ -1285,18 +1291,32 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       : null
     const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
+    // A user-initiated implicit open from an external path outside every
+    // project is a Chat for this draft: forcing the live path into a project
+    // draft is wrong, and the live location is not a target choice that should
+    // erase the project the user last picked. A managed chat scratch directory
+    // is not external; the recorded project still reopens from it.
+    const isImplicitExternalChatFallback = currentDirectory !== null
+      && !isChatDirectoryPath(currentDirectory)
+      && currentDirProject === null
+      && options?.automatic !== true
+      && options?.target === undefined
+      && options?.directoryOverride === undefined
+      && options?.selectedProjectId === undefined
     const persistedProject = persistedProjectById ?? persistedProjectByDir
 
     // Nothing explicit was asked for: reopen on the side the user last worked
     // on. Only a recorded project target that still resolves to an existing
     // project beats Chat — a project removed since must not open a draft
-    // pointing at a directory that is no longer registered.
+    // pointing at a directory that is no longer registered — and the live
+    // directory must not itself be an unregistered external path.
     const restoresProjectTarget = !isVSCodeRuntime()
       && !options?.target
       && options?.directoryOverride === undefined
       && options?.selectedProjectId === undefined
       && persistedTarget?.target === "project"
       && persistedProject !== null
+      && !isImplicitExternalChatFallback
 
     let target = isVSCodeRuntime() ? "project" : options?.target
     if (!target) {
@@ -1344,7 +1364,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       warmChatsRootDirectory()
     }
 
-    persistDraftTarget({ projectId: selectedProject?.id ?? null, directory, target })
+    // An unregistered live path falls back to managed Chat for this draft, but
+    // it is not a user choice that should discard the recorded project target.
+    if (!(target === "chat" && isImplicitExternalChatFallback)) {
+      persistDraftTarget({ projectId: selectedProject?.id ?? null, directory, target })
+    }
 
     const nextDraft: NewSessionDraftState = {
       draftId: nextDraftId++,
