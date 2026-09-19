@@ -1,3 +1,65 @@
+export const MAX_HISTORY_BYTES = 512 * 1024;
+
+const utf8ByteLength = (value) => Buffer.byteLength(value);
+const utf8CodePointSize = (codePoint) => {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+};
+const dropUtf8Prefix = (value, dropBytes) => {
+  if (dropBytes <= 0) return { value, dropped: 0 };
+  let index = 0;
+  let dropped = 0;
+  while (index < value.length && dropped < dropBytes) {
+    const codePoint = value.codePointAt(index);
+    dropped += utf8CodePointSize(codePoint);
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return { value: value.slice(index), dropped };
+};
+
+export const createTerminalHistory = (maxBytes = MAX_HISTORY_BYTES) => ({
+  parts: [],
+  bytes: 0,
+  maxBytes,
+});
+
+export const resetTerminalHistory = (history) => {
+  history.parts.length = 0;
+  history.bytes = 0;
+  return history;
+};
+
+export const terminalHistoryText = (history) => {
+  if (history.parts.length === 0) return '';
+  if (history.parts.length === 1) return history.parts[0].text;
+  return history.parts.map((part) => part.text).join('');
+};
+
+export const appendTerminalHistory = (history, chunk, measure = utf8ByteLength) => {
+  if (!chunk) return history;
+  const chunkBytes = measure(chunk);
+  history.parts.push({ text: chunk, bytes: chunkBytes });
+  history.bytes += chunkBytes;
+  while (history.bytes > history.maxBytes && history.parts.length > 0) {
+    const overflow = history.bytes - history.maxBytes;
+    const first = history.parts[0];
+    if (first.bytes <= overflow) {
+      history.parts.shift();
+      history.bytes -= first.bytes;
+      continue;
+    }
+    const trimmed = dropUtf8Prefix(first.text, overflow);
+    first.text = trimmed.value;
+    first.bytes -= trimmed.dropped;
+    history.bytes -= trimmed.dropped;
+    if (!first.text) history.parts.shift();
+    break;
+  }
+  return history;
+};
+
 const isCsiFinalByte = (code) => code >= 0x40 && code <= 0x7e;
 const shouldStripCsi = (body, finalByte) =>
   finalByte === 'n'
