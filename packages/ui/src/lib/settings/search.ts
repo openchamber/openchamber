@@ -121,6 +121,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isMobile && ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
   {
+    id: 'appearance.animated-activity-indicators',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.animatedActivityIndicators',
+    descriptionKey: 'settings.openchamber.visual.field.animatedActivityIndicatorsInfo',
+    keywords: ['spinner', 'animation', 'session', 'activity', 'motion', 'running', 'indicator'],
+  },
+  {
     id: 'appearance.interface-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.interfaceFontSize',

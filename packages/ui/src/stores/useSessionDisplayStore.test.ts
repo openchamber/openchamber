@@ -55,3 +55,26 @@ describe('useSessionDisplayStore project display', () => {
     });
   });
 });
+
+describe('useSessionDisplayStore animated activity indicators', () => {
+  test('defaults to static indicators', () => {
+    expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(false);
+  });
+
+  test('v5→v6 adds the animatedActivityIndicators default without touching other keys', () => {
+    const migrated = migrateSessionDisplayState(
+      { projectSortOrder: 'a-z', stickyZoneHeaders: false },
+      5,
+    );
+
+    expect(migrated.animatedActivityIndicators).toBe(false);
+    expect(migrated.projectSortOrder).toBe('a-z');
+    expect(migrated.stickyZoneHeaders).toBe(false);
+  });
+
+  test('v6 state preserves an enabled preference', () => {
+    const migrated = migrateSessionDisplayState({ animatedActivityIndicators: true }, 6);
+
+    expect(migrated.animatedActivityIndicators).toBe(true);
+  });
+});

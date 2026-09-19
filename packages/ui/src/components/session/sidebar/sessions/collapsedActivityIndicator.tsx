@@ -1,4 +1,5 @@
 import React from 'react';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { cn } from '@/lib/utils';
 import type { SessionNode } from '../types';
 import { useI18n } from '@/lib/i18n';
@@ -36,14 +37,10 @@ export function CollapsedActivityIndicator({
     ? t('sessions.sidebar.session.status.active')
     : t('sessions.sidebar.session.status.unread');
   return (
-    <span
-      className={cn(
-        'h-1.5 w-1.5 shrink-0 rounded-full',
-        state === 'active' ? 'bg-primary' : 'bg-[var(--status-info)]',
-        className,
-      )}
-      aria-label={label}
-      title={label}
+    <SessionActivityIndicator
+      state={state === 'active' ? 'running' : 'unread'}
+      label={label}
+      className={className}
     />
   );
 }

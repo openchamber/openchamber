@@ -425,8 +425,8 @@ button svg,
  * value only WebKit parses, which keeps the rule where it was written for.
  */
 @supports (font: -apple-system-body) {
-  button svg:not(.animate-spin),
-  [role="button"] svg:not(.animate-spin) {
+  button svg:not(.animate-spin):not(.activity-spinner),
+  [role="button"] svg:not(.animate-spin):not(.activity-spinner) {
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
   }
@@ -1803,6 +1803,21 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 
 .animate-status-logo {
   animation: oc-status-logo 4s steps(10, jump-none) infinite;
+}
+
+@keyframes activity-spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Running-session spinner (opt-in). steps() throttles to 20 value changes per
+   second; identical frames in between produce no new compositor output.
+   Technique from VS Code's codicon-modifier-spin. */
+.activity-spinner {
+  animation: activity-spin 1.5s steps(30) infinite;
+  transform-box: fill-box;
+  transform-origin: center center;
 }
 
 @keyframes navrail-dot-wave {
