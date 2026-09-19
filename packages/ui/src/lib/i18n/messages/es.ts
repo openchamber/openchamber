@@ -3103,6 +3103,7 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.actions.downloadUpdate": "Descargar actualización",
   "updateDialog.status.downloading": "Descargando...",
   "updateDialog.actions.restartToUpdate": "Reiniciar para actualizar",
+  "updateDialog.status.restarting": "Reiniciando...",
   "updateDialog.actions.updateNow": "Actualizar ahora",
   "updateDialog.actions.openMobileUpdate": "Abrir actualización",
   "updateDialog.status.updating": "Actualizando...",
