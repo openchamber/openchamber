@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import * as npm from './npm-registry.js';
 
 const originalFetch = globalThis.fetch;
 const originalDateNow = Date.now;
+const originalUserConfig = process.env.NPM_CONFIG_USERCONFIG;
+const originalLowerRegistry = process.env.npm_config_registry;
+const originalUpperRegistry = process.env.NPM_CONFIG_REGISTRY;
 
 let fetchMock;
+let userConfigPath;
 
 function jsonResponse(body, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), {
@@ -17,6 +24,10 @@ describe('npm registry client', () => {
   beforeEach(() => {
     npm.clearCache();
     Date.now = originalDateNow;
+    userConfigPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-npmrc-')), '.npmrc');
+    process.env.NPM_CONFIG_USERCONFIG = userConfigPath;
+    delete process.env.npm_config_registry;
+    delete process.env.NPM_CONFIG_REGISTRY;
     fetchMock = mock(() => jsonResponse({}));
     globalThis.fetch = fetchMock;
   });
@@ -25,6 +36,13 @@ describe('npm registry client', () => {
     npm.clearCache();
     globalThis.fetch = originalFetch;
     Date.now = originalDateNow;
+    fs.rmSync(path.dirname(userConfigPath), { recursive: true, force: true });
+    if (originalUserConfig === undefined) delete process.env.NPM_CONFIG_USERCONFIG;
+    else process.env.NPM_CONFIG_USERCONFIG = originalUserConfig;
+    if (originalLowerRegistry === undefined) delete process.env.npm_config_registry;
+    else process.env.npm_config_registry = originalLowerRegistry;
+    if (originalUpperRegistry === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+    else process.env.NPM_CONFIG_REGISTRY = originalUpperRegistry;
   });
 
   test('200 success returns latest versions and dist tags', async () => {
@@ -169,6 +187,14 @@ describe('npm registry client', () => {
     await npm.getNpmInfo('@scope/pkg');
 
     expect(fetchMock.mock.calls[0][0]).toBe('https://registry.npmjs.org/@scope%2Fpkg');
+  });
+
+  test('user npm configuration changes the package metadata registry', async () => {
+    fs.writeFileSync(userConfigPath, 'registry=https://mirror.example.com/npm/\n');
+
+    await npm.getNpmInfo('private-plugin');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://mirror.example.com/npm/private-plugin');
   });
 
   test('user-agent header is present', async () => {

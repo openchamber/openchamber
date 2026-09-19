@@ -24,6 +24,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
 - `packages/web/server/lib/opencode/shutdown-runtime.js`: graceful shutdown orchestration runtime for watcher/session/terminal/process/server teardown.
+- `packages/web/server/lib/opencode/npm-registry-config.js`: resolves npm package metadata requests from inherited npm registry settings or the user's `.npmrc`, including scoped registries and matching bearer/basic HTTP authentication.
 - `packages/web/server/lib/opencode/server-startup-runtime.js`: server listen/startup tunnel flow and process/signal handler orchestration runtime.
 - `packages/web/server/lib/opencode/static-routes-runtime.js`: static asset/SPA fallback route registration and manifest route wiring.
 - `packages/web/server/lib/opencode/feature-routes-runtime.js`: feature route composition runtime for dynamic import-backed config/skill/provider route registration.
