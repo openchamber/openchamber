@@ -1,12 +1,14 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
-import type { GitMergeInProgress, GitRebaseInProgress } from '@/lib/api/types';
+import type { GitMergeInProgress, GitRebaseInProgress, GitCherryPickInProgress, GitRevertInProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
 interface InProgressOperationBannerProps {
   mergeInProgress: GitMergeInProgress | null | undefined;
   rebaseInProgress: GitRebaseInProgress | null | undefined;
+  cherryPickInProgress?: GitCherryPickInProgress | null | undefined;
+  revertInProgress?: GitRevertInProgress | null | undefined;
   onContinue: () => Promise<void>;
   onAbort: () => Promise<void>;
   onResolveWithAI?: () => void;
@@ -17,6 +19,8 @@ interface InProgressOperationBannerProps {
 export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps> = ({
   mergeInProgress,
   rebaseInProgress,
+  cherryPickInProgress,
+  revertInProgress,
   onContinue,
   onAbort,
   onResolveWithAI,
@@ -29,7 +33,9 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   // Only show banner if we have actual in-progress operation data
   const hasMergeInProgress = mergeInProgress && mergeInProgress.head;
   const hasRebaseInProgress = rebaseInProgress && (rebaseInProgress.headName || rebaseInProgress.onto);
-  const operation = hasMergeInProgress ? 'merge' : hasRebaseInProgress ? 'rebase' : null;
+  const hasCherryPickInProgress = cherryPickInProgress && cherryPickInProgress.head;
+  const hasRevertInProgress = revertInProgress && revertInProgress.head;
+  const operation = hasMergeInProgress ? 'merge' : hasRebaseInProgress ? 'rebase' : hasCherryPickInProgress ? 'cherry-pick' : hasRevertInProgress ? 'revert' : null;
 
   if (!operation) {
     return null;
@@ -56,7 +62,15 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   const isProcessing = processingAction !== null;
   const hasUnresolvedConflicts = conflictCount > 0;
 
-  const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');
+  const operationLabel = operation === 'merge'
+    ? t('gitView.operation.merge')
+    : operation === 'rebase'
+      ? t('gitView.operation.rebase')
+      : operation === 'cherry-pick'
+        ? t('gitView.operation.cherryPickInProgress')
+        : operation === 'revert'
+          ? t('gitView.operation.revertInProgress')
+          : '';
 
   // Build description
   let description = '';
@@ -68,6 +82,10 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
     description = rebaseInProgress.headName
       ? t('gitView.operation.rebasingOnto', { headName: rebaseInProgress.headName, onto: rebaseInProgress.onto || '' })
       : t('gitView.operation.rebaseInProgress');
+  } else if (hasCherryPickInProgress) {
+    description = t('gitView.operation.cherryPickInProgress');
+  } else if (hasRevertInProgress) {
+    description = t('gitView.operation.revertInProgress');
   }
 
   const title = !hasUnresolvedConflicts
@@ -81,7 +99,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
     : t('gitView.operation.readyToContinueHint');
 
   return (
-    <div className="mx-4 mt-3 overflow-hidden rounded-lg border border-[var(--status-warning-border)]">
+    <div data-git-operation-banner={operation} className="mx-4 mt-3 overflow-hidden rounded-lg border border-[var(--status-warning-border)]">
       <div className="flex flex-col gap-3 p-3">
         <div className="min-w-0">
           <p className="typography-label text-[var(--status-warning)]">

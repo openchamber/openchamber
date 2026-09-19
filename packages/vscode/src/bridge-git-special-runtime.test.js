@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 const gitService = {
   getGitRangeFiles: mock(),
@@ -112,5 +115,30 @@ describe('bridge git special runtime', () => {
       limit: 10,
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(sdkClient.session.delete).toHaveBeenCalledWith({ sessionID: 'ses_1' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it('reads MERGE_MSG from Git\'s resolved state path', async () => {
+    const markerDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-merge-msg-'));
+    const markerPath = path.join(markerDirectory, 'MERGE_MSG');
+    await fs.writeFile(markerPath, 'Merge remote-tracking branch\n');
+    const execGit = mock(async (args) => {
+      const command = args.join('\0');
+      if (command === 'status\0--porcelain') return { stdout: 'UU conflict.ts\n', stderr: '', exitCode: 0 };
+      if (command === 'diff\0--name-only\0--diff-filter=U') return { stdout: 'conflict.ts\n', stderr: '', exitCode: 0 };
+      if (command === 'diff') return { stdout: '', stderr: '', exitCode: 0 };
+      if (command === 'rev-parse\0--verify\0--quiet\0MERGE_HEAD') return { stdout: 'a'.repeat(40), stderr: '', exitCode: 0 };
+      if (command === 'rev-parse\0--git-path\0MERGE_MSG') return { stdout: `${markerPath}\n`, stderr: '', exitCode: 0 };
+      return { stdout: '', stderr: '', exitCode: 1 };
+    });
+
+    try {
+      const response = await handleSpecialGitBridgeMessage({
+        id: 'conflict-details', type: 'api:git/conflict-details', payload: { directory: '/linked-worktree' },
+      }, {}, { readSettings: () => ({}), execGit });
+      expect(response?.success).toBe(true);
+      expect(response?.data?.headInfo).toContain('Merge remote-tracking branch');
+    } finally {
+      await fs.rm(markerDirectory, { recursive: true, force: true });
+    }
   });
 });

@@ -36,6 +36,14 @@ const hexToRgb = (value: string | undefined | null): string | null => {
   return `${r} ${g} ${b}`;
 };
 
+const gitGraphSyntaxFallbackKeys = [
+  'keyword',
+  'string',
+  'number',
+  'function',
+  'type',
+] as const;
+
 export class CSSVariableGenerator {
   generate(theme: Theme): string {
     const cssVars: string[] = [];
@@ -138,6 +146,10 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
         `  --sidebar-overlay-soft: ${this.opacity(base, softAlpha)} !important;`,
       );
     }
+
+    this.getGitGraphSeries(theme).forEach((color, index) => {
+      vars.push(`  --git-graph-${index + 1}: ${color};`);
+    });
 
     vars.push(`  --loading-spinner: ${theme.colors.primary.base};`);
     vars.push(`  --loading-spinner-track: ${theme.colors.surface.muted};`);
@@ -249,6 +261,11 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --pr-merged: ${pr?.merged || (theme.metadata.variant === 'dark' ? '#8957e5' : '#8250df')};`);
     vars.push(`  --pr-closed: ${pr?.closed || theme.colors.status.error};`);
     return vars;
+  }
+
+  private getGitGraphSeries(theme: Theme): string[] {
+    const syntaxBase = theme.colors.syntax.base;
+    return gitGraphSyntaxFallbackKeys.map((key) => syntaxBase[key]);
   }
 
   private generateSyntaxColors(syntax: Theme['colors']['syntax']): string[] {

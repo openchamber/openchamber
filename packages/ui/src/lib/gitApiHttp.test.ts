@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  abortCherryPick,
   abortMerge,
   abortRebase,
+  abortRevert,
   applyGitStash,
   checkoutBranch,
   checkoutCommit,
   cherryPick,
+  continueCherryPick,
   continueMerge,
   continueRebase,
+  continueRevert,
   createBranch,
+  createGitTag,
   deleteGitBranch,
   deleteRemoteBranch,
   dropGitStash,
@@ -20,7 +25,11 @@ import {
   getGitCommitDiff,
   getCommitFiles,
   getGitLog,
+  getGitHistory,
+  getGitHistoryMergeBase,
+  getGitHistoryRefs,
   getGitStatus,
+  getCommitFileDiff,
   gitFetch,
   gitPush,
   listGitDirectories,
@@ -37,11 +46,16 @@ import {
   unstageGitFile,
   unstageGitFiles,
 } from './gitApiHttp';
-import type { GitStatus } from './api/types';
+import type {
+  GitCommitChangesRequest,
+  GitCommitFilePreviewRequest,
+  GitStatus,
+} from './api/types';
 import { sessionEvents } from './sessionEvents';
 import { gitPushScopeKey, subscribeGitPush } from './gitPushEvents';
 import { getRuntimeKey } from './runtime-switch';
 import { GitPathUnavailableError } from './api/git-path-diff';
+import { GitHistoryRequestError, STALE_GIT_HISTORY_CURSOR_CODE } from './gitHistoryError';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -103,7 +117,7 @@ const restoreMocks = () => {
   }
 };
 
-const captureError = async (callback: () => Promise<void>): Promise<unknown> => {
+const captureError = async <T,>(callback: () => Promise<T>): Promise<unknown> => {
   try {
     await callback();
     return null;
@@ -133,6 +147,24 @@ test('nested repository discovery scopes the workspace to the requested root', a
 });
 
 describe('gitApiHttp index mutations', () => {
+  test('sends create tag payloads with the commit hash', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await createGitTag('/repo', 'v1.2.3', '0123456789abcdef0123456789abcdef01234567');
+
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0].input)).toBe('/api/git/tags?directory=%2Frepo');
+      expect(calls[0].init?.method).toBe('POST');
+      expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+        name: 'v1.2.3',
+        commitHash: '0123456789abcdef0123456789abcdef01234567',
+      });
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('sends bulk stage payloads as paths', async () => {
     installWindowMock();
     const calls = installFetchMock();
@@ -196,7 +228,7 @@ describe('gitApiHttp index mutations', () => {
 });
 
 describe('gitApiHttp branch comparisons', () => {
-  test('sends commit hashes and rename paths without trimming and rejects incomplete commit lists', async () => {
+  test('sends commit hashes and rename paths without trimming', async () => {
     installWindowMock();
     const urls: URL[] = [];
     globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
@@ -213,7 +245,7 @@ describe('gitApiHttp branch comparisons', () => {
       expect(urls[0].searchParams.get('path')).toBe(' new\nfile.ts');
       expect(urls[0].searchParams.get('previousPath')).toBe('old.ts');
       expect(urls[0].searchParams.get('context')).toBe('20');
-      await expect(getCommitFiles('/repo', hash)).rejects.toThrow();
+      await expect(getCommitFiles('/repo', { commitHash: hash, parentHash: null })).rejects.toThrow();
       await expect(getGitLog('/repo', { maxCount: 50, to: 'refs/heads/feature' })).rejects.toThrow();
       expect(urls[2].searchParams.get('maxCount')).toBe('50');
       expect(urls[2].searchParams.get('to')).toBe('refs/heads/feature');
@@ -518,6 +550,10 @@ describe('gitApiHttp post-mutation status invalidation (#2281)', () => {
       await expectStatusInvalidatedBy('/repo-2281-rebase', () => rebase('/repo-2281-rebase', { onto: 'main' }));
       await expectStatusInvalidatedBy('/repo-2281-rebase-abort', () => abortRebase('/repo-2281-rebase-abort'));
       await expectStatusInvalidatedBy('/repo-2281-rebase-continue', () => continueRebase('/repo-2281-rebase-continue'));
+      await expectStatusInvalidatedBy('/repo-2281-cherry-pick-abort', () => abortCherryPick('/repo-2281-cherry-pick-abort'));
+      await expectStatusInvalidatedBy('/repo-2281-cherry-pick-continue', () => continueCherryPick('/repo-2281-cherry-pick-continue'));
+      await expectStatusInvalidatedBy('/repo-2281-revert-abort', () => abortRevert('/repo-2281-revert-abort'));
+      await expectStatusInvalidatedBy('/repo-2281-revert-continue', () => continueRevert('/repo-2281-revert-continue'));
     } finally {
       restoreMocks();
     }
@@ -635,6 +671,237 @@ describe('gitApiHttp request priority', () => {
 
       expect(calls).toHaveLength(1);
       expect(calls[0].init?.priority).toBe(undefined);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp history requests', () => {
+  test('serializes repeated refs without comma ambiguity', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitHistoryRefs('/repo');
+      await getGitHistory('/repo', { refs: ['HEAD', 'refs/heads/main'], cursor: 'cursor', limit: 25 });
+      await getGitHistoryMergeBase('/repo', { refs: ['HEAD', 'refs/heads/main'] });
+
+      expect(String(calls[0].input)).toBe('/api/git/history/refs?directory=%2Frepo');
+      expect(String(calls[1].input)).toBe('/api/git/history?directory=%2Frepo&refs=HEAD&refs=refs%2Fheads%2Fmain&cursor=cursor&limit=25');
+      expect(String(calls[2].input)).toBe('/api/git/history/merge-base?directory=%2Frepo&refs=HEAD&refs=refs%2Fheads%2Fmain');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('preserves the structured refs error returned by the server', async () => {
+    installWindowMock();
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      error: 'Directory does not appear to be a git repository',
+    }), {
+      status: 400,
+      statusText: 'Bad Request',
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    try {
+      const error = await captureError(() => getGitHistoryRefs('/tmp/not-a-repo'));
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('Directory does not appear to be a git repository');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('falls back to the status text when the refs error body is unusable', async () => {
+    installWindowMock();
+
+    const cases = [
+      new Response('{"error":', {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      new Response(JSON.stringify({}), {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      new Response(JSON.stringify({ error: '   ' }), {
+        status: 504,
+        statusText: 'Gateway Timeout',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ];
+
+    try {
+      for (const response of cases) {
+        globalThis.fetch = (async () => response.clone()) as typeof fetch;
+        const error = await captureError(() => getGitHistoryRefs('/tmp/not-a-repo'));
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(`Failed to get git history refs: ${response.statusText}`);
+      }
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('serializes the all selector without explicit refs', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitHistory('/repo', { all: true, cursor: 'cursor', limit: 25 });
+
+      expect(String(calls[0].input)).toBe('/api/git/history?directory=%2Frepo&all=true&cursor=cursor&limit=25');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('preserves structured stale cursor history errors from the server', async () => {
+    installWindowMock();
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      error: 'stale cursor',
+      code: STALE_GIT_HISTORY_CURSOR_CODE,
+    }), {
+      status: 409,
+      statusText: 'Conflict',
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    try {
+      const error = await captureError(() => getGitHistory('/repo', { refs: ['HEAD'] }));
+      expect(error).toBeInstanceOf(GitHistoryRequestError);
+      expect((error as GitHistoryRequestError).message).toBe('stale cursor');
+      expect((error as GitHistoryRequestError).status).toBe(409);
+      expect((error as GitHistoryRequestError).code).toBe(STALE_GIT_HISTORY_CURSOR_CODE);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('falls back to the status text when the history error body is unusable', async () => {
+    installWindowMock();
+
+    const cases = [
+      new Response('{"error":', {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      new Response(JSON.stringify({}), {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ];
+
+    try {
+      for (const response of cases) {
+        globalThis.fetch = (async () => response.clone()) as typeof fetch;
+        const error = await captureError(() => getGitHistory('/repo', { refs: ['HEAD'] }));
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(`Failed to get git history: ${response.statusText}`);
+      }
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('accepts object requests for commit file history helpers', async () => {
+    installWindowMock();
+    const calls: FetchCall[] = [];
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init });
+      const url = new URL(String(input), 'http://localhost');
+      return Response.json(url.pathname.endsWith('/commit-files')
+        ? { files: [] }
+        : { status: 'ready', original: '', modified: '' });
+    }, previousFetch);
+    const commitHash = 'a'.repeat(40);
+    const parentHash = 'b'.repeat(40);
+    try {
+      const changesRequest: GitCommitChangesRequest = {
+        commitHash,
+        parentHash: null,
+      };
+      const previewRequest: GitCommitFilePreviewRequest = {
+        commitHash,
+        parentHash,
+        originalPath: null,
+        modifiedPath: 'new/name.ts',
+      };
+
+      await getCommitFiles('/repo', changesRequest);
+      await getCommitFileDiff('/repo', previewRequest);
+
+      expect(String(calls[0].input)).toBe(`/api/git/commit-files?directory=%2Frepo&commitHash=${commitHash}&parentHash=__ROOT__`);
+      expect(String(calls[1].input)).toBe(`/api/git/commit-file-diff?directory=%2Frepo&commitHash=${commitHash}&parentHash=${parentHash}&originalPath=__ROOT__&modifiedPath=new%2Fname.ts`);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('preserves JSON error details for commit file previews', async () => {
+    installWindowMock();
+    const request: GitCommitFilePreviewRequest = {
+      commitHash: 'a'.repeat(40),
+      parentHash: null,
+      originalPath: null,
+      modifiedPath: 'file.ts',
+    };
+    globalThis.fetch = Object.assign(
+      async () => Response.json({ error: 'The selected commit is unavailable.' }, { status: 404 }),
+      previousFetch
+    );
+
+    try {
+      await expect(getCommitFileDiff('/repo', request))
+        .rejects.toThrow('The selected commit is unavailable.');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('accepts ready and too-large commit file preview responses', async () => {
+    installWindowMock();
+    const request: GitCommitFilePreviewRequest = {
+      commitHash: 'a'.repeat(40),
+      parentHash: null,
+      originalPath: null,
+      modifiedPath: 'file.ts',
+    };
+    const responses = [
+      Response.json({ status: 'ready', original: 'before', modified: 'after' }),
+      Response.json({ status: 'too-large', totalBytes: 200_000, maxBytes: 100_000 }),
+    ];
+    globalThis.fetch = Object.assign(async () => responses.shift()!, previousFetch);
+
+    try {
+      expect(await getCommitFileDiff('/repo', request))
+        .toEqual({ status: 'ready', original: 'before', modified: 'after' });
+      expect(await getCommitFileDiff('/repo', request))
+        .toEqual({ status: 'too-large', totalBytes: 200_000, maxBytes: 100_000 });
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('rejects malformed commit file preview responses', async () => {
+    installWindowMock();
+    const request: GitCommitFilePreviewRequest = {
+      commitHash: 'a'.repeat(40),
+      parentHash: null,
+      originalPath: null,
+      modifiedPath: 'file.ts',
+    };
+    globalThis.fetch = Object.assign(
+      async () => Response.json({ status: 'ready', original: 'before', modified: 1 }),
+      previousFetch
+    );
+
+    try {
+      await expect(getCommitFileDiff('/repo', request)).rejects.toThrow();
     } finally {
       restoreMocks();
     }

@@ -13,7 +13,6 @@ import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
 export type {
   GitRemote,
   MergeConflictDetails,
-  CommitFileDiffResponse,
 } from './api/types';
 
 const getRuntimeGit = () => {
@@ -88,6 +87,30 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitStatus(directory, options);
   return gitHttp.getGitStatus(directory, options);
+}
+
+export async function getGitHistoryRefs(directory: string): Promise<import('./api/types').GitHistoryRefsResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistoryRefs) return runtime.getGitHistoryRefs(directory);
+  return gitHttp.getGitHistoryRefs(directory);
+}
+
+export async function getGitHistory(
+  directory: string,
+  options: import('./api/types').GitHistoryOptions,
+): Promise<import('./api/types').GitHistoryPage> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistory) return runtime.getGitHistory(directory, options);
+  return gitHttp.getGitHistory(directory, options);
+}
+
+export async function getGitHistoryMergeBase(
+  directory: string,
+  options: { refs: string[] },
+): Promise<import('./api/types').GitHistoryMergeBaseResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistoryMergeBase) return runtime.getGitHistoryMergeBase(directory, options);
+  return gitHttp.getGitHistoryMergeBase(directory, options);
 }
 
 export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
@@ -482,6 +505,7 @@ export async function generatePullRequestDescription(
     .filter((entry) => typeof entry?.hash === 'string' && entry.hash.length > 0)
     .map((entry) => ({
       hash: entry.hash,
+      parentHash: entry.parents?.[0] ?? null,
       subject: typeof entry.message === 'string' ? entry.message.trim() : '',
       body: typeof entry.body === 'string' ? entry.body.trim().slice(0, COMMIT_BODY_CHAR_LIMIT) : '',
     }));
@@ -493,7 +517,10 @@ export async function generatePullRequestDescription(
   const filesSet = new Set<string>();
   await Promise.all(commits.map(async (commit) => {
     try {
-      const response = await getCommitFiles(directory, commit.hash);
+      const response = await getCommitFiles(directory, {
+        commitHash: commit.hash,
+        parentHash: commit.parentHash,
+      });
       const files = Array.isArray(response?.files) ? response.files : [];
       for (const file of files) {
         if (typeof file?.path === 'string' && file.path.trim().length > 0) {
@@ -956,6 +983,16 @@ export async function createBranch(
   return gitHttp.createBranch(directory, name, startPoint);
 }
 
+export async function createGitTag(
+  directory: string,
+  name: string,
+  commitHash: string
+): Promise<{ success: boolean; tag: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.createGitTag) return runtime.createGitTag(directory, name, commitHash);
+  return gitHttp.createGitTag(directory, name, commitHash);
+}
+
 export async function renameBranch(
   directory: string,
   oldName: string,
@@ -977,11 +1014,11 @@ export async function getGitLog(
 
 export async function getCommitFiles(
   directory: string,
-  hash: string
+  request: import('./api/types').GitCommitChangesRequest
 ): Promise<import('./api/types').GitCommitFilesResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getCommitFiles(directory, hash);
-  return gitHttp.getCommitFiles(directory, hash);
+  if (runtime) return runtime.getCommitFiles(directory, request);
+  return gitHttp.getCommitFiles(directory, request);
 }
 
 export async function getGitCommitDiff(directory: string, options: import('./api/types').GetGitCommitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
@@ -995,13 +1032,11 @@ export async function getGitCommitDiff(directory: string, options: import('./api
 
 export async function getCommitFileDiff(
   directory: string,
-  hash: string,
-  filePath: string,
-  isBinary: boolean
-): Promise<import('./api/types').CommitFileDiffResponse> {
+  request: import('./api/types').GitCommitFilePreviewRequest
+): Promise<import('./api/types').GitCommitFilePreviewResponse> {
   const runtime = getRuntimeGit();
-  if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, hash, filePath, isBinary);
-  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
+  if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, request);
+  return gitHttp.getCommitFileDiff(directory, request);
 }
 
 export async function getGitIdentities(): Promise<import('./api/types').GitIdentityProfile[]> {
@@ -1162,6 +1197,30 @@ export async function continueMerge(directory: string): Promise<{ success: boole
   return gitHttp.continueMerge(directory);
 }
 
+export async function abortCherryPick(directory: string): Promise<{ success: boolean }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.abortCherryPick) return runtimeStatusMutation(directory, runtime.abortCherryPick(directory));
+  return gitHttp.abortCherryPick(directory);
+}
+
+export async function continueCherryPick(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.continueCherryPick) return runtimeStatusMutation(directory, runtime.continueCherryPick(directory));
+  return gitHttp.continueCherryPick(directory);
+}
+
+export async function abortRevert(directory: string): Promise<{ success: boolean }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.abortRevert) return runtimeStatusMutation(directory, runtime.abortRevert(directory));
+  return gitHttp.abortRevert(directory);
+}
+
+export async function continueRevert(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.continueRevert) return runtimeStatusMutation(directory, runtime.continueRevert(directory));
+  return gitHttp.continueRevert(directory);
+}
+
 export async function stash(
   directory: string,
   options?: { message?: string; includeUntracked?: boolean }
@@ -1216,4 +1275,41 @@ export async function canonicalizeWorktreeState(
     return runtime.canonicalizeWorktreeState(directory);
   }
   return gitHttp.canonicalizeWorktreeState(directory);
+}
+
+/**
+ * Decodes runtime-prefixed error codes and returns the original message.
+ * Handles: `[reset_hard_dirty]`, `[operation_in_progress]`, and other prefixes.
+ * Returns the error message with the prefix stripped.
+ */
+export function decodeGitErrorMessage(
+  err: Error | string | null | undefined,
+  fallback: string,
+): string {
+  if (err instanceof Error) {
+    const message = err.message;
+    const match = message.match(/^\[([a-z_]+)\]\s*(.*)$/);
+    return match ? match[2] || message : message;
+  }
+  if (err !== null && err !== undefined) {
+    const match = err.match(/^\[([a-z_]+)\]\s*(.*)$/);
+    return match ? match[2] || err : err;
+  }
+  return fallback;
+}
+
+/**
+ * Checks if an error represents a "reset hard dirty" condition
+ * (working tree has uncommitted changes).
+ * Detects both runtime prefix style `[reset_hard_dirty]` and HTTP response code `error.code`.
+ */
+export function isResetHardDirtyError(err: Error | string | null | undefined): boolean {
+  if (err instanceof Error) {
+    if (err.message.startsWith('[reset_hard_dirty]')) return true;
+    return err instanceof gitHttp.GitOperationRequestError && err.code === 'reset_hard_dirty';
+  }
+  if (err !== null && err !== undefined) {
+    return err.startsWith('[reset_hard_dirty]');
+  }
+  return false;
 }

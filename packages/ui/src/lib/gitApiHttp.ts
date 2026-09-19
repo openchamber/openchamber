@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import type {
+  GitHistoryMergeBaseResponse,
+  GitHistoryOptions,
+  GitHistoryPage,
+  GitHistoryRefsResponse,
   GitStatus,
   GitDiffResponse,
   GetGitDiffOptions,
@@ -28,8 +32,10 @@ import type {
   GitStashEntry,
   GitLogOptions,
   GitLogResponse,
+  GitCommitChangesRequest,
+  GitCommitFilePreviewRequest,
+  GitCommitFilePreviewResponse,
   GitCommitFilesResponse,
-  CommitFileDiffResponse,
   GitIdentityProfile,
   GitIdentitySummary,
   DiscoveredGitCredential,
@@ -46,21 +52,55 @@ import { getRuntimeKey } from './runtime-switch';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
 import { notifyGitPush } from './gitPushEvents';
 import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
+import { GitHistoryRequestError } from './gitHistoryError';
 
 const API_BASE = '/api/git';
+const ROOT_QUERY_MARKER = '__ROOT__';
 const gitRangeDiffSchema = z.object({ diff: z.string() });
 const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string() })) });
+const gitOperationErrorBodySchema = z.object({
+  error: z.string().optional(),
+  code: z.string().optional(),
+});
+
+type GitOperationErrorBody = {
+  error?: string;
+  code?: string;
+};
+
+export class GitOperationRequestError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'GitOperationRequestError';
+    this.code = code;
+  }
+}
 const gitRangeErrorSchema = z.object({ error: z.string() });
-const gitCommitFilesSchema = z.object({ files: z.array(z.object({
-  path: z.string(), previousPath: z.string().optional(), changeType: z.string(),
-  insertions: z.number(), deletions: z.number(), isBinary: z.boolean(),
-})) });
 const gitLogEntrySchema = z.object({
   hash: z.string(), date: z.string(), message: z.string(), refs: z.string(), body: z.string(),
   author_name: z.string(), author_email: z.string(), filesChanged: z.number(),
   insertions: z.number(), deletions: z.number(), parents: z.array(z.string()),
 });
 const gitLogSchema = z.object({ all: z.array(gitLogEntrySchema), latest: gitLogEntrySchema.nullable(), total: z.number() });
+const gitCommitFilesSchema = z.object({
+  files: z.array(z.object({
+    path: z.string(),
+    originalPath: z.string().optional(),
+    status: z.enum(['A', 'M', 'D', 'R']),
+    kind: z.enum(['file', 'symlink', 'gitlink']),
+    originalObjectId: z.string().optional(),
+    objectId: z.string().optional(),
+    insertions: z.number(),
+    deletions: z.number(),
+    isBinary: z.boolean(),
+  })),
+});
+const gitCommitFilePreviewSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ready'), original: z.string(), modified: z.string() }),
+  z.object({ status: z.literal('too-large'), totalBytes: z.number(), maxBytes: z.number() }),
+]);
 
 // Servers before #3586 send no `submodule`; that means "not known to be one".
 const gitPathDiffSchema = z.object({ diff: z.string(), submodule: gitSubmoduleStateSchema.nullable().default(null) });
@@ -86,6 +126,10 @@ async function rangeResponseError(response: Response, fallback: string): Promise
 }
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
+const gitHistoryErrorPayloadSchema = z.object({
+  error: z.string().trim().min(1).optional(),
+  code: z.string().trim().min(1).optional(),
+});
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
 const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
 const gitStatusCacheVersions = new Map<string, number>();
@@ -135,12 +179,80 @@ const completeStatusMutation = async <T>(directory: string, response: Response):
 function buildUrl(
   path: string,
   directory: string | null | undefined,
-  params?: Record<string, string | number | boolean | undefined>
+  params?: Record<string, string | number | boolean | Array<string> | undefined>
 ): string {
-  const query: Record<string, string | number | boolean | undefined> = { ...params };
-  if (directory) query.directory = directory;
+  const query = new URLSearchParams();
+  if (directory) {
+    query.set('directory', directory);
+  }
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        query.append(key, item);
+      }
+      continue;
+    }
+    query.set(key, String(value));
+  }
+  const base = getRuntimeUrlResolver().api(path);
+  const serialized = query.toString();
+  if (!serialized) {
+    return base;
+  }
+  return base.includes('?') ? `${base}&${serialized}` : `${base}?${serialized}`;
+}
 
-  return getRuntimeUrlResolver().api(path, query);
+export async function getGitHistoryRefs(directory: string): Promise<GitHistoryRefsResponse> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/history/refs`, directory));
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+    const detail = typeof payload?.error === 'string' && payload.error.trim()
+      ? payload.error.trim()
+      : null;
+    throw new Error(detail ?? `Failed to get git history refs: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function getGitHistory(directory: string, options: GitHistoryOptions): Promise<GitHistoryPage> {
+  const refs = Array.isArray(options.refs) ? options.refs.map((ref) => ref.trim()).filter(Boolean) : [];
+  const all = options.all === true;
+  if (all && refs.length > 0) {
+    throw new Error('all cannot be combined with explicit refs');
+  }
+  if (!all && refs.length === 0) {
+    throw new Error('refs are required to fetch git history');
+  }
+
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/history`, directory, {
+    all: all ? true : undefined,
+    refs: all ? undefined : refs,
+    cursor: options.cursor,
+    limit: options.limit,
+  }));
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const parsed = gitHistoryErrorPayloadSchema.safeParse(payload);
+    const detail = parsed.success ? (parsed.data.error ?? null) : null;
+    const code = parsed.success ? parsed.data.code : undefined;
+    throw new GitHistoryRequestError(detail ?? `Failed to get git history: ${response.statusText}`,
+      { status: response.status, code });
+  }
+  return response.json();
+}
+
+export async function getGitHistoryMergeBase(directory: string, options: { refs: string[] }): Promise<GitHistoryMergeBaseResponse> {
+  const refs = Array.isArray(options.refs) ? options.refs.map((ref) => ref.trim()).filter(Boolean) : [];
+  if (refs.length === 0) {
+    throw new Error('refs are required to fetch git history merge base');
+  }
+
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/history/merge-base`, directory, { refs }));
+  if (!response.ok) {
+    throw new Error(`Failed to get git history merge base: ${response.statusText}`);
+  }
+  return response.json();
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
@@ -960,6 +1072,23 @@ export async function createBranch(
   return completeStatusMutation(directory, response);
 }
 
+export async function createGitTag(
+  directory: string,
+  name: string,
+  commitHash: string
+): Promise<{ success: boolean; tag: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/tags`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, commitHash }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to create tag');
+  }
+  return response.json();
+}
+
 export async function renameBranch(
   directory: string,
   oldName: string,
@@ -999,10 +1128,13 @@ export async function getGitLog(
 
 export async function getCommitFiles(
   directory: string,
-  hash: string
+  request: GitCommitChangesRequest
 ): Promise<GitCommitFilesResponse> {
   const response = await runtimeFetch(
-    buildUrl(`${API_BASE}/commit-files`, directory, { hash })
+    buildUrl(`${API_BASE}/commit-files`, directory, {
+      commitHash: request.commitHash,
+      parentHash: request.parentHash ?? ROOT_QUERY_MARKER,
+    })
   );
   if (!response.ok) {
     throw await rangeResponseError(response, 'Failed to get commit files');
@@ -1012,21 +1144,20 @@ export async function getCommitFiles(
 
 export async function getCommitFileDiff(
   directory: string,
-  hash: string,
-  filePath: string,
-  isBinary: boolean
-): Promise<CommitFileDiffResponse> {
+  request: GitCommitFilePreviewRequest
+): Promise<GitCommitFilePreviewResponse> {
   const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
-      hash,
-      path: filePath,
-      binary: isBinary ? 'true' : undefined,
+      commitHash: request.commitHash,
+      parentHash: request.parentHash ?? ROOT_QUERY_MARKER,
+      originalPath: request.originalPath ?? ROOT_QUERY_MARKER,
+      modifiedPath: request.modifiedPath ?? ROOT_QUERY_MARKER,
     })
   );
   if (!response.ok) {
-    throw new Error(`Failed to get commit file diff: ${response.statusText}`);
+    throw await rangeResponseError(response, 'Failed to get commit file diff');
   }
-  return response.json();
+  return gitCommitFilePreviewSchema.parse(await response.json());
 }
 
 export async function getGitIdentities(): Promise<GitIdentityProfile[]> {
@@ -1267,8 +1398,10 @@ export async function resetToCommit(
     body: JSON.stringify({ hash, mode, force }),
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to reset');
+    const error: GitOperationErrorBody = gitOperationErrorBodySchema.parse(
+      await response.json().catch(() => ({ error: response.statusText })),
+    );
+    throw new GitOperationRequestError(error.error ?? 'Failed to reset', error.code);
   }
   return completeStatusMutation(directory, response);
 }
@@ -1302,6 +1435,50 @@ export async function continueMerge(directory: string): Promise<{ success: boole
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to continue merge');
+  }
+  return completeStatusMutation(directory, response);
+}
+
+export async function abortCherryPick(directory: string): Promise<{ success: boolean }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/cherry-pick/abort`, directory), {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to abort cherry-pick');
+  }
+  return completeStatusMutation(directory, response);
+}
+
+export async function continueCherryPick(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/cherry-pick/continue`, directory), {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to continue cherry-pick');
+  }
+  return completeStatusMutation(directory, response);
+}
+
+export async function abortRevert(directory: string): Promise<{ success: boolean }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/revert/abort`, directory), {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to abort revert');
+  }
+  return completeStatusMutation(directory, response);
+}
+
+export async function continueRevert(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/revert/continue`, directory), {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to continue revert');
   }
   return completeStatusMutation(directory, response);
 }

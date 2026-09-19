@@ -18,6 +18,14 @@ type SpecialGitDeps = {
   execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
 };
 
+async function readGitStateFile(deps: SpecialGitDeps, directory: string, marker: string): Promise<string> {
+  const markerResult = await deps.execGit(['rev-parse', '--git-path', marker], directory);
+  if (markerResult.exitCode !== 0 || !markerResult.stdout.trim()) {
+    return '';
+  }
+  return fs.promises.readFile(path.resolve(directory, markerResult.stdout.trim()), 'utf8').catch(() => '');
+}
+
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
 const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
 const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
@@ -382,13 +390,7 @@ export async function handleSpecialGitBridgeMessage(
         if (mergeHeadExists) {
           operation = 'merge';
           const mergeHead = mergeHeadResult.stdout.trim();
-          let mergeMsg = '';
-          try {
-            const mergeMsgPath = path.join(directory, '.git', 'MERGE_MSG');
-            mergeMsg = await fs.promises.readFile(mergeMsgPath, 'utf8');
-          } catch {
-            // MERGE_MSG may not exist
-          }
+          const mergeMsg = await readGitStateFile(deps, directory, 'MERGE_MSG');
           headInfo = `MERGE_HEAD: ${mergeHead}${mergeMsg ? '\n' + mergeMsg : ''}`;
         } else {
           const rebaseHeadResult = await deps.execGit(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'], directory);

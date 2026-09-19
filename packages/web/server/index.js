@@ -1163,6 +1163,11 @@ const startupPipelineRuntime = createStartupPipelineRuntime({
   createServerStartupRuntime,
 });
 
+export const withFeatureRouteBroadcastDependency = (routeDependencies, broadcastGlobalUiEvent) => ({
+  ...routeDependencies,
+  broadcastGlobalUiEvent,
+});
+
 const openCodeLifecycleState = {};
 Object.defineProperties(openCodeLifecycleState, {
   openCodeProcess: { get: () => openCodeProcess, set: (value) => { openCodeProcess = value; } },
@@ -1987,7 +1992,7 @@ async function main(options = {}) {
     logger: console,
   });
 
-  await featureRoutesRuntime.registerRoutes(app, {
+  await featureRoutesRuntime.registerRoutes(app, withFeatureRouteBroadcastDependency({
     crypto,
     fs,
     os,
@@ -2046,7 +2051,7 @@ async function main(options = {}) {
     permissionAutoAcceptRuntime,
     messageQueueRuntime,
     routingRuntime,
-  });
+  }, broadcastGlobalUiEvent));
 
   // After bootstrap: the upgrade gate needs the real UI auth controller.
   guestSurfaceRuntime = createGuestSurfaceRuntime({
