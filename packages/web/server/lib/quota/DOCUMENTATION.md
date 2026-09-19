@@ -27,6 +27,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
 | `command-code` | Command Code | `providers/command-code.js` | `command-code` OAuth/API credential in OpenCode `auth.json`, or `COMMAND_CODE_API_KEY` |
 | `cursor` | Cursor | `providers/cursor.js` | Environment/token files, OpenChamber-managed credentials, or explicit one-time Cursor import |
+| `deepinfra` | DeepInfra | `providers/deepinfra.js` | `deepinfra`, `deep-infra`, `deep_infra` (API key under `key` or `token`) |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |
 | `exe-dev` | exe.dev | `providers/exe-dev.js` | Usage API token stored under `~/.config/openchamber/quota/` |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
@@ -105,6 +106,10 @@ is a failed refresh, not zero usage. Both implementations choose a non-empty
 `key`, then `token`, and expose auth/fetch dependencies for focused tests.
 Saved UI provider-visibility lists remain authoritative; installations without a
 saved list include ClinePass through the provider registry.
+
+## DeepInfra balance semantics
+
+DeepInfra reports the spendable credit through `GET https://api.deepinfra.com/v1/me?checklist=true` (bearer API key). The documented `checklist.stripe_balance` is **negative when funds are ready to spend** and **positive when money is owed**, so the provider negates it before rendering the `credits_balance` money label (`-$X.XX` when a balance is owed). The API key is read from the OpenCode `auth.json` entry (`deepinfra`, `deep-infra`, `deep_infra`). Keep `packages/web/server/lib/quota/providers/deepinfra.js` and `packages/vscode/src/quotaProviders.ts` (`fetchDeepinfraQuota`) in sync — the VS Code extension duplicates this parsing logic rather than importing the web provider.
 
 ## Charm Hyper balance semantics
 

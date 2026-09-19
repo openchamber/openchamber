@@ -156,6 +156,14 @@ type DeepseekPayload = {
   }>;
 };
 
+type DeepinfraPayload = {
+  checklist?: {
+    stripe_balance?: number | string;
+    recent?: number | string;
+    limit?: number | string | null;
+  } | null;
+};
+
 type NeuralwattPayload = {
   balance?: {
     credits_remaining_usd?: number | string;
@@ -852,6 +860,11 @@ export const listConfiguredQuotaProviders = () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
     configured.add('deepseek');
+  }
+
+  const deepinfraAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepinfra', 'deep-infra', 'deep_infra']));
+  if (deepinfraAuth && ((deepinfraAuth as Record<string, unknown>).key || (deepinfraAuth as Record<string, unknown>).token)) {
+    configured.add('deepinfra');
   }
 
   if (getHyperApiKey(auth)) {
@@ -2779,6 +2792,100 @@ export const fetchClinePassQuota = async ({ readAuth = readAuthFile, fetchImpl =
   }
 };
 
+const DEEPINFRA_ME_URL = 'https://api.deepinfra.com/v1/me?checklist=true';
+
+const fetchDeepinfraQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepinfra', 'deep-infra', 'deep_infra'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'deepinfra',
+      providerName: 'DeepInfra',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(DEEPINFRA_ME_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'deepinfra',
+        providerName: 'DeepInfra',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with DeepInfra'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as DeepinfraPayload;
+    // Documented at https://docs.deepinfra.com/api-reference/account/me:
+    // checklist.stripe_balance is negative when funds are ready to spend and
+    // positive when money is owed, so the spendable credit is its negation.
+    const stripeBalance = toNumber(payload?.checklist?.stripe_balance);
+
+    if (stripeBalance === null) {
+      return buildResult({
+        providerId: 'deepinfra',
+        providerName: 'DeepInfra',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const availableCredits = -stripeBalance;
+    const symbol = availableCredits < 0 ? '-$' : '$';
+    const windows: Record<string, UsageWindow> = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `${symbol}${formatMoney(Math.abs(availableCredits))}`,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'deepinfra',
+      providerName: 'DeepInfra',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'deepinfra',
+      providerName: 'DeepInfra',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
 
 const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
@@ -3102,6 +3209,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchCursorQuota();
     case 'cline-pass':
       return fetchClinePassQuota();
+    case 'deepinfra':
+      return fetchDeepinfraQuota();
     case 'deepseek':
       return fetchDeepseekQuota();
     case 'hyper':
