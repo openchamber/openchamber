@@ -68,9 +68,129 @@ const outputTasks = (options, tasks) => {
   clackOutro(`${normalizedTasks.length} task(s)`);
 };
 
-async function scheduleCommand(options = {}, action = 'help') {
+const SCHEDULE_OUTPUT_OPTIONS = `OUTPUT OPTIONS:
+  -p, --port <port>       OpenChamber server port
+  --json                  Output machine-readable JSON
+  -q, --quiet             Print concise output`;
+
+const SCHEDULE_TARGET_OPTIONS = `  --project <projectId>   Project id from openchamber projects
+  --dir <path>            Resolve project by directory`;
+
+const SCHEDULE_ACTION_HELP = {
+  status: `OpenChamber Schedule Status
+
+USAGE:
+  openchamber schedule status [OPTIONS]
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+
+  list: `OpenChamber Schedule List
+
+USAGE:
+  openchamber schedule list (--project <projectId> | --dir <path>) [OPTIONS]
+
+OPTIONS:
+${SCHEDULE_TARGET_OPTIONS}
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+
+  create: `OpenChamber Schedule Create
+
+USAGE:
+  openchamber schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]
+
+OPTIONS:
+${SCHEDULE_TARGET_OPTIONS}
+  --name <name>           Task name
+  --prompt <prompt>       Prompt to run on schedule
+  --model <provider/model>  Model for the task
+  --daily <HH:mm>         Run daily at this time
+  --weekly <0,1,2>        Comma-separated weekdays (0=Sunday, 6=Saturday)
+  --once <YYYY-MM-DD>     Run once on this date
+  --time <HH:mm>          Time for weekly or one-time schedules
+  --cron <expr>           Cron expression schedule
+  --timezone <zone>       IANA timezone for created tasks
+  --agent <id>            Agent to use when running task
+  --variant <id>          Model variant to use when running task
+  --goal                  Continue the scheduled session toward a goal
+  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)
+  --disabled              Create task disabled
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+
+  run: `OpenChamber Schedule Run
+
+USAGE:
+  openchamber schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]
+
+OPTIONS:
+${SCHEDULE_TARGET_OPTIONS}
+  --task <taskId>         Task to run now
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+
+  delete: `OpenChamber Schedule Delete
+
+USAGE:
+  openchamber schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]
+
+OPTIONS:
+${SCHEDULE_TARGET_OPTIONS}
+  --task <taskId>         Task to delete
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+
+  enable: `OpenChamber Schedule Enable
+
+USAGE:
+  openchamber schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]
+
+OPTIONS:
+${SCHEDULE_TARGET_OPTIONS}
+  --task <taskId>         Task to enable
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+
+  disable: `OpenChamber Schedule Disable
+
+USAGE:
+  openchamber schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]
+
+OPTIONS:
+${SCHEDULE_TARGET_OPTIONS}
+  --task <taskId>         Task to disable
+
+${SCHEDULE_OUTPUT_OPTIONS}`,
+};
+
+const SCHEDULE_OVERVIEW_HELP = `OpenChamber Schedule Commands
+
+USAGE:
+  openchamber schedule <command> [OPTIONS]
+
+COMMANDS:
+  status      Show scheduler status
+  list        List scheduled tasks
+  create      Create a scheduled task
+  run         Run a task now
+  delete      Delete a task
+  enable      Enable a task
+  disable     Disable a task
+
+FOCUSED HELP:
+  openchamber schedule <command> --help   Show options for one command
+`;
+
+function showScheduleHelp(focus) {
+  const focused = typeof focus === 'string' && Object.prototype.hasOwnProperty.call(SCHEDULE_ACTION_HELP, focus)
+    ? SCHEDULE_ACTION_HELP[focus]
+    : null;
+  process.stdout.write(`${focused ?? SCHEDULE_OVERVIEW_HELP}\n`);
+}
+
+async function scheduleCommand(options = {}, action = 'help', helpFocus = null) {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Schedule Commands\n\nUSAGE:\n  openchamber schedule status [OPTIONS]\n  openchamber schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  openchamber schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  openchamber schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from openchamber projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       OpenChamber server port\n  --timezone <zone>       IANA timezone for created tasks\n  --agent <id>            Agent to use when running task\n  --variant <id>          Model variant to use when running task\n  --goal                  Continue the scheduled session toward a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create task disabled\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
+    showScheduleHelp(helpFocus);
     return;
   }
 
