@@ -5,8 +5,10 @@ import { ThemeSelectItem } from './ThemeSelectItem';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Input } from '@/components/ui/input';
@@ -302,7 +304,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'updateChannel' | 'autoSaveEnabled' | 'sessionTabs';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -466,6 +468,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
     const reportUsage = useUIStore(state => state.reportUsage);
     const setReportUsage = useUIStore(state => state.setReportUsage);
+    const updateChannel = useUIStore(state => state.updateChannel);
+    const setUpdateChannel = useUIStore(state => state.setUpdateChannel);
+    const checkForUpdates = useUpdateStore(state => state.checkForUpdates);
+
+    const handleUpdateChannelChange = React.useCallback((value: string) => {
+        if (value === 'stable' || value === 'beta') {
+            const channelLabel = value === 'beta' ? 'Beta' : 'Stable';
+            setUpdateChannel(value);
+            toast.info(t('settings.openchamber.visual.toast.switchedChannel', { channel: channelLabel }));
+            void checkForUpdates().then(() => {
+                const state = useUpdateStore.getState();
+                if (!state.available && !state.error) {
+                    toast.success(t('settings.openchamber.visual.toast.latestVersionForChannel', { channel: channelLabel }));
+                }
+            });
+        }
+    }, [setUpdateChannel, checkForUpdates, t]);
 
     // Sync reportUsage changes to server settings
     const handleReportUsageChange = React.useCallback((enabled: boolean) => {
@@ -2195,6 +2214,26 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
                             settingsItem="appearance.usage-reports"
                         />
+                    </SettingsSection>
+                )}
+
+                {/* --- Updates --- */}
+                {shouldShow('updateChannel') && (
+                    <SettingsSection title={t('settings.openchamber.visual.section.updates')}>
+                        <SettingsFieldRow
+                            label={t('settings.openchamber.visual.field.updateChannel')}
+                            info={t('settings.openchamber.visual.field.updateChannelHint')}
+                            settingsItem="appearance.update-channel"
+                        >
+                            <SettingsChipGroup
+                                value={updateChannel}
+                                onChange={handleUpdateChannelChange}
+                                options={[
+                                    { value: 'stable', label: 'Stable' },
+                                    { value: 'beta', label: 'Beta' },
+                                ]}
+                            />
+                        </SettingsFieldRow>
                     </SettingsSection>
                 )}
 

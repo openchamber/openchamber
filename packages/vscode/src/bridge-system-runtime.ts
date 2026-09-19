@@ -320,12 +320,16 @@ export async function handleSystemBridgeMessage(
           : os.arch();
         const reportUsage = body.reportUsage !== false;
 
+        const channel = typeof body.channel === 'string' && body.channel.trim().length > 0
+          ? body.channel.trim()
+          : (currentVersion.includes('-beta.') ? 'beta' : 'stable');
+
         const requestBody = {
           appType: 'vscode',
           deviceClass,
           platform: mapNodePlatformToApiPlatform(platformRaw),
           arch: mapNodeArchToApiArch(archRaw),
-          channel: 'stable',
+          channel,
           currentVersion,
           ...(reportUsage ? { installId: getOrCreateInstallId('vscode') } : {}),
           instanceMode,

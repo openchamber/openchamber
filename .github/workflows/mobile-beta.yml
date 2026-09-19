@@ -1,68 +1,36 @@
-name: Mobile Release
+name: Mobile Beta Build & Distribution
 
 on:
+  push:
+    branches:
+      - 'beta'
+      - 'release/**'
+  schedule:
+    # Run nightly beta build at 02:00 UTC
+    - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
+      platform:
+        description: Target platform to build
+        required: true
+        type: choice
+        options:
+          - both
+          - android
+          - ios
+        default: both
       version_name:
-        description: Version name / marketing version. Leave empty to use package.json version.
+        description: Custom marketing version name (leave empty for auto)
         required: false
         type: string
-      build_number:
-        description: Build number. Leave empty to use GitHub run number.
+      testflight_public_link:
+        description: TestFlight Public Join URL for QR code generation
         required: false
         type: string
-      release_tag:
-        description: Existing GitHub Release tag for Android artifact upload, for example v1.14.1.
-        required: false
-        type: string
-      upload_github_release:
-        description: Upload Android artifacts to GitHub Release. Requires release_tag when called by the release workflow.
-        required: false
-        default: false
-        type: boolean
-      build_android:
-        description: Build Android signed APK/AAB artifacts.
-        required: false
-        default: true
-        type: boolean
-      build_ios:
-        description: Build iOS IPA and upload it to TestFlight.
-        required: false
-        default: true
-        type: boolean
-  workflow_call:
-    inputs:
-      version_name:
-        description: Version name / marketing version. Leave empty to use package.json version.
-        required: false
-        type: string
-      build_number:
-        description: Build number. Leave empty to use GitHub run number.
-        required: false
-        type: string
-      release_tag:
-        description: Existing GitHub Release tag to attach Android artifacts to.
-        required: false
-        type: string
-      upload_github_release:
-        description: Upload Android artifacts to the matching GitHub Release.
-        required: false
-        default: false
-        type: boolean
-      build_android:
-        description: Build Android signed APK/AAB artifacts.
-        required: false
-        default: true
-        type: boolean
-      build_ios:
-        description: Build iOS IPA and upload it to TestFlight.
-        required: false
-        default: true
-        type: boolean
 
 concurrency:
-  group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}
-  cancel-in-progress: false
+  group: mobile-beta-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   MOBILE_PACKAGE_DIR: packages/mobile
@@ -71,54 +39,67 @@ env:
 
 jobs:
   resolve-version:
-    name: Resolve mobile version
+    name: Resolve version & targets
     runs-on: ubuntu-latest
     outputs:
       version_name: ${{ steps.version.outputs.version_name }}
       build_number: ${{ steps.version.outputs.build_number }}
       release_tag: ${{ steps.version.outputs.release_tag }}
+      build_android: ${{ steps.version.outputs.build_android }}
+      build_ios: ${{ steps.version.outputs.build_ios }}
+      testflight_url: ${{ steps.version.outputs.testflight_url }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version values
+      - name: Calculate version and target flags
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
-          input_version='${{ inputs.version_name }}'
-          input_build='${{ inputs.build_number }}'
-          input_release_tag='${{ inputs.release_tag }}'
-          build_android='${{ inputs.build_android }}'
-          build_ios='${{ inputs.build_ios }}'
           package_version="$(node -p "require('./package.json').version")"
+          input_version="${{ github.event.inputs.version_name }}"
+          input_platform="${{ github.event.inputs.platform || 'both' }}"
+          input_tf_url="${{ github.event.inputs.testflight_public_link }}"
+          secret_tf_url="${{ secrets.TESTFLIGHT_PUBLIC_LINK }}"
 
-          if [[ "$build_android" != "true" && "$build_ios" != "true" ]]; then
-            echo "Select at least one platform: build_android or build_ios."
-            exit 1
+          build_number="${{ github.run_number }}"
+          base_version="${input_version:-$package_version}"
+          version_name="${base_version}-beta.${build_number}"
+          release_tag="beta-v${version_name}"
+          testflight_url="${input_tf_url:-$secret_tf_url}"
+
+          build_android="true"
+          build_ios="true"
+
+          if [[ "$input_platform" == "android" ]]; then
+            build_ios="false"
+          elif [[ "$input_platform" == "ios" ]]; then
+            build_android="false"
           fi
-
-          version_name="${input_version:-$package_version}"
-          build_number="${input_build:-${{ github.run_number }}}"
-          release_tag="$input_release_tag"
 
           {
             echo "version_name=$version_name"
             echo "build_number=$build_number"
             echo "release_tag=$release_tag"
+            echo "build_android=$build_android"
+            echo "build_ios=$build_ios"
+            echo "testflight_url=$testflight_url"
           } >> "$GITHUB_OUTPUT"
 
-  android-release:
-    name: Android signed release
-    if: inputs.build_android
-    runs-on: ubuntu-latest
+  android-beta:
+    name: Build Android Beta APK & Release
     needs: resolve-version
+    if: needs.resolve-version.outputs.build_android == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
 
       - uses: actions/setup-java@v4
         with:
@@ -126,7 +107,7 @@ jobs:
           java-version: 21
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Prepare Android keystore
         shell: bash
@@ -135,16 +116,16 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
-            echo "ANDROID_KEYSTORE_BASE64 secret is required."
+            echo "Warning: ANDROID_KEYSTORE_BASE64 secret is missing."
             exit 1
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/openchamber-release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/openchamber-beta.keystore"
 
-      - name: Build signed Android release
+      - name: Build signed Android APK & AAB
         env:
           OPENCHAMBER_ANDROID_VERSION_CODE: ${{ needs.resolve-version.outputs.build_number }}
           OPENCHAMBER_ANDROID_VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
-          OPENCHAMBER_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/openchamber-release.keystore
+          OPENCHAMBER_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/openchamber-beta.keystore
           OPENCHAMBER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           OPENCHAMBER_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           OPENCHAMBER_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -152,17 +133,8 @@ jobs:
           bun run mobile:sync
           ./packages/mobile/android/gradlew -p packages/mobile/android bundleRelease assembleRelease
 
-      - name: Upload Android artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: openchamber-android-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
-          path: |
-            packages/mobile/android/app/build/outputs/bundle/release/*.aab
-            packages/mobile/android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-
-      - name: Upload Android artifacts to GitHub Release
-        if: inputs.upload_github_release && needs.resolve-version.outputs.release_tag != ''
+      - name: Create Beta Release & Upload Artifacts
+        id: create_beta_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
@@ -171,18 +143,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release-assets
-          cp app/build/outputs/bundle/release/*.aab "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
-          cp app/build/outputs/apk/release/*.apk "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
-          files=(
-            app/build/outputs/bundle/release/*.aab
-            app/build/outputs/apk/release/*.apk
-            release-assets/*
-          )
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
-        working-directory: ${{ env.ANDROID_PROJECT_DIR }}
 
-      - name: Upload to Google Play Console (Production / Release Track)
+          APK_PATH=$(find packages/mobile/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          AAB_PATH=$(find packages/mobile/android/app/build/outputs/bundle/release -name "*.aab" | head -n 1)
+
+          if [[ -z "$APK_PATH" ]]; then
+            echo "Error: APK file not found!"
+            exit 1
+          fi
+
+          node scripts/changelog/generate-beta-notes.mjs --version "$VERSION_NAME" --build "$BUILD_NUMBER" --output "$RUNNER_TEMP/beta-notes.md"
+
+          # Create prerelease tag & release on GitHub
+          gh release create "$RELEASE_TAG" "$APK_PATH" "$AAB_PATH" \
+            --title "OpenChamber Android Beta v${VERSION_NAME}" \
+            --notes-file "$RUNNER_TEMP/beta-notes.md" \
+            --prerelease \
+            --repo "${{ github.repository }}"
+
+          # Get browser download URL of uploaded APK
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/$(basename "$APK_PATH")"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Android Beta QR Code in Summary
+        env:
+          DOWNLOAD_URL: ${{ steps.create_beta_release.outputs.download_url }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+        run: |
+          node scripts/generate-beta-qr.mjs \
+            --platform android \
+            --url "$DOWNLOAD_URL" \
+            --version "$VERSION_NAME" \
+            --build "$BUILD_NUMBER"
+
+      - name: Upload to Google Play Console (Internal Track)
         if: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON != '' }}
         uses: rstudio/google-play-track-action@v1
         with:
@@ -193,18 +188,20 @@ jobs:
           status: completed
 
 
-  ios-testflight:
-    name: iOS TestFlight upload
-    if: inputs.build_ios
-    runs-on: macos-26
+  ios-beta:
+    name: Build & Upload iOS TestFlight
     needs: resolve-version
+    if: needs.resolve-version.outputs.build_ios == 'true'
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Install Apple signing assets
         shell: bash
@@ -218,7 +215,7 @@ jobs:
           set -euo pipefail
           for name in IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_APP_PROFILE_BASE64 IOS_WIDGET_PROFILE_BASE64 IOS_NSE_PROFILE_BASE64; do
             if [[ -z "${!name}" ]]; then
-              echo "$name secret is required."
+              echo "Error: $name secret is required."
               exit 1
             fi
           done
@@ -350,13 +347,6 @@ jobs:
           IOS_NSE_PROFILE_NAME: ${{ secrets.IOS_NSE_PROFILE_NAME }}
         run: |
           set -euo pipefail
-          for name in IOS_APP_PROFILE_NAME IOS_WIDGET_PROFILE_NAME IOS_NSE_PROFILE_NAME; do
-            if [[ -z "${!name}" ]]; then
-              echo "$name secret is required."
-              exit 1
-            fi
-          done
-
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -388,13 +378,6 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
         working-directory: ${{ env.IOS_PROJECT_DIR }}
 
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openchamber-ios-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
-          path: ${{ runner.temp }}/OpenChamberExport/*.ipa
-          if-no-files-found: error
-
       - name: Upload to TestFlight
         shell: bash
         env:
@@ -410,3 +393,16 @@ jobs:
             --file "$RUNNER_TEMP/OpenChamberExport/App.ipa" \
             --apiKey "$APP_STORE_CONNECT_KEY_ID" \
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Generate iOS TestFlight QR Code in Summary
+        if: needs.resolve-version.outputs.testflight_url != ''
+        env:
+          TF_URL: ${{ needs.resolve-version.outputs.testflight_url }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+        run: |
+          node scripts/generate-beta-qr.mjs \
+            --platform ios \
+            --url "$TF_URL" \
+            --version "$VERSION_NAME" \
+            --build "$BUILD_NUMBER"

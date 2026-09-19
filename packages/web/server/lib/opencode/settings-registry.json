@@ -715,6 +715,10 @@
       "scope": "device",
       "local": true
     },
+    "updateChannel": {
+      "scope": "device",
+      "local": true
+    },
     "desktopSplashColors": {
       "scope": "instance",
       "owner": "desktop-shell",

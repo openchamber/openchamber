@@ -564,6 +564,7 @@ export const LOCAL_DEVICE_KEYS = [
   'alwaysShowScrollbars',
   'agentMemoryViewedAt',
   'projectContextSidebarWidth',
+  'updateChannel',
 ] as const;
 
 /**
