@@ -11,9 +11,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { commandMatchesSearch, mergeCommandAutocompleteItems } from './commandAutocompleteItems';
+import { useGuestCommands } from '@/hooks/useGuestSurfaces';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
-type CommandSource = 'openchamber' | 'opencode' | 'skill';
+type CommandSource = 'openchamber' | 'opencode' | 'skill' | 'extension';
 
 export interface CommandInfo {
   id: string;
@@ -27,7 +28,16 @@ export interface CommandInfo {
   isOpenChamber?: boolean;
   isSkill?: boolean;
   scope?: string;
+  /** Name of the extension that contributed the command; shown as its badge. */
+  extensionName?: string;
 }
+
+// Every name the composer runs itself; an extension command with one of
+// these names is dropped before it reaches the list.
+const LOCAL_COMMAND_NAMES = [
+  'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'btw', 'summary', 'workspace-review', 'handoff-review',
+  'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
+];
 
 export interface CommandAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -118,6 +128,14 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     void refreshSkills();
   }, [refreshCommands, refreshSkills]);
 
+  const reservedCommandNames = React.useMemo(() => {
+    const names = new Set<string>(LOCAL_COMMAND_NAMES);
+    for (const command of commandsWithMetadata) names.add(command.name.toLowerCase());
+    for (const skill of skills) names.add(skill.name.toLowerCase());
+    return names;
+  }, [commandsWithMetadata, skills]);
+  const guestCommands = useGuestCommands(reservedCommandNames);
+
   React.useEffect(() => {
     const loadCommands = async () => {
       setLoading(true);
@@ -153,10 +171,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                 { id: 'openchamber:undo', name: 'undo', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.undoDescription'), isBuiltIn: true },
                 { id: 'openchamber:redo', name: 'redo', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.redoDescription'), isBuiltIn: true },
                 { id: 'openchamber:timeline', name: 'timeline', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.timelineDescription'), isBuiltIn: true },
+                { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
               ]
             : []
           ),
-          { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:btw', name: 'btw', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.btwDescription'), isOpenChamber: true }]
             : []
@@ -202,7 +220,17 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
         ];
-        const allCommands = mergeCommandAutocompleteItems(builtInCommands, customCommands, skillCommands);
+        const extensionCommands: CommandInfo[] = guestCommands.map((entry) => ({
+          id: `extension:${entry.guestId}:${entry.command.name}`,
+          name: entry.command.name,
+          source: 'extension',
+          description: entry.command.description,
+          extensionName: entry.guestName,
+        }));
+        const allCommands = [
+          ...mergeCommandAutocompleteItems(builtInCommands, customCommands, skillCommands),
+          ...extensionCommands,
+        ];
 
         const filtered = searchQuery
           ? allCommands.filter(cmd => commandMatchesSearch(cmd, searchQuery))
@@ -293,7 +321,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, t]);
+  }, [searchQuery, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, guestCommands, skills, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
@@ -347,24 +375,27 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
     switch (command.name) {
       case 'init':
-        return <Icon name="file" className="h-3.5 w-3.5 text-green-500" />;
+        return <Icon name="file" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'undo':
-        return <Icon name="arrow-go-back" className="h-3.5 w-3.5 text-orange-500" />;
+        return <Icon name="arrow-go-back" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'redo':
-        return <Icon name="arrow-go-forward" className="h-3.5 w-3.5 text-orange-500" />;
+        return <Icon name="arrow-go-forward" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'timeline':
         return <Icon name="time" className="h-3.5 w-3.5" />;
       case 'compact':
-        return <Icon name="scissors" className="h-3.5 w-3.5 text-purple-500" />;
+        return <Icon name="scissors" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'review':
-        return <Icon name="search-eye" className="h-3.5 w-3.5 text-blue-500" />;
+        return <Icon name="search-eye" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'test':
       case 'build':
       case 'run':
         return <Icon name="terminal-box" className="h-3.5 w-3.5 text-cyan-500" />;
       default:
         if (command.isBuiltIn) {
-          return <Icon name="flashlight" className="h-3.5 w-3.5 text-yellow-500" />;
+          return <Icon name="flashlight" className="h-3.5 w-3.5 text-muted-foreground" />;
+        }
+        if (command.source === 'extension') {
+          return <Icon name="window" className="h-3.5 w-3.5 text-muted-foreground" />;
         }
         return <Icon name="command" className="h-3.5 w-3.5 text-muted-foreground" />;
     }
@@ -373,7 +404,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-64 oc-glass-popover border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
       <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
@@ -464,7 +495,11 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                           {t('chat.commandAutocomplete.badge.command')}
                         </span>
                       )}
-                      {isOpenChamberBadge ? (
+                      {command.extensionName ? (
+                        <span className={NEUTRAL_BADGE_CLASS}>
+                          {command.extensionName}
+                        </span>
+                      ) : isOpenChamberBadge ? (
                         <span className={NEUTRAL_BADGE_CLASS}>
                           OpenChamber
                         </span>

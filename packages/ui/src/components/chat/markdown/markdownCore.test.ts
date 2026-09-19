@@ -105,6 +105,96 @@ describe('markdown sanitization', () => {
 
 });
 
+describe('Markdown parser failures', () => {
+  // Real parser recursion overflow, rather than a mocked parse failure.
+  const source = `${'> '.repeat(20000)}<img src=x onerror="alert(1)"> & text\n  **unfinished`;
+  const fallback = `<div class="whitespace-pre-wrap break-words">${escapeRawMarkdownHtml(source)}</div>`;
+
+  test('preserves source as inert text on first paint in both image modes', () => {
+    expect(renderMarkdownSync(source, 'inline')).toBe(fallback);
+    expect(renderMarkdownSync(source, 'label')).toBe(fallback);
+    expect(renderMarkdownSync('**healthy**')).toContain('<strong>healthy</strong>');
+  });
+
+  test('keeps streaming and settled rendering readable and caches the settled fallback', async () => {
+    resetMarkdownHtmlCacheForTests();
+    for (const streaming of [true, false]) {
+      const blocks = await renderMarkdownBlocks(source, streaming);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0]?.html).toBe(fallback);
+    }
+    expect(getCachedMarkdownBlocks(source)?.[0]?.html).toBe(fallback);
+    const healthy = await renderMarkdownBlocks('**still healthy**', false);
+    expect(healthy[0]?.html).toContain('<strong>still healthy</strong>');
+  });
+
+  test('keeps images from other messages when one message cannot be scanned', () => {
+    expect(extractMarkdownImageCandidates([
+      '![before](https://example.test/before.png)',
+      source,
+      '![after](https://example.test/after.png)',
+    ])).toEqual([
+      { source: 'https://example.test/before.png', filename: 'before.png' },
+      { source: 'https://example.test/after.png', filename: 'after.png' },
+    ]);
+  });
+});
+
+describe('Markdown disclosures', () => {
+  test('renders summaries and rich Markdown without allowing raw HTML attributes', () => {
+    const html = renderMarkdownSync('<details open><summary>Review **ready**</summary>\n\n> Quoted review\n\n1. First\n2. Second\n\n```sh\nbun test\n```\n\n</details>\n\nAfter');
+    expect(html).toContain('<details data-md-details open>');
+    expect(html).toContain('<summary>Review <strong>ready</strong></summary>');
+    expect(html).toContain('<blockquote>');
+    expect(html).toContain('<ol>');
+    expect(html).toContain('<code class="language-sh">bun test');
+    expect(html).toContain('</details><p>After</p>');
+    const unsafe = renderMarkdownSync('<details onclick="alert(1)"><summary>Unsafe</summary>text</details>');
+    expect(unsafe).not.toContain('<details');
+    expect(unsafe).toContain('&lt;details');
+    expect(renderMarkdownSync('<details><summary>Safe</summary>\n\n<style>body{display:none}</style>\n\n</details>')).not.toContain('<style>');
+  });
+
+  test('keeps nested disclosures and literal closing tags inside code in their owner', () => {
+    const source = '<details><summary>Outer</summary>\n\n`</details>`\n\n```html\n</details>\n```\n\n<details open><summary>Inner</summary>\n\n**Nested**\n\n</details>\n\nOuter end\n\n</details>\n\nAfter';
+    const html = renderMarkdownSync(source);
+    expect(html.match(/<details /g)).toHaveLength(2);
+    expect(html).toContain('<code>&lt;/details&gt;</code>');
+    expect(html).toContain('<strong>Nested</strong>');
+    expect(html).toContain('</details><p>Outer end</p>');
+    expect(html).toContain('</details><p>After</p>');
+    expect(renderMarkdownSync('```html\n<details><summary>Example</summary></details>\n```')).not.toContain('<details');
+  });
+
+  test('keeps streamed bodies together and settled leading blocks cache-stable', async () => {
+    const prefix = 'Introduction\n\n<details><summary>Review</summary>\n\n';
+    const first = await renderMarkdownBlocks(`${prefix}> First\n\n1. Item`, true);
+    const next = await renderMarkdownBlocks(`${prefix}> First\n\n1. Item\n2. More\n\n\`\`\`sh\nbun test`, true);
+    expect(first).toHaveLength(2);
+    expect(next).toHaveLength(2);
+    expect(next[0]).toEqual(first[0]);
+    expect(next[1]?.html).toContain('<details data-md-details>');
+    expect(next[1]?.html).toContain('<li>More</li>');
+    expect(next[1]?.html).toContain('bun test');
+    expect(next[1]?.html.endsWith('</details>')).toBe(true);
+    const finished = await renderMarkdownBlocks(`${prefix}> First\n\n</details>\n\nAfter`, true);
+    expect(finished).toHaveLength(3);
+    expect(finished[2]?.html).toContain('<p>After</p>');
+  });
+
+  test('handles incomplete summary and closing tag prefixes without losing content', async () => {
+    const source = '<details><summary>Review</summary>\n\n**Body**\n\n</details>';
+    for (let length = 1; length <= source.length; length += 1) {
+      const blocks = await renderMarkdownBlocks(source.slice(0, length), true);
+      const html = blocks.map((block) => block.html).join('');
+      if (length >= source.indexOf('\n\n')) expect(html).toContain('<details data-md-details>');
+      if (length >= source.indexOf('\n\n</details>')) {
+        expect(html).toContain('<strong>Body</strong>');
+      }
+    }
+  });
+});
+
 describe('Markdown block cache reads', () => {
   test('returns all settled blocks synchronously after a full cache hit', async () => {
     resetMarkdownHtmlCacheForTests();
@@ -354,5 +444,79 @@ describe('Escaped brackets versus display math', () => {
   test('still renders display math that owns its line', () => {
     expect(renderMarkdownSync('\\[x = y\\]')).toContain('katex');
     expect(renderMarkdownSync('Before\n\n\\[\nx = y\n\\]\n\nAfter')).toContain('katex');
+  });
+});
+
+describe('Dollar math rendering', () => {
+  // Follow-up to openchamber/openchamber#2318: single-dollar inline math used
+  // to be unsupported, so `$y$` reached the chat as literal text.
+  test('renders single-dollar inline math in prose', () => {
+    const html = renderMarkdownSync('$y$：$n\\times 1$ 观测向量，$X$：$n \\times (p+1)$ 设计矩阵');
+    expect(html).toContain('katex');
+    expect(html).not.toContain('katex-error');
+    expect(html).not.toContain('katex-display');
+    expect(html).not.toContain('$y$');
+    expect(html).not.toContain('$n');
+    expect(html).not.toContain('$X');
+  });
+
+  test('renders inline math with a comparison operator', () => {
+    // `>` is HTML-escaped by marked before this pass runs.
+    const html = renderMarkdownSync('当 $n > p$ 且 $\\mathrm{rank}(X) = p+1$ 时可解');
+    expect(html).toContain('katex');
+    expect(html).not.toContain('katex-error');
+  });
+
+  test('renders display math containing apostrophes and ampersands', () => {
+    // Regression: marked escapes rendered text (`'` → `&#39;`, `&` → `&amp;`)
+    // before this pass runs, so a transpose or alignment ampersand used to
+    // reach KaTeX as entities and parse-fail into a red `katex-error`.
+    const html = renderMarkdownSync("$$S(\\beta) = |y - X\\beta|^2 = (y-X\\beta)'(y-X\\beta)$$");
+    expect(html).toContain('katex-display');
+    expect(html).not.toContain('katex-error');
+    expect(html).not.toContain('&#39;');
+
+    const aligned = renderMarkdownSync("$$\\begin{aligned} X'X\\;\\hat\\beta &= X'y \\end{aligned}$$");
+    expect(aligned).toContain('katex-display');
+    expect(aligned).not.toContain('katex-error');
+  });
+
+  test('leaves currency prose as literal text', () => {
+    const cases = [
+      'US$ 680',
+      'raised $50M to $72M, then $100M',
+      '总价 $5 and $10，合计 $50',
+      '价格是 $100$ 整',
+    ];
+    for (const text of cases) {
+      const html = renderMarkdownSync(text);
+      expect(html).not.toContain('katex');
+    }
+    // The dollar signs survive verbatim instead of being eaten as delimiters.
+    expect(renderMarkdownSync('US$ 680')).toContain('US$ 680');
+    expect(renderMarkdownSync('价格是 $100$ 整')).toContain('$100$');
+  });
+
+  test('keeps dollar pairs out of code and out of link attributes', () => {
+    expect(renderMarkdownSync('`$x$`')).not.toContain('katex');
+    expect(renderMarkdownSync('```\n$y = x$\n```')).not.toContain('katex');
+
+    // An href may legitimately hold `$`; math never reaches into attributes.
+    const html = renderMarkdownSync('see [docs](https://example.com/?q=$a$&lang=en)');
+    expect(html).not.toContain('katex');
+    expect(html).toContain('q=$a$');
+  });
+
+  test('a display pair must live in one text run', () => {
+    // `$$` pairs used to match across `</p><p>` with the tags themselves fed
+    // to KaTeX as LaTeX — a guaranteed red `katex-error`. Now the orphaned
+    // opener stays literal and only the closed pair renders.
+    const html = renderMarkdownSync('before\n\n$$a\n\n$$b$$\n\nafter');
+    expect(html).toContain('$$a');
+    expect(html).toContain('katex');
+    expect(html).not.toContain('katex-error');
+
+    const multi = renderMarkdownSync('$$a$$ 段落\n\n$$b$$ 段落');
+    expect(multi.match(/katex-display/g)).toHaveLength(2);
   });
 });

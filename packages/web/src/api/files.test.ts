@@ -21,6 +21,7 @@ const toUrl = (path: string, query?: RuntimeUrlQuery): string => {
 const urls: RuntimeUrlResolver = {
   api: toUrl,
   authenticatedAsset: toUrl,
+  assetWithUrlToken: (path: string, _token: string, query?: RuntimeUrlQuery) => toUrl(path, query),
   auth: toUrl,
   health: (query?: RuntimeUrlQuery) => toUrl('/health', query),
   rawFile: (path: string) => toUrl('/api/fs/raw', new URLSearchParams({ path })),
@@ -75,6 +76,15 @@ describe('createWebFilesAPI', () => {
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
       cache: 'default',
+      headers: { 'x-opencode-directory': '/worktree-a' },
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(new Response('fresh content'));
+    await api.readFile?.('/worktree-b/file.txt', { directory: '/worktree-a', fresh: true });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      cache: 'no-store',
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
   });

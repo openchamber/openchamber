@@ -26,6 +26,8 @@ export interface ProjectPlanLink {
   title: string;
   createdAt: number;
   pinned: boolean;
+  /** The user's own plan, or one from the team's shared plans folder. */
+  source?: 'shared' | 'personal';
 }
 
 export type ProjectNoteSource = 'manual' | 'selection' | 'agent';
@@ -45,6 +47,8 @@ interface ProjectContextData {
   notes: ProjectNote[];
   todos: ProjectTodoItem[];
   plans: ProjectPlanLink[];
+  /** Absolute path of the team's shared plans folder when the project has one. */
+  sharedPlansDir: string | null;
 }
 
 interface ProjectPlanContent extends ProjectPlanLink {
@@ -136,6 +140,7 @@ const parseContext = (payload: unknown): ProjectContextData => {
     notes: Array.isArray(record.notes) ? record.notes : [],
     todos: Array.isArray(record.todos) ? record.todos : [],
     plans: Array.isArray(record.plans) ? record.plans : [],
+    sharedPlansDir: typeof record.sharedPlansDir === 'string' ? record.sharedPlansDir : null,
   };
 };
 
@@ -348,3 +353,33 @@ export const deleteProjectPlan = async (
   }
   return parseContext(await response.json());
 };
+
+/**
+ * Move a plan between the user's folder and the team's shared plans folder.
+ * The plan gets a new id on the other side; resolves `null` when it is gone.
+ * Sharing needs a shared plans folder set for the project (Project settings).
+ */
+const movePlan = async (
+  project: ProjectRef,
+  planId: string,
+  direction: 'share' | 'unshare',
+): Promise<{ plan: ProjectPlanLink; context: ProjectContextData } | null> => {
+  const response = await runtimeFetch(
+    `${basePath(requireProjectId(project))}/plans/${encodeURIComponent(planId)}/${direction}`,
+    { method: 'POST' },
+  );
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, direction === 'share' ? 'Failed to share plan' : 'Failed to make plan personal'));
+  }
+  const payload = await response.json() as { plan?: ProjectPlanLink; context?: unknown };
+  if (!payload?.plan) {
+    throw new Error('Malformed plan move response');
+  }
+  return { plan: payload.plan, context: parseContext(payload.context) };
+};
+
+export const shareProjectPlan = (project: ProjectRef, planId: string) => movePlan(project, planId, 'share');
+export const unshareProjectPlan = (project: ProjectRef, planId: string) => movePlan(project, planId, 'unshare');

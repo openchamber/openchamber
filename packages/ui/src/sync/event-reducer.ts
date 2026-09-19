@@ -433,11 +433,13 @@ export function applyDirectoryEvent(
           : part
       } else {
         // Replace optimistic part (no sessionID) with server part of same type.
-        // Gate: only scan if the first part lacks sessionID (optimistic parts are
-        // always inserted first). Assistant messages never have optimistic parts,
-        // so this check is effectively free during streaming.
-        const hasOptimistic = next.length > 0 && !(next[0] as { sessionID?: string }).sessionID
-        const optimisticIndex = hasOptimistic && (part.type === "text" || part.type === "file")
+        // Every optimistic part is a candidate, not only the first one: the
+        // server echoes a just-sent message part by part, and after the text
+        // echo replaced the first slot the file echo still has to find the
+        // optimistic file behind it, or the attachment shows twice until the
+        // next page fetch. The scan runs only when a part with a NEW id
+        // arrives, which during assistant streaming is once per part.
+        const optimisticIndex = part.type === "text" || part.type === "file"
           ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
           : -1
         if (optimisticIndex >= 0) {

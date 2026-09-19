@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, openCodeApi: apiOverrides = {}, retryDelaysMs = [0] } = {}) => {
+const createRuntime = ({ stored, openCodeApi: apiOverrides = {}, retryDelaysMs = [0], evaluatePermission, onPermissionReplied } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -20,6 +20,8 @@ const createRuntime = ({ stored, openCodeApi: apiOverrides = {}, retryDelaysMs =
     readSettingsFromDiskMigrated: async () => settings,
     persistSettings: async (changes) => { settings = { ...settings, ...changes }; },
     retryDelaysMs,
+    evaluatePermission,
+    onPermissionReplied,
   });
   runtime.start();
   return {
@@ -176,5 +178,40 @@ describe('permission auto-accept runtime', () => {
     expect(openCodeApi.replyPermission).toHaveBeenCalledWith(expect.objectContaining({ requestID: 'root-pending' }), { timeoutMs: 5000 });
     expect(listPendingPermissions).toHaveBeenCalledWith('/project', { timeoutMs: 5000 });
     expect(await runtime.load()).toEqual({ sessions: { root: true }, revision: 1 });
+  });
+
+  it('leaves a request held by the safety net unanswered and forgets it once replied', async () => {
+    const verdicts = { held: { action: 'hold', score: 0.9, kind: 'git_history' }, safe: { action: 'accept', score: 0.1 } };
+    const evaluatePermission = vi.fn(async (permission) => verdicts[permission.id]);
+    const onPermissionReplied = vi.fn();
+    const { runtime, emit, openCodeApi } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: true } } },
+      evaluatePermission,
+      onPermissionReplied,
+    });
+    await runtime.load();
+
+    emit({ type: 'permission.asked', properties: { id: 'held', sessionID: 'root', permission: 'bash', metadata: {} } });
+    emit({ type: 'permission.asked', properties: { id: 'safe', sessionID: 'root', permission: 'bash', metadata: {} } });
+    await flush();
+
+    expect(openCodeApi.replyPermission).toHaveBeenCalledTimes(1);
+    expect(openCodeApi.replyPermission).toHaveBeenCalledWith(
+      { sessionID: 'root', requestID: 'safe', directory: '/project', reply: 'once' },
+      { timeoutMs: 5000 },
+    );
+    expect(evaluatePermission).toHaveBeenCalledTimes(2);
+
+    emit({ type: 'permission.replied', properties: { sessionID: 'root', requestID: 'held', reply: 'once' } });
+    expect(onPermissionReplied).toHaveBeenCalledWith('held');
+  });
+
+  it('does not consult the safety net for sessions that are not auto-accepting', async () => {
+    const evaluatePermission = vi.fn(async () => ({ action: 'hold' }));
+    const { runtime, emit } = createRuntime({ evaluatePermission });
+    await runtime.load();
+    emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'manual', permission: 'bash', metadata: {} } });
+    await flush();
+    expect(evaluatePermission).not.toHaveBeenCalled();
   });
 });

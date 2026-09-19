@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,6 +13,8 @@ export default defineConfig({
       // real module behind it, which is what forced mocks to hand-copy export
       // lists that then fell behind the source.
       { find: '@opencode-ai/sdk/v2', replacement: path.resolve(here, '../../node_modules/@opencode-ai/sdk/dist/v2/client.js') },
+      { find: '@openchamber/sdk/schemas', replacement: path.resolve(here, '../sdk/src/schemas.ts') },
+      { find: '@openchamber/sdk', replacement: path.resolve(here, '../sdk/src/index.ts') },
       { find: '@openchamber/ui', replacement: path.resolve(here, '../ui/src') },
       { find: '@web', replacement: path.resolve(here, './src') },
       // Anchored to `@/` on purpose: a bare `@` prefix would also swallow
@@ -21,6 +23,9 @@ export default defineConfig({
     ],
   },
   test: {
+    // UI integration fixtures with Vite asset imports cannot execute in Bun's
+    // raw TS loader. Keep them beside their UI owner and run them here.
+    include: [...configDefaults.include, '../ui/src/**/*.vitest.tsx'],
     // The Git suites drive a real `git` binary against temporary repositories.
     // Those subprocess round-trips routinely pass the 5s default, and which
     // cases exceed it shifts with machine load, so the default made a valid

@@ -39,6 +39,7 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
     archiveSessions,
     unarchiveSessions,
     deleteSessions,
+    bulkDeleteConfirm,
     setBulkDeleteConfirm,
   });
 

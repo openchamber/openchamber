@@ -17,6 +17,7 @@ const getWorktreeBootstrapStatusMock = vi.fn(async () => ({
 const sessionCreateMock = vi.fn(async () => ({ id: 'ses_123' }));
 const sessionForkMock = vi.fn(async () => ({ id: 'ses_fork', title: 'Forked session' }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
+const sessionUpdateMock = vi.fn(async ({ sessionID }) => ({ data: { id: sessionID, time: { archived: 1 } } }));
 
 let existingSessionMessages = [];
 let dispatchedUserMessageSeq = 0;
@@ -72,6 +73,10 @@ const openCodeApi = {
   listAgents: listAgentsMock,
   getConfig: getConfigMock,
   supportsSessionMetadata: () => true,
+  archiveSession: async ({ sessionID, directory, archivedAt }) => {
+    const response = await sessionUpdateMock({ sessionID, directory, time: { archived: archivedAt } });
+    return response?.data;
+  },
 };
 globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
 globalThis.__openchamberGetWorktreeBootstrapStatusMock = getWorktreeBootstrapStatusMock;
@@ -81,6 +86,7 @@ let registerOpenChamberSessionRoutes;
 vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
   getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
+  resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory }),
 }));
 
 const createApp = (overrides = {}, options = {}) => {
@@ -140,6 +146,92 @@ describe('openchamber session routes', () => {
     sessionCommandMock.mockResolvedValue({ data: {} });
     commandListMock.mockReset();
     commandListMock.mockResolvedValue({ data: [] });
+    sessionUpdateMock.mockReset();
+    sessionUpdateMock.mockImplementation(async ({ sessionID }) => ({ data: { id: sessionID, time: { archived: 1 } } }));
+  });
+
+  describe('archiving a batch of sessions', () => {
+    it('archives every id against the resolved directory and returns the archived sessions', async () => {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', 'ses_b'], archivedAt: 1700 })
+        .expect(200);
+
+      expect(response.body.directory).toBe('/repo/app');
+      expect(response.body.archived.map((session) => session.id)).toEqual(['ses_a', 'ses_b']);
+      expect(response.body.failedIds).toEqual([]);
+      expect(sessionUpdateMock).toHaveBeenCalledTimes(2);
+      expect(sessionUpdateMock).toHaveBeenCalledWith({
+        sessionID: 'ses_a',
+        directory: '/repo/app',
+        time: { archived: 1700 },
+      });
+    });
+
+    it('keeps archiving after a failed session and reports it as failed', async () => {
+      sessionUpdateMock.mockImplementation(async ({ sessionID }) => {
+        if (sessionID === 'ses_b') throw new Error('session.update failed');
+        return { data: { id: sessionID } };
+      });
+
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', 'ses_b', 'ses_c'] })
+        .expect(200);
+
+      expect(response.body.archived.map((session) => session.id)).toEqual(['ses_a', 'ses_c']);
+      expect(response.body.failedIds).toEqual(['ses_b']);
+    });
+
+    it('reports a session the server did not confirm as failed instead of archived', async () => {
+      sessionUpdateMock.mockImplementation(async ({ sessionID }) => (
+        sessionID === 'ses_b' ? { data: null } : { data: { id: sessionID } }
+      ));
+
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', 'ses_b'] })
+        .expect(200);
+
+      expect(response.body.archived.map((session) => session.id)).toEqual(['ses_a']);
+      expect(response.body.failedIds).toEqual(['ses_b']);
+    });
+
+    it('rejects an empty batch, an oversized batch, and non-string ids', async () => {
+      const { app } = createApp();
+
+      await request(app).post('/api/openchamber/sessions/archive').send({ directory: '/repo/app', ids: [] }).expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: Array.from({ length: 501 }, (_, index) => `ses_${index}`) })
+        .expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', ''] })
+        .expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a'], archivedAt: -1 })
+        .expect(400);
+
+      expect(sessionUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a directory the runtime does not accept', async () => {
+      const { app } = createApp({
+        validateDirectoryPath: async () => ({ ok: false, error: 'Invalid directory' }),
+      });
+
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/elsewhere', ids: ['ses_a'] })
+        .expect(400);
+
+      expect(sessionUpdateMock).not.toHaveBeenCalled();
+    });
   });
 
   it('creates a session for a directory', async () => {
@@ -220,6 +312,57 @@ describe('openchamber session routes', () => {
         model: { providerID: 'openai', modelID: 'gpt-5.5' },
         agent: 'build',
     }));
+  });
+
+  it('lets the routing hook replace an Auto default before the prompt leaves', async () => {
+    const seen = [];
+    const resolvePromptBody = vi.fn(async (body, target) => {
+      seen.push({ model: body.model, target });
+      body.model = { providerID: 'openai', modelID: 'gpt-5.5' };
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openchamber/auto',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+      resolvePromptBody,
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+
+    expect(seen).toEqual([{
+      model: { providerID: 'openchamber', modelID: 'auto' },
+      target: { sessionId: 'ses_123', directory: '/repo/app' },
+    }]);
+    expect(sendPromptMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'openai', modelID: 'gpt-5.5' },
+    }));
+  });
+
+  it.each([
+    ['', { projectId: 'proj_1' }],
+    ['', { directory: '/repo/app', worktree: { name: 'side-task' } }],
+    ['', { directory: '/repo/worktrees/side-task' }],
+    ['/ses_existing/send', { directory: '/repo/worktrees/side-task' }],
+    ['/ses_existing/fork', { directory: '/repo/worktrees/side-task' }],
+  ])('prefers project defaults for %s with %j', async (endpoint, scope) => {
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app', defaultAgent: 'plan' }],
+      }),
+    });
+    const response = await request(app)
+      .post(`/api/openchamber/sessions${endpoint}`)
+      .send({ ...scope, prompt: 'Run this' })
+      .expect(200);
+
+    expect(response.body.agent).toBe('plan');
+    expect(sendPromptMock).toHaveBeenCalledWith(expect.objectContaining({ agent: 'plan' }));
   });
 
   it('dispatches an initial prompt when model is provided', async () => {

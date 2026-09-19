@@ -1,4 +1,5 @@
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
 
 /**
  * Matches how OpenCode reads its own boolean env flags: any value other than
@@ -109,7 +110,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     const userRoots = [
-      path.join(home, '.config', 'opencode'),
+      OPENCODE_CONFIG_DIR,
       path.join(home, '.opencode'),
       path.join(home, '.claude', 'skills'),
       path.join(home, '.agents', 'skills'),

@@ -138,12 +138,18 @@ export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null;
   }
 
   const apiBaseUrl = options.apiBaseUrl?.trim() || readInjectedApiBaseUrl();
-  if (!apiBaseUrl) {
+  const pageOrigin = globalThis.window?.location?.origin ?? '';
+  const sameOriginBaseUrl = /^https?:\/\//.test(pageOrigin) ? pageOrigin : '';
+  if (!apiBaseUrl && !sameOriginBaseUrl) {
     return;
   }
 
+  // An empty API base uses same-origin HTTP, including Electron's Vite proxy.
+  // Give it an instance identity while keeping requests relative to that proxy.
+  const localOrigin = readInjectedLocalOrigin();
+  const isLocal = localOrigin && (!apiBaseUrl || sameOrigin(apiBaseUrl, localOrigin));
   activeApiBaseUrl = apiBaseUrl;
-  activeRuntimeKey = options.runtimeKey?.trim() || (sameOrigin(apiBaseUrl, readInjectedLocalOrigin()) ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl));
+  activeRuntimeKey = options.runtimeKey?.trim() || (isLocal ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl || sameOriginBaseUrl));
 };
 
 export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null; relay?: RelayRuntimeDescriptor | null }): void => {

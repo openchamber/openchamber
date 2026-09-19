@@ -21,7 +21,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full max-w-2xl gap-0 overflow-hidden p-0">
-        <ScrollableOverlay outerClassName="max-h-[min(90vh,48rem)]" className="w-full bg-background">
+        <ScrollableOverlay outerClassName="max-h-[min(90vh,48rem)]" className="w-full bg-transparent">
           <div className="w-full p-3 sm:p-6 sm:pt-8">
             {open && project ? (
               <ProjectSettingsPanel project={project} onIdentitySave={onSave} showWorktrees={false} />

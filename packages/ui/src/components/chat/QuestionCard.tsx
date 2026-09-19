@@ -80,7 +80,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
       onKeyDown={onKeyDown}
       style={{ height }}
       className={cn(
-        'w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none',
+        'oc-surface-elevated w-full bg-surface-elevated border border-border/30 focus:border-interactive-border-focus rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none',
         isScrollable ? 'overflow-y-auto' : 'overflow-hidden'
       )}
       autoFocus

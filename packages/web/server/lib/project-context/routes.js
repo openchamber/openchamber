@@ -220,6 +220,21 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     }
   });
 
+  // Moving a plan between the user's folder and the team's shared folder.
+  for (const [suffix, method] of [['share', 'sharePlan'], ['unshare', 'unsharePlan']]) {
+    app.post(`/api/project-context/:projectId/plans/:planId/${suffix}`, async (req, res) => {
+      try {
+        const result = await projectContextRuntime[method](req.params.projectId, req.params.planId);
+        if (!result) {
+          return res.status(404).json({ error: 'Plan not found' });
+        }
+        return res.json(result);
+      } catch (error) {
+        return respondWithError(res, error, `Failed to ${suffix} plan`);
+      }
+    });
+  }
+
   app.delete('/api/project-context/:projectId/plans/:planId', async (req, res) => {
     try {
       const { deleted, context } = await projectContextRuntime.deletePlan(

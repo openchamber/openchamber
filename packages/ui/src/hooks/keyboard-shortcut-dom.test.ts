@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
-import { hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
+import { canUseDigitShortcut, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
 
 const domWindow = new Window();
 Object.assign(globalThis, {
@@ -60,30 +60,54 @@ test('does not treat a plain element or non-element target as editable', () => {
   expect(isEditableEventTarget(null)).toBe(false);
 });
 
-// Both digit shortcuts (switch_context_surface and switch_session_tab) gate on
-// isEditableEventTarget(event.target). switch_session_tab's default prefix is a
-// bare modifier, so plain ctrl/cmd+1 reaches the handler while the composer has
-// focus; the guard only holds if a dispatched keydown reports the focused
-// textarea as its target rather than the element the listener sits on (#2689).
-test('reports the focused editable element as the target of a bubbled ctrl/cmd+digit keydown', () => {
-  const textarea = document.createElement('textarea');
-  document.body.appendChild(textarea);
+for (const tag of ['input', 'textarea', 'select', 'div']) {
+  test(`allows Cmd/Ctrl digit shortcuts from a focused ${tag} while preserving text input`, () => {
+    const target = document.createElement(tag);
+    if (tag === 'div') {
+      target.contentEditable = 'true';
+      Object.defineProperty(target, 'isContentEditable', { value: true });
+    }
+    document.body.appendChild(target);
+    target.focus();
 
-  let observedTarget: EventTarget | null = null;
-  const listener = (event: Event) => {
-    observedTarget = event.target;
-  };
-  document.addEventListener('keydown', listener);
+    const listener = (event: KeyboardEvent) => {
+      if (canUseDigitShortcut(event)) event.preventDefault();
+    };
+    document.addEventListener('keydown', listener);
+    try {
+      const cases: Array<[KeyboardEventInit, boolean]> = [
+        [{ metaKey: true }, true],
+        [{ metaKey: true, altKey: true }, true],
+        [{ ctrlKey: true }, true],
+        [{ ctrlKey: true, altKey: true }, true],
+        [{}, false],
+        [{ shiftKey: true }, false],
+        [{ altKey: true }, false],
+        [{ ctrlKey: true, altKey: true, modifierAltGraph: true }, false],
+        [{ metaKey: true, isComposing: true }, false],
+        [{ ctrlKey: true, keyCode: 229 }, false],
+      ];
+      for (const [modifiers, allowed] of cases) {
+        const event = new KeyboardEvent('keydown', {
+          key: '1', code: 'Digit1', bubbles: true, cancelable: true, ...modifiers,
+        });
+        // happy-dom treats any Alt chord as AltGraph, including Cmd+Option.
+        Object.defineProperty(event, 'getModifierState', {
+          value: (modifier: string) => modifier === 'AltGraph' && modifiers.modifierAltGraph === true,
+        });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(allowed);
+      }
+    } finally {
+      document.removeEventListener('keydown', listener);
+      target.remove();
+    }
+  });
+}
 
-  textarea.dispatchEvent(new KeyboardEvent('keydown', {
-    key: '1',
-    metaKey: true,
-    bubbles: true,
-  }));
-
-  document.removeEventListener('keydown', listener);
-  textarea.remove();
-
-  expect(observedTarget).toBe(textarea);
-  expect(isEditableEventTarget(observedTarget)).toBe(true);
+test('allows unmodified digit prefixes outside editable targets', () => {
+  const target = document.createElement('button');
+  const event = new KeyboardEvent('keydown', { key: '1' });
+  target.dispatchEvent(event);
+  expect(canUseDigitShortcut(event)).toBe(true);
 });

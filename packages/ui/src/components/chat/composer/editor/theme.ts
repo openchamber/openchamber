@@ -15,7 +15,7 @@ import { EditorView } from '@codemirror/view';
 export const COMPOSER_EDITOR_THEME_SPEC = {
     '&': {
         backgroundColor: 'transparent',
-        color: 'var(--surface-foreground)',
+        color: 'var(--surface-elevated-foreground)',
     },
     '&.cm-focused': { outline: 'none' },
     '.cm-content': {
@@ -40,7 +40,7 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     //
     // CodeMirror recolours it for dark editors through `&dark .cm-cursor`,
     // which needs the theme to declare itself dark. OpenChamber themes are not
-    // only light or dark, so the cursor takes the surface foreground directly
+    // only light or dark, so the cursor takes the elevated field foreground
     // instead. `&.cm-editor` matches the specificity of that `&dark` rule, and
     // theme styles mount after the base theme, so this wins in every variant.
     //
@@ -48,7 +48,7 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // builds its selectors without scopes and throws RangeError on them the
     // moment this module is imported.
     '&.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
-        borderLeftColor: 'var(--surface-foreground)',
+        borderLeftColor: 'var(--surface-elevated-foreground)',
         borderLeftWidth: '2px',
         transform: 'scaleY(1.15)',
         transformOrigin: 'center',
@@ -63,7 +63,8 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // Kebab-case: the theme emits `--surface-muted-foreground`. A camelCased
     // name here is not a missing colour but an invalid declaration, and since
     // `color` inherits, the placeholder silently renders at full text
-    // brightness instead.
+    // brightness instead. The muted token already supplies secondary text;
+    // another opacity reduction makes the hint unreadable in subdued themes.
     '.cm-placeholder': { color: 'var(--surface-muted-foreground)' },
     // `drawSelection()` paints its own selection layer, and CodeMirror styles
     // it for the focused editor through
@@ -116,14 +117,12 @@ export const composerEditorTheme = EditorView.theme(COMPOSER_EDITOR_THEME_SPEC);
  * two highlights would otherwise stack.
  */
 export const NATIVE_SELECTION_THEME_SPEC = {
-    // Built from `--primary`, not `--interactive-selection`: themes define the
-    // selection token with its own alpha (often under 10%), so mixing it with
-    // transparent again leaves the highlight barely perceptible. `--primary`
-    // is a full-strength colour in every theme; a low mix of it reads as a
-    // classic editor selection while the token colours stay legible through it.
+    // Native selection can paint both the background and its paired text.
+    // Use the authored alpha directly instead of diluting it a second time.
     '& .cm-content .cm-line ::selection, & .cm-content .cm-line::selection': {
         backgroundColor:
-            'color-mix(in srgb, var(--primary) 25%, transparent) !important',
+            'var(--interactive-selection) !important',
+        color: 'var(--interactive-selection-foreground) !important',
     },
     // iOS derives the colour of its selection UI — the drag handles included —
     // from the caret colour, and `drawSelection()` sets `caret-color:
@@ -140,7 +139,7 @@ export const NATIVE_SELECTION_THEME_SPEC = {
     // selection is non-empty. Typing stays on the transparent-native-caret
     // fast path.
     '&.cm-editor.oc-native-range .cm-content, &.cm-editor.oc-native-range .cm-content .cm-line': {
-        caretColor: 'var(--surface-foreground) !important',
+        caretColor: 'var(--surface-elevated-foreground) !important',
     },
     '&.oc-native-range .cm-scroller > .cm-cursorLayer': {
         display: 'none',

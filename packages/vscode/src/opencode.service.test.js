@@ -1,6 +1,7 @@
-import { afterAll, afterEach, beforeEach, describe, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, mock, spyOn, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,6 +21,8 @@ let serviceStops = 0;
 let serviceEndpoints = [];
 let root = '';
 let nextPid = 4100;
+const children = new Map();
+let killSpy;
 
 mock.module('vscode', () => ({
   Disposable: class {
@@ -48,15 +51,27 @@ mock.module('vscode', () => ({
 
 mock.module('child_process', () => ({
   execSync: () => '',
+  execFile: (_binary, args, _options, callback) => {
+    const child = children.get(Number(args[1]));
+    if (!child) throw new Error('Unknown fixture process');
+    child.kill();
+    queueMicrotask(() => callback(null));
+  },
   spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
   spawn: (binary, args, options) => {
     spawnCalls.push({ binary, args: [...args], options });
     const child = new EventEmitter();
     child.pid = nextPid++;
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
+    children.set(child.pid, child);
+    child.exitCode = null;
+    child.signalCode = null;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
     child.kill = () => {
+      if (child.signalCode) return true;
       childKills += 1;
+      child.signalCode = 'SIGTERM';
+      queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
       return true;
     };
     queueMicrotask(() => {
@@ -127,6 +142,12 @@ const createContext = () => ({
 });
 
 beforeEach(() => {
+  children.clear();
+  killSpy = spyOn(process, 'kill').mockImplementation((pid) => {
+    const child = children.get(Math.abs(pid));
+    if (!child) throw new Error('Unknown fixture process');
+    return child.kill();
+  });
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-service-'));
   apiUrl = '';
   binaryPath = '';
@@ -153,6 +174,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  killSpy.mockRestore();
   globalThis.fetch = originalFetch;
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -298,6 +320,8 @@ describe('unchanged OpenCode lifecycle modes', () => {
     assert.equal(registryReaps, 0);
 
     await manager.stop();
-    assert.equal(manager.getStatus(), 'connected');
+    assert.equal(manager.getStatus(), 'disconnected');
+    assert.equal(manager.getApiUrl(), 'http://external.test:4096');
+    assert.equal(childKills, 0);
   });
 });

@@ -4,8 +4,12 @@ import * as sessionActions from '@/sync/session-actions';
 import { withBtwSessionLink, withBtwSessionMarker, withoutBtwSessionLink, withoutBtwSessionMarker } from '@/lib/sessionBtwMetadata';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { getSyncChildStores, getSyncMessages, registerSessionDirectory } from '@/sync/sync-refs';
 import { Binary } from '@/sync/binary';
+import type { ContextPartMetadata } from '@/lib/messages/contextParts';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
  * `/btw <question>`: fork the main session into a temporary session and send
@@ -22,12 +26,21 @@ import { Binary } from '@/sync/binary';
  */
 export type StartBtwInput = {
   parentSessionId: string;
+  expectedRuntimeKey?: string;
   question: string;
   directory: string;
   providerID: string;
   modelID: string;
   agent?: string;
-  variant?: string;
+  variant?: string | null;
+  permissionAutoAccept?: boolean;
+  attachments?: AttachedFile[];
+  additionalParts?: Array<{
+    text: string;
+    attachments?: AttachedFile[];
+    synthetic?: boolean;
+    metadata?: ContextPartMetadata;
+  }>;
 };
 
 /**
@@ -135,11 +148,45 @@ function insertForkIntoDirectoryStore(session: Session, directory: string): void
   }
 }
 
+/** Preparation can be discarded until the server-side fork starts. */
+export async function preparePendingBtwSend(
+  parentSessionId: string,
+  expectedRuntimeKey: string,
+  prepare: () => Promise<void>,
+): Promise<symbol | null> {
+  if (getRuntimeKey() !== expectedRuntimeKey) return null;
+  const panels = useBtwStore.getState();
+  const owner = panels.byParent[parentSessionId];
+  if (!owner?.pending || owner.creating || owner.pendingSend) return null;
+  const token = Symbol('btw-send');
+  panels.setPanelState(parentSessionId, { pendingSend: token });
+  try {
+    await prepare();
+  } catch (error) {
+    if (useBtwStore.getState().byParent[parentSessionId]?.pendingSend === token) {
+      panels.setPanelState(parentSessionId, { pendingSend: undefined });
+    }
+    throw error;
+  }
+  if (useBtwStore.getState().byParent[parentSessionId]?.pendingSend !== token) return null;
+  if (getRuntimeKey() !== expectedRuntimeKey) {
+    panels.clearPanelState(parentSessionId);
+    return null;
+  }
+  return token;
+}
+
 export async function startBtwSession(input: StartBtwInput): Promise<Session> {
-  const { setPanelState, clearPanelState } = useBtwStore.getState();
+  const { setPanelState } = useBtwStore.getState();
+  if (useBtwStore.getState().byParent[input.parentSessionId]?.creating) {
+    throw new Error('btw session creation already in progress');
+  }
+  const expectedRuntimeKey = input.expectedRuntimeKey ?? getRuntimeKey();
+  if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
   setPanelState(input.parentSessionId, { creating: true });
   try {
     await sessionActions.waitForConnectionOrThrow();
+    if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
     // Fork at the parent's last completed assistant turn rather than at HEAD,
     // so a `/btw` typed mid-turn does not inherit a half-finished one.
     const forkPointMessageID = findLastCompletedAssistantMessageID(
@@ -156,18 +203,28 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
     // SAFETY: the SDK Session type omits the server's `directory` field; this
     // widening only reads it, with the requested directory as the fallback.
     const sessionDirectory = (forked as Session & { directory?: string | null }).directory ?? input.directory;
-    registerSessionDirectory(forked.id, sessionDirectory);
-
     try {
-      // The boundary between inherited history and the fork's own tail is the
-      // id of the newest cloned message. Message ids are server-generated and
-      // ascending, so everything the fork produces sorts after it.
+      if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
+      registerSessionDirectory(forked.id, sessionDirectory);
+      const selections = useSelectionStore.getState();
+      selections.saveSessionModelSelection(forked.id, input.providerID, input.modelID);
+      if (input.agent) {
+        selections.saveSessionAgentSelection(forked.id, input.agent);
+        selections.saveAgentModelForSession(forked.id, input.agent, input.providerID, input.modelID);
+        selections.saveAgentModelVariantForSession(forked.id, input.agent, input.providerID, input.modelID, input.variant);
+      }
+      if (input.permissionAutoAccept !== undefined) {
+        const { usePermissionStore } = await import('@/stores/permissionStore');
+        if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
+        await usePermissionStore.getState().setSessionAutoAccept(forked.id, input.permissionAutoAccept);
+        if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
+      }
+      // Locate the inherited-history boundary by identity, not by ID ordering.
       const newestCloned = await opencodeClient.getSessionMessages(forked.id, 1, sessionDirectory);
       // A `null` boundary makes the panel show every inherited message, so an
       // empty read must not be taken as "the fork inherited nothing" when we
       // know it did: having picked a fork point proves the parent had turns.
-      // Fall back to that id — the fork's own messages are created later and
-      // still sort after it, so the tail stays complete either way.
+      // Retain the known fork point as a fallback marker.
       const boundaryMessageID = newestCloned[newestCloned.length - 1]?.info.id
         ?? forkPointMessageID
         ?? null;
@@ -179,16 +236,19 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
       // forks are hidden from session lists by this marker, so inserting an
       // unmarked fork first would flash it in the sidebar.
       const marked = await sessionActions.patchSessionMetadata(forked.id, sessionDirectory, (metadata) =>
-        withBtwSessionMarker(metadata, input.parentSessionId, boundaryMessageID));
+        withBtwSessionMarker(metadata, input.parentSessionId, boundaryMessageID), expectedRuntimeKey);
       // patchSessionMetadata already upserted the marked fork into the global
       // store; the directory child store still needs the explicit insert.
       insertForkIntoDirectoryStore(marked, sessionDirectory);
-      void sessionActions.updateSessionTitle(forked.id, btwSessionTitle(input.question)).catch(() => undefined);
+      void sessionActions.updateSessionTitle(forked.id, btwSessionTitle(input.question), {
+        directory: sessionDirectory,
+        expectedRuntimeKey,
+      }).catch(() => undefined);
 
       // Link the parent before sending so the panel opens as soon as the
       // metadata lands; the question streams into it.
       await sessionActions.patchSessionMetadata(input.parentSessionId, input.directory, (metadata) =>
-        withBtwSessionLink(metadata, forked.id));
+        withBtwSessionLink(metadata, forked.id), expectedRuntimeKey);
 
       try {
         await useSessionUIStore.getState().sendMessage(
@@ -196,13 +256,13 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
           input.providerID,
           input.modelID,
           input.agent,
-          [],
+          input.attachments ?? [],
           undefined,
           // The very first question already needs the boundary: the fork is at
           // its most dangerous here, with the parent's in-flight plan as the
           // newest thing in its context.
-          btwBoundaryParts(),
-          input.variant,
+          [...btwBoundaryParts(), ...(input.additionalParts ?? [])],
+          input.variant ?? undefined,
           'normal',
           { sessionId: forked.id, directory: sessionDirectory },
         );
@@ -210,29 +270,31 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
         // A fork without its first question is not a usable btw session:
         // unlink the parent again before deleting the fork.
         await sessionActions.patchSessionMetadata(input.parentSessionId, input.directory, (metadata) =>
-          withoutBtwSessionLink(metadata, forked.id)).catch(() => undefined);
+          withoutBtwSessionLink(metadata, forked.id), expectedRuntimeKey).catch(() => undefined);
         throw error;
       }
     } catch (error) {
-      await sessionActions.deleteSession(forked.id).catch(() => undefined);
+      await sessionActions.deleteSession(forked.id, { expectedRuntimeKey }).catch(() => undefined);
       throw error;
     }
     return forked;
   } finally {
-    clearPanelState(input.parentSessionId);
+    if (getRuntimeKey() === expectedRuntimeKey) setPanelState(input.parentSessionId, { creating: false });
   }
 }
 
 /**
- * Keep only the fork's own tail: messages after the last message cloned from
- * the parent. A `null` boundary means the fork inherited nothing.
+ * Records are a chronologically ordered suffix of the session. Keep everything
+ * after the inherited-history marker; an absent marker is outside that suffix.
+ * Message IDs are identities, not timestamps (including client-generated IDs).
  */
 export function filterBtwTailMessages(
   records: Array<{ info: Message; parts: Part[] }>,
   boundaryMessageID: string | null,
 ): Array<{ info: Message; parts: Part[] }> {
   if (!boundaryMessageID) return records;
-  return records.filter((record) => record.info.id > boundaryMessageID);
+  const boundaryIndex = records.findIndex((record) => record.info.id === boundaryMessageID);
+  return boundaryIndex < 0 ? records : records.slice(boundaryIndex + 1);
 }
 
 export type BtwSessionRef = {
@@ -267,10 +329,23 @@ export async function destroyBtwSession(ref: BtwSessionRef): Promise<boolean> {
  * session.
  */
 export async function promoteBtwSession(ref: BtwSessionRef): Promise<void> {
-  await sessionActions.patchSessionMetadata(ref.parentSessionId, ref.directory, (metadata) =>
-    withoutBtwSessionLink(metadata, ref.btwSessionId));
-  await sessionActions.patchSessionMetadata(ref.btwSessionId, ref.directory, withoutBtwSessionMarker)
-    .catch(() => undefined);
+  const expectedRuntimeKey = getRuntimeKey();
+  let originalForkMetadata: Parameters<typeof withoutBtwSessionMarker>[0] | null = null;
+  await sessionActions.patchSessionMetadata(ref.btwSessionId, ref.directory, (metadata) => {
+    originalForkMetadata = metadata;
+    return withoutBtwSessionMarker(metadata);
+  }, expectedRuntimeKey);
+  try {
+    await sessionActions.patchSessionMetadata(ref.parentSessionId, ref.directory, (metadata) =>
+      withoutBtwSessionLink(metadata, ref.btwSessionId), expectedRuntimeKey);
+  } catch (error) {
+    const metadataToRestore = originalForkMetadata;
+    if (metadataToRestore) {
+      await sessionActions.patchSessionMetadata(ref.btwSessionId, ref.directory, () => metadataToRestore, expectedRuntimeKey)
+        .catch(() => undefined);
+    }
+    throw error;
+  }
   useBtwStore.getState().clearPanelState(ref.parentSessionId);
   useSessionUIStore.getState().setCurrentSession(ref.btwSessionId);
 }

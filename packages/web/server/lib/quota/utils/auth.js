@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { OPENCODE_CONFIG_DIR } from '../../opencode/shared.js';
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 
 export const ANTIGRAVITY_ACCOUNTS_PATHS = [

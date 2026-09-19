@@ -1,0 +1,121 @@
+---
+title: 示例
+description: 一个可直接复制的完整三文件 OpenChamber 扩展。它连接 GitHub 令牌、列出仓库，并把其中一个附加到聊天。
+---
+
+# 示例
+
+这三个文件就是一个可运行的扩展。它连接 GitHub 令牌、列出你的仓库，并让你把其中一个附加到聊天。把它们复制到一个文件夹，然后改成你自己提供方的 API 和列表。清单字段和安装方式见[构建扩展](/sdk/)；每个方法见 [Host API](/sdk/host/)。
+
+`package.json`：
+
+```json
+{
+  "name": "my-repos",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": { "path": "/user", "name": "login" },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "^1.24.0" }
+}
+```
+
+`panel/index.html`：
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html, body { margin: 0; height: 100%; } #root { height: 100%; padding: 12px; box-sizing: border-box; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
+```
+
+`panel/main.ts`：
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+import { applyHostReady, mountBanner, mountEmpty, mountList, mountSpinner } from "@openchamber/sdk/ui";
+
+type Repo = { full_name: string; html_url: string; description: string | null };
+
+const host = connectHost();
+const root = document.querySelector("#root")!;
+let mounted: Array<{ dispose: () => void }> = [];
+
+const clear = () => {
+  for (const block of mounted) block.dispose();
+  mounted = [];
+};
+
+let generation = 0;
+const paint = async (connected: boolean) => {
+  const currentGeneration = ++generation;
+  clear();
+  if (!connected) {
+    mounted.push(mountEmpty(root, {
+      title: "Not connected",
+      body: "Paste a GitHub token in Settings → Integrations → GitHub (token).",
+    }));
+    return;
+  }
+  const spinner = mountSpinner(root, { label: "Loading repositories" });
+  mounted.push(spinner);
+  try {
+    const result = await host.request({ method: "GET", path: "/user/repos", query: { per_page: "30", sort: "updated" } });
+    if (currentGeneration !== generation) return;
+    spinner.dispose();
+    if (result.status !== 200) {
+      mounted.push(mountBanner(root, { tone: "error", title: `GitHub answered ${result.status}` }));
+      return;
+    }
+    const repos = JSON.parse(result.body) as Repo[];
+    mounted.push(mountList(root, {
+      items: repos.map((repo) => ({ id: repo.full_name, title: repo.full_name, subtitle: repo.description ?? undefined })),
+      onSelect: (id) => {
+        const repo = repos.find((item) => item.full_name === id);
+        if (repo) void host.attach({ providerId: "my-repos", id: repo.full_name, title: repo.full_name, url: repo.html_url });
+      },
+    }));
+  } catch (error) {
+    if (currentGeneration !== generation) return;
+    spinner.dispose();
+    const text = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    mounted.push(mountBanner(root, { tone: "error", title: "Request failed", body: text }));
+  }
+};
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+});
+let previousConnection: string | undefined;
+host.onConnection((connection) => {
+  const key = JSON.stringify(connection);
+  if (key === previousConnection) return;
+  previousConnection = key;
+  void paint(connection.connected);
+});
+```
+
+通过 Git URL 安装和更新时，请将构建后的 `panel/main.js` 与 HTML 和清单一起提交。OpenChamber 安装扩展时不会安装 npm 依赖或编译 TypeScript。提交锁文件，将 `node_modules/` 加入 `.gitignore`，并将浏览器依赖打包进 IIFE。发布更新时，提升扩展自身 `package.json` 中的版本，重新构建、提交并推送，然后在 Settings → Extensions 中选择 Update。固定到 Git 标签的 URL 会保持在该标签。
+
+在该文件夹中用 `bunx openchamber-guest-bundle panel/main.ts panel/main.js` 构建，然后在 设置 → 扩展 中添加这个文件夹。另外五个示例（每个 UI 控件、带操作和斜杠命令的任务列表、一个本地服务、一个配置文件编辑器、一个仅含工具的包）在 [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples)。

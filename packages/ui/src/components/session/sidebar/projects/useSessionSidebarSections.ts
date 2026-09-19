@@ -6,6 +6,7 @@ import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
+import { getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
 
 type ProjectItem = {
   id: string;
@@ -195,15 +196,18 @@ export const useSessionSidebarSections = (args: Args) => {
       return result;
     }
 
-    const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
+    const idQuery = normalizedSessionSearchQuery.trim().toLowerCase();
+    const isIdQuery = idQuery.startsWith('ses_');
+    const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => (
+      total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + countNodes(node.children)
+    ), 0);
 
     const addSearchData = (group: SessionGroup) => {
       const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
       const matchedSessionCount = countNodes(filteredNodes);
-      const groupMatches = matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
-      const scopeKey = normalizePath(group.directory ?? null);
-      const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
-      const folderNameMatchCount = scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;
+      const groupMatches = !isIdQuery && matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
+      const scopeFolders = getSessionFolderScopes(group).flatMap(({ scopeKey }) => foldersMap[scopeKey] ?? []);
+      const folderNameMatchCount = isIdQuery ? 0 : scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;
 
       result.set(group, {
         filteredNodes,

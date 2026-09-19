@@ -7,6 +7,16 @@ description: Dostosuj OpenChamber za pomocą wbudowanych i własnych motywów.
 
 OpenChamber obsługuje wbudowane motywy oraz własne pliki JSON z motywami.
 
+## Importuj motyw VS Code
+
+Otwórz **Ustawienia → Wygląd → Importuj motyw VS Code**, aby wyszukać motywy w Open VSX. Wyniki pokazują ikonę, nazwę i autora. Wybierz pakiet, porównaj podglądy kolorów i zaimportuj wybrane warianty. Import zbiorczy zachowuje bieżący motyw. Motywy dostępne tylko w Microsoft Marketplace mogą być nieobecne w Open VSX.
+
+Użyj **Wybierz plik JSON** dla lokalnego pliku `.json` lub `.jsonc` do 512 KiB. Aplikacja desktopowa otwiera `~/.vscode/extensions`, jeśli katalog istnieje. Import przekształca kolory interfejsu, składni i diff oraz aktywuje motyw pliku. Kosz obok zaimportowanego motywu usuwa go z połączonego serwera. Usunięcie wybranego motywu przywraca domyślny motyw danego trybu.
+
+Motyw jest zapisywany na połączonym serwerze OpenChamber, również przy imporcie z aplikacji desktopowej lub mobilnej. Ponowny import tego samego pliku nie tworzy duplikatu ani nie nadpisuje motywu zmienionego na serwerze. Rozszerzenie VS Code korzysta z motywu samego VS Code.
+
+Jeśli plik używa `include` lub odwołuje się do osobnego pliku tokenów, uruchom **Developer: Generate Color Theme From Current Settings** w palecie poleceń VS Code i zaimportuj wygenerowany JSON.
+
 ## Dodaj własny motyw
 
 1. Utwórz katalog motywów:

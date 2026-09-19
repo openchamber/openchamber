@@ -3,12 +3,13 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
-/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
-   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
-   first markdown render of a session; that late injection triggered a style
-   recalc during which the layered `.chat-message-column` width clamp briefly
-   lost, flashing message text to full width before it snapped back. */
-@import "katex/dist/katex.min.css";
+/* KaTeX styles are loaded eagerly through `styles/katex-css` (a JS import) at
+   every app entry point. Keeping them eager avoids a late stylesheet injection
+   on the first markdown render, whose style recalc briefly lost the layered
+   `.chat-message-column` width clamp and flashed message text to full width.
+   A JS import is required because Lightning CSS inlines a CSS `@import`
+   without resolving the relative `url(fonts/...)` references, leaving the
+   KaTeX font files unbundled (openchamber/openchamber#1880). */
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -75,36 +76,31 @@ button,
   line-height: round(1.625em, 1px);
 }
 
-:root.light .message-content-text::selection,
-:root.light .message-content-text ::selection,
-:root.light .oc-file-preview::selection,
-:root.light .oc-file-preview ::selection {
-  background: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
-  color: var(--surface-foreground);
+/* Native selection uses the theme's selection pair. */
+.message-content-text::selection,
+.message-content-text ::selection,
+.oc-file-preview::selection,
+.oc-file-preview ::selection {
+  background: var(--oc-text-selection);
+  color: var(--interactive-selection-foreground);
 }
 
 .oc-cm-selected-line {
-  background: color-mix(in srgb, var(--primary-base) 22%, transparent);
+  background: var(--interactive-selection);
+  color: var(--interactive-selection-foreground);
 }
 
-/* Quoted chat fragment kept visibly highlighted while its comment input is
-   open (the native selection collapses once the input takes focus). The
-   rectangles come from the selection's own client rects, so shape and shade
-   both match the native selection that was just showing. */
+/* These rectangles sit above glyphs, so the fill must remain translucent. */
 .oc-chat-comment-rect {
-  background-color: var(--interactive-selection);
-}
-
-:root.light .oc-chat-comment-rect {
-  background-color: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
+  background-color: color-mix(in srgb, var(--interactive-selection) 35%, transparent);
 }
 
 .pierre-diff-wrapper {
-  --diffs-bg-selection-override: color-mix(in srgb, var(--primary-base) 22%, transparent);
-  --diffs-bg-selection-background-override: color-mix(in srgb, var(--primary-base) 14%, transparent);
-  --diffs-bg-selection-number-override: color-mix(in srgb, var(--primary-base) 28%, transparent);
-  --diffs-bg-selection-number-background-override: color-mix(in srgb, var(--primary-base) 18%, transparent);
-  --diffs-selection-color-override: var(--primary-base);
+  --diffs-bg-selection-override: var(--interactive-selection);
+  --diffs-bg-selection-background-override: var(--interactive-selection);
+  --diffs-bg-selection-number-override: var(--interactive-selection);
+  --diffs-bg-selection-number-background-override: var(--interactive-selection);
+  --diffs-selection-color-override: var(--interactive-selection-foreground);
 }
 
 /* Codemirror syntax fallback for classHighlighter tokens */
@@ -245,7 +241,7 @@ button,
 }
 
 :root.vscode-runtime [data-chat-input="true"] .cm-placeholder {
-  color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
 }
 
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
@@ -274,7 +270,8 @@ div[data-chat-input-footer="true"] {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -293,7 +290,7 @@ div[data-chat-input-footer="true"] {
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -325,7 +322,8 @@ div[data-chat-input-footer="true"] {
   opacity: 1;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"]:not([data-top-scroll="true"]):not([data-top-bottom-scroll="true"]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
@@ -417,11 +415,21 @@ button svg,
   shape-rendering: geometricPrecision;
 }
 
-/* GPU acceleration for non-spinning SVGs */
-button svg:not(.animate-spin),
-[role="button"] svg:not(.animate-spin) {
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
+/*
+ * WebKit only. A 3D transform gives every matched icon a compositor layer of
+ * its own, and the compositor walks every layer on every frame. Measured in
+ * Chromium with 60 icons on screen: 66 layers per frame instead of 9, three
+ * times the layerization time, and four points of renderer CPU while a
+ * response streams. The cost grows with the number of buttons on screen, so
+ * Chromium runtimes no longer get the hint. `font: -apple-system-body` is a
+ * value only WebKit parses, which keeps the rule where it was written for.
+ */
+@supports (font: -apple-system-body) {
+  button svg:not(.animate-spin),
+  [role="button"] svg:not(.animate-spin) {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
@@ -627,6 +635,12 @@ html:not(.dark) .chat-scroll {
   scrollbar-gutter: unset !important;
 }
 
+/* Extensions can cross the overflow threshold as cards expand or the catalog loads. */
+.overlay-scrollbar-target:has(> .extensions-settings-page),
+.extensions-settings-page > .overlay-scrollbar-target {
+  scrollbar-gutter: stable !important;
+}
+
 .overlay-scrollbar-target::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
@@ -653,6 +667,13 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Overlay scrollbar styling (custom thumb) */
+/* Reserve the thumb's 6px width, 4px right inset and a 4px content gap.
+   Follow overflow, not hover visibility, so showing the thumb never shifts text.
+   Direct-child matching prevents nested scrollers from reserving space twice. */
+.overlay-scrollbar-wrapper:has(> .overlay-scrollbar > .overlay-scrollbar__thumb--vertical:not([hidden])) {
+  padding-right: 6px;
+}
+
 .overlay-scrollbar {
   position: absolute;
   inset: 0;
@@ -908,11 +929,26 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Assistant message footer: collapse text labels only on very narrow layouts. */
-@container message-footer (max-width: 16rem) {
-  .message-footer__label {
-    display: none;
-  }
+/* Assistant message footer: one line of facts, in priority order. Which of
+   them fit is decided by useFactsFit, which hides the least important ones
+   until the model name stops being truncated — CSS can only guess at the
+   model's width, and a wrapped-away fact leaves its width behind as a hole. */
+.message-footer__facts {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* Each fact carries its own leading separator and spacing. */
+.message-footer__fact {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline-start: 0.375rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Animated tabs: collapse labels based on local container width. */
@@ -995,11 +1031,13 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Text font */
+/* Text font. The line height is snapped to whole pixels: a fractional
+   value lets glyph baselines land on half pixels and text lines blur or
+   render unevenly as they scroll. */
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
-  line-height: inherit;
+  line-height: round(1.625em, 1px);
 }
 
 .markdown-content p,
@@ -1010,20 +1048,31 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
-/* Restore paragraph block spacing inside markdown content. The
-   --markdown-paragraph-spacing token existed but was never wired, so Tailwind
-   preflight's zeroed <p> margins left adjacent paragraphs collapsed into one
-   visual line. */
-.markdown-content p {
-  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+/* Block rhythm: every block carries the same margin on both sides, so the
+   gap between any two neighbours is one paragraph spacing (margins collapse)
+   and the first/last block of a message adds nothing. Tailwind preflight
+   zeroes these margins, which left adjacent paragraphs reading as one. */
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content hr,
+.markdown-content table {
+  margin: var(--markdown-paragraph-spacing) 0;
 }
 
 /* The markdown renderer wraps each block in a display:contents [data-md-block]
-   element, so the message-level [&_.markdown-content>*:last-child]:mb-0
-   nullifiers target the wrapper (where margin is ignored), not the paragraph.
-   Drop the trailing margin on the last paragraph of the last block directly so
-   messages don't gain extra space at the bottom. */
-.markdown-content > [data-md-block]:last-child p:last-child {
+   element, so the message-level [&_.markdown-content>*:first-child]:mt-0 /
+   [&_.markdown-content>*:last-child]:mb-0 nullifiers target the wrapper
+   (where margin is ignored), not the block. Trim the outer blocks directly so
+   messages gain no extra space at the top or bottom. */
+.markdown-content > [data-md-block]:first-child > :first-child,
+.markdown-content > :first-child:not([data-md-block]) {
+  margin-top: 0;
+}
+
+.markdown-content > [data-md-block]:last-child > :last-child,
+.markdown-content > :last-child:not([data-md-block]) {
   margin-bottom: 0;
 }
 
@@ -1055,10 +1104,6 @@ html:not(.dark) .chat-scroll {
 .markdown-content.markdown-reasoning {
   font-size: var(--text-markdown);
   color: var(--surface-muted-foreground);
-  --markdown-heading1: inherit;
-  --markdown-heading2: inherit;
-  --markdown-heading3: inherit;
-  --markdown-heading4: inherit;
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);
   --markdown-blockquote: inherit;
@@ -1110,35 +1155,36 @@ html:not(.dark) .chat-scroll {
   font-size: inherit !important;
 }
 
-/* Streamdown headers: keep proportional but not oversized */
-.markdown-content h1 {
-  font-size: 1.125em;
+/* Headings: a clear step above the body without becoming display type, and
+   more air above than below so each heading binds to the text it introduces. */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 1.25rem 0 0.5rem;
+  color: color-mix(in srgb, var(--foreground) 95%, transparent);
   font-weight: 600;
-  margin-top: 1em;
-  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 1.25rem;
 }
 
 .markdown-content h2 {
-  font-size: 1.0625em;
-  font-weight: 600;
-  margin-top: 0.875em;
-  margin-bottom: 0.375em;
+  font-size: 1.125rem;
 }
 
 .markdown-content h3 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 0.75em;
-  margin-bottom: 0.25em;
+  font-size: 1rem;
 }
 
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 0.625em;
-  margin-bottom: 0.25em;
+  font-size: 0.875rem;
 }
 
 /* Code font */
@@ -1148,33 +1194,24 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code);
 }
 
-/* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
+/* Inline code sits inside a sentence: the theme's code colour over its own
+   quiet chip. The colour keeps the theme's value with a touch of transparency,
+   and the chip fades into the background further, so neither shouts like the
+   original full-strength style. */
 .markdown-content code[data-markdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
-  padding: 0.125rem 0.3125rem;
+  padding: 0.1rem 0.35rem;
   border-radius: 0.375rem;
   word-break: break-all;
   overflow-wrap: break-word;
 }
 
-/* Markdown headings - use theme colors */
-.markdown-content h1 {
-  color: var(--markdown-heading1, var(--primary));
-}
-
-.markdown-content h2 {
-  color: var(--markdown-heading2, var(--primary));
-}
-
-.markdown-content h3 {
-  color: var(--markdown-heading3, var(--primary));
-}
-
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 {
-  color: var(--markdown-heading4, var(--foreground));
+@supports (color: color-mix(in lab, red, red)) {
+  .markdown-content code[data-markdown="inline-code"] {
+    background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;
+    color: color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent) !important;
+  }
 }
 
 /* Markdown links - use theme colors */
@@ -1212,8 +1249,9 @@ html:not(.dark) .chat-scroll {
 
 /* Markdown blockquote - use theme colors */
 .markdown-content blockquote {
+  border-left: 2px solid var(--markdown-blockquote-border, var(--border));
+  padding-left: 0.8rem;
   color: var(--markdown-blockquote, var(--muted-foreground));
-  border-left-color: var(--markdown-blockquote-border, var(--border));
 }
 
 /* Markdown horizontal rule - use theme colors */
@@ -1272,6 +1310,8 @@ html:not(.dark) .chat-scroll {
 
 /* Reduce code block header height */
 [data-markdown="code-block-header"] {
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
   margin: 0;
   padding: 0.375rem 0.75rem;
   display: flex;
@@ -1298,7 +1338,9 @@ html:not(.dark) .chat-scroll {
   max-inline-size: 100%;
   min-inline-size: 0;
   overflow: hidden;
-  background: var(--surface-background);
+  --foreground: var(--syntax-foreground);
+  color: var(--foreground);
+  background: var(--syntax-background);
   border: 1px solid var(--interactive-border);
   border-radius: 0.75rem;
 }
@@ -1666,44 +1708,54 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   color: transparent !important;
 }
 
-/* Hide browser/system caret for Ghostty's own input surfaces.
-   Terminal cursor is rendered by the canvas renderer. */
-.terminal-viewport-container[contenteditable="true"][aria-label="Terminal input"],
-.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
+/* libghostty-vt terminal surface. The canvas draws the grid and cursor; the
+   textarea only receives keyboard, IME and clipboard events and follows the
+   cursor so IME candidates appear where the user types. */
+.terminal-viewport-container .oc-terminal-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: text;
+}
+
+.terminal-viewport-container .oc-terminal-input {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  padding: 0;
+  border: 0;
+  resize: none;
+  pointer-events: none;
   caret-color: transparent !important;
   outline: none !important;
 }
 
-textarea[aria-label="Terminal input"],
-input[aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar {
+  position: absolute;
+  top: 4px;
+  right: 1px;
+  bottom: 4px;
+  z-index: 1;
+  width: 8px;
+  cursor: default;
+  touch-action: none;
 }
 
-/* When touch terminal input uses the portaled overlay, keep Ghostty's
-   internal editable surfaces fully non-painting to avoid duplicate cursors. */
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
-  caret-color: transparent !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  background: transparent !important;
-  border: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  text-shadow: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 0;
+  border-radius: 3px;
+  background: var(--oc-scrollbar-thumb);
+  transition: background-color 120ms ease-out;
 }
 
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
-  opacity: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  pointer-events: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar:hover .oc-terminal-scrollbar-thumb {
+  background: var(--oc-scrollbar-thumb-hover);
 }
 
 /* Mobile Terminal Optimizations */
@@ -1712,15 +1764,6 @@ input[aria-label="Terminal input"] {
     font-variant-ligatures: none;
     font-feature-settings: "liga" 0, "calt" 0;
   }
-}
-
-/* Font loading states */
-.fonts-loading .terminal-viewport-container {
-  font-family: monospace;
-}
-
-.fonts-loaded .terminal-viewport-container {
-  font-family: "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @keyframes oc-busy-pulse {
@@ -1734,6 +1777,32 @@ input[aria-label="Terminal input"] {
 
 .animate-busy-pulse {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
+}
+
+/*
+ * The staggered dots of a busy indicator that stays on screen for as long as
+ * the agent works. A smooth opacity pulse is composited, yet it still makes
+ * the compositor and the GPU process draw sixty frames a second: about ten
+ * percent of a core on an otherwise still page. Three steps per half cycle
+ * last 200ms each, the same as the stagger between dots, so every dot changes
+ * on the same five frames a second, which halves that cost. Keep the stagger
+ * a multiple of one step or the dots stop sharing frames.
+ */
+.animate-busy-wave {
+  animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite;
+}
+
+@keyframes oc-status-logo {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-status-logo {
+  animation: oc-status-logo 4s steps(10, jump-none) infinite;
 }
 
 @keyframes navrail-dot-wave {
@@ -1856,15 +1925,12 @@ input[aria-label="Terminal input"] {
     display: none;
   }
 
-  .animate-busy-pulse {
+  .animate-busy-pulse,
+  .animate-busy-wave,
+  .animate-status-logo {
     animation: none;
   }
 
-}
-
-/* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
-[data-settings-view="true"] .overlay-scrollbar {
-  display: none;
 }
 
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor
@@ -1918,15 +1984,9 @@ html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
 /* Session tab titles: fade out instead of "..." — the ellipsis reads as
    clutter next to the tab's status dot and hover controls. Short titles
    never reach the fade zone (the span spans the tab, not the text). The
-   fade belongs to the resting state only: while the tab is hovered or its
-   controls are open, the title clips hard so the smear never sits next to
-   the menu/close/rename controls. */
+   fade follows the title's available width, including when hover controls
+   or an open menu reserve space at its end. */
 .session-tab-title {
   -webkit-mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
   mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
-}
-.session-tab:hover .session-tab-title,
-.session-tab[data-controls-open='true'] .session-tab-title {
-  -webkit-mask-image: none;
-  mask-image: none;
 }

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { OpenCode, type SessionMessageInfo } from '@opencode-ai/client';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import * as gitService from './gitService';
+import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel } from './bridge-git-generation-model';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import type { OpenCodeProtocol } from './opencode';
 
@@ -19,7 +20,6 @@ type SpecialGitDeps = {
   execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
 };
 
-const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
 const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
 const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
@@ -74,13 +74,6 @@ const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, stri
   headers: authHeaders || {},
 });
 
-const readStringField = (value: unknown, key: string): string => {
-  if (!value || typeof value !== 'object') return '';
-  const record = value as Record<string, unknown>;
-  const candidate = record[key];
-  return typeof candidate === 'string' ? candidate.trim() : '';
-};
-
 const fetchBridgeGitModelCatalog = async (
   apiUrl: string,
   authHeaders: Record<string, string> | undefined,
@@ -123,7 +116,7 @@ const fetchBridgeGitModelCatalog = async (
 };
 
 const resolveBridgeGitGenerationModel = async (
-  payloadModel: { providerId?: string; modelId?: string; zenModel?: string },
+  payloadModel: BridgeGitGenerationPayloadModel,
   settings: Record<string, unknown>,
   apiUrl: string,
   authHeaders: Record<string, string> | undefined,
@@ -143,24 +136,7 @@ const resolveBridgeGitGenerationModel = async (
     return catalog.has(`${providerID}/${modelID}`);
   };
 
-  const requestProviderId = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
-  const requestModelId = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
-  if (requestProviderId && requestModelId && hasModel(requestProviderId, requestModelId)) {
-    return { providerID: requestProviderId, modelID: requestModelId };
-  }
-
-  const settingsProviderId = readStringField(settings, 'gitProviderId');
-  const settingsModelId = readStringField(settings, 'gitModelId');
-  if (settingsProviderId && settingsModelId && hasModel(settingsProviderId, settingsModelId)) {
-    return { providerID: settingsProviderId, modelID: settingsModelId };
-  }
-
-  const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';
-  const settingsZenModel = readStringField(settings, 'zenModel');
-  return {
-    providerID: 'zen',
-    modelID: payloadZenModel || settingsZenModel || BRIDGE_ZEN_DEFAULT_MODEL,
-  };
+  return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel);
 };
 
 const extractTextFromMessageParts = (parts: unknown): string => {

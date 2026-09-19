@@ -14,31 +14,34 @@ const runtimeCtx = {
   isWindows: false,
   isLinux: false,
   isWindowsArm64: false,
+  routingAvailable: false,
 };
 
 describe('settings search', () => {
-  test('finds the Claude Code third-party integration', () => {
-    const results = buildSettingsSearchResults({
-      query: 'claude',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
+  test('Enter-to-send is searchable only outside mobile', () => {
+    for (const isMobile of [false, true]) {
+      const results = buildSettingsSearchResults({
+        query: 'shift enter',
+        runtimeCtx: { ...runtimeCtx, isMobile },
+        t,
+        getPageTitle: (page) => page,
+      });
 
-    expect(results.some((result) => result.id === 'integrations.third-party.opencode-claude')).toBe(true);
+      expect(results.some((result) => result.id === 'chat.enter-to-send')).toBe(!isMobile);
+    }
   });
 
-  test('finds third-party integrations by OpenChamber npm package names', () => {
-    const results = buildSettingsSearchResults({
-      query: '@openchamber/opencode-cursor',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
+  test('finds the scrollbar preference on every surface', () => {
+    for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
+      const results = buildSettingsSearchResults({
+        query: 'scrollbar',
+        runtimeCtx: context,
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
+    }
   });
-
   test('finds Linear connect on the integrations page', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',
@@ -52,6 +55,28 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(true);
   });
 
+  test('finds the chat input history scope setting', () => {
+    const results = buildSettingsSearchResults({
+      query: 'input history scope',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-scope')).toBe(true);
+  });
+
+  test('finds the chat input history limit setting by recall keywords', () => {
+    const results = buildSettingsSearchResults({
+      query: 'remember prompts',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-limit')).toBe(true);
+  });
+
   test('hides Linear connect in VS Code', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',
@@ -63,5 +88,27 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear')).toBe(false);
     expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(false);
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(false);
+  });
+
+  test('finds guest extension panels on the integrations page', () => {
+    const results = buildSettingsSearchResults({
+      query: 'gitlab',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'integrations.guests')).toBe(true);
+  });
+
+  test('hides guest extension panels in VS Code', () => {
+    const results = buildSettingsSearchResults({
+      query: 'clickup',
+      runtimeCtx: { ...runtimeCtx, isVSCode: true },
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
   });
 });

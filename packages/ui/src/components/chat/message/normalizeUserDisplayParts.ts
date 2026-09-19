@@ -117,10 +117,43 @@ const shouldKeepSyntheticUserText = (text: string, planModeEnabled: boolean): bo
     return false;
 };
 
+const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
+    const comments = parts
+        .map((part) => readContextPart(part))
+        .filter((payload) => payload?.kind === 'code-comment');
+    if (comments.length === 0) return new Set();
+
+    const redundant = new Set<string>();
+    for (const part of parts) {
+        if (part.type !== 'file') continue;
+        const { url } = part;
+        const range = url.match(/[?&]start=(\d+)&end=(\d+)/);
+        if (!range) continue;
+        const encodedPath = url.replace(/^file:\/\//, '').split('?')[0];
+        let path = encodedPath;
+        try {
+            path = decodeURIComponent(encodedPath);
+        } catch {
+            // Keep the encoded path; malformed URLs must not break rendering.
+        }
+        path = path.replace(/\\/g, '/');
+        const matches = comments.some((comment) => {
+            const commentPath = comment.fileLabel.replace(/\\/g, '/');
+            return comment.startLine === Number(range[1])
+                && comment.endLine === Number(range[2])
+                && (path === commentPath || path.endsWith(`/${commentPath}`));
+        });
+        if (matches) redundant.add(url);
+    }
+    return redundant;
+};
+
 export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEnabled?: boolean }): Part[] => {
     const planModeEnabled = options?.planModeEnabled === true;
+    const redundantFileUrls = redundantCommentFileUrls(parts);
     return parts
         .filter((part) => {
+            if (part.type === 'file' && redundantFileUrls.has(part.url)) return false;
             const synthetic = (part as { synthetic?: boolean }).synthetic === true;
             if (!synthetic) return true;
             if (part.type !== 'text') return false;
@@ -147,7 +180,13 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
 
                 if (synthetic) {
                     const contextPayload = readContextPart(part);
-                    if (contextPayload?.kind === 'github-issue' || contextPayload?.kind === 'github-pr' || contextPayload?.kind === 'linear-issue') {
+                    if (
+                        contextPayload?.kind === 'github-issue'
+                        || contextPayload?.kind === 'github-pr'
+                        || contextPayload?.kind === 'linear-issue'
+                        || contextPayload?.kind === 'guest-issue'
+                        || contextPayload?.kind === 'guest-pr'
+                    ) {
                         // SAFETY: same display-only file-part shape the legacy
                         // buildGitHubAttachmentPart produces; consumed by
                         // FileAttachment, which matches on the mime type.
@@ -156,6 +195,18 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
                                 type: 'file',
                                 mime: 'application/vnd.openchamber.linear-issue-link',
                                 filename: `${contextPayload.identifier}: ${contextPayload.title}`,
+                                url: contextPayload.url,
+                            } as Part;
+                        }
+                        if (contextPayload.kind === 'guest-issue' || contextPayload.kind === 'guest-pr') {
+                            return {
+                                type: 'file',
+                                mime: contextPayload.kind === 'guest-pr'
+                                    ? 'application/vnd.openchamber.guest-pr-link'
+                                    : 'application/vnd.openchamber.guest-issue-link',
+                                filename: contextPayload.kind === 'guest-pr'
+                                    ? `PR ${contextPayload.id}: ${contextPayload.title}`
+                                    : `${contextPayload.id}: ${contextPayload.title}`,
                                 url: contextPayload.url,
                             } as Part;
                         }

@@ -161,6 +161,29 @@ describe('OpenCode API runtime', () => {
     expect(unavailable.error).toBeInstanceOf(Error);
   });
 
+  it('ends descending history at the oldest page even when a previous cursor remains', async () => {
+    const cursors = [];
+    const runtime = createV2Runtime(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === '/api/session/session-1') return json({ data: v2Session('session-1') });
+      const cursor = parsed.searchParams.get('cursor');
+      cursors.push(cursor);
+      if (cursor === null) return json({
+        data: [{ id: 'new', type: 'user', time: { created: 2 }, text: 'newer' }],
+        cursor: { next: 'older' },
+      });
+      if (cursor === 'older') return json({
+        data: [{ id: 'old', type: 'user', time: { created: 1 }, text: 'older' }],
+        cursor: { previous: 'newer' },
+      });
+      throw new Error('History traversal reversed direction');
+    });
+    const result = await runtime.listMessages({ sessionID: 'session-1', allPages: true, limit: 1 });
+    expect(cursors).toEqual([null, 'older']);
+    expect(result.messages.map(({ info }) => info.id)).toEqual(['old', 'new']);
+    expect(result.cursor).toBeUndefined();
+  });
+
   it('uses generated V2 permission list and reply operations', async () => {
     const requests = [];
     const fetchImpl = vi.fn(async (url, init) => {
@@ -245,6 +268,8 @@ describe('OpenCode API runtime', () => {
       .rejects.toBeInstanceOf(UnsupportedOpenCodeOperationError);
     await expect(runtime.getRuntimeProviderListing())
       .rejects.toBeInstanceOf(UnsupportedOpenCodeOperationError);
+    await expect(runtime.archiveSession({ sessionID: 'session-1', directory: '/repo', archivedAt: 1700 }))
+      .rejects.toBeInstanceOf(UnsupportedOpenCodeOperationError);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -277,6 +302,11 @@ describe('OpenCode API runtime', () => {
     await expect(runtime.getRuntimeProviderListing('/repo')).resolves.toEqual({ all: [], connected: [], default: {} });
     expect(listProviders).toHaveBeenCalledWith({ directory: '/repo' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     await expect(runtime.listSessions({ directory: '/repo' })).rejects.toBe(sdkError);
+    await expect(runtime.archiveSession({ sessionID: 'session-1', directory: '/repo', archivedAt: 1700 }))
+      .resolves.toEqual({ id: 'session-1' });
+    expect(update).toHaveBeenLastCalledWith({
+      sessionID: 'session-1', directory: '/repo', time: { archived: 1700 },
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('resolves URL, auth, and protocol at call time', async () => {

@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
@@ -215,7 +215,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
 
   if (schedule.kind === 'cron') {
     try {
-      const iterator = parser.parseExpression(schedule.cron, {
+      const iterator = CronExpressionParser.parse(schedule.cron, {
         tz: zone,
         currentDate: new Date(nowMs),
       });
@@ -424,7 +424,16 @@ export const createScheduledTasksRuntime = (deps) => {
     }
 
     for (const projectID of activeProjectIDs) {
-      await syncProject(projectID);
+      try {
+        await syncProject(projectID);
+      } catch (error) {
+        // One project's config being unusable (a broken file, a lock timeout)
+        // must not keep every other project's tasks from being scheduled.
+        logger.warn?.('[ScheduledTasks] failed to sync project', {
+          projectID,
+          error: error?.message ?? String(error),
+        });
+      }
     }
   };
 
@@ -655,7 +664,8 @@ export const createScheduledTasksRuntime = (deps) => {
   const runTask = async (projectID, taskID, reason, scheduledFor) => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
-    if (!task || !task.enabled) {
+    // Manual runNow runs paused tasks too; only scheduled dispatches skip them.
+    if (!task || (reason !== 'manual' && !task.enabled)) {
       return { ok: false, skipped: true };
     }
 

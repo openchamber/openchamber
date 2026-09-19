@@ -23,7 +23,7 @@ function Command({
         ...style,
       }}
       className={cn(
-        "flex h-full w-full flex-col overflow-hidden rounded-xl",
+        "oc-surface-elevated flex h-full w-full flex-col overflow-hidden rounded-xl",
         className
       )}
       {...props}

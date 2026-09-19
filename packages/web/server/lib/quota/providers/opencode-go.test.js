@@ -27,9 +27,34 @@ describe('OpenCode Go quota provider', () => {
   it('parses partial API usage windows', () => {
     const windows = parseOpenCodeGoUsage({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' }, weekly: { percent: 40, resetsAt: '2026-08-19T12:00:00.000Z' } } });
     expect(windows['5h'].usedPercent).toBe(25);
-    expect(windows['5h'].resetAt).toBe('2026-08-12T12:00:00.000Z');
+    expect(windows['5h'].resetAt).toBe(Date.parse('2026-08-12T12:00:00.000Z'));
     expect(windows.weekly.usedPercent).toBe(40);
     expect(windows.monthly).toBeUndefined();
+  });
+
+  it('returns numeric reset timestamps for all usage windows', async () => {
+    const resetsAt = '2026-10-01T00:00:00.000Z';
+    const windows = await fetchOpenCodeGoUsage('test-key', async () => new Response(JSON.stringify({
+      usage: {
+        rolling: { percent: 25, resetsAt },
+        weekly: { percent: 40, resetsAt },
+        monthly: { percent: 60, resetsAt },
+      },
+    })));
+    expect(Object.keys(windows)).toEqual(['5h', 'weekly', 'monthly']);
+    for (const window of Object.values(windows)) {
+      expect(window.resetAt).toBe(Date.parse(resetsAt));
+    }
+  });
+
+  it('preserves valid windows when another reset date is invalid', () => {
+    const windows = parseOpenCodeGoUsage({ usage: {
+      rolling: { percent: 25, resetsAt: 'invalid' },
+      weekly: { percent: 40, resetsAt: '2026-08-19T12:00:00.000Z' },
+      monthly: { percent: 60, resetsAt: null },
+    } });
+    expect(Object.keys(windows)).toEqual(['weekly']);
+    expect(windows.weekly.resetAt).toBe(Date.parse('2026-08-19T12:00:00.000Z'));
   });
 
   it('does not expose credentials in authentication errors', async () => {

@@ -1,7 +1,15 @@
-import { getGitBranches, getGitStatus } from '@/lib/gitApi';
+import { checkIsGitRepository, getGitBranches, getGitStatus } from '@/lib/gitApi';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktree } from '@/lib/worktrees/worktreeManager';
 import { getRootBranch, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
+
+export class WorktreeRequiresGitRepositoryError extends Error {
+  constructor() {
+    super('Worktree creation requires a Git repository');
+    this.name = 'WorktreeRequiresGitRepositoryError';
+  }
+}
 
 const parseTrackingRef = (tracking: string | null | undefined): { remote: string; branch: string } | null => {
   const value = String(tracking || '').trim().replace(/^remotes\//, '');
@@ -162,7 +170,22 @@ export const createWorktreeWithDefaults = async (
   args: CreateWorktreeArgs,
   options?: { resolvedRootTrackingRemote?: string | null }
 ) => {
-  const remoteArgs = await withWorktreeRemoteStartRef(project, args);
-  const resolvedArgs = await withWorktreeUpstreamDefaults(project.path, remoteArgs, options);
-  return createWorktree(project, resolvedArgs);
+  const runtime = getRuntimeKey();
+  let cancelled = false;
+  const unsubscribe = subscribeRuntimeEndpointChanged(() => { cancelled = true; });
+  const assertCurrent = () => { if (cancelled || getRuntimeKey() !== runtime) throw new Error('Server changed during worktree creation'); };
+  try {
+    const isGitRepository = await checkIsGitRepository(project.path);
+    assertCurrent();
+    if (!isGitRepository) {
+      throw new WorktreeRequiresGitRepositoryError();
+    }
+    const remoteArgs = await withWorktreeRemoteStartRef(project, args);
+    assertCurrent();
+    const resolvedArgs = await withWorktreeUpstreamDefaults(project.path, remoteArgs, options);
+    assertCurrent();
+    return await createWorktree(project, resolvedArgs);
+  } finally {
+    unsubscribe();
+  }
 };

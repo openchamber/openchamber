@@ -9,11 +9,11 @@ description: 连接 GitHub 并从 issue 和拉取请求开始会话。
 
 ## 连接 GitHub
 
-1. 打开 **Settings → Git**。
-2. 在 GitHub 下，选择 **Connect**。OpenChamber 会显示一个链接和一个短码。
+1. 打开 **Settings → Integrations**，展开 **GitHub** 卡片。
+2. 选择 **Connect GitHub**。OpenChamber 会显示一个链接和一个短码。
 3. 打开链接，输入短码并批准。
 
-连接后，你的账号会显示在 GitHub 部分下。你可以连接多个账号并在它们之间切换，或随时断开连接。
+连接后，你的账号会显示在卡片上。你可以连接多个账号并在它们之间切换，或随时断开连接。如果同一台机器上已登录 `gh` CLI，OpenChamber 可以将其作为备用方式。
 
 ## 从 issue 或 PR 开始工作
 
@@ -27,6 +27,10 @@ description: 连接 GitHub 并从 issue 和拉取请求开始会话。
 ## 打开并管理拉取请求
 
 在 [git 视图](/zh-cn/git/) 的 **PR** 标签页中，你可以创建拉取请求、更新它、将草稿标记为就绪或合并它。OpenChamber 可以从你的变更生成 PR 标题和描述。
+
+## 将 issue 或 PR 关联到消息
+
+在聊天输入框中选择 **Link GitHub Issue** 或 **Link GitHub PR**。该 issue，或带有 diff 的 PR，会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。同一个选择器也可以用该 issue 作为第一条提示来开始新会话。
 
 ## 相关内容
 

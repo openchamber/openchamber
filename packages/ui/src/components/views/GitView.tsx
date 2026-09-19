@@ -20,6 +20,7 @@ import {
   useGitLoadingLog,
 } from '@/stores/useGitStore';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -64,6 +65,7 @@ import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIn
 import { deriveBaseBranch } from './git/baseBranch';
 import { getFreshestPrStatusForBranch, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
+import { pushCommittedChanges } from './git/commitAndPush';
 import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
@@ -203,8 +205,14 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
-  const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
-  const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
+  const [worktreeBootstrapSnapshot, setWorktreeBootstrapSnapshot] = React.useState<{
+    directory: string;
+    status: 'pending' | 'ready' | 'failed' | null;
+  } | null>(null);
+  const [postBootstrapRefresh, setPostBootstrapRefresh] = React.useState<{
+    directory: string;
+    status: 'refreshing' | 'failed';
+  } | null>(null);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
   const setDraftBootstrapPendingDirectory = useSessionUIStore((s) => s.setDraftBootstrapPendingDirectory);
@@ -285,7 +293,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const isLogLoading = useGitLoadingLog(gitDirectory ?? null);
   const {
     setActiveDirectory,
-    fetchAll,
     ensureAll,
     fetchStatus,
     fetchBranches,
@@ -301,7 +308,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     selectNestedRepo,
   } = useGitStore(useShallow((state) => ({
     setActiveDirectory: state.setActiveDirectory,
-    fetchAll: state.fetchAll,
     ensureAll: state.ensureAll,
     fetchStatus: state.fetchStatus,
     fetchBranches: state.fetchBranches,
@@ -329,7 +335,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   });
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
 
-  const previousBootstrapStatusRef = React.useRef<'pending' | 'ready' | 'failed' | null>(null);
   const gitReconcileTimeoutRef = React.useRef<number | null>(null);
   const gitMutationFlushTimeoutRef = React.useRef<number | null>(null);
   const flushQueuedGitMutationsRef = React.useRef<(() => void) | null>(null);
@@ -438,10 +443,12 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   React.useEffect(() => {
     if (!isActive) return;
     if (!currentDirectory) {
-      setWorktreeBootstrapStatus(null);
-      setIsWaitingForGitRefreshAfterBootstrap(false);
+      setWorktreeBootstrapSnapshot(null);
       return;
     }
+
+    const bootstrapDirectory = normalizePath(currentDirectory) ?? currentDirectory;
+    setWorktreeBootstrapSnapshot({ directory: bootstrapDirectory, status: null });
 
     let cancelled = false;
     let timeoutId: number | null = null;
@@ -452,7 +459,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         if (cancelled) {
           return;
         }
-        setWorktreeBootstrapStatus(next.status);
+        setWorktreeBootstrapSnapshot({ directory: bootstrapDirectory, status: next.status });
         if (next.status === 'pending') {
           timeoutId = window.setTimeout(() => {
             void poll();
@@ -460,7 +467,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         }
       } catch {
         if (!cancelled) {
-          setWorktreeBootstrapStatus(null);
+          setWorktreeBootstrapSnapshot({ directory: bootstrapDirectory, status: null });
         }
       }
     };
@@ -475,37 +482,84 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     };
   }, [isActive, currentDirectory]);
 
-  React.useEffect(() => {
-    const previous = previousBootstrapStatusRef.current;
-    previousBootstrapStatusRef.current = worktreeBootstrapStatus;
-
-    if (!currentDirectory || !git) {
-      return;
-    }
-
-    if (previous === 'pending' && worktreeBootstrapStatus === 'ready') {
-      setIsWaitingForGitRefreshAfterBootstrap(true);
-      void fetchAll(currentDirectory, git).finally(() => {
-        window.setTimeout(() => {
-          setIsWaitingForGitRefreshAfterBootstrap(false);
-        }, 1200);
-      });
-    }
-
-    if (worktreeBootstrapStatus === 'failed') {
-      setDraftBootstrapPendingDirectory(null);
-      setIsWaitingForGitRefreshAfterBootstrap(false);
-    }
-  }, [currentDirectory, fetchAll, git, setDraftBootstrapPendingDirectory, worktreeBootstrapStatus]);
-
   const normalizedDraftBootstrapPendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);
   const isDraftBootstrapPendingForCurrentDirectory = Boolean(
     currentDirectory && normalizedDraftBootstrapPendingDirectory && normalizedDraftBootstrapPendingDirectory === normalizePath(currentDirectory)
   );
+  const sharedWorktreeBootstrapPending = useWorktreeBootstrapPending(currentDirectory ?? null);
+  const normalizedCurrentBootstrapDirectory = normalizePath(currentDirectory);
+  const observedWorktreeBootstrapStatus = worktreeBootstrapSnapshot?.directory === normalizedCurrentBootstrapDirectory
+    ? worktreeBootstrapSnapshot.status
+    : null;
   const isPendingWorktreeSetup = Boolean(
-    currentDirectory && (worktreeBootstrapStatus === 'pending' || isDraftBootstrapPendingForCurrentDirectory)
+    currentDirectory
+      && (
+        sharedWorktreeBootstrapPending
+        || observedWorktreeBootstrapStatus === 'pending'
+        || (isDraftBootstrapPendingForCurrentDirectory && newSessionDraft?.pendingWorktreeRequestId)
+      )
   );
-  const shouldHideNotGitState = isPendingWorktreeSetup || isWaitingForGitRefreshAfterBootstrap;
+  const isPostBootstrapRefreshForCurrentDirectory = Boolean(
+    normalizedCurrentBootstrapDirectory
+      && postBootstrapRefresh?.directory === normalizedCurrentBootstrapDirectory
+  );
+
+  React.useEffect(() => {
+    if (!normalizedCurrentBootstrapDirectory) return;
+
+    if (observedWorktreeBootstrapStatus === 'failed') {
+      setDraftBootstrapPendingDirectory(null);
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory ? null : current
+      ));
+      return;
+    }
+
+    if (isPendingWorktreeSetup) {
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory && current.status === 'refreshing'
+          ? current
+          : { directory: normalizedCurrentBootstrapDirectory, status: 'refreshing' }
+      ));
+      return;
+    }
+
+    if (
+      postBootstrapRefresh?.directory !== normalizedCurrentBootstrapDirectory
+      || postBootstrapRefresh.status !== 'refreshing'
+      || !gitDirectory
+      || !git
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchStatus(gitDirectory, git, {
+      force: true,
+      silent: true,
+      throwOnError: true,
+    }).then(() => {
+      if (cancelled) return;
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory ? null : current
+      ));
+    }).catch(() => {
+      if (cancelled) return;
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory
+          ? { ...current, status: 'failed' }
+          : current
+      ));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchStatus, git, gitDirectory, isPendingWorktreeSetup, normalizedCurrentBootstrapDirectory, observedWorktreeBootstrapStatus, postBootstrapRefresh, setDraftBootstrapPendingDirectory]);
+
+  const shouldHideGitState = isPendingWorktreeSetup || isPostBootstrapRefreshForCurrentDirectory;
+  const postBootstrapRefreshFailed = isPostBootstrapRefreshForCurrentDirectory
+    && postBootstrapRefresh?.status === 'failed';
 
   const initialSnapshot = React.useMemo(() => {
     if (!gitDirectory) return null;
@@ -988,7 +1042,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   );
 
   React.useEffect(() => {
-    if (!gitDirectory || changeEntries.length === 0) {
+    if (!isActive || !gitDirectory || changeEntries.length === 0) {
       return;
     }
 
@@ -1018,7 +1072,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [changeEntries, gitDirectory, git, prefetchDiffs, stagedChangeEntries, visibleChangePaths]);
+  }, [isActive, changeEntries, gitDirectory, git, prefetchDiffs, stagedChangeEntries, visibleChangePaths]);
 
   const getPushedRemoteName = (result?: Awaited<ReturnType<typeof git.gitPush>>) => {
     return result?.pushed[0]?.remote
@@ -1063,46 +1117,41 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         );
       } else if (action === 'push') {
         const result = await git.gitPush(gitDirectory);
-        toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
+        toast.success(result.pushed.length > 0
+          ? t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) })
+          : t('gitView.toast.alreadyUpToDate'));
       } else if (action === 'sync') {
         if (!remote) {
           throw new Error('No remote available for sync');
         }
         let pulledFileCount = 0;
-        let pushedChanges = false;
-        await git.gitFetch(gitDirectory, { remote: remote.name });
-        const afterFetch = await git.getGitStatus(gitDirectory);
-
-        if ((afterFetch.behind ?? 0) > 0) {
-          if ((afterFetch.files?.length ?? 0) > 0) {
-            toast.error(t('gitView.toast.commitOrStashBeforeSync'));
-            return;
-          }
-          const pullResult = await git.gitPull(gitDirectory, getPullOptions(remote));
-          pulledFileCount = pullResult.files.length;
-        }
-
-        const afterPull = await git.getGitStatus(gitDirectory);
-        if ((afterPull.ahead ?? 0) > 0) {
-          await git.gitPush(gitDirectory);
-          pushedChanges = true;
-        }
-        if (pulledFileCount > 0 && pushedChanges) {
+        const result = await pushCommittedChanges({
+          git,
+          directory: gitDirectory,
+          remote,
+          dirtyWorktreeError: t('gitView.toast.commitOrStashBeforeSync'),
+          onPulled: (pullResult) => { pulledFileCount = pullResult.files.length; },
+        });
+        const pushedChanges = result.pushed.length > 0;
+        const pushedRemote = getPushedRemoteName(result);
+        if (pulledFileCount > 0 && pushedChanges && pushedRemote === remote.name) {
           toast.success(
             pulledFileCount === 1
               ? t('gitView.toast.syncedPulledSingleAndPushed', { count: pulledFileCount, name: remote.name })
               : t('gitView.toast.syncedPulledPluralAndPushed', { count: pulledFileCount, name: remote.name })
           );
-        } else if (pulledFileCount > 0) {
-          toast.success(
-            pulledFileCount === 1
-              ? t('gitView.toast.pulledFilesSingle', { count: pulledFileCount, name: remote.name })
-              : t('gitView.toast.pulledFilesPlural', { count: pulledFileCount, name: remote.name })
-          );
-        } else if (pushedChanges) {
-          toast.success(t('gitView.toast.pushedToUpstream', { name: remote.name }));
         } else {
-          toast.success(t('gitView.toast.alreadyUpToDate'));
+          if (pulledFileCount > 0) {
+            toast.success(pulledFileCount === 1
+              ? t('gitView.toast.pulledFilesSingle', { count: pulledFileCount, name: remote.name })
+              : t('gitView.toast.pulledFilesPlural', { count: pulledFileCount, name: remote.name }));
+          }
+          if (pushedChanges) {
+            toast.success(t('gitView.toast.pushedToUpstream', { name: pushedRemote }));
+          }
+          if (pulledFileCount === 0 && !pushedChanges) {
+            toast.success(t('gitView.toast.alreadyUpToDate'));
+          }
         }
       }
 
@@ -1184,29 +1233,16 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         }
 
         setSyncAction('sync');
-        const trackingPrefix = `${remote.name}/`;
-        const trackedBranch = status?.tracking?.startsWith(trackingPrefix)
-          ? status.tracking.slice(trackingPrefix.length)
-          : undefined;
-
-        await git.gitFetch(gitDirectory, { remote: remote.name });
-        const afterFetch = await git.getGitStatus(gitDirectory);
-        if ((afterFetch.behind ?? 0) > 0) {
-          if ((afterFetch.files?.length ?? 0) > 0) {
-            toast.error(t('gitView.toast.commitOrStashBeforeSync'));
-            await refreshStatusAndBranches(false);
-            return;
-          }
-          await git.gitPull(gitDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
-        }
-
-        const afterPull = await git.getGitStatus(gitDirectory);
-        let result: Awaited<ReturnType<typeof git.gitPush>> | undefined;
-        if ((afterPull.ahead ?? 0) > 0) {
-          result = await git.gitPush(gitDirectory);
-        }
-        toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
-        triggerFireworks();
+        await pushCommittedChanges({
+          git,
+          directory: gitDirectory,
+          remote,
+          dirtyWorktreeError: t('gitView.toast.commitOrStashBeforeSync'),
+          onPushed: (result) => {
+            toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
+            triggerFireworks();
+          },
+        });
         await refreshStatusAndBranches(false);
       } else {
         await refreshStatusAndBranches(false);
@@ -1839,6 +1875,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         id: 'staged',
         title: t('gitView.changes.stagedTitle'),
         entries: stagedChangeEntries,
+        statsScope: 'staged',
         actionSymbol: '-',
         actionAllLabel: t('gitView.changes.unstageAllAria'),
         getActionLabel: (path) => t('gitView.changes.unstageFileAria', { path }),
@@ -1856,6 +1893,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         id: 'unstaged',
         title: t('gitView.changes.title'),
         entries: unstagedChangeEntries,
+        statsScope: 'working',
         actionSymbol: '+',
         actionAllLabel: t('gitView.changes.stageAllAria'),
         getActionLabel: (path) => t('gitView.changes.stageFileAria', { path }),
@@ -2336,6 +2374,42 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     );
   }
 
+  if (shouldHideGitState) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+        {!postBootstrapRefreshFailed ? (
+          <Icon name="loader-4" className="mb-3 size-6 animate-spin text-muted-foreground" />
+        ) : null}
+        <p className="typography-ui-label font-semibold text-foreground">
+          {postBootstrapRefreshFailed
+            ? t('gitView.toast.refreshRepositoryFailed')
+            : t('gitView.empty.worktreeSetupInProgress')}
+        </p>
+        {!postBootstrapRefreshFailed ? (
+          <p className="typography-meta mt-1 text-muted-foreground">
+            {t('gitView.empty.worktreeSetupDescription')}
+          </p>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={() => {
+              if (!normalizedCurrentBootstrapDirectory) return;
+              setPostBootstrapRefresh({
+                directory: normalizedCurrentBootstrapDirectory,
+                status: 'refreshing',
+              });
+            }}
+          >
+            {t('gitView.empty.retryDiscovery')}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   if (isGitRepo === null || (isGitRepo === true && !status)) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -2348,20 +2422,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   }
 
   if (isGitRepo === false) {
-    if (shouldHideNotGitState) {
-      return (
-        <div className="flex h-full flex-col items-center justify-center px-4 text-center">
-          <Icon name="loader-4" className="mb-3 size-6 animate-spin text-muted-foreground" />
-          <p className="typography-ui-label font-semibold text-foreground">
-            {t('gitView.empty.worktreeSetupInProgress')}
-          </p>
-          <p className="typography-meta mt-1 text-muted-foreground">
-            {t('gitView.empty.worktreeSetupDescription')}
-          </p>
-        </div>
-      );
-    }
-
     // Nested repository discovery states (discovering, failed, unsupported,
     // none found, or settling on the auto-selected repository).
     return (

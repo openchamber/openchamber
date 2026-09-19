@@ -14,7 +14,10 @@ const providerPayload = (overrides = {}) => ({
       id: 'llmapi',
       source: 'config',
       options: { apiKey: 'plugin-key', baseURL: 'https://api.llmapi.ai/v1/' },
-      models: { 'claude-opus-4-8': { api: { id: 'claude-opus-4-8', url: '', npm: '@ai-sdk/anthropic' } } },
+      models: {
+        'claude-opus-4-8': { api: { id: 'claude-opus-4-8', url: '', npm: '@ai-sdk/anthropic' } },
+        'gpt-5.6-luna': { api: { id: 'gpt-5.6-luna', url: 'https://api.llmapi.ai/v1', npm: '@ai-sdk/openai' } },
+      },
     },
     {
       id: 'opencode',
@@ -55,6 +58,9 @@ describe('OpenCode runtime provider snapshot', () => {
 
     expect(provider).toMatchObject({ apiKey: 'plugin-key', baseURL: 'https://api.llmapi.ai/v1' });
     expect(getRuntimeProviderListing).toHaveBeenCalledWith(undefined, { timeoutMs: 5000 });
+    expect(provider.models.get('gpt-5.6-luna')).toEqual({
+      api: { url: 'https://api.llmapi.ai/v1', npm: '@ai-sdk/openai' },
+    });
   });
 
   it('refuses the zen sentinel as a credential', async () => {

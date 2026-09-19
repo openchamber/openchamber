@@ -28,7 +28,7 @@ function createPart(id: string, messageID: string): Part {
 }
 
 describe("getReconnectCandidateSessionIds", () => {
-  test("includes non-idle, incomplete assistant, and parent sessions", () => {
+  test("includes non-idle, incomplete assistant, and active-child ancestor sessions", () => {
     const busyStatus = { type: "busy" } as SessionStatus
 
     expect(getReconnectCandidateSessionIds({
@@ -38,11 +38,22 @@ describe("getReconnectCandidateSessionIds", () => {
         createSession("parent"),
         createSession("incomplete"),
       ],
-      session_status: { busy: busyStatus },
+      session_status: { busy: busyStatus, child: busyStatus },
       message: {
         incomplete: [createAssistantMessage("m-1", "incomplete")],
       },
-    }).sort()).toEqual(["busy", "incomplete", "parent"])
+    }).sort()).toEqual(["busy", "child", "incomplete", "parent"])
+  })
+
+  test("closed historical children do not trigger parent recovery or a history scan", () => {
+    let parentReads = 0
+    const session: Session[] = Array.from({ length: 15_000 }, (_, index) => ({
+      id: `session-${index}`, slug: `session-${index}`, projectID: "project", directory: "/repo",
+      title: "Historical session", version: "1", time: { created: 1, updated: 1 },
+      get parentID() { parentReads += 1; return `parent-${index}` },
+    }))
+    expect(getReconnectCandidateSessionIds({ session, session_status: {}, message: {} })).toEqual([])
+    expect(parentReads).toBe(0)
   })
 
   test("includes the currently viewed session even when it looks idle and complete", () => {

@@ -12,6 +12,20 @@ import {
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 
 describe('scheduled-tasks runtime helpers', () => {
+  it.each([
+    ['*/15 * * * *', 'UTC', '2026-09-18T08:07:00Z', '2026-09-18T08:15:00Z'],
+    ['30 */5 * * * *', 'UTC', '2026-09-18T08:07:00Z', '2026-09-18T08:10:30Z'],
+    ['0 9 * * MON-FRI', 'Europe/Kyiv', '2026-09-18T07:00:00Z', '2026-09-21T06:00:00Z'],
+    ['0 9 * * *', 'Europe/Kyiv', '2026-03-28T08:00:00Z', '2026-03-29T06:00:00Z'],
+    ['0 9 * * *', 'Europe/Kyiv', '2026-10-24T08:00:00Z', '2026-10-25T07:00:00Z'],
+    ['0 0 L * *', 'UTC', '2026-02-01T00:00:00Z', '2026-02-28T00:00:00Z'],
+  ])('computes cron %s in %s from %s', (cron, timezone, now, expected) => {
+    expect(computeNextRunAt({
+      enabled: true,
+      schedule: { kind: 'cron', cron, timezone },
+    }, Date.parse(now))).toBe(Date.parse(expected));
+  });
+
   it('computes next daily run in timezone', () => {
     const nowUtc = Date.UTC(2025, 0, 1, 8, 0, 0);
     const next = computeNextRunAt({
@@ -203,6 +217,59 @@ Run daily.
       listSpy.mockRestore();
     } finally {
       await cleanup();
+    }
+  });
+});
+
+describe('scheduled-tasks runtime syncAllProjects', () => {
+  it('keeps scheduling the other projects when one project cannot be synced', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-runtime-sync-all-'));
+    try {
+      const brokenPath = path.join(tempRoot, 'broken');
+      const healthyPath = path.join(tempRoot, 'healthy');
+      await mkdir(path.join(healthyPath, '.agents', 'loops'), { recursive: true });
+      await mkdir(brokenPath, { recursive: true });
+      await writeFile(path.join(healthyPath, '.agents', 'loops', 'daily.md'), `---
+name: daily
+schedule: "0 9 * * *"
+enabled: true
+model: openai/gpt-5
+---
+Run daily.
+`, 'utf8');
+
+      const projectConfigRuntime = createProjectConfigRuntime({
+        fsPromises: await import('fs/promises'),
+        path,
+        projectsDirPath: path.join(tempRoot, 'config'),
+        createTaskID: () => 'task-fixed-id',
+      });
+      await mkdir(path.join(tempRoot, 'config'), { recursive: true });
+      await writeFile(projectConfigRuntime.resolveProjectConfigPath('broken'), '{ not json', 'utf8');
+
+      const warnings = [];
+      const runtime = createScheduledTasksRuntime({
+        buildOpenCodeUrl: () => 'http://localhost',
+        getOpenCodeAuthHeaders: () => ({}),
+        waitForOpenCodeReady: async () => {},
+        projectConfigRuntime,
+        listProjects: async () => [
+          { id: 'broken', path: brokenPath },
+          { id: 'healthy', path: healthyPath },
+        ],
+        logger: { warn: (...args) => warnings.push(args) },
+      });
+
+      await expect(runtime.start()).resolves.toBeUndefined();
+
+      expect(runtime.getStatus().enabledScheduledTasksCount).toBe(1);
+      const healthyTasks = await projectConfigRuntime.listScheduledTasks('healthy');
+      expect(healthyTasks.map((task) => task.id)).toEqual(['loop:project:daily']);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0][1]).toMatchObject({ projectID: 'broken' });
+      runtime.stop();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
     }
   });
 });

@@ -33,6 +33,7 @@ import {
   applyMarkdownCodeBlockWrapState,
   decorateMarkdown,
   getMarkdownCodeText,
+  stabilizeMarkdownTableWidths,
   type DecorateContext,
   type DecorateLabels,
   type MermaidControlOptions,
@@ -814,6 +815,7 @@ const useMorphdomMarkdown = ({
   syntaxVars,
   ctx,
   domCacheKey,
+  tableLayoutSettled,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
@@ -822,6 +824,7 @@ const useMorphdomMarkdown = ({
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
   domCacheKey?: DetachedMarkdownDomKey | null;
+  tableLayoutSettled: boolean;
 }) => {
   React.useEffect(() => {
     ensureMarkdownShikiTheme();
@@ -829,6 +832,7 @@ const useMorphdomMarkdown = ({
 
   const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
   const renderRevisionRef = React.useRef(0);
+  const tableLayoutFrameRef = React.useRef<number | null>(null);
   // A provisional first paint (blocks not in the settled cache) holds the
   // timeline reveal until the async render lands, so the session opens with
   // final code highlighting instead of a visible restyle.
@@ -859,6 +863,28 @@ const useMorphdomMarkdown = ({
     }
     mermaidViewerRef.current.refresh();
   }, [containerRef]);
+  const scheduleTableLayout = React.useCallback(() => {
+    if (!tableLayoutSettled) return;
+    const previousFrame = tableLayoutFrameRef.current;
+    if (previousFrame !== null) window.cancelAnimationFrame(previousFrame);
+    const renderRevision = renderRevisionRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      if (tableLayoutFrameRef.current !== frame) return;
+      tableLayoutFrameRef.current = null;
+      if (renderRevisionRef.current !== renderRevision) return;
+      const container = containerRef.current;
+      const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+      if (target) stabilizeMarkdownTableWidths(target);
+    });
+    tableLayoutFrameRef.current = frame;
+  }, [containerRef, tableLayoutSettled]);
+
+  React.useEffect(() => () => {
+    const frame = tableLayoutFrameRef.current;
+    if (frame === null) return;
+    window.cancelAnimationFrame(frame);
+    tableLayoutFrameRef.current = null;
+  }, []);
 
   React.useLayoutEffect(() => {
     renderRevisionRef.current += 1;
@@ -984,6 +1010,7 @@ const useMorphdomMarkdown = ({
           ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
           : null;
         streamPerfCount('ui.markdown_renderer.settled_paint.reused');
+        scheduleTableLayout();
         releaseRevealHold();
         return;
       }
@@ -992,6 +1019,12 @@ const useMorphdomMarkdown = ({
     void renderMarkdownBlocks(text, streaming, imageMode).then((blocks) => {
       if (!active || renderRevisionRef.current !== renderRevision) return;
       const existing = Array.from(target.children) as HTMLElement[];
+      // Capture before block reconciliation: streaming completion changes the
+      // wrapper layout, and theme changes can replace entire decorated blocks.
+      // Match by disclosure order plus heading so unrelated replacements cannot
+      // inherit the previous disclosure's state. No persistent/global state.
+      const disclosureStates = Array.from(target.querySelectorAll<HTMLDetailsElement>('details[data-md-details]'))
+        .map((details) => ({ summary: details.querySelector('summary')?.textContent, open: details.open }));
 
       // Reconcile per block: only re-morph blocks whose content changed, leaving
       // stable leading blocks untouched. Keeps per-stream-step DOM work bounded
@@ -1054,7 +1087,13 @@ const useMorphdomMarkdown = ({
         const tempHasMermaidBlock = shouldRefreshMermaidViewers(temp);
         morphdom(el, temp, {
           childrenOnly: true,
-          onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
+          onBeforeElUpdated: (fromEl, toEl) => {
+            if (fromEl.matches('details[data-md-details]') && toEl.matches('details[data-md-details]')
+              && fromEl.querySelector('summary')?.textContent === toEl.querySelector('summary')?.textContent) {
+              toEl.toggleAttribute('open', fromEl.hasAttribute('open'));
+            }
+            return !fromEl.isEqualNode(toEl);
+          },
         });
         el.setAttribute('data-md-id', block.id);
         el.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
@@ -1075,16 +1114,25 @@ const useMorphdomMarkdown = ({
       if (removedMermaidBlock || (existing.length > blocks.length && hadMermaidBeforeTrailingCleanup)) {
         refreshMermaidViewers();
       }
+      if (disclosureStates.length > 0) {
+        target.querySelectorAll<HTMLDetailsElement>('details[data-md-details]').forEach((details, index) => {
+          const previous = disclosureStates[index];
+          if (previous && previous.summary === details.querySelector('summary')?.textContent) {
+            details.open = previous.open;
+          }
+        });
+      }
       mountedDomRef.current = domCacheKey
         ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
         : null;
+      scheduleTableLayout();
       releaseRevealHold();
     });
 
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, imageMode, refreshMermaidViewers, releaseRevealHold, streaming, text]);
+  }, [containerRef, ctx, domCacheKey, imageMode, refreshMermaidViewers, releaseRevealHold, scheduleTableLayout, streaming, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1203,6 +1251,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     syntaxVars,
     ctx,
     domCacheKey,
+    tableLayoutSettled: !isStreaming,
   });
 
   const markdownContent = (
@@ -1293,6 +1342,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     streaming: false,
     syntaxVars,
     ctx,
+    tableLayoutSettled: true,
   });
 
   return (

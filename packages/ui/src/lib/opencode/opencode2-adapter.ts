@@ -869,6 +869,7 @@ export function createOpencode2Adapter(
   };
 
   const listV2Pages = async (input: SessionListInput, budget: { remaining: number }, parentID: string | null | undefined, options?: LegacyOptions): Promise<Session[]> => {
+    if (budget.remaining <= 0) throw new Error('OpenCode V2 session pagination limit exceeded');
     const output: Session[] = [];
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
@@ -1236,7 +1237,7 @@ export function createOpencode2Adapter(
         let session = sessions.get(input.sessionID);
         if (!session) session = rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))));
         const data = normalizeMessages(input.sessionID, [...result.data].reverse(), session);
-        const next = result.cursor.next ?? result.cursor.previous;
+        const next = result.cursor.next;
         const response: LegacyResult<typeof data> = { data };
         if (next) response.response = new Response(null, { headers: { 'x-next-cursor': next } });
         return response;

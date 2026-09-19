@@ -12,6 +12,7 @@ type OperationCounts = {
   replaceCalls: number;
   removeCalls: number;
   getBoundingClientRectCalls: number;
+  tableProbeReads: number;
   viewBoxWrites: number;
   resizeObserverCreates: number;
   resizeObserverObserveCalls: number;
@@ -62,6 +63,7 @@ let windowInstance: Window;
 let previousGlobals: Map<string, PropertyDescriptor | undefined>;
 let activeCounts: OperationCounts | null = null;
 let animationFrameQueue: FrameRequestCallback[] = [];
+let tableProbeWidths: Map<string, number> | null = null;
 let notifyResize: ((entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void) | null = null;
 let MarkdownRenderer: React.ComponentType<{
   content: string;
@@ -82,6 +84,7 @@ const makeCounts = (): OperationCounts => ({
   replaceCalls: 0,
   removeCalls: 0,
   getBoundingClientRectCalls: 0,
+  tableProbeReads: 0,
   viewBoxWrites: 0,
   resizeObserverCreates: 0,
   resizeObserverObserveCalls: 0,
@@ -239,10 +242,15 @@ const initializePerformanceDom = async (): Promise<void> => {
     return originalRemove.call(this);
   } });
   const originalGetBoundingClientRect = elementPrototype.getBoundingClientRect;
-  Object.defineProperty(elementPrototype, 'getBoundingClientRect', { configurable: true, value: function (): DOMRect {
+  Object.defineProperty(elementPrototype, 'getBoundingClientRect', { configurable: true, value: function (this: Element): DOMRect {
     if (activeCounts) {
       activeCounts.getBoundingClientRectCalls += 1;
       activeCounts.geometrySequence.push('read');
+    }
+    if (this.matches('table') && this.closest('[data-md-table-measure]')) {
+      if (activeCounts) activeCounts.tableProbeReads += 1;
+      const key = (this.textContent ?? '').trim();
+      return new windowInstance.DOMRect(0, 0, tableProbeWidths?.get(key) ?? 0, 20);
     }
     return originalGetBoundingClientRect.call(this);
   } });
@@ -318,6 +326,124 @@ afterAll(() => {
 });
 
 describe('MarkdownRenderer DOM mount performance contract', () => {
+  test('preserves disclosure choices through streaming, settlement, and redecorating', async () => {
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const prefix = 'Introduction\n\n<details><summary>Review</summary>\n\n';
+    const render = async (content: string, streaming: boolean) => {
+      await act(async () => {
+        root.render(<MarkdownRenderer content={content} messageId="disclosures" isAnimated={false} isStreaming={streaming} enableFileReferences={false} />);
+        await waitForSettledEffects();
+      });
+      await act(async () => waitForSettledEffects());
+    };
+    try {
+      await render(`${prefix}First`, true);
+      const first = host.querySelector<HTMLDetailsElement>('details');
+      expect(first).not.toBeNull();
+      expect(first?.open).toBe(false);
+      expect(first?.querySelector('summary [data-md-disclosure-icon] use')?.getAttribute('href')).toBe('#oc-arrow-right-s');
+      if (!first) throw new Error('Expected disclosure');
+      first.open = true;
+      for (let count = 1; count <= 5; count += 1) {
+        await render(`${prefix}First\n\n${'More text. '.repeat(count)}`, true);
+        expect(host.querySelector<HTMLDetailsElement>('details')?.open).toBe(true);
+      }
+      const settled = `${prefix}First\n\n</details>\n\n<details open><summary>Second</summary>\n\nBody\n\n</details>`;
+      await render(settled, false);
+      const disclosures = host.querySelectorAll<HTMLDetailsElement>('details');
+      expect(disclosures).toHaveLength(2);
+      expect(disclosures[0]?.open).toBe(true);
+      expect(disclosures[1]?.open).toBe(true);
+      disclosures[1]!.open = false;
+      // The fixture supplies a fresh theme/translation context on each render,
+      // exercising whole-block replacement with unchanged source as well.
+      await render(settled, false);
+      expect(host.querySelectorAll<HTMLDetailsElement>('details')[0]?.open).toBe(true);
+      expect(host.querySelectorAll<HTMLDetailsElement>('details')[1]?.open).toBe(false);
+      expect(host.querySelectorAll('summary [data-md-disclosure-icon]')).toHaveLength(2);
+      await render('<details><summary>Different</summary>\n\nNew body\n\n</details>', false);
+      expect(host.querySelector<HTMLDetailsElement>('details')?.open).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  test('fixes body-sized table columns once the stream settles', async () => {
+    const content = [
+      '| An intentionally oversized header | Another oversized header | A third oversized header |',
+      '| --- | --- | --- |',
+      '| short | medium body value | very long body value |',
+    ].join('\n');
+    tableProbeWidths = new Map([
+      ['short', 48],
+      ['medium body value', 186],
+      ['very long body value', 800],
+    ]);
+    const counts = makeCounts();
+    activeCounts = counts;
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const render = (isStreaming: boolean) => root.render(
+      <MarkdownRenderer
+        content={content}
+        messageId="table-width-message"
+        isAnimated={false}
+        isStreaming={isStreaming}
+        enableFileReferences={false}
+      />,
+    );
+
+    try {
+      await act(async () => {
+        render(true);
+        await waitForSettledEffects();
+      });
+      await flushAnimationFrame();
+      expect(host.querySelector('[data-markdown="table"]')?.getAttribute('data-md-table-layout')).toBe('pending');
+      expect(counts.tableProbeReads).toBe(0);
+
+      await act(async () => {
+        render(false);
+        await waitForSettledEffects();
+      });
+      await flushAnimationFrame();
+
+      const table = host.querySelector<HTMLTableElement>('[data-markdown="table"]');
+      const cells = Array.from(table?.querySelectorAll('th, td') ?? []);
+      const columnWidths = Array.from(table?.querySelectorAll<HTMLTableColElement>('colgroup[data-md-table-columns] col') ?? [])
+        .map((column) => column.style.width);
+      const tableProbeReads = counts.tableProbeReads;
+      await flushAnimationFrame();
+
+      expect(table).not.toBeNull();
+      expect(table?.getAttribute('data-md-table-layout')).toBe('fixed');
+      expect(table?.style.tableLayout).toBe('fixed');
+      expect(table?.style.width).toBe('626px');
+      expect(columnWidths).toEqual(['120px', '186px', '320px']);
+      expect(table?.classList.contains('w-max')).toBe(true);
+      expect(table?.classList.contains('min-w-full')).toBe(false);
+      expect(table?.classList.contains('w-full')).toBe(false);
+      expect(table?.parentElement?.classList.contains('overflow-x-auto')).toBe(true);
+      const wrapper = table?.closest('[data-markdown="table-wrapper"]');
+      expect(wrapper?.classList.contains('w-fit')).toBe(true);
+      expect(wrapper?.classList.contains('max-w-full')).toBe(true);
+      expect(cells.length).toBeGreaterThan(0);
+      expect(cells.every((cell) => cell.classList.contains('min-w-[120px]'))).toBe(true);
+      expect(cells.every((cell) => cell.classList.contains('max-w-[320px]'))).toBe(true);
+      expect(cells.every((cell) => (
+        cell.classList.contains('whitespace-normal')
+        && cell.classList.contains('[overflow-wrap:anywhere]')
+      ))).toBe(true);
+      expect(counts.tableProbeReads).toBe(tableProbeReads);
+    } finally {
+      tableProbeWidths = null;
+      await act(async () => root.unmount());
+    }
+  });
+
   test('builds Markdown sprite controls without parsing SVG markup', async () => {
     const mounted = await mountFixture(1);
 
@@ -517,7 +643,8 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     expect(metrics.innerHTMLWrites).toBeGreaterThan(0);
     expect(metrics.querySelectorAllCalls).toBeGreaterThan(0);
     expect(metrics.appendCalls).toBeGreaterThan(0);
-    expect(metrics.getBoundingClientRectCalls).toBe(metrics.mermaidRenderedCount);
+    expect(metrics.tableProbeReads).toBe(fixtureWorkload.rendererCount * 2);
+    expect(metrics.getBoundingClientRectCalls).toBe(metrics.mermaidRenderedCount + metrics.tableProbeReads);
     expect(metrics.viewBoxWrites).toBe(metrics.mermaidRenderedCount);
     expect(metrics.resizeObserverCreates).toBe(1);
     expect(metrics.resizeObserverObserveCalls).toBe(metrics.mermaidRenderedCount);

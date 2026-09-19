@@ -145,7 +145,11 @@ export const readLinuxDesktopEntries = async (options = {}) => {
 const desktopEntryMatchesApp = (entry, appName, appId = '') => {
   const needles = uniqueStrings([appName, appId]).flatMap((value) => [normalizeComparable(value), normalizeCompactComparable(value)]).filter(Boolean);
   const haystacks = [entry.name, entry.id, path.basename(entry.filePath || ''), entry.exec]
-    .flatMap((value) => [normalizeComparable(value), normalizeCompactComparable(value)]);
+    .flatMap((value) => [normalizeComparable(value), normalizeCompactComparable(value)])
+    // A value with no ASCII letters or digits (e.g. a CJK-only Name) normalizes to the empty
+    // string, and needle.includes('') is true for every app — drop it so such entries can
+    // only match through a field that still carries comparable text.
+    .filter(Boolean);
   return needles.some((needle) => haystacks.some((haystack) => haystack === needle || haystack.includes(needle) || needle.includes(haystack)));
 };
 

@@ -10,52 +10,63 @@
  * occupy the whole connection pool and interactive traffic (opening a session
  * and fetching its messages) queues for seconds behind them.
  *
- * Every poll/prefetch-shaped background call should run through
- * {@link runBackgroundNetworkTask} so the aggregate background footprint stays
- * bounded and sockets remain free for the critical path. GitHub PR status has
- * its own dedicated gate (see useGitHubPrStatusStore) because a single PR
- * request can hold a socket for up to 12s and must not starve other
- * background work either; the two caps combined still leave sockets free.
+ * Session pages use {@link runSessionListNetworkTask}; other poll/prefetch reads
+ * and directory initialization use {@link runBackgroundNetworkTask}. The lanes
+ * share a fixed aggregate budget, with reserved list capacity so a slow Git or
+ * skills request cannot block an empty worktree's session list. GitHub PR
+ * status also takes a background slot, in addition to its own fan-out cap.
+ * An independent PR budget used to overfill the browser's pool alongside
+ * three persistent SSE connections, despite each limiter looking bounded.
  */
 
-const BACKGROUND_NETWORK_CONCURRENCY = 3
-
-let backgroundNetworkActive = 0
-const backgroundNetworkWaiters: Array<() => void> = []
-
-const acquireBackgroundNetworkSlot = (): Promise<void> => {
-  if (backgroundNetworkActive < BACKGROUND_NETWORK_CONCURRENCY) {
-    backgroundNetworkActive += 1
-    return Promise.resolve()
-  }
-  return new Promise<void>((resolve) => {
-    backgroundNetworkWaiters.push(resolve)
-  })
+type NetworkLane = {
+  active: number
+  waiters: Array<() => void>
+  activeSessionWaiters: Array<() => void>
 }
+const background: NetworkLane = { active: 0, waiters: [], activeSessionWaiters: [] }
+const sessionLists: NetworkLane = { active: 0, waiters: [], activeSessionWaiters: [] }
+const TOTAL_LIMIT = 3
+const LANE_LIMIT = 2
 
-const releaseBackgroundNetworkSlot = (): void => {
-  const next = backgroundNetworkWaiters.shift()
-  if (next) {
-    // Hand the slot directly to the next waiter — keep the active count steady.
+const pump = () => {
+  while (background.active + sessionLists.active < TOTAL_LIMIT) {
+    // Background reads never occupy the reserved list slot. Either lane may
+    // use a second slot, without serializing independent background queries.
+    const lane = sessionLists.active < LANE_LIMIT && sessionLists.waiters.length > 0
+      ? sessionLists
+      : background.active < LANE_LIMIT && (background.activeSessionWaiters.length > 0 || background.waiters.length > 0)
+        ? background
+        : null
+    if (!lane) return
+    const next = lane.activeSessionWaiters.shift() ?? lane.waiters.shift()
+    if (!next) return
+    lane.active += 1
     next()
-    return
   }
-  backgroundNetworkActive = Math.max(0, backgroundNetworkActive - 1)
 }
 
-/** Run one background network call under the shared concurrency gate. */
-export const runBackgroundNetworkTask = async <T>(task: () => Promise<T>): Promise<T> => {
-  await acquireBackgroundNetworkSlot()
+async function run<T>(lane: NetworkLane, task: () => Promise<T>, priority: "normal" | "active-session"): Promise<T> {
+  await new Promise<void>((resolve) => {
+    if (priority === "active-session") lane.activeSessionWaiters.push(resolve)
+    else lane.waiters.push(resolve)
+    pump()
+  })
   try {
     return await task()
   } finally {
-    releaseBackgroundNetworkSlot()
+    lane.active -= 1
+    pump()
   }
 }
 
-/** Test-only visibility into the gate. */
+export const runBackgroundNetworkTask = <T>(task: () => Promise<T>, priority: "normal" | "active-session" = "normal") => run(background, task, priority)
+export const runSessionListNetworkTask = <T>(task: () => Promise<T>) => run(sessionLists, task, "normal")
+
+const snapshot = (lane: NetworkLane) => ({ active: lane.active, waiting: lane.waiters.length + lane.activeSessionWaiters.length, limit: LANE_LIMIT })
+
+/** Test-only visibility into both lanes. */
 export const getBackgroundNetworkState = () => ({
-  active: backgroundNetworkActive,
-  waiting: backgroundNetworkWaiters.length,
-  limit: BACKGROUND_NETWORK_CONCURRENCY,
+  ...snapshot(background),
+  sessionLists: snapshot(sessionLists),
 })

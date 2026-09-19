@@ -82,4 +82,19 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: false }).some((s) => s.id === 'linear')).toBe(false);
     expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: true }).some((s) => s.id === 'linear')).toBe(true);
   });
+
+  test('appends installed guest panels except on VS Code', () => {
+    const hello = {
+      id: 'plugin:hello' as const,
+      mode: 'plugin:hello' as const,
+      icon: 'window' as const,
+      label: 'Hello',
+      labelKey: 'contextRail.surface.plugin' as const,
+      descriptionKey: 'contextRail.surface.plugin.description' as const,
+      availability: 'always' as const,
+      defaultWidthFraction: 0.45,
+    };
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, extras: [hello] }).some((s) => s.id === 'plugin:hello')).toBe(true);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, extras: [hello], isVSCode: true }).some((s) => s.id === 'plugin:hello')).toBe(false);
+  });
 });

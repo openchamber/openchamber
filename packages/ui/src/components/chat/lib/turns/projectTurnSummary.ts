@@ -1,3 +1,5 @@
+import type { SnapshotFileDiff } from '@opencode-ai/sdk/v2';
+import { summarizeLiveActivity } from './liveActivitySummary';
 import type { ChatMessageEntry, TurnChangedFile, TurnDiffStats, TurnSummaryRecord } from './types';
 
 interface SummaryDiff {
@@ -110,30 +112,52 @@ export const projectTurnDiffStats = (userMessage: ChatMessageEntry): TurnDiffSta
     };
 };
 
-export const projectTurnChangedFiles = (userMessage: ChatMessageEntry): TurnChangedFile[] | undefined => {
-    const summary = (userMessage.info as { summary?: UserSummaryPayload | null }).summary;
-    const diffs = summary?.diffs;
-    if (!Array.isArray(diffs) || diffs.length === 0) {
-        return undefined;
+/**
+ * Files this turn changed, as evidenced by its own edit/write/patch calls.
+ *
+ * The user message's `summary.diffs` is a snapshot of the whole working tree
+ * between turn start and end, so it also lists edits made by other sessions
+ * or by hand in the same directory. It is therefore not used to decide which
+ * files belong to the turn, only to supply line counts for a file the turn
+ * touched: those match the turn diff view a file pill opens, and they fall
+ * back to the tool call's own patch when the snapshot has no entry.
+ *
+ * One exception: edits a turn delegated to subagents live in child sessions
+ * this projection cannot see, and the snapshot is their only record. When
+ * the turn ran subagents, snapshot entries no own tool call touched are
+ * appended after the turn's own files.
+ */
+export const projectTurnChangedFiles = (
+    assistantMessages: ChatMessageEntry[],
+    userMessage: ChatMessageEntry,
+): TurnChangedFile[] | undefined => {
+    const summary = summarizeLiveActivity(assistantMessages);
+    const snapshotDiffs = userMessage.info.role === 'user' ? userMessage.info.summary?.diffs ?? [] : [];
+    const snapshotByFile = new Map<string, SnapshotFileDiff>();
+    for (const diff of snapshotDiffs) {
+        if (diff.file) snapshotByFile.set(diff.file, diff);
     }
 
-    const files = diffs
-        .map((diff) => {
-            if (!diff || typeof diff.file !== 'string' || diff.file.trim().length === 0) {
-                return null;
-            }
-            const additions = typeof diff.additions === 'number' ? diff.additions : 0;
-            const deletions = typeof diff.deletions === 'number' ? diff.deletions : 0;
-            if (additions === 0 && deletions === 0) {
-                return null;
-            }
-            return {
-                file: diff.file,
-                additions,
-                deletions,
-            };
-        })
-        .filter((file): file is TurnChangedFile => file !== null);
+    const files = summary.changedFiles.map((change): TurnChangedFile => {
+        const snapshot = snapshotByFile.get(change.path);
+        if (!snapshot) {
+            return change.additions !== undefined && change.deletions !== undefined
+                ? { file: change.path, additions: change.additions, deletions: change.deletions, inTurnDiff: false }
+                : { file: change.path, inTurnDiff: false };
+        }
+        // A snapshot without line changes (a binary write) has nothing to count.
+        return snapshot.additions === 0 && snapshot.deletions === 0
+            ? { file: change.path, inTurnDiff: true }
+            : { file: change.path, additions: snapshot.additions, deletions: snapshot.deletions, inTurnDiff: true };
+    });
+
+    if (summary.subagents > 0) {
+        const own = new Set(files.map((file) => file.file));
+        for (const diff of snapshotDiffs) {
+            if (!diff.file || own.has(diff.file) || (diff.additions === 0 && diff.deletions === 0)) continue;
+            files.push({ file: diff.file, additions: diff.additions, deletions: diff.deletions, inTurnDiff: true });
+        }
+    }
 
     return files.length > 0 ? files : undefined;
 };

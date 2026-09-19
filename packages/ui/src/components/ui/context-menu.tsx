@@ -7,6 +7,7 @@ import {
   dropdownMenuPopupClass,
   dropdownMenuSeparatorClass,
 } from "./dropdown-menu.styles";
+import { handleDropdownNavigationKey } from "./dropdown-navigation";
 
 function ContextMenu({ ...props }: React.ComponentProps<typeof BaseContextMenu.Root>) {
   return <BaseContextMenu.Root {...props} />;
@@ -22,7 +23,18 @@ type ContentProps = {
   children?: React.ReactNode;
 } & React.ComponentProps<typeof BaseContextMenu.Popup>;
 
-function ContextMenuContent({ className, positionerClassName, children, style, ...props }: ContentProps) {
+function ContextMenuContent({ className, positionerClassName, children, style, onKeyDown, ...props }: ContentProps) {
+  const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseContextMenu.Popup>["onKeyDown"]> = (event) => {
+    onKeyDown?.(event);
+    handleDropdownNavigationKey(event, (navigationKey) => {
+      event.currentTarget.dispatchEvent(new KeyboardEvent("keydown", {
+        key: navigationKey,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+  };
+
   return (
     <BaseContextMenu.Portal>
       <BaseContextMenu.Positioner className={cn("app-region-no-drag z-50", positionerClassName)}>
@@ -34,6 +46,7 @@ function ContextMenuContent({ className, positionerClassName, children, style, .
           }}
           className={cn(dropdownMenuPopupClass, className)}
           {...props}
+          onKeyDown={handleKeyDown}
         >
           {children}
         </BaseContextMenu.Popup>

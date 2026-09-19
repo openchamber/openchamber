@@ -535,6 +535,7 @@ export const buildAnnotationOverlayScript = (
   };
 
   var onKeyDown = function (event) {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -545,6 +546,8 @@ export const buildAnnotationOverlayScript = (
   var onCommentKeyDown = function (event) {
     // Do not let the annotated page treat typed letters as its own shortcuts.
     event.stopPropagation();
+    // WebKit can report the composition-confirming Enter as keyCode 229.
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       attach();

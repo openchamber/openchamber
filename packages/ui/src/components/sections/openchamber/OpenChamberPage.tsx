@@ -42,7 +42,6 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
-    void runtimeEndpointEpoch;
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
 
     // If no section specified, show all (mobile/legacy behavior)
@@ -50,7 +49,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         return (
             <SettingsPageLayout showSaveStatus className="openchamber-page-body space-y-3 sm:space-y-6">
                 <OpenChamberVisualSettings />
-                <DefaultsSettings />
+                <DefaultsSettings key={runtimeEndpointEpoch} />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 {!isVSCode && <OpenCodeCliSettings />}
                 {!isVSCode && <OpenChamberToolsSettings />}
@@ -72,7 +71,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
             case 'chat':
                 return <ChatSectionContent />;
             case 'sessions':
-                return <SessionsSectionContent />;
+                return <SessionsSectionContent runtimeEndpointEpoch={runtimeEndpointEpoch} />;
             case 'shortcuts':
                 return <ShortcutsSectionContent />;
             case 'git':
@@ -176,6 +175,7 @@ const VisualSectionContent: React.FC = () => {
         'terminalFontSize',
         'editorFontSize',
         'spacing',
+        'scrollbars',
         'inputBarOffset',
     ]} />;
 };
@@ -204,22 +204,25 @@ const ChatSectionContent: React.FC = () => {
                 'splitAssistantMessageActions',
                 'subagentReadOnlyBanner',
                 'diffLayout',
+                'inputHistoryScope',
+                'inputHistoryLimit',
                 'dotfiles',
                 'fileViewerPreview',
                 'followUpBehavior',
                 'persistDraft',
                 'inputSpellcheck',
                 'largeTextPaste',
+                'enterToSend',
             ]}
         />
     );
 };
 
 // Sessions section: Default model & agent, Session retention
-const SessionsSectionContent: React.FC = () => {
+const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ runtimeEndpointEpoch }) => {
     return (
         <>
-            <DefaultsSettings />
+            <DefaultsSettings key={runtimeEndpointEpoch} />
             <SessionRetentionSettings />
         </>
     );

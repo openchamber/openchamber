@@ -1,5 +1,8 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
+import { isVSCodeRuntime } from './desktop';
+import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { z } from 'zod';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -18,6 +21,18 @@ type SessionCreatedEvent = {
   createdAt: number;
   promptDispatched: boolean;
   dispatchedAsCommand: boolean;
+};
+
+/**
+ * The set of linked worktrees of one repository changed: created or removed by
+ * this server, by an agent, or from a terminal. `directories` are the
+ * directories inside that repository the server has seen requests for, so a
+ * listener can map them onto its registered projects and refresh only those.
+ */
+type WorktreeChangedEvent = {
+  type: 'worktree-changed';
+  directories: string[];
+  changedAt: number;
 };
 
 /**
@@ -42,12 +57,74 @@ type AgentMemoryChangedEvent = {
   projectId?: string;
 };
 
+/**
+ * The extension chosen as browser provider can no longer serve (paused,
+ * removed, or approval withdrawn), so the server put the in-app browser back.
+ * The setting is already written; listeners update the store and tell the user.
+ */
+const browserProviderResetSchema = z.object({
+  guestId: z.string().min(1),
+  guestName: z.string().min(1),
+});
+type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
+
+/** Jev routing events; each carries what the routing store needs and nothing the UI must re-derive. */
+const routingUpdatedSchema = z.object({
+  available: z.boolean(),
+  autoReady: z.boolean(),
+  tokenPresent: z.boolean(),
+});
+
+const routingDecisionSchema = z.object({
+  sessionId: z.string().min(1),
+  at: z.number(),
+  category: z.string().nullable(),
+  confidence: z.number(),
+  reason: z.enum(['routed', 'low-confidence', 'unknown-category', 'error', 'not-ready']),
+  providerID: z.string().optional(),
+  modelID: z.string().optional(),
+  variant: z.string().nullable().optional(),
+  agent: z.string().nullable().optional(),
+  error: z.string().optional(),
+});
+
+const routingPermissionHeldSchema = z.object({
+  permissionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  score: z.number(),
+  kind: z.string().nullable(),
+});
+
+const routingSafetySkippedSchema = z.object({
+  permissionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  error: z.string(),
+});
+
+type RoutingUpdatedEvent = { type: 'routing-updated' } & z.infer<typeof routingUpdatedSchema>;
+type RoutingDecisionEvent = { type: 'routing-decision'; decision: z.infer<typeof routingDecisionSchema> };
+type RoutingPermissionHeldEvent = { type: 'routing-permission-held' } & z.infer<typeof routingPermissionHeldSchema>;
+type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<typeof routingSafetySkippedSchema>;
+
 type OpenChamberEvent =
+  | { type: 'event-stream-ready' }
+  | RoutingUpdatedEvent
+  | RoutingDecisionEvent
+  | RoutingPermissionHeldEvent
+  | RoutingSafetySkippedEvent
+  | MessageQueueUpdatedEvent
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
+  | WorktreeChangedEvent
   | BrowserControlRequestEvent
+  | BrowserProviderResetEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
+
+const worktreeChangedPropertiesSchema = z.object({
+  directories: z.array(z.string().min(1)).min(1),
+  at: z.number().optional(),
+});
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -126,10 +203,49 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:event-stream-ready') {
     reconnectAttempt = 0;
+    for (const listener of listeners) listener({ type: 'event-stream-ready' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:message-queue.updated') {
+    const parsed = messageQueueUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
     return;
   }
 
   if (envelope.type === 'openchamber:heartbeat') {
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.updated') {
+    const parsed = routingUpdatedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-updated', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.decision') {
+    const parsed = routingDecisionSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-decision', decision: parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.permission-held') {
+    const parsed = routingPermissionHeldSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-permission-held', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.safety-skipped') {
+    const parsed = routingSafetySkippedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-safety-skipped', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-provider-reset') {
+    const parsed = browserProviderResetSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
     return;
   }
 
@@ -171,6 +287,18 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     for (const listener of listeners) {
       listener(nextEvent);
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:worktree-changed') {
+    const parsed = worktreeChangedPropertiesSchema.safeParse(envelope.properties);
+    if (!parsed.success) return;
+    const nextEvent: WorktreeChangedEvent = {
+      type: 'worktree-changed',
+      directories: parsed.data.directories,
+      changedAt: parsed.data.at ?? Date.now(),
+    };
+    for (const listener of listeners) listener(nextEvent);
     return;
   }
 
@@ -250,9 +378,11 @@ const connect = () => {
     canControlBrowser ? { browser: '1' } : undefined,
   ));
   source.onopen = () => {
+    if (eventSource !== source) return;
     resetHeartbeatTimer();
   };
   source.onmessage = (event) => {
+    if (eventSource !== source) return;
     resetHeartbeatTimer();
     const envelope = parseEnvelope(event.data);
     if (!envelope) {
@@ -262,6 +392,7 @@ const connect = () => {
   };
 
   source.onerror = () => {
+    if (eventSource !== source) return;
     cleanupSource();
     scheduleReconnect();
   };
@@ -284,6 +415,10 @@ const cleanupRuntimeChangeSubscription = () => {
 };
 
 export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {
+  // VS Code runs OpenCode through its bridge, not the OpenChamber server that
+  // owns this stream. Opening it here retries against vscode-webview:// forever.
+  if (isVSCodeRuntime()) return () => undefined;
+
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
   connect();

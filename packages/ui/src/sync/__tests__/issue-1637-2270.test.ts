@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import { createOpencodeClient, type Session } from "@opencode-ai/sdk/v2/client"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
@@ -16,9 +16,11 @@ let nextCreateSessionCalls: Array<{ params: unknown; directory: string | null | 
 
 // Configurable current directory (used as fallback when no directoryOverride is set)
 let currentDirectory: string | null = null
+const runtimeSdkClient = createOpencodeClient()
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
+    getSdkClient: () => runtimeSdkClient,
     getDirectory: () => currentDirectory,
     setDirectory: mock(() => undefined),
     createSession: mock(async (params: unknown, directory?: string | null) => {
@@ -90,11 +92,16 @@ beforeEach(() => {
   nextCreateSessionResponse = { id: "ses_default", time: { created: 1 } } as Session
   currentDirectory = null
 
-  // Initialize action refs. The first two args (sdk, childStores) are not
-  // exercised by `createSession` itself, only the directory getter is.
+  // Initialize action refs. `createSession` seeds the created session into its
+  // directory's child store, so the mock hands back an empty store; the sdk
+  // is not exercised, only the directory getter is.
   setActionRefs(
     {} as never,
-    { children: new Map(), ensureChild: () => ({}), getChild: () => undefined } as never,
+    {
+      children: new Map(),
+      ensureChild: () => ({ getState: () => ({ session: [] }), setState: () => undefined }),
+      getChild: () => undefined,
+    } as never,
     () => currentDirectory ?? "",
   )
 })

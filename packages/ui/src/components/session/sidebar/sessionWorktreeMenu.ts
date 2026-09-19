@@ -1,4 +1,8 @@
-import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import {
+  preserveClientTrackedWorktreeStatus,
+  replaceRepositoryWorktrees,
+  type ProjectRef,
+} from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { normalizePath } from '@/lib/pathNormalization';
 
@@ -24,7 +28,7 @@ type SessionWorktreeMenuState = {
   showNewWorktreeAction: boolean;
 };
 
-type StartSessionWorktreeMenuLoadDependencies = {
+type WorktreeTopologyRefreshDependencies = {
   projects: ReadonlyArray<ProjectRef>;
   getCurrentProjects: () => ReadonlyArray<ProjectRef>;
   rawWorktreesByProjectRef: { current: RawWorktreesByProjectScope };
@@ -46,7 +50,69 @@ type StartSessionWorktreeMenuLoadDependencies = {
   }) => void;
   getRuntimeKey: () => string;
   now: () => number;
+};
+
+type StartSessionWorktreeMenuLoadDependencies = WorktreeTopologyRefreshDependencies & {
   projectRootBranch: string | null;
+};
+
+export const refreshProjectWorktreeTopology = async (
+  project: ProjectRef,
+  currentWorktree: WorktreeMetadata | null,
+  deps: WorktreeTopologyRefreshDependencies,
+): Promise<WorktreeMetadata[]> => {
+  const runtimeKey = deps.getRuntimeKey();
+  const normalizedProjectPath = normalizePath(project.path);
+  if (!normalizedProjectPath) throw new Error('Unable to resolve worktree project');
+
+  const refreshedWorktrees = await deps.listProjectWorktrees(project, { force: true });
+  if (deps.getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed during worktree refresh');
+
+  const currentProjects = deps.getCurrentProjects();
+  const currentProject = currentProjects.find((candidate) => candidate.id === project.id) ?? null;
+  if (!currentProject || normalizePath(currentProject.path ?? null) !== normalizedProjectPath) {
+    throw new Error('Project removed during worktree refresh');
+  }
+
+  const currentRawScope = ensureRawWorktreesByProjectScope({
+    rawWorktreesByProjectRef: deps.rawWorktreesByProjectRef,
+    publishedWorktreesByProject: deps.getPublishedWorktreesByProject(),
+    runtimeKey,
+  });
+  const nextProjectWorktrees = refreshedWorktrees.map((worktree) => cloneMetadata(worktree));
+  nextProjectWorktrees.sort((a, b) => compareLinkedTargets(
+    { metadata: a, isPrimary: false, isCurrent: false },
+    { metadata: b, isPrimary: false, isCurrent: false },
+  ));
+
+  const nextRawTopology = replaceRepositoryWorktrees(
+    currentRawScope.worktreesByProject,
+    normalizedProjectPath,
+    nextProjectWorktrees,
+    currentWorktree?.projectDirectory,
+  );
+
+  markRawWorktreesByProjectMutation(deps.rawWorktreesByProjectRef, runtimeKey);
+  deps.rawWorktreesByProjectRef.current = {
+    runtimeKey,
+    revision: deps.rawWorktreesByProjectRef.current.revision,
+    worktreesByProject: nextRawTopology,
+  };
+
+  const publishedWorktreesByProject = deps.getPublishedWorktreesByProject();
+  const partitionedWorktreesByProject = preserveClientTrackedWorktreeStatus(
+    deps.partitionWorktreesByRegisteredProject(currentProjects, nextRawTopology),
+    publishedWorktreesByProject,
+  );
+  const allWorktrees = [...partitionedWorktreesByProject.values()].flat();
+  deps.recordWorktreesSeen(allWorktrees.map((worktree) => worktree.path), deps.now());
+  if (!deps.worktreeMapsEqual(partitionedWorktreesByProject, publishedWorktreesByProject)) {
+    deps.publishTopology({
+      availableWorktrees: allWorktrees,
+      availableWorktreesByProject: partitionedWorktreesByProject,
+    });
+  }
+  return nextProjectWorktrees;
 };
 
 type RequestRediscovery = () => void;
@@ -280,71 +346,7 @@ export const startSessionWorktreeMenuLoad = (
         throw new Error('Unable to resolve worktree project');
       }
 
-      const refreshedWorktrees = await deps.listProjectWorktrees(project, { force: true });
-
-      if (deps.getRuntimeKey() !== runtimeKey) {
-        throw new Error('Runtime changed during worktree refresh');
-      }
-
-      const currentProjects = deps.getCurrentProjects();
-      const currentProject = currentProjects.find((candidate) => candidate.id === project.id) ?? null;
-      if (!currentProject || normalizePath(currentProject.path ?? null) !== normalizedProjectPath) {
-        throw new Error('Project removed during worktree refresh');
-      }
-
-      const currentRawScope = ensureRawWorktreesByProjectScope({
-        rawWorktreesByProjectRef: deps.rawWorktreesByProjectRef,
-        publishedWorktreesByProject: deps.getPublishedWorktreesByProject(),
-        runtimeKey,
-      });
-      const nextRawTopology = cloneWorktreesByProject(currentRawScope.worktreesByProject);
-      const nextProjectWorktrees = [...refreshedWorktrees]
-        .map((worktree) => cloneMetadata(worktree))
-        .sort((a, b) => compareLinkedTargets(
-          { metadata: a, isPrimary: false, isCurrent: false },
-          { metadata: b, isPrimary: false, isCurrent: false },
-        ));
-
-      const refreshedRepositoryRoot = normalizePath(
-        nextProjectWorktrees.find((worktree) => normalizePath(worktree.projectDirectory ?? null))?.projectDirectory
-          ?? args.currentWorktree?.projectDirectory
-          ?? project.path,
-      );
-      const matchingProjectPaths = new Set<string>([normalizedProjectPath]);
-      for (const [projectPath, worktrees] of nextRawTopology.entries()) {
-        const repositoryRoot = normalizePath(
-          worktrees.find((worktree) => normalizePath(worktree.projectDirectory ?? null))?.projectDirectory ?? projectPath,
-        );
-        if (repositoryRoot && repositoryRoot === refreshedRepositoryRoot) {
-          matchingProjectPaths.add(projectPath);
-        }
-      }
-      for (const projectPath of matchingProjectPaths) {
-        if (nextProjectWorktrees.length === 0) {
-          nextRawTopology.delete(projectPath);
-          continue;
-        }
-        nextRawTopology.set(projectPath, nextProjectWorktrees.map((worktree) => cloneMetadata(worktree)));
-      }
-
-      markRawWorktreesByProjectMutation(deps.rawWorktreesByProjectRef, runtimeKey);
-      deps.rawWorktreesByProjectRef.current = {
-        runtimeKey,
-        revision: deps.rawWorktreesByProjectRef.current.revision,
-        worktreesByProject: nextRawTopology,
-      };
-
-      const partitionedWorktreesByProject = deps.partitionWorktreesByRegisteredProject(currentProjects, nextRawTopology);
-      const allWorktrees = [...partitionedWorktreesByProject.values()].flat();
-      deps.recordWorktreesSeen(allWorktrees.map((worktree) => worktree.path), deps.now());
-
-      const latestPublishedWorktreesByProject = deps.getPublishedWorktreesByProject();
-      if (!deps.worktreeMapsEqual(partitionedWorktreesByProject, latestPublishedWorktreesByProject)) {
-        deps.publishTopology({
-          availableWorktrees: allWorktrees,
-          availableWorktreesByProject: partitionedWorktreesByProject,
-        });
-      }
+      const nextProjectWorktrees = await refreshProjectWorktreeTopology(project, args.currentWorktree, deps);
 
       return buildSessionWorktreeMenuTargets({
         projectPath: normalizedProjectPath,

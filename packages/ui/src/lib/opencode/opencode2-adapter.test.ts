@@ -123,6 +123,21 @@ const adapter = (
 ): OpencodeClient => createOpencode2Adapter(legacy, 'https://openchamber.test', '/repo', fetch, async () => protocol);
 
 describe('OpenCode V2 adapter', () => {
+  test('does not expose a newer-page cursor as more older history', async () => {
+    const client = adapter(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      if (new URL(request.url).pathname.endsWith('/session/session-1')) return json({ data: v2Session('session-1') });
+      return json({
+        data: [{ id: 'oldest', type: 'user', time: { created: 1 }, text: 'first message' }],
+        cursor: { previous: 'newer' },
+      });
+    });
+    const result = await client.session.messages({ sessionID: 'session-1', before: 'oldest-page', limit: 20 });
+    expect(result.error).toBeUndefined();
+    expect(result.data?.map(({ info }) => info.id)).toEqual(['oldest']);
+    expect(result.response?.headers.get('x-next-cursor') ?? null).toBeNull();
+  });
+
   test('resolves the current protocol without mutating the SDK shape', async () => {
     let protocol: OpenCodeProtocol = 'legacy';
     const client = createOpencode2Adapter(legacyStub(), 'https://openchamber.test', '/repo', async () => json({}), async () => protocol);
@@ -305,6 +320,22 @@ describe('OpenCode V2 adapter', () => {
     expect(result.data?.[0]?.cost).toBe(1.25);
     expect(signals.every((signal) => signal === controller.signal)).toBe(true);
     expect(exhausted.data).toEqual([]);
+  });
+
+  test('rejects incomplete descendant discovery when the shared page budget is exhausted', async () => {
+    let calls = 0;
+    const client = adapter(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      calls += 1;
+      if (new URL(request.url).searchParams.get('parentID') === 'null') {
+        return json({ data: Array.from({ length: 100 }, (_, index) => v2Session(`root-${index}`)), cursor: {} });
+      }
+      return json({ data: [], cursor: {} });
+    });
+    const result = await client.experimental.session.list({ directory: '/repo', roots: false, limit: 100 });
+    expect(result.error).toBeInstanceOf(Error);
+    expect(result.data).toBeUndefined();
+    expect(calls).toBe(100);
   });
 
   test('keeps archived=true inclusive and allows a fresh reload', async () => {

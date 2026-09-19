@@ -4,9 +4,16 @@ import { listProjectWorktrees, removeProjectWorktree, type ProjectRef } from '@/
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { deleteSessionInDirectory } from '@/sync/session-actions';
-import { retry } from '@/sync/retry';
+import { listGlobalSessionPages } from './globalSessions';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { buildAgentGroups, type AgentGroup, type AgentGroupSession } from '@/lib/multirun/groups';
+import { getMultiRunIdentity } from '@/lib/multirun/identity';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { checkIsGitRepository } from '@/lib/gitApi';
+
+export type { AgentGroup, AgentGroupSession } from '@/lib/multirun/groups';
+let loadGeneration = 0;
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -23,57 +30,9 @@ const normalize = (value: string): string => {
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AgentGroupSession {
-  id: string;
-  path: string;
-  providerId: string;
-  modelId: string;
-  instanceNumber: number;
-  branch: string;
-  displayLabel: string;
-  worktreeMetadata?: WorktreeMetadata;
-}
-
-export interface AgentGroup {
-  name: string;
-  sessions: AgentGroupSession[];
-  lastActive: number;
-  sessionCount: number;
-}
-
 interface DeleteAgentGroupResult {
   failedIds: string[];
   failedWorktreePaths: string[];
-}
-
-// ---------------------------------------------------------------------------
-// parseSessionTitle
-// ---------------------------------------------------------------------------
-
-function parseSessionTitle(title: string | undefined): {
-  groupSlug: string;
-  provider: string;
-  model: string;
-  index: number;
-} | null {
-  if (!title) return null;
-  const parts = title.split('/');
-  if (parts.length < 3) return null;
-
-  const groupSlug = parts[0];
-  if (!groupSlug || groupSlug.includes(' ')) return null;
-
-  const provider = parts[1];
-  if (!provider) return null;
-
-  const lastPart = parts[parts.length - 1];
-  const lastPartNum = parseInt(lastPart, 10);
-  const hasIndex = parts.length >= 4 && !isNaN(lastPartNum) && String(lastPartNum) === lastPart;
-
-  const modelParts = hasIndex ? parts.slice(2, -1) : parts.slice(2);
-  if (modelParts.length === 0) return null;
-
-  return { groupSlug, provider, model: modelParts.join('/'), index: hasIndex ? lastPartNum : 1 };
 }
 
 // ---------------------------------------------------------------------------
@@ -111,68 +70,12 @@ function resolveProjectRefForWorktree(session: AgentGroupSession): ProjectRef | 
 }
 
 // ---------------------------------------------------------------------------
-// buildGroups — turns raw sessions + worktree metadata into AgentGroup[]
-// ---------------------------------------------------------------------------
-
-function buildGroups(
-  sessions: Session[],
-  metaByPath: Map<string, WorktreeMetadata>,
-): AgentGroup[] {
-  const map = new Map<string, AgentGroupSession[]>();
-
-  for (const session of sessions) {
-    const parsed = parseSessionTitle(session.title);
-    if (!parsed) continue;
-
-    const sessionPath = normalize(session.directory ?? '');
-    const meta = metaByPath.get(sessionPath);
-
-    const entry: AgentGroupSession = {
-      id: session.id,
-      path: sessionPath,
-      providerId: parsed.provider,
-      modelId: parsed.model,
-      instanceNumber: parsed.index,
-      branch: meta?.branch ?? '',
-      displayLabel: `${parsed.provider}/${parsed.model}`,
-      worktreeMetadata: meta,
-    };
-
-    const existing = map.get(parsed.groupSlug);
-    if (existing) existing.push(entry);
-    else map.set(parsed.groupSlug, [entry]);
-  }
-
-  const groups: AgentGroup[] = [];
-  for (const [name, groupSessions] of map) {
-    const lastActive = groupSessions.reduce((max, gs) => {
-      const raw = sessions.find((s) => s.id === gs.id);
-      const t = (raw as { time?: { updated?: number | null } } | undefined)?.time?.updated ?? 0;
-      return Math.max(max, typeof t === 'number' ? t : 0);
-    }, 0);
-
-    groupSessions.sort((a, b) => {
-      const p = a.providerId.localeCompare(b.providerId);
-      if (p !== 0) return p;
-      const m = a.modelId.localeCompare(b.modelId);
-      if (m !== 0) return m;
-      return a.instanceNumber - b.instanceNumber;
-    });
-
-    groups.push({ name, sessions: groupSessions, lastActive: lastActive || Date.now(), sessionCount: groupSessions.length });
-  }
-
-  groups.sort((a, b) => a.name.localeCompare(b.name));
-  return groups;
-}
-
-// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
 interface AgentGroupsState {
   groups: AgentGroup[];
-  selectedGroupName: string | null;
+  selectedGroupId: string | null;
   selectedSessionId: string | null;
   isLoading: boolean;
   error: string | null;
@@ -181,10 +84,11 @@ interface AgentGroupsState {
 interface AgentGroupsActions {
   /** List worktrees, fetch sessions per worktree, build groups. */
   loadGroups: () => Promise<void>;
-  selectGroup: (groupName: string | null) => void;
+  selectGroup: (groupId: string | null) => void;
   selectSession: (sessionId: string | null) => void;
   deleteGroupSessions: (sessions: AgentGroupSession[], options?: { removeWorktrees?: boolean }) => Promise<DeleteAgentGroupResult>;
   clearError: () => void;
+  resetForRuntimeSwitch: () => void;
 }
 
 type Store = AgentGroupsState & AgentGroupsActions;
@@ -192,12 +96,14 @@ type Store = AgentGroupsState & AgentGroupsActions;
 export const useAgentGroupsStore = create<Store>()(
   (set, get) => ({
     groups: [],
-    selectedGroupName: null,
+    selectedGroupId: null,
     selectedSessionId: null,
     isLoading: false,
     error: null,
 
     loadGroups: async () => {
+      const generation = ++loadGeneration;
+      const runtimeKey = getRuntimeKey();
       const projectRef = resolveProjectRef();
       if (!projectRef) {
         set({ groups: [], isLoading: false, error: 'No project directory' });
@@ -208,20 +114,18 @@ export const useAgentGroupsStore = create<Store>()(
 
       try {
         // 1. List worktrees (already cached 30s by worktreeManager)
-        const worktrees = await listProjectWorktrees(projectRef);
+        const isGit = await checkIsGitRepository(projectRef.path);
+        if (generation !== loadGeneration || runtimeKey !== getRuntimeKey()) return;
+        const worktrees = isGit ? await listProjectWorktrees(projectRef) : [];
+        if (generation !== loadGeneration || runtimeKey !== getRuntimeKey()) return;
         const metaByPath = new Map<string, WorktreeMetadata>();
-        const dirs: string[] = [];
+        const dirs: string[] = [projectRef.path];
         for (const meta of worktrees) {
           if (meta?.path) {
             const key = normalize(meta.path);
-            dirs.push(key);
+            if (!dirs.includes(key)) dirs.push(key);
             metaByPath.set(key, meta);
           }
-        }
-
-        if (dirs.length === 0) {
-          set({ groups: [], isLoading: false });
-          return;
         }
 
         // 2. Fetch sessions for each worktree directory (parallel, max 5)
@@ -231,14 +135,8 @@ export const useAgentGroupsStore = create<Store>()(
 
         const fetchDir = async (dir: string) => {
           try {
-            const res = await retry(async () => {
-              const result = await api.session.list({ directory: dir });
-              if ((result as { error?: unknown }).error) {
-                throw new Error(`session.list failed for ${dir}: ${String((result as { error?: unknown }).error)}`);
-              }
-              return result;
-            });
-            const list = Array.isArray(res.data) ? res.data : [];
+            if (generation !== loadGeneration || runtimeKey !== getRuntimeKey()) return;
+            const list = await listGlobalSessionPages(api, { directory: dir, archived: true, narrowToArchived: false, pageSize: 500 });
             for (const s of list) if (s?.id) allSessions.push(s);
           } catch {
             failedDirectories.add(dir);
@@ -256,13 +154,27 @@ export const useAgentGroupsStore = create<Store>()(
         await Promise.all(Array.from({ length: Math.min(5, dirs.length) }, () => worker()));
 
         // 3. Build groups
-        const groups = buildGroups(allSessions, metaByPath);
+        if (generation !== loadGeneration || runtimeKey !== getRuntimeKey()) return;
+        const groups = buildAgentGroups(allSessions, metaByPath, projectRef.path);
+        for (const previous of get().groups) {
+          const retained = previous.sessions.filter((session) => failedDirectories.has(session.path));
+          if (!retained.length) continue;
+          const current = groups.find((group) => group.id === previous.id);
+          if (current) {
+            current.sessions.push(...retained);
+            current.sessionCount = current.sessions.length;
+            current.lastActive = Math.max(current.lastActive, previous.lastActive);
+          } else {
+            groups.push({ ...previous, sessions: retained, sessionCount: retained.length });
+          }
+        }
         set({
           groups,
           isLoading: false,
           error: failedDirectories.size > 0 ? `Failed to load sessions for ${failedDirectories.size} worktree${failedDirectories.size === 1 ? '' : 's'}` : null,
         });
       } catch (err) {
+        if (generation !== loadGeneration || runtimeKey !== getRuntimeKey()) return;
         set({
           groups: get().groups, // preserve on error
           isLoading: false,
@@ -271,14 +183,14 @@ export const useAgentGroupsStore = create<Store>()(
       }
     },
 
-    selectGroup: (groupName) => {
-      if (!groupName) {
-        set({ selectedGroupName: null, selectedSessionId: null });
+    selectGroup: (groupId) => {
+      if (!groupId) {
+        set({ selectedGroupId: null, selectedSessionId: null });
         return;
       }
-      const group = get().groups.find((g) => g.name === groupName);
+      const group = get().groups.find((g) => g.id === groupId);
       set({
-        selectedGroupName: groupName,
+        selectedGroupId: groupId,
         selectedSessionId: group?.sessions[0]?.id ?? null,
       });
     },
@@ -286,14 +198,33 @@ export const useAgentGroupsStore = create<Store>()(
     selectSession: (sessionId) => set({ selectedSessionId: sessionId }),
 
     deleteGroupSessions: async (sessions, options) => {
+      const runtimeKey = getRuntimeKey();
+      const assertCurrent = () => {
+        if (runtimeKey !== getRuntimeKey()) throw new Error('Runtime changed');
+      };
       const failedIds: string[] = [];
       const failedWorktreePaths: string[] = [];
       const removeWorktrees = options?.removeWorktrees === true;
       const deletedIds = new Set<string>();
 
       for (const s of sessions) {
-        if (!s.path) continue;
-        const ok = await deleteSessionInDirectory(s.id, s.path);
+        assertCurrent();
+        if (!s.path) { failedIds.push(s.id); continue; }
+        try {
+          const current = await opencodeClient.getSession(s.id, s.path);
+          assertCurrent();
+          const scope = s.worktreeMetadata?.projectDirectory ?? resolveProjectRef()?.path ?? s.path;
+          if (normalize(current.directory) !== normalize(s.path) || getMultiRunIdentity(current, scope)?.key !== s.groupKey) {
+            failedIds.push(s.id);
+            continue;
+          }
+        } catch {
+          assertCurrent();
+          failedIds.push(s.id);
+          continue;
+        }
+        const ok = await deleteSessionInDirectory(s.id, s.path, runtimeKey);
+        assertCurrent();
         if (!ok) failedIds.push(s.id);
         else deletedIds.add(s.id);
       }
@@ -309,6 +240,7 @@ export const useAgentGroupsStore = create<Store>()(
         }
 
         for (const [path, pathSessions] of worktreesByPath) {
+          assertCurrent();
           if (pathSessions.some((session) => failedIds.includes(session.id))) {
             failedWorktreePaths.push(path);
             continue;
@@ -317,31 +249,38 @@ export const useAgentGroupsStore = create<Store>()(
           const source = pathSessions.find((session) => session.worktreeMetadata)?.worktreeMetadata ?? pathSessions[0]?.worktreeMetadata;
           const projectRef = pathSessions.map(resolveProjectRefForWorktree).find((value): value is ProjectRef => value !== null) ?? null;
           if (!source || !projectRef) {
-            failedWorktreePaths.push(path);
             continue;
           }
+          if (normalize(projectRef.path) === path) continue;
 
           try {
+            const remaining = await listGlobalSessionPages(opencodeClient.getSdkClient(), {
+              directory: path, archived: true, narrowToArchived: false, pageSize: 500,
+            });
+            assertCurrent();
+            if (remaining.length > 0) { failedWorktreePaths.push(path); continue; }
             await removeProjectWorktree(projectRef, source, { deleteLocalBranch: true });
+            assertCurrent();
             const directoryStore = useDirectoryStore.getState();
             if (normalize(directoryStore.currentDirectory) === path) {
               directoryStore.setDirectory(projectRef.path, { showOverlay: false });
             }
           } catch {
+            assertCurrent();
             failedWorktreePaths.push(path);
           }
         }
       }
 
       // Clear selection if needed
-      const { selectedSessionId, selectedGroupName } = get();
+      const { selectedSessionId, selectedGroupId } = get();
       if (selectedSessionId && deletedIds.has(selectedSessionId)) {
         set({ selectedSessionId: null });
       }
-      if (selectedGroupName) {
-        const group = get().groups.find((g) => g.name === selectedGroupName);
+      if (selectedGroupId) {
+        const group = get().groups.find((g) => g.id === selectedGroupId);
         if (group && group.sessions.every((s) => deletedIds.has(s.id))) {
-          set({ selectedGroupName: null, selectedSessionId: null });
+          set({ selectedGroupId: null, selectedSessionId: null });
         }
       }
 
@@ -352,5 +291,9 @@ export const useAgentGroupsStore = create<Store>()(
     },
 
     clearError: () => set({ error: null }),
+    resetForRuntimeSwitch: () => {
+      loadGeneration += 1;
+      set({ groups: [], selectedGroupId: null, selectedSessionId: null, isLoading: false, error: null });
+    },
   }),
 );

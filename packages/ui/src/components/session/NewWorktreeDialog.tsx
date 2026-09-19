@@ -1,4 +1,6 @@
 import * as React from 'react';
+import type { AttachIssueRequest } from '@openchamber/sdk';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -6,6 +8,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { GuestAttachDialog } from '@/components/layout/GuestAttachDialog';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestAttachItems } from '@/hooks/useGuestSurfaces';
+import { guestSessionTitle, guestWorktreeBranch } from '@/lib/guests/start-session';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -32,14 +38,16 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
-import { buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
+import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
@@ -51,7 +59,7 @@ import {
 } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
-import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
+import { GitHubIntegrationDialog, type GitHubWorktreeSelection } from './GitHubIntegrationDialog';
 import { LinearIssuePickerDialog } from './LinearIssuePickerDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -65,7 +73,7 @@ import type {
   LinearIssue,
   LinearIssueComment,
 } from '@/lib/api/types';
-import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n } from '@/lib/i18n';
 
 type Mode = 'new-branch' | 'existing-branch';
@@ -93,6 +101,7 @@ interface NewBranchState {
   linkedIssue: GitHubIssue | null;
   linkedPr: GitHubPullRequestSummary | null;
   linkedLinearIssue: LinkedLinearWorktreeIssue | null;
+  linkedGuest: AttachIssueRequest | null;
   includePrDiff: boolean;
 }
 
@@ -245,6 +254,12 @@ export function NewWorktreeDialog({
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const linearAuthStatus = useLinearAuthStore((state) => state.status);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
+  const guestAttachItems = useGuestAttachItems();
+  const dialogGuests = React.useMemo(
+    () => guestAttachItems.filter((item) => item.mode === 'dialog'),
+    [guestAttachItems],
+  );
+  const [guestDialogId, setGuestDialogId] = React.useState<string | null>(null);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   
   const projectDirectory = activeProject?.path ?? null;
@@ -267,6 +282,7 @@ export function NewWorktreeDialog({
     linkedIssue: null,
     linkedPr: null,
     linkedLinearIssue: null,
+    linkedGuest: null,
     includePrDiff: false,
   });
   
@@ -456,6 +472,7 @@ export function NewWorktreeDialog({
   // Creation state
   const [isCreating, setIsCreating] = React.useState(false);
   const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
+  const initializedForCurrentOpen = React.useRef(false);
 
   const resolveDefaultAgentName = React.useCallback((): string | undefined => {
     const configState = useConfigStore.getState();
@@ -493,9 +510,7 @@ export function NewWorktreeDialog({
       : undefined;
 
     const provider = configState.providers.find((p) => p.id === providerID);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelID) as
-      | { variants?: Record<string, unknown> }
-      | undefined;
+    const model = provider?.models.find((m) => m.id === modelID);
     const variants = model?.variants;
     if (!variants) return settingsDefaultVariant || currentVariant || undefined;
     if (settingsDefaultVariant && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) return settingsDefaultVariant;
@@ -509,6 +524,7 @@ export function NewWorktreeDialog({
     issue: GitHubIssue | null;
     pr: GitHubPullRequestSummary | null;
     linearIssue: LinkedLinearWorktreeIssue | null;
+    guest: AttachIssueRequest | null;
     includeDiff: boolean;
   }) => {
     const configState = useConfigStore.getState();
@@ -517,6 +533,51 @@ export function NewWorktreeDialog({
     const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
     const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
     const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
+
+    if (args.guest) {
+      const kind = args.guest.kind === 'pull' ? 'pull' : 'issue';
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedGuestIssue({
+          providerId: args.guest.providerId,
+          identifier: args.guest.id,
+          title: args.guest.title,
+          url: args.guest.url,
+          thread: kind,
+          author: args.guest.author,
+          head: args.guest.branches?.head,
+          base: args.guest.branches?.base,
+          data: args.guest.data,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
+      if (args.guest.text) {
+        if (!providerID || !modelID) {
+          toast.error(t('session.newWorktree.error.noModelSelected'));
+          return;
+        }
+        await useSessionUIStore.getState().sendMessage(
+          args.guest.text,
+          providerID,
+          modelID,
+          agentName,
+          undefined,
+          undefined,
+          undefined,
+          resolveDefaultVariant(providerID, modelID),
+          undefined,
+          { sessionId: args.sessionId, directory: args.directory },
+        );
+      }
+
+      toast.success(kind === 'pull'
+        ? t('session.newWorktree.toast.sessionFromPr')
+        : t('session.newWorktree.toast.sessionFromIssue'));
+      return;
+    }
 
     if (!providerID || !modelID) {
       toast.error(t('session.newWorktree.error.noModelSelected'));
@@ -763,7 +824,12 @@ export function NewWorktreeDialog({
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.
   React.useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initializedForCurrentOpen.current = false;
+      return;
+    }
+    if (initializedForCurrentOpen.current) return;
+    initializedForCurrentOpen.current = true;
 
     setMode('new-branch');
     setExistingBranchState({
@@ -792,6 +858,7 @@ export function NewWorktreeDialog({
       linkedIssue: null,
       linkedPr: null,
       linkedLinearIssue: null,
+      linkedGuest: null,
       includePrDiff: false,
     });
   }, [open, generateUniqueSlug]);
@@ -840,14 +907,15 @@ export function NewWorktreeDialog({
       if (normalizedBranch && normalizedWorktree) {
         const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
         const prConfig = linkedPr ? resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches) : null;
-        const result = await validateWorktreeCreate(projectRef, {
+        const validateArgs: CreateWorktreeArgs = {
           mode: mode === 'existing-branch' || prConfig ? 'existing' : 'new',
           branchName: normalizedBranch,
           worktreeName: normalizedWorktree,
           existingBranch: prConfig?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
-          ...(prConfig?.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
-          ...(prConfig?.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
-        });
+        };
+        if (prConfig?.ensureRemoteName) validateArgs.ensureRemoteName = prConfig.ensureRemoteName;
+        if (prConfig?.ensureRemoteUrl) validateArgs.ensureRemoteUrl = prConfig.ensureRemoteUrl;
+        const result = await validateWorktreeCreate(projectRef, validateArgs);
         
         if (abortController.signal.aborted) return;
         
@@ -953,21 +1021,22 @@ export function NewWorktreeDialog({
       const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
       const linkedIssue = mode === 'new-branch' ? newBranchState.linkedIssue : null;
       const linkedLinearIssue = mode === 'new-branch' ? newBranchState.linkedLinearIssue : null;
+      const linkedGuest = mode === 'new-branch' ? newBranchState.linkedGuest : null;
       const linkedPrState = mode === 'new-branch' ? newBranchState.linkedPr : null;
       const includePrDiff = mode === 'new-branch' ? newBranchState.includePrDiff : false;
-      const shouldCreateSession = Boolean(linkedIssue || linkedPrState || linkedLinearIssue);
+      const shouldCreateSession = Boolean(linkedIssue || linkedPrState || linkedLinearIssue || linkedGuest);
 
-      const setupCommands = await getWorktreeSetupCommands(projectRef);
+      const setupCommands = await resolveWorktreeSetupCommands(projectRef);
       const sourceBranch = newBranchState.sourceBranch;
 
       let sourceLabel = '';
-      const args = (() => {
+      const args: CreateWorktreeArgs = (() => {
         if (linkedPr) {
           const prConfig = resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches);
           sourceLabel = prConfig.sourceLabel;
-          return {
+          const prArgs: CreateWorktreeArgs = {
             preferredName: normalizedBranch || normalizedWorktree,
-            mode: 'existing' as const,
+            mode: 'existing',
             branchName: normalizedBranch,
             worktreeName: normalizedWorktree,
             existingBranch: prConfig.existingBranch,
@@ -976,22 +1045,24 @@ export function NewWorktreeDialog({
             upstreamRemote: prConfig.upstreamRemote,
             upstreamBranch: prConfig.upstreamBranch,
             returnAfterDirectoryCreated: true,
-            ...(prConfig.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
-            ...(prConfig.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
           };
+          if (prConfig.ensureRemoteName) prArgs.ensureRemoteName = prConfig.ensureRemoteName;
+          if (prConfig.ensureRemoteUrl) prArgs.ensureRemoteUrl = prConfig.ensureRemoteUrl;
+          return prArgs;
         }
 
         sourceLabel = mode === 'new-branch' ? sourceBranch : '';
-        return {
+        const baseArgs: CreateWorktreeArgs = {
           preferredName: normalizedBranch || normalizedWorktree,
-          mode: mode === 'existing-branch' ? 'existing' as const : 'new' as const,
+          mode: mode === 'existing-branch' ? 'existing' : 'new',
           branchName: mode === 'existing-branch' ? undefined : normalizedBranch,
           worktreeName: normalizedWorktree,
           existingBranch: mode === 'existing-branch' ? normalizedBranch : undefined,
           setupCommands,
           returnAfterDirectoryCreated: true,
-          ...(sourceBranch && mode === 'new-branch' ? { startRef: sourceBranch } : {}),
         };
+        if (sourceBranch && mode === 'new-branch') baseArgs.startRef = sourceBranch;
+        return baseArgs;
       })();
 
       const metadata = await createWorktreeWithDefaults(projectRef, args);
@@ -1003,7 +1074,9 @@ export function NewWorktreeDialog({
           await waitForWorktreeBootstrap(metadata.path);
         }
 
-        const sessionTitle = linkedLinearIssue
+        const sessionTitle = linkedGuest
+          ? guestSessionTitle(linkedGuest)
+          : linkedLinearIssue
           ? `${linkedLinearIssue.identifier} ${linkedLinearIssue.title}`.trim()
           : linkedIssue
           ? `#${linkedIssue.number} ${linkedIssue.title}`.trim()
@@ -1058,9 +1131,12 @@ export function NewWorktreeDialog({
           issue: linkedIssue,
           pr: linkedPrState,
           linearIssue: linkedLinearIssue,
+          guest: linkedGuest,
           includeDiff: includePrDiff,
         }).catch((error) => {
-          const fallback = linkedLinearIssue
+          const fallback = linkedGuest
+            ? t('session.newWorktree.error.sendGuestContextFailed')
+            : linkedLinearIssue
             ? t('session.newWorktree.error.sendLinearContextFailed')
             : t('session.newWorktree.error.sendGitHubContextFailed');
           const message = error instanceof Error ? error.message : fallback;
@@ -1084,17 +1160,14 @@ export function NewWorktreeDialog({
   };
 
   // Handle GitHub selection
-  const handleGitHubSelect = (result: {
-    type: 'issue' | 'pr';
-    item: GitHubIssue | GitHubPullRequestSummary;
-    includeDiff?: boolean;
-  } | null) => {
+  const handleGitHubSelect = (result: GitHubWorktreeSelection | null) => {
     if (!result) {
       setNewBranchState(prev => ({
         ...prev,
         linkedIssue: null,
         linkedPr: null,
         linkedLinearIssue: null,
+      linkedGuest: null,
         includePrDiff: false,
         branchName: '',
       }));
@@ -1102,25 +1175,27 @@ export function NewWorktreeDialog({
     }
 
     if (result.type === 'issue') {
-      const issue = result.item as GitHubIssue;
+      const issue = result.item;
       const newBranchName = `issue-${issue.number}-${generateBranchSlug()}`;
       setNewBranchState(prev => ({
         ...prev,
         linkedIssue: issue,
         linkedPr: null,
         linkedLinearIssue: null,
+      linkedGuest: null,
         includePrDiff: false,
         branchName: newBranchName,
         worktreeName: slugifyWorktreeName(newBranchName),
         isSyncingWorktreeName: true,
       }));
     } else if (result.type === 'pr') {
-      const pr = result.item as GitHubPullRequestSummary;
+      const pr = result.item;
       setNewBranchState(prev => ({
         ...prev,
         linkedPr: pr,
         linkedIssue: null,
         linkedLinearIssue: null,
+      linkedGuest: null,
         includePrDiff: result.includeDiff ?? false,
         branchName: pr.head,
         worktreeName: slugifyWorktreeName(pr.head),
@@ -1146,6 +1221,7 @@ export function NewWorktreeDialog({
       },
       linkedIssue: null,
       linkedPr: null,
+      linkedGuest: null,
       includePrDiff: false,
       branchName: newBranchName,
       worktreeName: slugifyWorktreeName(newBranchName),
@@ -1153,9 +1229,37 @@ export function NewWorktreeDialog({
     }));
   };
 
+  const handleGuestSelect = (issue: AttachIssueRequest): void => {
+    const kind = issue.kind === 'pull' ? 'pull' : 'issue';
+    const newBranchName = `${guestWorktreeBranch(issue.id, kind)}-${generateBranchSlug()}`;
+    setNewBranchState((prev) => ({
+      ...prev,
+      linkedGuest: issue,
+      linkedIssue: null,
+      linkedPr: null,
+      linkedLinearIssue: null,
+      includePrDiff: Boolean(issue.text),
+      branchName: newBranchName,
+      worktreeName: slugifyWorktreeName(newBranchName),
+      isSyncingWorktreeName: true,
+    }));
+    setGuestDialogId(null);
+  };
+
   // GitHub connection check
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
   const isLinearConnected = Boolean(linear) && linearAuthChecked && linearAuthStatus?.connected === true;
+  const linkedGuest = newBranchState.linkedGuest
+    ? dialogGuests.find((entry) => entry.id === newBranchState.linkedGuest?.providerId)
+    : undefined;
+  const linkedGuestIcon = linkedGuest?.icon;
+  const linkedGuestIconSrc = linkedGuest?.iconSrc;
+  const hasLinkedItem = Boolean(
+    newBranchState.linkedIssue
+    || newBranchState.linkedPr
+    || newBranchState.linkedLinearIssue
+    || newBranchState.linkedGuest,
+  );
 
   // Check if form is valid for submission
   const isFormValid = mode === 'existing-branch'
@@ -1164,19 +1268,27 @@ export function NewWorktreeDialog({
 
   const canCreate = isFormValid && !isCreating;
 
+  const handleCreateKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    handleWorktreeCreateKeyDown(event, () => {
+      if (!canCreate) return;
+      void handleCreate();
+    });
+  };
+
   const handleClearLinkedItem = () => {
     setNewBranchState(prev => ({
       ...prev,
       linkedIssue: null,
       linkedPr: null,
       linkedLinearIssue: null,
+      linkedGuest: null,
       branchName: '',
       includePrDiff: false,
       isSyncingWorktreeName: true,
     }));
   };
 
-  const startFromIssueButtons = mode === 'new-branch' && (isGitHubConnected || isLinearConnected) ? (
+  const startFromIssueButtons = mode === 'new-branch' && (isGitHubConnected || isLinearConnected || dialogGuests.length > 0) ? (
     <div className="flex items-center gap-0.5 shrink-0">
       {isGitHubConnected && (
         <Button
@@ -1202,6 +1314,19 @@ export function NewWorktreeDialog({
           <Icon name="linear" className="size-4" />
         </Button>
       )}
+      {dialogGuests.map((guest) => (
+        <Button
+          key={guest.id}
+          variant="ghost"
+          size="sm"
+          onClick={() => setGuestDialogId(guest.id)}
+          className="h-8 w-8 px-0"
+          title={t('session.newWorktree.actions.startFromGuest', { name: guest.name })}
+          aria-label={t('session.newWorktree.actions.startFromGuest', { name: guest.name })}
+        >
+          <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
+        </Button>
+      ))}
     </div>
   ) : null;
 
@@ -1261,7 +1386,11 @@ export function NewWorktreeDialog({
                 { id: 'existing-branch', label: t('session.newWorktree.mode.existingBranch'), icon: <Icon name="git-repository" className="h-3.5 w-3.5" /> },
               ]}
               activeId={mode}
-              onSelect={(id) => handleModeChange(id as Mode)}
+              onSelect={(id) => {
+                if (id === 'new-branch' || id === 'existing-branch') {
+                  handleModeChange(id);
+                }
+              }}
               variant="active-pill"
               layoutMode="fit"
               className="w-full"
@@ -1446,9 +1575,11 @@ export function NewWorktreeDialog({
                       linkedIssue: null,
                       linkedPr: null,
                       linkedLinearIssue: null,
+      linkedGuest: null,
                     }));
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                  onKeyDown={handleCreateKeyDown}
                   placeholder={t('session.newWorktree.branchNamePlaceholder')}
                   disabled={!!newBranchState.linkedPr}
                   className={cn(
@@ -1480,6 +1611,17 @@ export function NewWorktreeDialog({
                       {t('session.newWorktree.fromLinearIssue', {
                         identifier: newBranchState.linkedLinearIssue.identifier,
                         title: newBranchState.linkedLinearIssue.title,
+                      })}
+                    </span>
+                  </div>
+                )}
+                {newBranchState.linkedGuest && (
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
+                    <span className="typography-micro">
+                      {t('session.newWorktree.fromGuest', {
+                        id: newBranchState.linkedGuest.id,
+                        title: newBranchState.linkedGuest.title,
                       })}
                     </span>
                   </div>
@@ -1534,6 +1676,7 @@ export function NewWorktreeDialog({
                   }
                 }}
                 onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                onKeyDown={handleCreateKeyDown}
                 placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
                 className={cn(
                   'h-8',
@@ -1682,17 +1825,25 @@ export function NewWorktreeDialog({
             )}
 
             {/* Linked Item Preview - Two row minimal display */}
-            {(newBranchState.linkedIssue || newBranchState.linkedPr || newBranchState.linkedLinearIssue) && mode === 'new-branch' && (
+            {hasLinkedItem && mode === 'new-branch' && (
               <div className="mt-2 px-2 py-1.5 rounded bg-muted/30">
                 {/* Row 1: Type, number, title, actions */}
                 <div className="flex items-center gap-2">
-                  <Icon
-                    name={newBranchState.linkedLinearIssue ? 'linear' : 'github'}
-                    className={cn(
-                      'h-3.5 w-3.5 shrink-0',
-                      newBranchState.linkedLinearIssue ? 'text-foreground' : 'text-status-success',
-                    )}
-                  />
+                  {newBranchState.linkedGuest ? (
+                    <GuestIcon
+                      icon={linkedGuestIcon ?? 'window'}
+                      iconSrc={linkedGuestIconSrc}
+                      className="h-3.5 w-3.5 shrink-0"
+                    />
+                  ) : (
+                    <Icon
+                      name={newBranchState.linkedLinearIssue ? 'linear' : 'github'}
+                      className={cn(
+                        'h-3.5 w-3.5 shrink-0',
+                        newBranchState.linkedLinearIssue ? 'text-foreground' : 'text-status-success',
+                      )}
+                    />
+                  )}
                   
                     {newBranchState.linkedLinearIssue && (
                       <span className="typography-micro text-muted-foreground shrink-0">
@@ -1709,13 +1860,18 @@ export function NewWorktreeDialog({
                         {t('session.newWorktree.prNumber', { number: newBranchState.linkedPr.number })}
                       </span>
                     )}
+                    {newBranchState.linkedGuest && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {newBranchState.linkedGuest.id}
+                      </span>
+                    )}
                   
                   <span className="typography-micro text-foreground truncate flex-1">
-                    {newBranchState.linkedLinearIssue?.title || newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title}
+                    {newBranchState.linkedGuest?.title || newBranchState.linkedLinearIssue?.title || newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title}
                   </span>
                   
                   <a
-                    href={newBranchState.linkedLinearIssue?.url || newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url}
+                    href={newBranchState.linkedGuest?.url || newBranchState.linkedLinearIssue?.url || newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-muted-foreground hover:text-foreground shrink-0"
@@ -1745,6 +1901,18 @@ export function NewWorktreeDialog({
                       )}
                   </div>
                 )}
+                {newBranchState.linkedGuest?.branches && (
+                  <div className="flex items-center gap-2 mt-0.5 pl-5">
+                    <span className="typography-micro text-muted-foreground">
+                      {newBranchState.linkedGuest.branches.head} → {newBranchState.linkedGuest.branches.base}
+                    </span>
+                    {newBranchState.includePrDiff && (
+                      <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
+                        {t('session.newWorktree.includeDiffBadge')}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1767,7 +1935,11 @@ export function NewWorktreeDialog({
                       { id: 'existing-branch', label: t('session.newWorktree.mode.existingBranch'), icon: <Icon name="git-repository" className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={mode}
-                    onSelect={(id) => handleModeChange(id as Mode)}
+                    onSelect={(id) => {
+                if (id === 'new-branch' || id === 'existing-branch') {
+                  handleModeChange(id);
+                }
+              }}
                     variant="active-pill"
                     layoutMode="fit"
                     className="w-full"
@@ -1776,7 +1948,7 @@ export function NewWorktreeDialog({
               </div>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto mt-2 space-y-6">
+            <ScrollableOverlay outerClassName="flex-1 mt-2" className="space-y-6" disableHorizontal>
               {/* Branch Name / Existing Branch Selection */}
               {mode === 'existing-branch' ? (
                 <div className="space-y-1.5">
@@ -1927,9 +2099,11 @@ export function NewWorktreeDialog({
                         linkedIssue: null,
                         linkedPr: null,
                         linkedLinearIssue: null,
+      linkedGuest: null,
                       }));
                     }}
                     onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                    onKeyDown={handleCreateKeyDown}
                     placeholder={t('session.newWorktree.branchNamePlaceholder')}
                     disabled={!!newBranchState.linkedPr}
                     className={cn(
@@ -1961,6 +2135,17 @@ export function NewWorktreeDialog({
                         {t('session.newWorktree.fromLinearIssue', {
                           identifier: newBranchState.linkedLinearIssue.identifier,
                           title: newBranchState.linkedLinearIssue.title,
+                        })}
+                      </span>
+                    </div>
+                  )}
+                  {newBranchState.linkedGuest && (
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
+                      <span className="typography-micro">
+                        {t('session.newWorktree.fromGuest', {
+                          id: newBranchState.linkedGuest.id,
+                          title: newBranchState.linkedGuest.title,
                         })}
                       </span>
                     </div>
@@ -2015,6 +2200,7 @@ export function NewWorktreeDialog({
                     }
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                  onKeyDown={handleCreateKeyDown}
                   placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
                   className={cn(
                     'h-8',
@@ -2136,17 +2322,25 @@ export function NewWorktreeDialog({
               )}
 
               {/* Linked Item Preview - Two row minimal display */}
-              {(newBranchState.linkedIssue || newBranchState.linkedPr || newBranchState.linkedLinearIssue) && mode === 'new-branch' && (
+              {hasLinkedItem && mode === 'new-branch' && (
                 <div className="mt-2 px-2 py-1.5 rounded bg-muted/30">
                   {/* Row 1: Type, number, title, actions */}
                   <div className="flex items-center gap-2">
-                    <Icon
-                      name={newBranchState.linkedLinearIssue ? 'linear' : 'github'}
-                      className={cn(
-                        'h-3.5 w-3.5 shrink-0',
-                        newBranchState.linkedLinearIssue ? 'text-foreground' : 'text-status-success',
-                      )}
+                    {newBranchState.linkedGuest ? (
+                      <GuestIcon
+                      icon={linkedGuestIcon ?? 'window'}
+                      iconSrc={linkedGuestIconSrc}
+                      className="h-3.5 w-3.5 shrink-0"
                     />
+                    ) : (
+                      <Icon
+                        name={newBranchState.linkedLinearIssue ? 'linear' : 'github'}
+                        className={cn(
+                          'h-3.5 w-3.5 shrink-0',
+                          newBranchState.linkedLinearIssue ? 'text-foreground' : 'text-status-success',
+                        )}
+                      />
+                    )}
                     
                     {newBranchState.linkedLinearIssue && (
                       <span className="typography-micro text-muted-foreground shrink-0">
@@ -2163,13 +2357,18 @@ export function NewWorktreeDialog({
                         {t('session.newWorktree.prNumber', { number: newBranchState.linkedPr.number })}
                       </span>
                     )}
+                    {newBranchState.linkedGuest && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {newBranchState.linkedGuest.id}
+                      </span>
+                    )}
                     
                     <span className="typography-micro text-foreground truncate flex-1">
-                      {newBranchState.linkedLinearIssue?.title || newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title}
+                      {newBranchState.linkedGuest?.title || newBranchState.linkedLinearIssue?.title || newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title}
                     </span>
                     
                     <a
-                      href={newBranchState.linkedLinearIssue?.url || newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url}
+                      href={newBranchState.linkedGuest?.url || newBranchState.linkedLinearIssue?.url || newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-muted-foreground hover:text-foreground shrink-0"
@@ -2199,9 +2398,21 @@ export function NewWorktreeDialog({
                       )}
                     </div>
                   )}
+                  {newBranchState.linkedGuest?.branches && (
+                    <div className="flex items-center gap-2 mt-0.5 pl-5">
+                      <span className="typography-micro text-muted-foreground">
+                        {newBranchState.linkedGuest.branches.head} → {newBranchState.linkedGuest.branches.base}
+                      </span>
+                      {newBranchState.includePrDiff && (
+                        <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
+                          {t('session.newWorktree.includeDiffBadge')}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </ScrollableOverlay>
 
             {/* Footer */}
             <DialogFooter className="mt-1 flex items-center justify-between">
@@ -2251,6 +2462,14 @@ export function NewWorktreeDialog({
         onOpenChange={setLinearDialogOpen}
         mode="select"
         onSelect={handleLinearSelect}
+      />
+      <GuestAttachDialog
+        guestId={guestDialogId}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setGuestDialogId(null);
+        }}
+        onAttach={handleGuestSelect}
+        onSessionStarted={() => onOpenChange(false)}
       />
     </>
   );

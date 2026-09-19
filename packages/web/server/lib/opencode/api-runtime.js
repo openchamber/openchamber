@@ -455,7 +455,7 @@ export const createOpenCodeApiRuntime = (dependencies) => {
       assignWhen(request, 'cursor', cursor, Boolean(cursor));
       const response = await runtime.v2.message.list(request, { signal: runtime.signal });
       pages.unshift([...response.data].reverse());
-      next = response.cursor.next ?? response.cursor.previous ?? undefined;
+      next = response.cursor.next ?? undefined;
       cursor = next;
     } while (input.allPages === true && next && pages.length < MAX_SESSION_PAGES);
     if (input.allPages === true && next && pages.length >= MAX_SESSION_PAGES) {
@@ -741,6 +741,16 @@ export const createOpenCodeApiRuntime = (dependencies) => {
     return response.data.map(normalizeV2Agent);
   };
 
+  const archiveSession = async (input, options = {}) => {
+    const runtime = context(input.directory, options);
+    if (runtime.protocol === 'opencode2') unsupported('session archive', runtime.protocol);
+    return legacyData(runtime.legacy.session.update({
+      sessionID: input.sessionID,
+      directory: input.directory,
+      time: { archived: input.archivedAt },
+    }, { signal: runtime.signal }), 'session.update');
+  };
+
   const listProviders = async (directory, options = {}) => {
     const runtime = context(directory, options);
     if (runtime.protocol === 'legacy') {
@@ -824,6 +834,7 @@ export const createOpenCodeApiRuntime = (dependencies) => {
     replyPermission,
     waitForSessionIdle,
     mergeSessionMetadata,
+    archiveSession,
     listAgents,
     listProviders,
     getRuntimeProviderListing,

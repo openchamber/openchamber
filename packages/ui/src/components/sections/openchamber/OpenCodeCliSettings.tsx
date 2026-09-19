@@ -11,11 +11,10 @@ import {
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isWindowsArm64 } from '@/lib/platform';
 import { toast } from '@/components/ui';
 
@@ -31,19 +30,11 @@ export const OpenCodeCliSettings: React.FC = () => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await runtimeFetch('/api/config/settings', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
+        const data = await loadDesktopSettings();
         if (cancelled || !data) {
           return;
         }
-        const next = typeof data.opencodeBinary === 'string' ? data.opencodeBinary.trim() : '';
-        setValue(next);
+        setValue(data.opencodeBinary ?? '');
       } catch {
         // ignore
       } finally {

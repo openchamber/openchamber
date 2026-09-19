@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -681,7 +682,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   const resultsSection = (
     <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-[var(--surface-elevated)] shadow-sm">
-      <div className="max-h-[min(28rem,58vh)] overflow-y-auto p-2">
+      <ScrollableOverlay outerClassName="max-h-[min(28rem,58vh)]" className="p-2">
         <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground/80">
           {t('directoryExplorerDialog.browse.directories')}
         </div>
@@ -730,7 +731,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => executeRow(row)}
                   className={cn(
-                    'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     isActive && 'bg-interactive-selection text-interactive-selection-foreground',
                     !isActive && 'hover:bg-interactive-hover/50',
                     row.type === 'directory' && row.disabled && 'opacity-45'
@@ -780,7 +781,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             })}
           </div>
         )}
-      </div>
+      </ScrollableOverlay>
     </div>
   );
 

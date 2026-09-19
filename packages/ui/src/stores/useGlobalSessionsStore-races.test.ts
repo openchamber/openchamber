@@ -1,3 +1,4 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2"
 
@@ -154,3 +155,8 @@ describe("global session mutation reconciliation", () => {
     expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([])
   })
 })
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

@@ -15,11 +15,13 @@
  */
 
 import { z } from 'zod';
+import type { JsonValue } from '@openchamber/sdk';
 import type { TextPart } from '@opencode-ai/sdk/v2';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendTerminalContexts } from './terminalContext';
 
 export const CONTEXT_METADATA_KEY = 'openchamberContext';
+const OPENCODE_COMMENT_METADATA_KEY = 'opencodeComment';
 
 export type CodeCommentContext = {
     kind: 'code-comment';
@@ -103,6 +105,25 @@ type LinearIssueContext = {
     url: string;
 };
 
+type GuestIssueContext = {
+    kind: 'guest-issue';
+    providerId: string;
+    id: string;
+    title: string;
+    url: string;
+    /** Opaque guest payload; stored for the round trip back to the guest, never rendered. */
+    data?: JsonValue;
+};
+
+type GuestPrContext = {
+    kind: 'guest-pr';
+    providerId: string;
+    id: string;
+    title: string;
+    url: string;
+    data?: JsonValue;
+};
+
 export type ContextPartPayload =
     | CodeCommentContext
     | TerminalContextPayload
@@ -113,9 +134,22 @@ export type ContextPartPayload =
     | ChatQuoteContext
     | GitHubIssueContext
     | GitHubPrContext
-    | LinearIssueContext;
+    | LinearIssueContext
+    | GuestIssueContext
+    | GuestPrContext;
 
-export type ContextPartMetadata = { [K in typeof CONTEXT_METADATA_KEY]: ContextPartPayload };
+type OpenCodeCommentMetadata = {
+    path: string;
+    selection?: { startLine: number; endLine: number; startChar?: number; endChar?: number };
+    comment: string;
+    preview?: string;
+    origin?: 'file' | 'review';
+};
+
+export type ContextPartMetadata = {
+    [CONTEXT_METADATA_KEY]: ContextPartPayload;
+    [OPENCODE_COMMENT_METADATA_KEY]?: OpenCodeCommentMetadata;
+};
 
 export type ContextPart = {
     text: string;
@@ -163,8 +197,10 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
-            // Linked issues/PRs carry server-fetched context text built by
-            // their pickers; there is no default text to derive here.
+        case 'guest-issue':
+        case 'guest-pr':
+            // Linked issues/PRs carry picker-built context text;
+            // there is no default text to derive here.
             return '';
     }
 }
@@ -177,10 +213,25 @@ export function formatContextText(payload: ContextPartPayload): string {
  */
 export function createContextPart(payload: ContextPartPayload, text?: string): ContextPart {
     const resolvedText = text ?? formatContextText(payload);
+    const metadata: ContextPartMetadata = { [CONTEXT_METADATA_KEY]: payload };
+    if (payload.kind === 'code-comment') {
+        metadata[OPENCODE_COMMENT_METADATA_KEY] = {
+            path: payload.fileLabel,
+            selection: {
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                startChar: 0,
+                endChar: 0,
+            },
+            comment: payload.text,
+            preview: payload.code,
+            origin: payload.source === 'diff' ? 'review' : 'file',
+        };
+    }
     return {
         text: resolvedText,
         synthetic: true,
-        metadata: { [CONTEXT_METADATA_KEY]: payload },
+        metadata,
     };
 }
 
@@ -313,7 +364,50 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
         title: z.string(),
         url: z.string(),
     }),
+    z.object({
+        kind: z.literal('guest-issue'),
+        providerId: z.string().min(1),
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        data: z.json().optional(),
+    }),
+    z.object({
+        kind: z.literal('guest-pr'),
+        providerId: z.string().min(1),
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        data: z.json().optional(),
+    }),
 ]);
+
+/**
+ * Part metadata carrying a context payload, for parsing at a trust boundary
+ * (a queued message coming back from the server, for instance).
+ */
+const openCodeCommentSchema = z.object({
+    path: z.string(),
+    selection: z.object({
+        startLine: z.number().finite(),
+        endLine: z.number().finite(),
+        startChar: z.number().finite().optional(),
+        endChar: z.number().finite().optional(),
+    }).optional(),
+    comment: z.string(),
+    preview: z.string().optional(),
+    origin: z.enum(['file', 'review']).optional(),
+});
+
+/**
+ * Part metadata carrying a context payload, for parsing at a trust boundary
+ * (a queued message coming back from the server, for instance). The OpenCode
+ * Desktop mirror rides along so a queued comment keeps it too.
+ */
+export const contextPartMetadataSchema = z.object({
+    [CONTEXT_METADATA_KEY]: contextPayloadSchema,
+    [OPENCODE_COMMENT_METADATA_KEY]: openCodeCommentSchema.optional(),
+});
 
 /** The subset of a message part that context read-back inspects. */
 export type ContextCarrierPart = { type: string } & Pick<TextPart, 'metadata'>;
@@ -326,7 +420,32 @@ export type ContextCarrierPart = { type: string } & Pick<TextPart, 'metadata'>;
 export function readContextPart(part: ContextCarrierPart): ContextPartPayload | null {
     if (part.type !== 'text') return null;
     const parsed = contextPayloadSchema.safeParse(part.metadata?.[CONTEXT_METADATA_KEY]);
-    return parsed.success ? parsed.data : null;
+    if (parsed.success) return parsed.data;
+
+    const compatible = openCodeCommentSchema.safeParse(part.metadata?.[OPENCODE_COMMENT_METADATA_KEY]);
+    if (compatible.success) {
+        const comment = compatible.data;
+        if (!comment.selection) {
+            return {
+                kind: 'file-quote',
+                fileLabel: comment.path,
+                quote: comment.preview ?? '',
+                text: comment.comment,
+            };
+        }
+        return {
+            kind: 'code-comment',
+            source: comment.origin === 'review' ? 'diff' : 'file',
+            fileLabel: comment.path,
+            startLine: comment.selection.startLine,
+            endLine: comment.selection.endLine,
+            language: '',
+            code: comment.preview ?? '',
+            text: comment.comment,
+        };
+    }
+
+    return null;
 }
 
 /** Whether a message carries any user-attached context part. */
@@ -405,6 +524,8 @@ export function draftFromContextPayload(
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             return null;
     }
 }

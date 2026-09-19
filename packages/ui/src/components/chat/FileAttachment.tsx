@@ -12,7 +12,6 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { useDeviceInfo } from '@/lib/device';
 
 import type { ToolPopupContent } from './message/types';
 
@@ -136,8 +135,6 @@ interface ImagePreviewProps {
 
 const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: ImagePreviewProps) => {
   const { t } = useI18n();
-  const { isMobile, isTablet } = useDeviceInfo();
-  const alwaysShowActions = isMobile || isTablet;
   const isLocalImagePreview =
     file.source !== 'server' &&
     file.mimeType.startsWith('image/') &&
@@ -220,7 +217,7 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
           handleOpenPreview();
         }
       }}
-      className="relative h-10 w-10 rounded-lg border border-border/40 bg-muted/10 overflow-hidden flex-shrink-0 group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={displayName}
     >
       <img
@@ -234,14 +231,14 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
           event.stopPropagation();
           onRemove();
         }}
-        className={cn(
-          "absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-          alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        )}
+        className="absolute top-1 right-1 h-5 w-5 rounded-md bg-background/80 text-foreground hover:bg-background flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        // Inline: the mobile stylesheet floors every button at 36px, which
+        // would swallow a 64px thumbnail; the thumbnail itself is the target.
+        style={{ width: 20, height: 20, minWidth: 0, minHeight: 0 }}
         title={t('chat.fileAttachment.actions.removeImage')}
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
-        <Icon name="close" className="h-2.5 w-2.5" />
+        <Icon name="close" className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -294,23 +291,22 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
           return;
         }
       }}
-      className="flex items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5"
+      className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/80 bg-background pl-2 pr-1 text-xs text-foreground text-left hover:opacity-90 transition-opacity"
+      title={displayName}
     >
-      <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4" />
-      <span className="text-foreground truncate max-w-[200px]">
-        {displayName}
-        {fileSize && <span className="text-muted-foreground ml-1">({fileSize})</span>}
-      </span>
+      <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4 flex-shrink-0" />
+      <span className="truncate max-w-[200px]">{displayName}</span>
+      {fileSize && <span className="text-muted-foreground flex-shrink-0">{fileSize}</span>}
       <span
         data-remove-button
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
-        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-md transition-colors cursor-pointer"
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
-        <Icon name="close" className="h-4 w-4 text-muted-foreground" />
+        <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
       </span>
     </button>
   );
@@ -335,7 +331,7 @@ const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
         }
       }}
       className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm border border-solid bg-transparent text-foreground not-italic hover:opacity-90 transition-colors text-left"
-      style={{ borderColor: 'var(--syntax-punctuation)' }}
+      style={{ borderColor: 'var(--interactive-border)' }}
       title={file.vscodePath}
     >
       <span
@@ -362,6 +358,7 @@ VSCodeFileChip.displayName = 'VSCodeFileChip';
 
 interface AttachedFilesListProps {
   onShowPopup?: (content: ToolPopupContent) => void;
+  className?: string;
 }
 
 export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListProps) => {
@@ -395,7 +392,7 @@ export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListP
 
 AttachedVSCodeFileChips.displayName = 'AttachedVSCodeFileChips';
 
-export const AttachedFilesList = memo(({ onShowPopup }: AttachedFilesListProps) => {
+export const AttachedFilesList = memo(({ onShowPopup, className }: AttachedFilesListProps) => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
@@ -413,10 +410,10 @@ export const AttachedFilesList = memo(({ onShowPopup }: AttachedFilesListProps) 
   })).filter((image) => image.url);
 
   return (
-    <div className="pb-4 w-full px-1 space-y-3">
+    <div className={cn('w-full space-y-2', className)}>
       {/* Images row - inline with previews */}
       {images.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           {images.map((file, index) => (
             <ImagePreview
               key={file.id}
@@ -432,7 +429,7 @@ export const AttachedFilesList = memo(({ onShowPopup }: AttachedFilesListProps) 
       
       {/* Other files row - inline text-only */}
       {otherFiles.length > 0 && (
-        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           {otherFiles.map((file) => (
             <FileChip
               key={file.id}
@@ -506,7 +503,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       {showSelectionPin && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
-          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          style={{ borderColor: 'var(--interactive-border)' }}
           title={relativePath}
         >
           <button
@@ -525,7 +522,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       {showFileAdd && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
-          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          style={{ borderColor: 'var(--interactive-border)' }}
           title={relativePath}
         >
           <button
@@ -559,8 +556,10 @@ interface FilePart {
 const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
 const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
 const LINEAR_ISSUE_LINK_MIME = 'application/vnd.openchamber.linear-issue-link';
+const GUEST_ISSUE_LINK_MIME = 'application/vnd.openchamber.guest-issue-link';
+const GUEST_PR_LINK_MIME = 'application/vnd.openchamber.guest-pr-link';
 
-type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue';
+type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue' | 'guest-issue' | 'guest-pr';
 
 const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === GITHUB_ISSUE_LINK_MIME) {
@@ -572,12 +571,19 @@ const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === LINEAR_ISSUE_LINK_MIME) {
     return 'linear-issue';
   }
+  if (file.mime === GUEST_ISSUE_LINK_MIME) {
+    return 'guest-issue';
+  }
+  if (file.mime === GUEST_PR_LINK_MIME) {
+    return 'guest-pr';
+  }
   return null;
 };
 
-const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' => {
-  if (kind === 'github-pr') return 'git-pull-request';
+const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' | 'attachment-2' => {
+  if (kind === 'github-pr' || kind === 'guest-pr') return 'git-pull-request';
   if (kind === 'linear-issue') return 'linear';
+  if (kind === 'guest-issue') return 'attachment-2';
   return 'github';
 };
 
@@ -728,7 +734,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                       <button
                         type="button"
                         onClick={() => handleImageClick(index)}
-                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
                         aria-label={filename}
                       >
                         {file.url ? (

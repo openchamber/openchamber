@@ -14,6 +14,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
     EMPTY_INLINE_COMMENT_DRAFTS,
@@ -54,8 +55,8 @@ const basename = (path: string): string => {
     return segments[segments.length - 1] ?? path;
 };
 
-const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]';
-const ENTRY_LABEL_CLASS = 'text-[10px] font-medium uppercase tracking-wide text-[var(--surface-mutedForeground)] opacity-60';
+const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
+const ENTRY_LABEL_CLASS = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground opacity-60';
 
 const DraftPreviewEntry: React.FC<{
     draft: InlineCommentDraft;
@@ -109,9 +110,9 @@ const DraftPreviewEntry: React.FC<{
     return (
         <div>
             <div className="flex items-center gap-1.5 px-3 py-1.5"
-                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-mutedForeground) 8%, transparent)' }}>
-                <span className="text-xs font-medium text-[var(--surface-mutedForeground)]">{index + 1}.</span>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--surface-foreground)]" title={title}>
+                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 8%, transparent)' }}>
+                <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={title}>
                     {title}
                 </span>
                 {onSaveComment ? (
@@ -146,8 +147,8 @@ const DraftPreviewEntry: React.FC<{
                         <div
                             className={
                                 monoSource(draft.source)
-                                    ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-[var(--surface-foreground)]'
-                                    : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-[var(--surface-foreground)]'
+                                    ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-foreground'
+                                    : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground'
                             }
                         >
                             {draft.code}
@@ -165,6 +166,10 @@ const DraftPreviewEntry: React.FC<{
                                 onChange={(event) => setEditText(event.target.value)}
                                 onBlur={commitEdit}
                                 onKeyDown={(event) => {
+                                    // An IME candidate is confirmed with Enter and
+                                    // abandoned with Escape; neither keystroke should
+                                    // commit or revert the edit.
+                                    if (isIMECompositionEvent(event)) return;
                                     if (event.key === 'Enter' && !event.shiftKey) {
                                         event.preventDefault();
                                         commitEdit();
@@ -175,11 +180,11 @@ const DraftPreviewEntry: React.FC<{
                                     }
                                 }}
                                 placeholder={t('chat.textSelection.comment.placeholder')}
-                                className="mt-0.5 w-full resize-none rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-2 py-1 text-sm text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)]"
+                                className="oc-surface-elevated mt-0.5 w-full resize-none rounded-md border border-border bg-surface-elevated px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                                 style={{ minHeight: 0 }}
                             />
                         ) : (
-                            <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-[var(--surface-foreground)]">{draft.text}</div>
+                            <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">{draft.text}</div>
                         )}
                     </div>
                 ) : null}
@@ -351,11 +356,8 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                     <button
                         key={group.key}
                         type="button"
-                        className="inline-flex max-w-full items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left"
-                        style={{
-                            backgroundColor: colors?.surface?.elevated,
-                            borderColor: colors?.interactive?.border,
-                        }}
+                        className="oc-glass-popover inline-flex max-w-full items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left"
+                        style={{ borderColor: colors?.interactive?.border }}
                         onMouseEnter={() => {
                             cancelClose();
                             setOpenGroupKey(group.key);
