@@ -14,6 +14,7 @@
  */
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { canDriveBrowserPage } from '@/lib/browser/hostCapability';
 
 type BrowserControlRequest = {
   readonly requestId: string;
@@ -109,6 +110,10 @@ const waitForController = async (
 const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
   const isOpen = request.action === 'browser.open';
   const controller = activeController;
+  // Reported with every successful open. It is the same per-client fact the
+  // event stream declared to the server, and the agent cannot otherwise tell a
+  // page it can drive from one that is only being displayed.
+  const drivable = canDriveBrowserPage();
 
   if (!controller && !(isOpen && opener)) return;
 
@@ -128,7 +133,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         ? request.parameters.viewport
         : '';
       if (!requestedViewport || requestedViewport === 'fill') {
-        await postResult(request.requestId, { ok: true, data: { url, opened: true } });
+        await postResult(request.requestId, { ok: true, data: { url, opened: true, drivable } });
         return;
       }
 
@@ -139,13 +144,18 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
       if (!attached) {
         // Still no view. Reporting a plain success here would leave the agent
         // believing a size it asked for was applied to a page nobody is showing.
+        // A display-only client can never apply a layout, so the note keeps the
+        // resize follow-up only where a controller can carry it out.
         await postResult(request.requestId, {
           ok: true,
           data: {
             url,
             opened: true,
             viewportApplied: false,
-            note: 'The panel had no browser view yet, so the viewport was not applied. Call browser.resize now that one exists.',
+            drivable,
+            note: drivable
+              ? 'The panel had no browser view yet, so the viewport was not applied. Call browser.resize now that one exists.'
+              : 'The panel had no browser view yet, so the viewport was not applied. This client can display a page but cannot drive one, so browser.resize is not available here.',
           },
         });
         return;
@@ -157,13 +167,18 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         : null;
       await postResult(request.requestId, {
         ok: true,
-        data: { url, opened: true, viewportApplied: true, viewport },
+        data: { url, opened: true, viewportApplied: true, viewport, drivable },
       });
       return;
     }
 
     const data = await controller!.run(request.action, request.parameters);
-    await postResult(request.requestId, { ok: true, data });
+    await postResult(request.requestId, {
+      ok: true,
+      // The pane reports the page it opened; only this client knows whether
+      // that page can then be driven, so an open gets the answer here.
+      data: isOpen ? Object.assign({}, data, { drivable }) : data,
+    });
   } catch (error) {
     await postResult(request.requestId, {
       ok: false,

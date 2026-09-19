@@ -48,6 +48,27 @@ describe('openchamber events', () => {
     }
   });
 
+  test('declares browser control on the stream only from a driving host', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+
+    const webUnsubscribe = subscribeOpenchamberEvents(() => undefined);
+    try {
+      expect(MockEventSource.instances).toHaveLength(1);
+      expect(MockEventSource.instances[0].url).not.toContain('browser=1');
+    } finally {
+      webUnsubscribe();
+    }
+
+    Object.assign(window, { __OPENCHAMBER_ELECTRON__: true });
+    const drivingUnsubscribe = subscribeOpenchamberEvents(() => undefined);
+    try {
+      expect(MockEventSource.instances).toHaveLength(2);
+      expect(MockEventSource.instances[1].url).toContain('browser=1');
+    } finally {
+      drivingUnsubscribe();
+    }
+  });
+
   test('dispatches externally created session events', async () => {
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
     const events: unknown[] = [];

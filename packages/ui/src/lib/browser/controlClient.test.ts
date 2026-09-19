@@ -31,6 +31,18 @@ const { registerBrowserController, registerBrowserOpener } = await import('./con
 /** Registrations are module-global, so every test unwinds its own. */
 const cleanups: Array<() => void> = [];
 
+/**
+ * Stubs the host identity the capability check reads. The app injects it before
+ * boot; each test sets it so both host kinds are exercised through the real
+ * capability function rather than a mocked one.
+ */
+const asHost = (electron: boolean): void => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: electron ? { __OPENCHAMBER_ELECTRON__: true } : {},
+  });
+};
+
 const emitOpen = (parameters: Record<string, unknown>): void => {
   listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.open', parameters });
 };
@@ -42,10 +54,13 @@ describe('opening a page before any view exists', () => {
     posted.length = 0;
     claims.length = 0;
     grantClaims = true;
+    // The reported environment: a plain browser tab, display only.
+    asHost(false);
   });
 
   afterEach(() => {
     while (cleanups.length > 0) cleanups.pop()?.();
+    Reflect.deleteProperty(globalThis, 'window');
   });
 
   test('lets the view that the open created apply the layout that was asked for', async () => {
@@ -75,6 +90,7 @@ describe('opening a page before any view exists', () => {
       opened: true,
       viewportApplied: true,
       viewport: { mode: 'mobile', width: 390, height: 844 },
+      drivable: false,
     });
   });
 
@@ -116,7 +132,7 @@ describe('opening a page before any view exists', () => {
     emitOpen({ url: 'https://example.test' });
     await wait(20);
 
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, drivable: false });
   });
 
   test('says the layout was not applied when no view ever appears', async () => {
@@ -126,8 +142,111 @@ describe('opening a page before any view exists', () => {
     // Past the client's own attach deadline.
     await wait(2_400);
 
-    const data = posted[0]?.data as { viewportApplied?: boolean; note?: string };
-    expect(data.viewportApplied).toBe(false);
-    expect(typeof data.note).toBe('string');
+    // A display-only client can never apply a layout, so the note must not send
+    // the agent after a resize that cannot happen here.
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test',
+      opened: true,
+      viewportApplied: false,
+      drivable: false,
+      note: 'The panel had no browser view yet, so the viewport was not applied. This client can display a page but cannot drive one, so browser.resize is not available here.',
+    });
+  });
+
+  test('a controller answer reports the host drivability for an open', async () => {
+    const ran: string[] = [];
+    cleanups.push(registerBrowserController({
+      run: async (action) => {
+        ran.push(action);
+        return { url: 'https://example.test', title: 'Example', opened: true, settled: true };
+      },
+    }));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(50);
+
+    expect(ran).toEqual(['browser.open']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test',
+      title: 'Example',
+      opened: true,
+      settled: true,
+      drivable: false,
+    });
+  });
+
+  test('on a driving host, a plain open reports that the page can be driven', async () => {
+    asHost(true);
+    cleanups.push(registerBrowserOpener(() => {}));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(20);
+
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, drivable: true });
+  });
+
+  test('on a driving host, the created view applies the layout and the result stays drivable', async () => {
+    asHost(true);
+    const opened: string[] = [];
+    const ran: string[] = [];
+
+    cleanups.push(registerBrowserOpener((url) => {
+      opened.push(url);
+      setTimeout(() => {
+        cleanups.push(registerBrowserController({
+          run: async (action) => {
+            ran.push(action);
+            return { viewport: { mode: 'mobile', width: 390, height: 844 } };
+          },
+        }));
+      }, 120);
+    }));
+
+    emitOpen({ url: 'https://example.test', viewport: 'mobile' });
+    await wait(400);
+
+    expect(opened).toEqual(['https://example.test']);
+    expect(ran).toEqual(['browser.resize']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test',
+      opened: true,
+      viewportApplied: true,
+      viewport: { mode: 'mobile', width: 390, height: 844 },
+      drivable: true,
+    });
+  });
+
+  test('on a driving host, a missing view keeps the resize follow-up in the note', async () => {
+    asHost(true);
+    cleanups.push(registerBrowserOpener(() => {}));
+
+    emitOpen({ url: 'https://example.test', viewport: 'mobile' });
+    await wait(2_400);
+
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test',
+      opened: true,
+      viewportApplied: false,
+      drivable: true,
+      note: 'The panel had no browser view yet, so the viewport was not applied. Call browser.resize now that one exists.',
+    });
+  });
+
+  test('on a driving host, a controller answer reports drivable', async () => {
+    asHost(true);
+    cleanups.push(registerBrowserController({
+      run: async () => ({ url: 'https://example.test', title: 'Example', opened: true, settled: true }),
+    }));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(50);
+
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test',
+      title: 'Example',
+      opened: true,
+      settled: true,
+      drivable: true,
+    });
   });
 });
