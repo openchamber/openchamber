@@ -678,7 +678,12 @@ export const createSettingsRuntime = (deps) => {
   const writeJsonFileAtomic = async (filePath, text) => {
     const directory = path.dirname(filePath);
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
+    if (process.platform !== 'win32') {
+      // Best-effort: orchestrator-owned data dirs can be writable but not chmod-able.
+      await fsPromises.chmod(directory, 0o700).catch((error) => {
+        if (error?.code !== 'EPERM') throw error;
+      });
+    }
     // Atomic write: Electron main and ssh-manager read these files via plain
     // readFile + JSON.parse and silently coerce parse errors to {}. A
     // partial read during a non-atomic writeFile would make their next

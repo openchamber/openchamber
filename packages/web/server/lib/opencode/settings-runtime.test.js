@@ -6,11 +6,26 @@ import path from 'path';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createSettingsRuntime } from './settings-runtime.js';
 
-const createRuntime = async ({ mergePersistedSettings = (_current, changes) => changes } = {}) => {
+const fsWithDirectoryChmodEperm = (directory) => ({
+  ...fsPromises,
+  chmod: async (target, mode) => {
+    if (path.resolve(target) === path.resolve(directory)) {
+      const error = new Error('operation not permitted');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return fsPromises.chmod(target, mode);
+  },
+});
+
+const createRuntime = async ({
+  mergePersistedSettings = (_current, changes) => changes,
+  wrapFsPromises,
+} = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
-    fsPromises,
+    fsPromises: wrapFsPromises ? wrapFsPromises({ tempRoot, settingsFilePath }) : fsPromises,
     path,
     crypto,
     SETTINGS_FILE_PATH: settingsFilePath,
@@ -111,6 +126,43 @@ describe('settings runtime', () => {
       expect((await fsPromises.stat(tempRoot)).mode & 0o777).toBe(0o700);
       expect((await fsPromises.stat(settingsFilePath)).mode & 0o777).toBe(0o600);
     } finally {
+      await cleanup();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('writes settings.json and preferences.json when data-dir chmod is EPERM', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      wrapFsPromises: ({ tempRoot: dataDir }) => fsWithDirectoryChmodEperm(dataDir),
+    });
+    const settings = { desktopUiPassword: 'secret', sidebarProjectDisplayMode: 'single' };
+    try {
+      await runtime.writeSettingsToDisk(settings);
+
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toEqual(settings);
+      const stored = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
+      expect(stored.fields.sidebarProjectDisplayMode.value).toBe('single');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('seeds preferences.json when data-dir chmod is EPERM', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      wrapFsPromises: ({ tempRoot: dataDir }) => fsWithDirectoryChmodEperm(dataDir),
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 110, desktopLanAccessEnabled: true }), 'utf8');
+
+      await expect(runtime.readSettingsFromDisk()).resolves.toMatchObject({
+        fontSize: 110,
+        desktopLanAccessEnabled: true,
+      });
+      const stored = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
+      expect(stored.fields.fontSize.value).toBe(110);
+      expect(warn.mock.calls.some((call) => String(call[0]).includes('Failed to seed preferences file'))).toBe(false);
+    } finally {
+      warn.mockRestore();
       await cleanup();
     }
   });
