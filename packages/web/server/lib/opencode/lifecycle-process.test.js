@@ -13,6 +13,7 @@ const createRuntime = (waitForReady, state) => createOpenCodeLifecycleRuntime({
   env: { ENV_CONFIGURED_OPENCODE_PORT: 45678, ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1' },
   syncToHmrState() {}, syncFromHmrState() {},
   ensureOpencodeCliEnv: () => process.execPath,
+  detectCliProtocol: async () => 'legacy',
   applyOpencodeBinaryFromSettings: async () => {},
   ensureLocalOpenCodeServerPassword: async () => 'fixture-only',
   resolveManagedOpenCodeLaunchSpec: (binary) => ({ binary, args: [] }),

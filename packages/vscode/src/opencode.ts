@@ -3,14 +3,16 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as net from 'net';
-import { spawn, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
-import { Service, type Endpoint } from '@opencode-ai/client/service';
+import { Service, type Endpoint } from '@opencode/client/service';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { reapOrphanedProcesses } from './opencodeProcessRegistry';
 import { applyProviderEnvAliases } from './provider-env-aliases';
 import { spawnManagedOpenCodeProcess } from './managed-opencode-process';
+import { detectOpenCodeCliProtocol } from '../../web/server/lib/opencode/cli-protocol.js';
+import { parseOpenCodeHealth } from '../../web/server/lib/opencode/network-runtime.js';
 
 const t = vscode.l10n.t;
 
@@ -158,10 +160,17 @@ export function resolveWindowsLaunchSpec(binary: string, args: string[]): Window
   if (!isBatchShim && !isBareName) {
     return { binary: trimmed, args };
   }
-  if (isBatchShim && path.basename(trimmed, ext).toLowerCase() === 'opencode2') {
-    const nativeBinary = path.join(path.dirname(trimmed), 'node_modules', '@opencode-ai', 'cli', 'bin', 'opencode2.exe');
-    if (isExecutable(nativeBinary)) {
-      return { binary: nativeBinary, args };
+  if (isBatchShim) {
+    try {
+      const content = fs.readFileSync(trimmed, 'utf8');
+      const match = content.match(/["'](%~?dp0%?[\\/][^"']+\.exe)["']/i);
+      if (match) {
+        const relative = match[1].replace(/^%~?dp0%?[\\/]?/i, '');
+        const nativeBinary = path.resolve(path.dirname(trimmed), relative.replace(/[\\/]+/g, path.sep));
+        if (isExecutable(nativeBinary)) return { binary: nativeBinary, args };
+      }
+    } catch {
+      // Non-readable wrappers retain the existing shell fallback.
     }
   }
   return {
@@ -170,13 +179,6 @@ export function resolveWindowsLaunchSpec(binary: string, args: string[]): Window
   };
 }
 
-function isOpenCodeV2Launch(binary: string, launch: WindowsLaunchSpec): boolean {
-  return [binary, launch.binary, ...launch.args].some((value) => {
-    const candidate = stripWrappingQuotes(value);
-    const extension = path.extname(candidate);
-    return path.basename(candidate, extension).toLowerCase() === 'opencode2';
-  });
-}
 
 // Strip a single wrapping quote pair (Windows "Copy as path" and quoted shell
 // snippets) — literal quotes are never part of a real path and break every
@@ -697,7 +699,7 @@ export async function waitForReady(
   const candidates = getCandidateBaseUrls(serverUrl);
   const healthCandidates: Array<{ protocol: OpenCodeProtocol; path: string }> = [
     { protocol: 'legacy', path: '/global/health' },
-    { protocol: 'opencode2', path: '/api/health' },
+    { protocol: 'opencode2', path: '/api/info' },
   ];
   let attempts = 0;
 
@@ -724,13 +726,11 @@ export async function waitForReady(
             headers: { Accept: 'application/json', ...authHeaders },
             signal: controller.signal,
           });
-          const body: { healthy?: boolean; version?: string } | null = await res.text()
-            .then((text) => JSON.parse(text))
-            .catch(() => null);
+          const body = await parseOpenCodeHealth(res, candidate.protocol);
           getManagerOutputChannel().appendLine(
-            `Health check to ${url.toString()} returned ${res.status} with body: ${JSON.stringify(body)}`,
+            `OpenCode ${candidate.protocol} probe returned ${res.status}; valid: ${body !== null}`,
           );
-          if (res.ok && body?.healthy === true) {
+          if (res.ok && body) {
             return {
               ok: true,
               baseUrl,
@@ -802,62 +802,15 @@ async function allocateManagedOpenCodePort(): Promise<number> {
   });
 }
 
-async function startSharedOpenCodeService(
-  launch: WindowsLaunchSpec,
-  workingDirectory: string,
-  inheritedEnvironment: NodeJS.ProcessEnv,
-): Promise<Endpoint> {
-  await new Promise<void>((resolve, reject) => {
-    const serviceEnv = { ...inheritedEnvironment };
-    delete serviceEnv.OPENCODE_SERVER_PASSWORD;
-    delete serviceEnv.OPENCODE_SERVER_USERNAME;
-    const child = spawn(launch.binary, [...launch.args, 'service', 'start'], {
-      cwd: workingDirectory,
-      env: serviceEnv,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    let settled = false;
-
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      child.off('error', onError);
-      child.off('exit', onExit);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onError = (error: Error) => finish(error);
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      if (code === 0) {
-        finish();
-        return;
-      }
-      finish(new Error(`OpenCode V2 service start exited with ${signal ? `signal ${signal}` : `code ${code}`}`));
-    };
-    const timeout = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        // The startup command may already have exited.
-      }
-      finish(new Error(`OpenCode V2 service start timed out after ${READY_CHECK_TIMEOUT_MS}ms`));
-    }, READY_CHECK_TIMEOUT_MS);
-
-    child.once('error', onError);
-    child.once('exit', onExit);
-  });
-
+async function discoverSharedOpenCodeService(): Promise<Endpoint> {
   const endpoint = await Service.discover();
   if (!endpoint) {
-    throw new Error('OpenCode V2 global service did not publish a healthy compatible endpoint after service start');
+    throw new Error('No healthy OpenCode V2 service was discovered; start the service with OpenCode and reconnect');
   }
   return endpoint;
 }
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
-  const sharedServiceEnvironment = { ...process.env };
   let sharedServiceMode = false;
   let sharedServiceEndpoint: Endpoint | null = null;
   let server: ReturnType<typeof spawnManagedOpenCodeServer> | null = null;
@@ -1054,17 +1007,17 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         process.env.OPENCODE_BINARY = resolvedCli;
 
         const launch = resolveWindowsLaunchSpec(resolvedCli, []);
-        sharedServiceMode = isOpenCodeV2Launch(resolvedCli, launch);
+        sharedServiceMode = await detectOpenCodeCliProtocol(launch, { signal: startup.signal }) === 'opencode2';
+        startup.signal.throwIfAborted();
         if (sharedServiceMode) {
           protocol = 'opencode2';
           if (managedPasswordSource !== 'user-env' && managedPassword === process.env.OPENCODE_SERVER_PASSWORD) {
             delete process.env.OPENCODE_SERVER_PASSWORD;
           }
           const serviceStartedAt = Date.now();
-          const serviceCwd = serverWorkingDirectory();
-          fs.mkdirSync(serviceCwd, { recursive: true });
-          sharedServiceEndpoint = await startSharedOpenCodeService(launch, serviceCwd, sharedServiceEnvironment);
+          const endpoint = await discoverSharedOpenCodeService();
           startup.signal.throwIfAborted();
+          sharedServiceEndpoint = endpoint;
           detectedPort = resolvePortFromUrl(sharedServiceEndpoint.url);
           lastReadyElapsedMs = Date.now() - serviceStartedAt;
           lastReadyAttempts = 1;

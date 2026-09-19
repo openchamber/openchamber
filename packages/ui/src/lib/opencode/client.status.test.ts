@@ -104,7 +104,10 @@ describe("directory status HTTP boundary", () => {
     const fetch = spyOn(globalThis, "fetch")
     try {
       for (const body of [null, [], { session: { type: "unknown" } }, { session: { type: "retry" } }, { "": { type: "busy" } }]) {
-        fetch.mockImplementation(async () => Response.json(body))
+        fetch.mockImplementation(async (input) => {
+          const url = new URL(input instanceof Request ? input.url : input.toString())
+          return Response.json(url.pathname === '/health' ? { openCodeProtocol: 'legacy' } : body)
+        })
         expect(await opencodeClient.getSessionStatusForDirectory("/workspace")).toBeNull()
       }
       fetch.mockImplementation(async () => Response.json({}))
@@ -127,6 +130,44 @@ describe("directory status HTTP boundary", () => {
       expect(await opencodeClient.getSessionStatusForDirectory("c:\\")).toEqual(status)
       expect(requests).toHaveLength(1)
       expect(requests[0].searchParams.get("directory")).toBe("C:/")
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test('detects stable V2 server info and reports server-assigned command message IDs', async () => {
+    const requests: Request[] = []
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = new Request(input, init)
+      const url = new URL(request.url)
+      if (url.pathname === '/health') return Response.json({ openCodeProtocol: null })
+      if (url.pathname.endsWith('/api/info')) return Response.json({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } })
+      requests.push(request)
+      return new Response(null, { status: 204 })
+    })
+    try {
+      expect(await opencodeClient.sendCommand({ id: 'session-1', providerID: 'provider', modelID: 'model', command: 'review', arguments: '--quick', messageId: 'optimistic-1' })).toBeNull()
+      expect(requests.map((request) => new URL(request.url).pathname)).toEqual(['/api/api/session/session-1/model', '/api/api/session/session-1/command'])
+      expect(await requests[1].json()).toEqual({ name: 'review', text: '--quick' })
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test('keeps a failed V2 probe retryable rather than caching a legacy fallback', async () => {
+    let failed = true
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      if (url.pathname === '/health') return Response.json({ openCodeProtocol: null })
+      if (failed) return new Response(null, { status: 503 })
+      if (url.pathname.endsWith('/api/info')) return Response.json({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } })
+      return new Response(null, { status: 204 })
+    })
+    try {
+      const command = { id: 'session-1', providerID: 'provider', modelID: 'model', command: 'review' }
+      await expect(opencodeClient.sendCommand(command)).rejects.toThrow('info probe failed (503)')
+      failed = false
+      expect(await opencodeClient.sendCommand(command)).toBeNull()
     } finally {
       fetch.mockRestore()
     }

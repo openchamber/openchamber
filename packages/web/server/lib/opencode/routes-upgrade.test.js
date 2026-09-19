@@ -35,6 +35,17 @@ const createApp = (overrides = {}) => {
 };
 
 describe('OpenCode upgrade routes', () => {
+  it.each([
+    ['/global/health', { healthy: true, version: '1.18.31' }, true],
+    ['/api/info', { version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } }, true],
+    ['/api/info', { healthy: true }, false],
+  ])('normalizes %s for the UI startup readiness check', async (healthPath, body, healthy) => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(body));
+    const { app } = createApp({ getOpenCodeHealthPath: () => healthPath });
+    await request(app).get('/api/opencode/health').expect(200, { healthy });
+    expect(globalThis.fetch).toHaveBeenCalledWith(`http://127.0.0.1:4096${healthPath}`, expect.objectContaining({ method: 'GET' }));
+  });
+
   it('fails closed without contacting the bundled OpenCode updater', async () => {
     globalThis.fetch = vi.fn();
     const { app } = createApp();

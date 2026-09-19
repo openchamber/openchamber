@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { type JsonValue } from '@opencode-ai/client';
+import { type JsonValue } from '@opencode/client';
 import type { GlobalEvent, OpencodeClient } from '@opencode-ai/sdk/v2';
 import { createOpencode2Adapter, resolveOpenCodeProtocol, type OpenCodeProtocol, type OpenCodeRuntimeFetch } from './opencode2-adapter';
 
@@ -290,7 +290,7 @@ describe('OpenCode V2 adapter', () => {
     expect(promptSent).toBe(false);
   });
 
-  test('normalizes sessions and traverses descendants with bounded parent pages', async () => {
+  test('loads roots and descendants through the unfiltered session list', async () => {
     const parents: Array<string | null> = [];
     const signals: Array<AbortSignal | null | undefined> = [];
     const controller = new AbortController();
@@ -299,9 +299,7 @@ describe('OpenCode V2 adapter', () => {
       const parent = url.searchParams.get('parentID');
       parents.push(parent);
       signals.push(input instanceof Request ? input.signal : init?.signal);
-      if (parent === null || parent === '' || parent === 'null') return json({ data: [v2Session('root')], cursor: {} });
-      if (parent === 'root') return json({ data: [v2Session('child', 'root')], cursor: {} });
-      return json({ data: [], cursor: {} });
+      return json({ data: [v2Session('root'), v2Session('child', 'root')], cursor: {} });
     });
 
     const result = await client.experimental.session.list(
@@ -310,7 +308,7 @@ describe('OpenCode V2 adapter', () => {
     );
     const exhausted = await client.experimental.session.list({ directory: '/repo', roots: false, archived: false, cursor: 9, limit: 100 });
 
-    expect(parents).toEqual(['null', 'root', 'child']);
+    expect(parents).toEqual([null]);
     expect(result.data?.map((session) => session.id)).toEqual(['root', 'child']);
     expect(result.data?.[0]?.slug).toBe('root');
     expect(result.data?.[0]?.version).toBe('2');
@@ -322,20 +320,41 @@ describe('OpenCode V2 adapter', () => {
     expect(exhausted.data).toEqual([]);
   });
 
-  test('rejects incomplete descendant discovery when the shared page budget is exhausted', async () => {
+  test('rejects incomplete session discovery when the page budget is exhausted', async () => {
     let calls = 0;
-    const client = adapter(async (input) => {
-      const request = input instanceof Request ? input : new Request(input);
+    const client = adapter(async () => {
       calls += 1;
-      if (new URL(request.url).searchParams.get('parentID') === 'null') {
-        return json({ data: Array.from({ length: 100 }, (_, index) => v2Session(`root-${index}`)), cursor: {} });
-      }
-      return json({ data: [], cursor: {} });
+      return json({ data: [v2Session(`session-${calls}`)], cursor: { next: `page-${calls}` } });
     });
     const result = await client.experimental.session.list({ directory: '/repo', roots: false, limit: 100 });
     expect(result.error).toBeInstanceOf(Error);
     expect(result.data).toBeUndefined();
     expect(calls).toBe(100);
+  });
+
+  test('loads 1000 root and child sessions in ten requests', async () => {
+    let calls = 0;
+    const client = adapter(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.searchParams.has('parentID')).toBe(false);
+      const page = Number(url.searchParams.get('cursor') ?? 0);
+      calls += 1;
+      return json({
+        data: Array.from({ length: 100 }, (_, index) => v2Session(`session-${page * 100 + index}`, index % 2 ? `session-${page * 100 + index - 1}` : undefined)),
+        cursor: page < 9 ? { next: String(page + 1) } : {},
+      });
+    });
+    const result = await client.session.list({ roots: false, limit: 100 });
+    expect(result.error).toBeUndefined();
+    expect(result.data).toHaveLength(1000);
+    expect(calls).toBe(10);
+  });
+
+  test('rejects repeated session cursors instead of publishing partial authority', async () => {
+    const client = adapter(async () => json({ data: [v2Session('root')], cursor: { next: 'same' } }));
+    const result = await client.session.list({ roots: false });
+    expect(String(result.error)).toContain('cursor repeated');
+    expect(result.data).toBeUndefined();
   });
 
   test('keeps archived=true inclusive and allows a fresh reload', async () => {
@@ -411,9 +430,9 @@ describe('OpenCode V2 adapter', () => {
     const client = adapter(async (input) => {
       const request = input instanceof Request ? input : new Request(input);
       const captured = { method: request.method, path: new URL(request.url).pathname };
-      if (request.method === 'POST') requests.push({ ...captured, body: await request.json() });
+      if (request.method === 'PATCH') requests.push({ ...captured, body: await request.json() });
       else requests.push(captured);
-      if (request.method === 'POST') return new Response(null, { status: 204 });
+      if (request.method === 'PATCH') return new Response(null, { status: 204 });
       return json({ data: { ...v2Session('session-1'), title: 'Renamed' } });
     });
 
@@ -423,7 +442,7 @@ describe('OpenCode V2 adapter', () => {
     expect(rejected.error).toBeInstanceOf(Error);
     expect(renamed.data?.title).toBe('Renamed');
     expect(requests).toEqual([
-      { method: 'POST', path: '/api/api/session/session-1/rename', body: { title: 'Renamed' } },
+      { method: 'PATCH', path: '/api/api/session/session-1', body: { title: 'Renamed' } },
       { method: 'GET', path: '/api/api/session/session-1' },
     ]);
   });
@@ -437,8 +456,8 @@ describe('OpenCode V2 adapter', () => {
       const body = await request.json();
       posts.push({ path, body });
       if (path.endsWith('/fork')) return json({ data: v2Session('fork-1', 'session-1') });
-      if (path.endsWith('/command')) return json({ data: { id: 'inbox-1', sessionID: 'session-1', timeCreated: 1, type: 'user', payload: { text: '' }, delivery: 'steer' } });
-      return json({ data: { id: 'compact-1', sessionID: 'session-1', timeCreated: 1, type: 'compaction', payload: {}, delivery: 'steer' } });
+      if (path.endsWith('/compact')) return json({ data: { id: 'compact-1', sessionID: 'session-1', time: { created: 1 }, type: 'compaction', payload: {}, delivery: 'steer' } });
+      return new Response(null, { status: 204 });
     });
 
     const command = await client.session.command({ sessionID: 'session-1', messageID: 'message-1', command: 'review', arguments: '--quick', model: 'provider-1/model-1', variant: 'high', agent: 'build' });
@@ -449,8 +468,10 @@ describe('OpenCode V2 adapter', () => {
     expect(fork.data?.id).toBe('fork-1');
     expect(summarize.data).toBe(true);
     expect(posts).toEqual([
-      { path: '/api/api/session/session-1/command', body: { id: 'message-1', command: 'review', arguments: '--quick', agent: 'build', model: { id: 'model-1', providerID: 'provider-1', variant: 'high' } } },
-      { path: '/api/api/session/session-1/fork', body: { boundary: { type: 'before', messageID: 'message-1' } } },
+      { path: '/api/api/session/session-1/agent', body: { agent: 'build' } },
+      { path: '/api/api/session/session-1/model', body: { model: { id: 'model-1', providerID: 'provider-1', variant: 'high' } } },
+      { path: '/api/api/session/session-1/command', body: { name: 'review', text: '--quick' } },
+      { path: '/api/api/session/session-1/fork', body: { before: 'message-1' } },
       { path: '/api/api/session/session-1/compact', body: {} },
     ]);
   });
@@ -486,7 +507,7 @@ describe('OpenCode V2 adapter', () => {
       { method: 'POST', path: '/api/api/session/session-1/move', body: { directory: '/other' } },
       { method: 'POST', path: '/api/api/session/session-1/revert/stage', body: { messageID: 'message-1', files: true } },
       { method: 'GET', path: '/api/api/session/session-1' },
-      { method: 'POST', path: '/api/api/session/session-1/revert/clear', body: undefined },
+      { method: 'DELETE', path: '/api/api/session/session-1/revert' },
       { method: 'GET', path: '/api/api/session/session-1' },
     ]);
   });
@@ -578,7 +599,7 @@ describe('OpenCode V2 adapter', () => {
     expect(permissionReply.data).toBe(true);
     expect(questionReply.data).toBe(true);
     expect(posts).toEqual([
-      { path: '/api/api/session/session-1/permission/permission-1/reply', body: { reply: 'once' } },
+      { path: '/api/api/session/session-1/permission/permission-1/reply', body: { decision: 'once' } },
       { path: '/api/api/session/session-1/form/form-1/reply', body: { answer: { environment: 'prod', confirm: true } } },
     ]);
   });

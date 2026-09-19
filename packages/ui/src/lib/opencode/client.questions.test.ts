@@ -70,7 +70,7 @@ mock.module('@/lib/runtime-switch', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify([]), {
+  runtimeFetch: mock(async () => new Response(JSON.stringify({ openCodeProtocol: 'legacy' }), {
     headers: { 'Content-Type': 'application/json' },
   })),
 }));

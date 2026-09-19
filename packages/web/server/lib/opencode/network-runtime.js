@@ -1,8 +1,24 @@
+import { z } from 'zod';
+
 const OPEN_CODE_HEALTH_PATHS = {
   legacy: '/global/health',
-  opencode2: '/api/health',
+  opencode2: '/api/info',
 };
 const HEALTH_PROBE_ATTEMPT_TIMEOUT_MS = 1000;
+
+const legacyHealthSchema = z.object({ healthy: z.literal(true), version: z.string().optional() });
+const v2InfoSchema = z.object({
+  version: z.string().startsWith('2.'),
+  pid: z.number().int().positive(),
+  urls: z.array(z.string()),
+  paths: z.object({ tmp: z.string() }),
+});
+
+export const parseOpenCodeHealth = async (response, protocol) => {
+  const schema = protocol === 'legacy' ? legacyHealthSchema : v2InfoSchema;
+  const parsed = schema.safeParse(await response.json().catch(() => null));
+  return parsed.success ? { version: parsed.data.version ?? null } : null;
+};
 
 export const detectOpenCodeProtocol = async (baseUrl, options = {}) => {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
@@ -27,8 +43,7 @@ export const detectOpenCodeProtocol = async (baseUrl, options = {}) => {
         signal: controller.signal,
       });
       if (!response.ok) continue;
-      const body = await response.json().catch(() => null);
-      if (body?.healthy === true) {
+      if (await parseOpenCodeHealth(response, protocol)) {
         return { protocol };
       }
     } catch {

@@ -289,7 +289,7 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
 
   const probeTargets: ProbeTarget[] = protocol === 'opencode2'
     ? [
-        { label: 'health', path: '/api/health', directoryQuery: false },
+        { label: 'health', path: '/api/info', directoryQuery: false },
         { label: 'config', path: '/api/config', directoryQuery: 'location[directory]' },
         { label: 'providers', path: '/api/provider', directoryQuery: 'location[directory]' },
         { label: 'agents', path: '/api/agent', directoryQuery: 'location[directory]', timeoutMs: 12000 },

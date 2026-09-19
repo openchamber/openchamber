@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { OpenCode, type SessionMessageInfo } from '@opencode-ai/client';
+import { OpenCode, type SessionMessageInfo } from '@opencode/client';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import * as gitService from './gitService';
 import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel } from './bridge-git-generation-model';

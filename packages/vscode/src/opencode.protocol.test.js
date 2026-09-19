@@ -23,7 +23,7 @@ describe('OpenCode protocol detection', () => {
           init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
         });
       }
-      return new Response(JSON.stringify({ healthy: true, version: '2.0.0' }), {
+      return new Response(JSON.stringify({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -36,7 +36,7 @@ describe('OpenCode protocol detection', () => {
     assert.equal(result.ok && result.protocol, 'opencode2');
     assert.deepEqual(requested, [
       { url: 'http://127.0.0.1:4096/global/health', authorization: 'Basic external' },
-      { url: 'http://127.0.0.1:4096/api/health', authorization: 'Basic external' },
+      { url: 'http://127.0.0.1:4096/api/info', authorization: 'Basic external' },
     ]);
   });
 
@@ -46,7 +46,7 @@ describe('OpenCode protocol detection', () => {
       const url = String(input);
       requested.push(url);
       if (url.endsWith('/global/health')) throw new Error('legacy unavailable');
-      return Response.json({ healthy: true });
+      return Response.json({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } });
     };
 
     const { waitForReady } = await import('./opencode');
@@ -55,7 +55,7 @@ describe('OpenCode protocol detection', () => {
     assert.equal(result.ok && result.protocol, 'opencode2');
     assert.deepEqual(requested, [
       'http://127.0.0.1:4096/global/health',
-      'http://127.0.0.1:4096/api/health',
+      'http://127.0.0.1:4096/api/info',
     ]);
   });
 

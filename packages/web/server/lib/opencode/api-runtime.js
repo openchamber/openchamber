@@ -3,13 +3,12 @@ import {
   isMessageNotFoundError,
   isPermissionNotFoundError,
   isSessionNotFoundError,
-} from '@opencode-ai/client';
+} from '@opencode/client';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const SESSION_PAGE_LIMIT = 100;
 const MAX_SESSION_PAGES = 100;
-const MAX_SESSION_DESCENDANTS = 10_000;
 
 export class UnsupportedOpenCodeOperationError extends Error {
   constructor(operation, protocol) {
@@ -52,7 +51,6 @@ const normalizeV2Session = (session) => {
     version: '2',
     time: session.time,
   };
-  if (session.location?.workspaceID) normalized.workspaceID = session.location.workspaceID;
   if (session.subpath) normalized.path = session.subpath;
   if (session.parentID) normalized.parentID = session.parentID;
   if (session.agent) normalized.agent = session.agent;
@@ -335,7 +333,10 @@ export const createOpenCodeApiRuntime = (dependencies) => {
       const response = await client.session.list(request, { signal });
       sessions.push(...response.data.map(normalizeV2Session));
       const next = response.cursor.next ?? undefined;
-      if (!input.allPages || !next || next === cursor || seenCursors.has(next)) {
+      if (next && (next === cursor || seenCursors.has(next))) {
+        throw new Error('OpenCode V2 session pagination cursor repeated');
+      }
+      if (!input.allPages || !next) {
         return { sessions, cursor: next };
       }
       seenCursors.add(next);
@@ -361,25 +362,9 @@ export const createOpenCodeApiRuntime = (dependencies) => {
     }
 
     const rootsOnly = input.roots === true;
-    const includeDescendants = input.roots === false;
     const budget = { remaining: MAX_SESSION_PAGES };
-    const rootPage = await listV2SessionPages(runtime.v2, input, budget, rootsOnly || includeDescendants ? null : undefined, runtime.signal);
-    const sessions = [...rootPage.sessions];
-    if (includeDescendants && input.cursor === undefined) {
-      const queue = [...sessions];
-      const visited = new Set(queue.map((session) => session.id));
-      while (queue.length > 0 && sessions.length < MAX_SESSION_DESCENDANTS) {
-        const parent = queue.shift();
-        const page = await listV2SessionPages(runtime.v2, { ...input, cursor: undefined }, budget, parent.id, runtime.signal);
-        for (const child of page.sessions) {
-          if (visited.has(child.id)) continue;
-          visited.add(child.id);
-          sessions.push(child);
-          queue.push(child);
-        }
-      }
-      if (queue.length > 0) throw new Error('OpenCode V2 descendant session limit exceeded');
-    }
+    const rootPage = await listV2SessionPages(runtime.v2, input, budget, rootsOnly ? null : undefined, runtime.signal);
+    const sessions = rootPage.sessions;
     const filtered = input.archived === true ? sessions : sessions.filter((session) => !session.time?.archived);
     return { sessions: filtered, cursor: rootPage.cursor };
   };
@@ -425,10 +410,7 @@ export const createOpenCodeApiRuntime = (dependencies) => {
       assignWhen(request, 'messageID', input.messageID, Boolean(input.messageID));
       return legacyData(runtime.legacy.session.fork(request, { signal: runtime.signal }), 'session.fork');
     }
-    const boundary = input.messageID
-      ? { type: 'before', messageID: input.messageID }
-      : { type: 'through' };
-    return normalizeV2Session(await runtime.v2.session.fork({ sessionID: input.sessionID, boundary }, { signal: runtime.signal }));
+    return normalizeV2Session(await runtime.v2.session.fork({ sessionID: input.sessionID, before: input.messageID }, { signal: runtime.signal }));
   };
 
   const listMessages = async (input, options = {}) => {
@@ -587,13 +569,14 @@ export const createOpenCodeApiRuntime = (dependencies) => {
     }
     const request = {
       sessionID: input.sessionID,
-      command: input.command,
-      arguments: input.arguments,
-      agent: input.agent,
-      model,
+      name: input.command,
+      text: input.arguments ?? '',
       delivery: input.delivery,
     };
-    assignWhen(request, 'id', input.messageID, Boolean(input.messageID));
+    await switchV2Selection(runtime, { ...input, model });
+    if (input.parts?.length) {
+      request.files = input.parts.map((part) => assignWhen({ uri: part.url }, 'name', part.filename, Boolean(part.filename)));
+    }
     return runtime.v2.session.command(request, { signal: runtime.signal });
   };
 
@@ -661,7 +644,7 @@ export const createOpenCodeApiRuntime = (dependencies) => {
         const request = {
           sessionID: input.sessionID,
           requestID: input.requestID,
-          reply: input.reply,
+          decision: input.reply,
         };
         assignWhen(request, 'message', input.message, Boolean(input.message));
         await runtime.v2.permission.reply(request, { signal: runtime.signal });

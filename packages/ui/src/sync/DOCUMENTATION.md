@@ -285,6 +285,19 @@ Rules:
 10. Session-scoped ArrowUp and ArrowDown recall merges the visible transcript's user prompts (`useUserMessageHistory`) with the persisted input-history bucket for runtime + normalized directory + session identity. Revert markers hide prompts from the transcript source only; the persisted bucket still recalls them. Global scope reads the persisted runtime bucket alone.
 11. Part arrays preserve authoritative response/event order. Part IDs are identity keys and have the same rollover limitation; identity lookup/removal must not require a part array to be lexically ID-sorted.
 
+Released V2 commands assign message IDs on the server and return 204. The command
+sender reports that distinction to `optimisticSend`, which removes its provisional
+message and shadow after acceptance. Authoritative command messages arrive through
+events or history loading. V1 commands and normal prompts keep their client-generated
+IDs and the existing reconciliation path.
+
+V2 bootstrap initializes supported project, path, permission and form resources.
+It does not require V1 config, status snapshots or LSP endpoints. Skipping those
+unsupported reads preserves existing state and does not set `sessionStatusReady`:
+omission from V2's active-session map cannot prove idle. Config catalogs remain
+owned by the provider and agent stores. Supported-resource failures still fail
+their initialization scope.
+
 A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
 Initial loads use smaller pages on constrained VS Code/mobile surfaces. Prefetch resolves only the initial renderable page; it does not eagerly download older history. The mounted chat timeline requests older pages when its viewport is underfilled or the user scrolls toward history, while mobile uses its explicit load-older action. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.

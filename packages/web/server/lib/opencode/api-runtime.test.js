@@ -1,4 +1,4 @@
-import { OpenCode } from '@opencode-ai/client';
+import { OpenCode } from '@opencode/client';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -215,7 +215,7 @@ describe('OpenCode API runtime', () => {
 
     const listUrl = new URL(requests[0].url);
     expect(listUrl.searchParams.get('location[directory]')).toBe('/repo');
-    expect(await requests[1].json()).toEqual({ reply: 'once' });
+    expect(await requests[1].json()).toEqual({ decision: 'once' });
     expect(requests.every((request) => request.headers.get('authorization') === 'Basic test')).toBe(true);
   });
 
@@ -228,14 +228,11 @@ describe('OpenCode API runtime', () => {
       const parentID = parsed.searchParams.get('parentID');
       const cursor = parsed.searchParams.get('cursor');
       calls.push({ parentID, cursor, signal: init?.signal });
-      if (parentID === 'null' && cursor === null) {
+      if (parentID === null && cursor === null) {
         return json({ data: [v2Session('root-1')], cursor: { next: 'root-page-2' } });
       }
-      if (parentID === 'null' && cursor === 'root-page-2') {
-        return json({ data: [v2Session('root-2')], cursor: {} });
-      }
-      if (parentID === 'root-1') {
-        return json({ data: [v2Session('child-1', 'root-1')], cursor: {} });
+      if (parentID === null && cursor === 'root-page-2') {
+        return json({ data: [v2Session('root-2'), v2Session('child-1', 'root-1')], cursor: {} });
       }
       return json({ data: [], cursor: {} });
     });
@@ -251,13 +248,53 @@ describe('OpenCode API runtime', () => {
     expect(result.sessions.map((session) => session.id)).toEqual(['root-1', 'root-2', 'child-1']);
     expect(result.cursor).toBe(undefined);
     expect(calls.map(({ parentID, cursor }) => ({ parentID, cursor }))).toEqual([
-      { parentID: 'null', cursor: null },
-      { parentID: 'null', cursor: 'root-page-2' },
-      { parentID: 'root-1', cursor: null },
-      { parentID: 'root-2', cursor: null },
-      { parentID: 'child-1', cursor: null },
+      { parentID: null, cursor: null },
+      { parentID: null, cursor: 'root-page-2' },
     ]);
     expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
+  });
+
+  it('loads 1000 roots and children in ten V2 requests', async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      const request = new Request(url, init);
+      const query = new URL(request.url).searchParams;
+      expect(query.has('parentID')).toBe(false);
+      const page = Number(query.get('cursor') ?? 0);
+      return json({
+        data: Array.from({ length: 100 }, (_, index) => v2Session(`session-${page * 100 + index}`, index % 2 ? `session-${page * 100 + index - 1}` : undefined)),
+        cursor: page < 9 ? { next: String(page + 1) } : {},
+      });
+    });
+    const result = await createV2Runtime(fetchImpl).listSessions({ roots: false, allPages: true, limit: 100 });
+    expect(result.sessions).toHaveLength(1000);
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
+  });
+
+  it('rejects repeated V2 cursors instead of returning a partial authoritative list', async () => {
+    const runtime = createV2Runtime(async () => json({ data: [v2Session('root')], cursor: { next: 'same' } }));
+    await expect(runtime.listSessions({ roots: false, allPages: true })).rejects.toThrow('cursor repeated');
+  });
+
+  it('uses stable V2 command, fork and wait routes with generated request bodies', async () => {
+    const requests = [];
+    const runtime = createV2Runtime(async (url, init) => {
+      const request = new Request(url, init);
+      const route = new URL(request.url).pathname;
+      if (request.method === 'GET') return json({ data: v2Session('session-1') });
+      requests.push({ path: route, body: await request.json().catch(() => undefined) });
+      if (route.endsWith('/fork')) return json({ data: v2Session('fork', 'session-1') });
+      return new Response(null, { status: 204 });
+    });
+    await runtime.runCommand({ sessionID: 'session-1', command: 'review', arguments: '--quick', agent: 'build', model: 'provider-1/model-1', variant: 'high' });
+    await runtime.forkSession({ sessionID: 'session-1', messageID: 'message-1' });
+    await runtime.waitForSessionIdle('session-1');
+    expect(requests).toEqual([
+      { path: '/api/session/session-1/agent', body: { agent: 'build' } },
+      { path: '/api/session/session-1/model', body: { model: { providerID: 'provider-1', id: 'model-1', variant: 'high' } } },
+      { path: '/api/session/session-1/command', body: { name: 'review', text: '--quick' } },
+      { path: '/api/session/session-1/fork', body: { before: 'message-1' } },
+      { path: '/api/experimental/session/session-1/wait', body: undefined },
+    ]);
   });
 
   it('fails unsupported V2 operations before issuing a request', async () => {

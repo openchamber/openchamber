@@ -220,7 +220,7 @@ export async function routeMessage(params: {
             files: params.files,
             messageId: messageID,
             directory: requestDirectory,
-          }).then(() => {}),
+          }).then((messageID): 'server-assigned' | undefined => messageID === null ? 'server-assigned' : undefined),
         })
         return 'command'
       }

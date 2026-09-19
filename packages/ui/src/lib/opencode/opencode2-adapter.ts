@@ -24,7 +24,7 @@ import {
   type SessionPromptInput as V2SessionPromptInput,
   type ProviderInfo,
   type TokenUsageInfo,
-} from '@opencode-ai/client';
+} from '@opencode/client';
 import type {
   AgentPartInput,
   AssistantMessage,
@@ -178,7 +178,6 @@ type ParsedAdapterEvent =
 
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 100;
-const MAX_DESCENDANTS = 10_000;
 const EMPTY_TOKENS: TokenUsageInfo = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
 
 const V2_EVENT_TYPES = new Set([
@@ -525,7 +524,6 @@ const normalizeSession = (info: SessionInfo): Session => {
     version: '2',
     time: info.time,
   };
-  if (info.location.workspaceID) session.workspaceID = info.location.workspaceID;
   if (info.subpath) session.path = info.subpath;
   if (info.parentID) session.parentID = info.parentID;
   if (info.agent) session.agent = info.agent;
@@ -868,6 +866,35 @@ export function createOpencode2Adapter(
     return session;
   };
 
+  const switchSelection = async (input: SessionPromptInput, options?: LegacyOptions): Promise<void> => {
+    const previousSession = input.agent && input.model
+      ? await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))
+      : undefined;
+    if (input.agent) await v2.session.switchAgent({ sessionID: input.sessionID, agent: input.agent }, requestOptions(options));
+    try {
+      if (input.model) {
+        const model: ModelRef = { providerID: input.model.providerID, id: input.model.modelID };
+        if (input.variant) model.variant = input.variant;
+        await v2.session.switchModel({ sessionID: input.sessionID, model }, requestOptions(options));
+      }
+    } catch (error) {
+      if (previousSession?.agent) {
+        try {
+          await v2.session.switchAgent({ sessionID: input.sessionID, agent: previousSession.agent }, requestOptions(options));
+        } catch (rollbackError) {
+          sessions.delete(input.sessionID);
+          try {
+            rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))));
+          } catch (refreshError) {
+            throw new AggregateError([error, rollbackError, refreshError], 'OpenCode V2 model switch failed, agent rollback failed, and session state could not be refreshed');
+          }
+          throw new AggregateError([error, rollbackError], 'OpenCode V2 model switch failed and agent rollback failed; session state was refreshed');
+        }
+      }
+      throw error;
+    }
+  };
+
   const listV2Pages = async (input: SessionListInput, budget: { remaining: number }, parentID: string | null | undefined, options?: LegacyOptions): Promise<Session[]> => {
     if (budget.remaining <= 0) throw new Error('OpenCode V2 session pagination limit exceeded');
     const output: Session[] = [];
@@ -886,7 +913,8 @@ export function createOpencode2Adapter(
       const result = await v2.session.list(query, requestOptions(options));
       for (const item of result.data) output.push(rememberSession(normalizeSession(item)));
       const next = result.cursor.next ?? undefined;
-      if (!next || seenCursors.has(next) || next === cursor) break;
+      if (!next) break;
+      if (seenCursors.has(next) || next === cursor) throw new Error('OpenCode V2 session pagination cursor repeated');
       if (budget.remaining === 0) throw new Error('OpenCode V2 session pagination limit exceeded');
       seenCursors.add(next);
       cursor = next;
@@ -896,26 +924,8 @@ export function createOpencode2Adapter(
 
   const listSessions = async (input: SessionListInput = {}, options?: LegacyOptions): Promise<Session[]> => {
     const rootsOnly = input.roots === true || input.roots === 'true';
-    const broad = input.roots === false || input.roots === 'false' || input.roots === undefined;
     const budget = { remaining: MAX_PAGES };
-    const roots = await listV2Pages(input, budget, broad || rootsOnly ? null : undefined, options);
-    const all = [...roots];
-    if (broad && !rootsOnly) {
-      const queue = [...roots];
-      const visited = new Set(queue.map((session) => session.id));
-      while (queue.length > 0 && all.length < MAX_DESCENDANTS) {
-        const parent = queue.shift();
-        if (!parent) break;
-        const children = await listV2Pages(input, budget, parent.id, options);
-        for (const child of children) {
-          if (visited.has(child.id)) continue;
-          visited.add(child.id);
-          all.push(child);
-          queue.push(child);
-        }
-      }
-      if (queue.length > 0) throw new Error('OpenCode V2 descendant session limit exceeded');
-    }
+    const all = await listV2Pages(input, budget, rootsOnly ? null : undefined, options);
     const includeArchived = input.archived === true || input.archived === 'true';
     return includeArchived ? all : all.filter((session) => !session.time.archived);
   };
@@ -993,9 +1003,6 @@ export function createOpencode2Adapter(
     switch (event.type) {
       case 'models-dev.refreshed':
       case 'integration.updated':
-      case 'integration.connection.updated':
-      case 'catalog.updated':
-      case 'plugin.added':
       case 'reference.updated':
       case 'pty.created':
       case 'pty.updated':
@@ -1192,7 +1199,7 @@ export function createOpencode2Adapter(
     })],
     ['project.list', async (_input?: LocationInput, options?: LegacyOptions) => guarded('project.list', async () => (await v2.project.list(requestOptions(options))).map(normalizeProject))],
     ['project.current', async (input?: LocationInput, options?: LegacyOptions) => guarded('project.current', async () => {
-      const result = await v2.project.current({ location: location(input, scopedDirectory) }, requestOptions(options));
+      const { project: result } = await v2.location.get({ location: location(input, scopedDirectory) }, requestOptions(options));
       return { id: result.id, worktree: result.directory, time: { created: 0, updated: 0 }, sandboxes: [] };
     })],
     ['session.list', async (input: SessionListInput = {}, options?: LegacyOptions) => guarded('session.list', () => listSessions(input, options))],
@@ -1223,7 +1230,7 @@ export function createOpencode2Adapter(
       }
       const title = input.title;
       return guarded('session.update', async () => {
-        await v2.session.rename({ sessionID: input.sessionID, title }, requestOptions(options));
+        await v2.session.update({ sessionID: input.sessionID, title }, requestOptions(options));
         return rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))));
       });
     }],
@@ -1250,37 +1257,7 @@ export function createOpencode2Adapter(
     }],
     ['session.promptAsync', async (input: SessionPromptInput, options?: LegacyOptions) => guarded('session.promptAsync', async () => {
         if (input.format) throw new Error('OpenCode V2 does not support structured prompt output');
-        const previousSession = input.agent && input.model
-          ? await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))
-          : undefined;
-        if (input.agent) await v2.session.switchAgent({ sessionID: input.sessionID, agent: input.agent }, requestOptions(options));
-        try {
-          if (input.model) {
-            if (input.variant) await v2.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID, variant: input.variant } }, requestOptions(options));
-            else await v2.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID } }, requestOptions(options));
-          }
-        } catch (error) {
-          if (previousSession?.agent) {
-            try {
-              await v2.session.switchAgent({ sessionID: input.sessionID, agent: previousSession.agent }, requestOptions(options));
-            } catch (rollbackError) {
-              sessions.delete(input.sessionID);
-              try {
-                rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))));
-              } catch (refreshError) {
-                throw new AggregateError(
-                  [error, rollbackError, refreshError],
-                  'OpenCode V2 model switch failed, agent rollback failed, and session state could not be refreshed',
-                );
-              }
-              throw new AggregateError(
-                [error, rollbackError],
-                'OpenCode V2 model switch failed and agent rollback failed; session state was refreshed',
-              );
-            }
-          }
-          throw error;
-        }
+         await switchSelection(input, options);
         const text = (input.parts ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('\n');
         const files = (input.parts ?? []).filter((part) => part.type === 'file').map((part) => {
           if (part.filename) return { uri: part.url, name: part.filename } satisfies PromptFile;
@@ -1299,27 +1276,24 @@ export function createOpencode2Adapter(
     })],
     ['session.command', async (input: SessionCommandInput, options?: LegacyOptions) => {
       const separator = input.model?.indexOf('/') ?? -1;
-      if (input.model && separator <= 0) return errorResult('session.command', new Error('OpenCode V2 requires command models in provider/model form'));
+      if (input.model && (separator <= 0 || separator === input.model.length - 1)) return errorResult('session.command', new Error('OpenCode V2 requires command models in provider/model form'));
       return guarded('session.command', async () => {
-        let model: ModelRef | undefined;
-        if (input.model) {
-          model = { providerID: input.model.slice(0, separator), id: input.model.slice(separator + 1) };
-          if (input.variant) model.variant = input.variant;
-        }
+        await switchSelection({
+          sessionID: input.sessionID,
+          agent: input.agent,
+          model: input.model ? { providerID: input.model.slice(0, separator), modelID: input.model.slice(separator + 1) } : undefined,
+          variant: input.variant,
+        }, options);
         return v2.session.command({
           sessionID: input.sessionID,
-          id: input.messageID,
-          command: input.command,
-          arguments: input.arguments,
-          agent: input.agent,
-          model,
+          name: input.command,
+          text: input.arguments ?? '',
           files: input.parts?.map((part) => part.filename ? { uri: part.url, name: part.filename } : { uri: part.url }),
         }, requestOptions(options));
       });
     }],
     ['session.fork', async (input: SessionForkInput, options?: LegacyOptions) => guarded('session.fork', async () => {
-      const boundary = input.messageID ? { type: 'before' as const, messageID: input.messageID } : { type: 'through' as const };
-      return rememberSession(normalizeSession(await v2.session.fork({ sessionID: input.sessionID, boundary }, requestOptions(options))));
+      return rememberSession(normalizeSession(await v2.session.fork({ sessionID: input.sessionID, before: input.messageID }, requestOptions(options))));
     })],
     ['session.summarize', async (input: SessionSummarizeInput, options?: LegacyOptions) => guarded('session.summarize', async () => {
       const session = await v2.session.get({ sessionID: input.sessionID }, requestOptions(options));
@@ -1385,10 +1359,10 @@ export function createOpencode2Adapter(
     ['permission.reply', async (input: PermissionReplyInput, options?: LegacyOptions) => {
       const sessionID = permissionSessions.get(input.requestID);
       if (!sessionID) return errorResult('permission.reply', new Error(`No session mapping for permission ${input.requestID}`));
-      return guarded('permission.reply', async () => { await v2.permission.reply({ sessionID, requestID: input.requestID, reply: input.reply ?? 'reject', message: input.message }, requestOptions(options)); permissionSessions.delete(input.requestID); return true; });
+      return guarded('permission.reply', async () => { await v2.permission.reply({ sessionID, requestID: input.requestID, decision: input.reply ?? 'reject', message: input.message }, requestOptions(options)); permissionSessions.delete(input.requestID); return true; });
     }],
     ['question.list', async (input?: LocationInput, options?: LegacyOptions) => guarded('question.list', async () => {
-      const result = await v2.form.request.list({ location: location(input, scopedDirectory) }, requestOptions(options));
+      const result = await v2.form.list({ location: location(input, scopedDirectory) }, requestOptions(options));
       return result.data.map((form) => { forms.set(form.id, { sessionID: form.sessionID, fields: form.fields }); return normalizeQuestion(form); });
     })],
     ['question.reply', async (input: QuestionReplyInput, options?: LegacyOptions) => {
@@ -1397,7 +1371,7 @@ export function createOpencode2Adapter(
       return guarded('question.reply', async () => {
         const answer: FormAnswer = {};
         form.fields.forEach((field, index) => { answer[field.key] = answerValue(field, input.answers?.[index] ?? []); });
-        await v2.form.reply({ sessionID: form.sessionID, formID: input.requestID, answer }, requestOptions(options));
+        await v2.session.form.reply({ sessionID: form.sessionID, formID: input.requestID, answer }, requestOptions(options));
         forms.delete(input.requestID);
         return true;
       });
@@ -1405,16 +1379,13 @@ export function createOpencode2Adapter(
     ['question.reject', async (input: { requestID: string }, options?: LegacyOptions) => {
       const form = forms.get(input.requestID);
       if (!form) return errorResult('question.reject', new Error(`No form mapping for question ${input.requestID}`));
-      return guarded('question.reject', async () => { await v2.form.cancel({ sessionID: form.sessionID, formID: input.requestID }, requestOptions(options)); forms.delete(input.requestID); return true; });
+      return guarded('question.reject', async () => { await v2.session.form.cancel({ sessionID: form.sessionID, formID: input.requestID }, requestOptions(options)); forms.delete(input.requestID); return true; });
     }],
     ['command.list', async (input?: LocationInput, options?: LegacyOptions) => guarded('command.list', async () => {
       const result = await v2.command.list({ location: location(input, scopedDirectory) }, requestOptions(options));
       return result.data.map((command) => {
-        const normalized: NormalizedCommand = { name: command.name, template: command.template, hints: [] };
+        const normalized: NormalizedCommand = { name: command.name, template: '', hints: [] };
         if (command.description) normalized.description = command.description;
-        if (command.agent) normalized.agent = command.agent;
-        if (command.model) normalized.model = `${command.model.providerID}/${command.model.id}`;
-        if (command.subtask !== undefined) normalized.subtask = command.subtask;
         return normalized;
       });
     })],

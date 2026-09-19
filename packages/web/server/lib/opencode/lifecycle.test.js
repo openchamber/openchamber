@@ -151,7 +151,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
     discoverOpenCodeService: vi.fn(async () => undefined),
-    spawnOpenCodeServiceCommand: spawnMock,
+    detectCliProtocol: vi.fn(async () => 'legacy'),
     setOpenCodeServiceAuth: vi.fn(),
     registerManagedOpenCodeProcess: registerManagedProcessMock,
     unregisterManagedOpenCodeProcess: unregisterManagedProcessMock,
@@ -236,7 +236,7 @@ describe('OpenCode lifecycle', () => {
     expect(runtime.testState.isSharedOpenCodeService).toBe(false);
   });
 
-  it('starts opencode2 through the effective service command and discovers the shared endpoint', async () => {
+  it('discovers released V2 under the opencode name without starting or configuring a service', async () => {
     process.env.OPENCODE_SERVER_PASSWORD = 'openchamber-password';
     process.env.OPENCODE_SERVER_USERNAME = 'openchamber-user';
     const allocateManagedOpenCodePort = vi.fn(async () => 11111);
@@ -249,7 +249,8 @@ describe('OpenCode lifecycle', () => {
     const setOpenCodeServiceAuth = vi.fn();
     spawnMock.mockImplementationOnce(() => createServiceCommandChild());
     const runtime = createRuntime({
-      ensureOpencodeCliEnv: vi.fn(() => '/usr/local/bin/opencode2'),
+      ensureOpencodeCliEnv: vi.fn(() => '/usr/local/bin/opencode'),
+      detectCliProtocol: vi.fn(async () => 'opencode2'),
       resolveManagedOpenCodeLaunchSpec: vi.fn(() => ({
         binary: '/usr/bin/node',
         args: ['/opt/opencode2/launcher.js'],
@@ -260,25 +261,13 @@ describe('OpenCode lifecycle', () => {
       getManagedOpenCodeEnv,
       discoverOpenCodeService,
       setOpenCodeServiceAuth,
-      getSharedOpenCodeServiceEnv: () => ({
-        INHERITED_ENV: 'yes',
-        OPENCODE_SERVER_PASSWORD: 'openchamber-password',
-        OPENCODE_SERVER_USERNAME: 'openchamber-user',
-      }),
     }, {}, { ENV_CONFIGURED_OPENCODE_PORT: null });
 
     const result = await runtime.startOpenCode();
 
     expect(result).toBeNull();
-    expect(spawnMock).toHaveBeenCalledWith(
-      '/usr/bin/node',
-      ['/opt/opencode2/launcher.js', 'service', 'start'],
-      expect.objectContaining({ stdio: 'ignore' }),
-    );
-    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('OPENCODE_SERVER_PASSWORD');
-    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('OPENCODE_SERVER_USERNAME');
-    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('SHELL_ONLY');
-    expect(spawnMock.mock.calls[0][2].env).toHaveProperty('INHERITED_ENV', 'yes');
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(runtime.testDependencies.detectCliProtocol).toHaveBeenCalledWith(expect.objectContaining({ binary: '/usr/bin/node', args: ['/opt/opencode2/launcher.js'] }));
     expect(discoverOpenCodeService).toHaveBeenCalledTimes(1);
     expect(discoverOpenCodeService).toHaveBeenCalledWith();
     expect(allocateManagedOpenCodePort).not.toHaveBeenCalled();
@@ -301,7 +290,7 @@ describe('OpenCode lifecycle', () => {
     });
   });
 
-  it('reconnects a shared service by rerunning service start and discovery', async () => {
+  it('reconnects a shared service through discovery alone', async () => {
     const endpoints = [
       { url: 'http://127.0.0.1:6123' },
       {
@@ -315,6 +304,7 @@ describe('OpenCode lifecycle', () => {
     spawnMock.mockImplementation(() => createServiceCommandChild());
     const runtime = createRuntime({
       ensureOpencodeCliEnv: vi.fn(() => '/usr/local/bin/opencode2'),
+      detectCliProtocol: vi.fn(async () => 'opencode2'),
       discoverOpenCodeService,
       onOpenCodeRestarted,
       setOpenCodeServiceAuth,
@@ -323,11 +313,7 @@ describe('OpenCode lifecycle', () => {
     await runtime.startOpenCode();
     await runtime.restartOpenCode('test-reconnect');
 
-    expect(spawnMock).toHaveBeenCalledTimes(2);
-    expect(spawnMock.mock.calls.map(([, args]) => args)).toEqual([
-      ['service', 'start'],
-      ['service', 'start'],
-    ]);
+    expect(spawnMock).not.toHaveBeenCalled();
     expect(discoverOpenCodeService).toHaveBeenCalledTimes(2);
     expect(setOpenCodeServiceAuth).toHaveBeenLastCalledWith({
       type: 'basic',
@@ -355,6 +341,7 @@ describe('OpenCode lifecycle', () => {
     }));
     const runtime = createRuntime({
       ensureOpencodeCliEnv: vi.fn(() => 'opencode2'),
+      detectCliProtocol: vi.fn(async () => 'opencode2'),
       discoverOpenCodeService,
       getActiveSessionCount: () => activeSessions,
       now: () => now,
@@ -366,14 +353,14 @@ describe('OpenCode lifecycle', () => {
       await runtime.triggerHealthCheck();
     }
 
-    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock).not.toHaveBeenCalled();
     expect(discoverOpenCodeService).toHaveBeenCalledTimes(1);
 
     activeSessions = 0;
     now += 15_000;
     await runtime.triggerHealthCheck();
 
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).not.toHaveBeenCalled();
     expect(discoverOpenCodeService).toHaveBeenCalledTimes(2);
     expect(registerManagedProcessMock).not.toHaveBeenCalled();
     warn.mockRestore();
@@ -398,6 +385,7 @@ describe('OpenCode lifecycle', () => {
     spawnMock.mockImplementationOnce(() => createServiceCommandChild());
     const runtime = createRuntime({
       ensureOpencodeCliEnv: vi.fn(() => 'opencode2'),
+      detectCliProtocol: vi.fn(async () => 'opencode2'),
       discoverOpenCodeService: vi.fn(async () => ({
         url: 'http://127.0.0.1:6123',
         auth: { type: 'basic', username: 'service-user', password: 'service-password' },
@@ -417,6 +405,7 @@ describe('OpenCode lifecycle', () => {
     spawnMock.mockImplementation(() => createServiceCommandChild());
     const runtime = createRuntime({
       ensureOpencodeCliEnv: vi.fn(() => 'opencode2'),
+      detectCliProtocol: vi.fn(async () => 'opencode2'),
       discoverOpenCodeService: vi.fn(async () => ({ url: 'http://127.0.0.1:6123' })),
     });
     await runtime.startOpenCode();

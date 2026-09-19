@@ -7,6 +7,7 @@ import { emitSyncConfigChanged } from "./sync-refs"
 import { warmChatsRootDirectory } from "../lib/chatDirectories"
 import { runBackgroundNetworkTask } from "../lib/background-network"
 import { sessionStatusSnapshotSchema } from "../lib/opencode/session-status"
+import { resolveOpenCodeProtocol } from "../lib/opencode/opencode2-adapter"
 import {
   readDirectoryStatusSnapshot,
   readDirectoryQuestionSnapshot,
@@ -58,7 +59,10 @@ export async function bootstrapGlobal(
     // it resolves alongside the other bootstrap calls, not ahead of them.
     warmChatsRootDirectory(),
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
-    retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
+    retry(async () => {
+      if (await resolveOpenCodeProtocol(sdk) === 'opencode2') return
+      set({ config: unwrap(await sdk.global.config.get(), 'global.config.get') })
+    }),
     retry(() =>
       sdk.project.list().then((x) => {
         const data = unwrap(x, "project.list")
@@ -165,6 +169,9 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
   // config/MCP cannot suppress pending questions or permission recovery.
   const critical = Promise.allSettled([
     read(async () => {
+      // V2's active-session map cannot prove omitted sessions idle. Leave
+      // snapshot authority unset and let live events establish their status.
+      if (await resolveOpenCodeProtocol(sdk) === 'opencode2') return
       const session_status = await readDirectoryStatusSnapshot(store, async () => (
         sessionStatusSnapshotSchema.parse(unwrap(await sdk.session.status({ directory }), "session.status"))
       ))
@@ -185,10 +192,13 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
     seededProject
       ? Promise.resolve()
       : read(() => sdk.project.current({ directory }).then((x) => commit({ project: unwrap(x, "project.current").id }))),
-    read(() => sdk.config.get({ directory }).then((x) => {
-      const config = unwrap(x, "config.get")
+    read(async () => {
+      // V2 config has a different contract. Feature catalogs are loaded by
+      // their owning stores; unsupported V1 config is not an init failure.
+      if (await resolveOpenCodeProtocol(sdk) === 'opencode2') return
+      const config = unwrap(await sdk.config.get({ directory }), "config.get")
       if (commit({ config })) emitSyncConfigChanged(directory, config)
-    })),
+    }),
     read(() =>
       sdk.path.get({ directory }).then((x) => {
         const data = unwrap(x, "path.get")
@@ -206,7 +216,10 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
     // for every known project directory, so either read launched one full
     // fleet per project at startup. Both surfaces fetch on demand through
     // their own stores (useMcpStore, useCommandsStore) instead.
-    read(() => sdk.lsp.status({ directory }).then((x) => commit({ lsp: unwrap(x, "lsp.status") }))),
+    read(async () => {
+      if (await resolveOpenCodeProtocol(sdk) === 'opencode2') return
+      commit({ lsp: unwrap(await sdk.lsp.status({ directory }), 'lsp.status') })
+    }),
     read(() =>
       sdk.vcs.get({ directory }).then((x) => {
         const current = store.getState()

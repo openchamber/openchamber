@@ -40,8 +40,8 @@ describe('OpenCode network runtime', () => {
 
   it('detects opencode2 after the legacy health endpoint is unavailable', async () => {
     globalThis.fetch = vi.fn(async (url) => {
-      if (String(url).endsWith('/api/health')) {
-        return Response.json({ healthy: true, version: '0.0.0-beta-17639', pid: 123 });
+      if (String(url).endsWith('/api/info')) {
+        return Response.json({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } });
       }
       return new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html' } });
     });
@@ -54,8 +54,8 @@ describe('OpenCode network runtime', () => {
   it('detects opencode2 after a bounded stalled legacy probe', async () => {
     vi.useFakeTimers();
     globalThis.fetch = vi.fn((url, init) => {
-      if (String(url).endsWith('/api/health')) {
-        return Promise.resolve(Response.json({ healthy: true }));
+      if (String(url).endsWith('/api/info')) {
+        return Promise.resolve(Response.json({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/fixture/tmp' } }));
       }
       return new Promise((resolve, reject) => {
         init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });

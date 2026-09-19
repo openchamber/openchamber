@@ -1,5 +1,5 @@
 import { createOpencodeClient, type GlobalEvent } from '@opencode-ai/sdk/v2';
-import { OpenCode, type EventSubscribeOutput } from '@opencode-ai/client';
+import { OpenCode, type EventSubscribeOutput } from '@opencode/client';
 import type { OpenCodeManager } from './opencode';
 
 // Session activity tracking (mirrors web server and desktop behavior)

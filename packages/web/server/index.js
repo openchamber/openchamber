@@ -804,7 +804,6 @@ const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
 const getOpenCodeResolutionSnapshot = (...args) =>
   openCodeResolutionRuntime.getOpenCodeResolutionSnapshot(...args);
 
-const sharedOpenCodeServiceEnv = { ...process.env };
 applyLoginShellEnvSnapshot();
 
 notificationTemplateRuntime = createNotificationTemplateRuntime({
@@ -1222,7 +1221,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
   setOpenCodeServiceAuth,
-  getSharedOpenCodeServiceEnv: () => sharedOpenCodeServiceEnv,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,

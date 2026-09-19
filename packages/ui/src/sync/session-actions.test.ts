@@ -1442,7 +1442,7 @@ describe("optimisticSend target directory", () => {
     sessionMessagesResult = { data: [] }
   })
 
-  test("passes the prompt directory to optimistic state during session switch races", async () => {
+  for (const serverAssigned of [false, true]) test(`keeps command placeholders scoped to their directory, server-assigned ID: ${serverAssigned}`, async () => {
     const currentStore = createStore({})
     const targetStore = createStore({})
     const childStores = createChildStores([
@@ -1472,6 +1472,7 @@ describe("optimisticSend target directory", () => {
       modelID: "model",
       send: async (messageID) => {
         sentMessageID = messageID
+        if (serverAssigned) return 'server-assigned'
       },
     })
 
@@ -1480,7 +1481,9 @@ describe("optimisticSend target directory", () => {
     expect(add.directory).toBe("/target/project")
     expect(add.sessionID).toBe("session-new")
     expect(add.message.id).toBe(sentMessageID)
-    expect(optimisticRemove).toBe(null)
+    expect(optimisticRemove).toEqual(serverAssigned
+      ? { sessionID: 'session-new', directory: '/target/project', messageID: sentMessageID }
+      : null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
   })

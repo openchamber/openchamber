@@ -54,7 +54,12 @@ const OPENCODE_HEALTH_TIMEOUT_MS = 4_000;
 const runtimeHealthSchema = z.object({
   openCodeProtocol: z.enum(['legacy', 'opencode2']).nullable().optional(),
 });
-const opencode2HealthSchema = z.object({ healthy: z.literal(true) });
+const opencode2HealthSchema = z.object({
+  version: z.string().startsWith('2.'),
+  pid: z.number().int().positive(),
+  urls: z.array(z.string()),
+  paths: z.object({ tmp: z.string() }),
+});
 
 /**
  * Render an SDK error payload into a short string for Error messages.
@@ -406,10 +411,12 @@ class OpencodeService {
 
       const v2Timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS);
       try {
-        const v2Response = await runtimeFetch('/api/api/health', { signal: v2Timeout.signal });
-        if (!v2Response.ok) return 'legacy';
+        const v2Response = await runtimeFetch('/api/api/info', { signal: v2Timeout.signal });
+        if (v2Response.status === 404) return 'legacy';
+        if (!v2Response.ok) throw new Error(`OpenCode V2 info probe failed (${v2Response.status})`);
         const v2Health = opencode2HealthSchema.safeParse(await v2Response.json().catch(() => null));
-        return v2Health.success ? 'opencode2' : 'legacy';
+        if (!v2Health.success) throw new Error('OpenCode V2 returned invalid server info');
+        return 'opencode2';
       } finally {
         v2Timeout.cleanup();
       }
@@ -1095,8 +1102,9 @@ class OpencodeService {
     files?: Array<FileInputLite>;
     messageId?: string;
     directory?: string | null;
-  }): Promise<string> {
+  }): Promise<string | null> {
     this.assertRuntimeUnchanged(params.runtimeKey);
+    const protocol = await this.detectProtocol();
 
     const tempMessageId = params.messageId ?? ascendingId("msg");
 
@@ -1123,7 +1131,8 @@ class OpencodeService {
     });
 
     unwrapSdkOptional(response, 'session.command');
-    return tempMessageId;
+    // Released V2 commands return 204 and assign their own message IDs.
+    return protocol === 'opencode2' ? null : tempMessageId;
   }
 
   async abortSession(id: string): Promise<boolean> {

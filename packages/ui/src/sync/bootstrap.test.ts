@@ -4,6 +4,7 @@ import { createStore } from "zustand/vanilla"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
 import { getBackgroundNetworkState, runBackgroundNetworkTask } from "../lib/background-network"
+import { createOpencode2Adapter } from '../lib/opencode/opencode2-adapter'
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -40,6 +41,30 @@ const inputFor = (sdk = createSdk(), state: Partial<State> = {}) => {
 }
 
 describe("bootstrapDirectory", () => {
+  test('initializes V2 supported resources without granting V1 status or config authority', async () => {
+    const paths: string[] = []
+    const sdk = createOpencode2Adapter(createSdk(), 'https://bootstrap.test', '/repo', async (input) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname
+      paths.push(path)
+      if (path.endsWith('/location')) return Response.json({ directory: '/repo', project: { id: 'project-a', vcs: 'git', worktree: '/repo', time: { created: 1, updated: 1 } } })
+      if (path.endsWith('/info')) return Response.json({ version: '2.0.10', pid: 123, urls: [], paths: { tmp: '/tmp' } })
+      if (path.endsWith('/permission/request') || path.endsWith('/form')) return Response.json({ data: [] })
+      if (path.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main' } } })
+      return new Response(null, { status: 404 })
+    }, async () => 'opencode2')
+    const statuses: State['session_status'] = { session: { type: 'busy' } }
+    const config: State['config'] = { instructions: ['cached'] }
+    const input = inputFor(sdk, { session_status: statuses, config })
+    const bootstrap = bootstrapDirectory(input)
+    expect(await bootstrap.sessions).toBe('complete')
+    expect(await bootstrap.environment).toBe('complete')
+    expect(input.store.getState().sessionStatusReady).toBeUndefined()
+    expect(input.store.getState().session_status).toBe(statuses)
+    expect(input.store.getState().config).toBe(config)
+    expect(input.store.getState().project).toBe('project-a')
+    expect(paths.some((path) => /config|active|status/.test(path))).toBe(false)
+  })
+
   test("finishes session loading while /config is unresolved", async () => {
     const blocked = deferred<Response>()
     const input = inputFor(createSdk((url) => url.pathname === "/config" ? blocked.promise : undefined))

@@ -70,6 +70,7 @@ const fsHomeResponses: Array<Response | Error> = [];
 
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: mock(async (input: string | URL | Request, init?: { query?: DirectoryProbeQuery }) => {
+    if (input === '/health') return Response.json({ openCodeProtocol: 'legacy' });
     if (typeof input === 'string' && input.includes('/fs/home')) {
       const next = fsHomeResponses.shift();
       if (next instanceof Error) throw next;

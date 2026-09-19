@@ -66,6 +66,7 @@ describe('OpenCode CLI discovery', () => {
     const npmDir = path.join(root, 'appdata', 'npm');
     const shim = executable(path.join(npmDir, 'opencode2.cmd'));
     const nativeBinary = executable(path.join(npmDir, 'node_modules', '@opencode-ai', 'cli', 'bin', 'opencode2.exe'));
+    fs.writeFileSync(shim, '@ECHO off\n"%dp0%\\node_modules\\@opencode-ai\\cli\\bin\\opencode2.exe" %*');
     const { resolveWindowsLaunchSpec } = await import('./opencode');
 
     assert.deepEqual(resolveWindowsLaunchSpec(shim, ['serve']), { binary: nativeBinary, args: ['serve'] });

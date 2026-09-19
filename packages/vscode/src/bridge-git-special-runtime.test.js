@@ -37,7 +37,7 @@ const rawFetch = mock(async () => {
 
 mock.module('./gitService', () => gitService);
 mock.module('@opencode-ai/sdk/v2', () => ({ createOpencodeClient }));
-mock.module('@opencode-ai/client', () => ({ OpenCode: { make: makeV2Client } }));
+mock.module('@opencode/client', () => ({ OpenCode: { make: makeV2Client } }));
 
 const { handleSpecialGitBridgeMessage } = await import('./bridge-git-special-runtime');
 

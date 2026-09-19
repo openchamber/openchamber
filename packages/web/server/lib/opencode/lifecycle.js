@@ -1,10 +1,12 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
-import { Service } from '@opencode-ai/client/service';
+import { Service } from '@opencode/client/service';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
+import { detectOpenCodeCliProtocol } from './cli-protocol.js';
+import { parseOpenCodeHealth } from './network-runtime.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -24,8 +26,6 @@ const WARMUP_DIRECTORY_LIMIT = 4;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
-const isOpenCode2Cli = (binary) => /(^|[\\/])opencode2(?:\.(?:exe|cmd|bat|com))?$/i.test(String(binary || ''))
-  || /^opencode2(?:\.(?:exe|cmd|bat|com))?$/i.test(String(binary || ''));
 
 const getBoundedTextTail = (value, maxBytes) => {
   const buffer = Buffer.from(String(value ?? ''));
@@ -115,9 +115,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getWarmupDirectories = async () => [],
     onOpenCodeRestarted = null,
     discoverOpenCodeService = Service.discover,
-    spawnOpenCodeServiceCommand = spawn,
+    detectCliProtocol = detectOpenCodeCliProtocol,
     setOpenCodeServiceAuth = () => {},
-    getSharedOpenCodeServiceEnv = () => process.env,
     allocateManagedOpenCodePort = null,
     managedStartupTimeoutMs = 30_000,
     now = Date.now,
@@ -568,55 +567,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
   };
 
-  const startSharedOpenCodeService = async ({ sourceBinary, attempt }) => {
-    const launch = resolveManagedOpenCodeLaunchSpec(sourceBinary) || { binary: sourceBinary, args: [] };
-    const args = [...(Array.isArray(launch.args) ? launch.args : []), 'service', 'start'];
-    const processEnv = stripAppImageArgv0Leak({ ...getSharedOpenCodeServiceEnv() });
-    delete processEnv.OPENCODE_SERVER_PASSWORD;
-    delete processEnv.OPENCODE_SERVER_USERNAME;
-
-    state.lastOpenCodeLaunchDiagnostics = {
-      launchedAt: new Date().toISOString(),
-      sourceBinary,
-      binary: launch.binary,
-      args,
-      cwd: state.openCodeWorkingDirectory,
-      wrapperType: launch.wrapperType || null,
-      sharedService: true,
-    };
-    console.log('[OpenCode] Ensuring shared service');
-
-    await new Promise((resolve, reject) => {
-      const child = spawnOpenCodeServiceCommand(launch.binary, args, {
-        cwd: state.openCodeWorkingDirectory,
-        env: processEnv,
-        windowsHide: true,
-        stdio: 'ignore',
-      });
-      let settled = false;
-      const finish = (handler, value) => {
-        if (settled) return;
-        settled = true;
-        child.off('error', onError);
-        child.off('close', onClose);
-        handler(value);
-      };
-      const onError = (error) => finish(reject, error);
-      const onClose = (code, signal) => {
-        if (code === 0) {
-          finish(resolve);
-          return;
-        }
-        const reason = signal ? `signal ${signal}` : `code ${code}`;
-        finish(reject, new Error(`OpenCode service start exited with ${reason}`));
-      };
-      child.once('error', onError);
-      child.once('close', onClose);
-    });
-
+  const connectSharedOpenCodeService = async ({ attempt }) => {
     const endpoint = await discoverOpenCodeService();
+    if (state.isShuttingDown) throw new Error('OpenCode connection cancelled during shutdown');
     if (!endpoint?.url) {
-      throw new Error('OpenCode service started but discovery returned no endpoint');
+      throw new Error('No healthy OpenCode V2 service was discovered; start the service with OpenCode and reconnect');
     }
     if (endpoint.auth && (
       endpoint.auth.type !== 'basic'
@@ -682,24 +637,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           },
         };
       }
-      let body;
-      try {
-        body = await response.json();
-      } catch {
+      if (!await parseOpenCodeHealth(response, state.openCodeProtocol)) {
         return {
           healthy: false,
           failure: {
             class: 'invalid_response',
-            detail: 'Health endpoint returned invalid JSON',
-          },
-        };
-      }
-      if (body?.healthy !== true) {
-        return {
-          healthy: false,
-          failure: {
-            class: 'invalid_response',
-            detail: 'Health endpoint did not report healthy=true',
+            detail: 'OpenCode returned an invalid health response',
           },
         };
       }
@@ -758,8 +701,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       durationMs: performance.now() - phaseStartedAt,
       totalDurationMs: performance.now() - attemptStartedAt,
     });
-    if (isOpenCode2Cli(sourceBinary)) {
-      return await startSharedOpenCodeService({ sourceBinary, attempt });
+    const launch = resolveManagedOpenCodeLaunchSpec(sourceBinary) || { binary: sourceBinary, args: [] };
+    const protocol = await detectCliProtocol(launch);
+    if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
+    if (protocol === 'opencode2') {
+      return await connectSharedOpenCodeService({ attempt });
     }
 
     state.isSharedOpenCodeService = false;

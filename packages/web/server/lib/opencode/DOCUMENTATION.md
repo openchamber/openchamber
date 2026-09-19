@@ -17,7 +17,8 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, ownership/endpoint/auth bootstrap, and HMR sync helpers.
 - `packages/web/server/lib/opencode/bootstrap-runtime.js`: base app bootstrap runtime for status/auth/tts/notification/OpenChamber route wiring.
-- `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction plus authoritative legacy (`/global/health`) versus opencode2 (`/api/health`) protocol detection used by readiness and health checks. Each candidate health endpoint has an independent bounded attempt, while caller cancellation stops the remaining candidates.
+- `packages/web/server/lib/opencode/cli-protocol.js`: bounded, cancellable `--version` probe of the resolved CLI launch target. V1 and released V2 both use the `opencode` name. Unknown versions fail before managed startup.
+- `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction and protocol detection through legacy `/global/health` or V2 `/api/info`. V2 probes validate server version, PID, URLs and temporary-directory fields. Each candidate has an independent bounded attempt, while caller cancellation stops the remaining candidates.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration with deferred-apply semantics (`restartDeferred` payloads; explicit apply via `POST /api/config/reload`).
 - `packages/web/server/lib/opencode/config-mutation-response.js`: shared response builders for deferred OpenCode restarts and external manual-restart guidance.
@@ -123,12 +124,14 @@ This module provides OpenCode server integration utilities for the web server ru
 
 ## Public exports (api-runtime.js)
 
-- `createOpenCodeApiRuntime(dependencies)`: resolves the active protocol, URL, and auth headers for every call. Legacy requests use `@opencode-ai/sdk/v2`; opencode2 requests use `OpenCode.make` from `@opencode-ai/client`.
+- `createOpenCodeApiRuntime(dependencies)`: resolves the active protocol, URL, and auth headers for every call. Legacy requests use `@opencode-ai/sdk/v2`; opencode2 requests use `OpenCode.make` from `@opencode/client`.
 - The returned API normalizes opencode2 sessions and messages into the legacy shapes used by server features. Pagination cursors remain separate from those records, and newest-first opencode2 message pages become chronological before normalization.
-- Session status has three outcomes. `authoritative` carries proven live state, `unknown` means opencode2 omitted the session from `/api/session/active`, and `unavailable` preserves request failure. `waitForSessionIdle` uses `/api/session/:id/wait` on opencode2.
+- Session status has three outcomes. `authoritative` carries proven live state, `unknown` means opencode2 omitted the session from `/api/session/active`, and `unavailable` preserves request failure. `waitForSessionIdle` uses the generated V2 `session.wait` operation at `/api/experimental/session/:id/wait`.
 - Metadata writes fresh-read before merging on legacy. opencode2 rejects metadata and runtime-provider credential reads with `UnsupportedOpenCodeOperationError`; callers must skip dependent background work or return an explicit `501`.
 - `archiveSession` preserves legacy archive timestamps. The pinned opencode2 contract rejects archiving before any request; batch callers retain each failed ID and continue with other sessions.
 - Descending message history follows only `cursor.next`. A remaining `cursor.previous` points toward newer history and does not mean older messages remain.
+- V2 session listing omits `parentID` for the complete root-and-child list, uses `parentID=null` for roots, and uses a session ID for direct children. Complete reads follow native cursors with a 100-page budget and reject repeated cursors. They never traverse every parent to load a global snapshot.
+- The released client is pinned to `@opencode/client` 2.0.10. V2 title updates use `session.update`, forks use optional `before`, permissions send `decision`, and forms use `form.list` plus `session.form.reply/cancel`. Commands send `name` and `text` after applying the selected agent/model. V2 assigns command message IDs and returns 204; it does not accept a client-generated command message ID. The command catalog exposes name and description, so template and selection fields are unavailable there.
 - Feature callers use this API instead of constructing OpenCode session, message, permission, provider, command, skill, or agent routes directly. Lifecycle keeps transport-level health and readiness probes, plus legacy-only warmup and post-restart agent checks. The generic browser proxy also remains transport-level.
 
 ## Public exports (session-runtime.js)
@@ -175,19 +178,15 @@ OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
 
-When the selected source CLI is `opencode2`, lifecycle resolves its effective
-launch command, runs `<binary> <wrapper args> service start`, waits for that
-short command to succeed, and calls `Service.discover()` without file/version
-overrides. The discovered URL, port, and Basic auth are authoritative and are
-kept in HMR state. OpenChamber does not allocate a private port, inject a
-managed password/config, register the daemon PID, or stop/kill the global
-service. Recovery repeats service start/discovery and rebinds transports after
-the existing health threshold and busy-session safeguards. Config reloads are
-reported as requiring an operator restart of the global service. The service
-command inherits the OpenChamber process environment captured before shell
-discovery; managed shell
-snapshots, provider aliases, generated auth, agent tools, and prompt plugins
-remain exclusive to legacy managed children.
+When the selected CLI reports V2, lifecycle calls `Service.discover()` from
+`@opencode/client/service`. The discovered URL, port and Basic auth are
+authoritative and remain in HMR state. This is connect-only. OpenChamber never
+starts, stops, upgrades or reconfigures the shared daemon. Missing discovery
+reports a connection error and asks the operator to start OpenCode.
+Recovery repeats discovery and rebinds transports after the existing health
+threshold and busy-session safeguards. Config reloads require an operator
+restart. Private ports, managed passwords, process registration, provider
+aliases, agent tools and prompt plugins remain exclusive to V1 managed children.
 
 Before spawn, `applyProviderEnvAliases` fills unset Google credential aliases
 from any present sibling (`GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_API_KEY`,
@@ -199,7 +198,7 @@ Set `OPENCHAMBER_STARTUP_PERF=1` to emit bounded startup phase records for serve
 
 macOS `say` voice enumeration starts concurrently with server composition. The server listener and managed OpenCode startup do not wait for it; `/api/tts/say/status` awaits the same authoritative capability promise when queried before enumeration completes.
 
-Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the recovery threshold using one cached unhealthy result; an exited legacy managed process still restarts immediately, while a shared service is re-ensured and re-discovered only after the threshold.
+Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the recovery threshold using one cached unhealthy result; an exited legacy managed process still restarts immediately, while a shared service is re-discovered only after the threshold.
 
 Managed health failures are classified as `timeout`, `connection_refused`, `connection_reset`, `invalid_response`, or `error`. The lifecycle retains the latest counted failure with a bounded detail string and source. Managed process wrappers continue capturing a sanitized, bounded stderr tail after readiness and retain exit code/signal. Before replacing a managed process, lifecycle snapshots the reason, latest health failure, process diagnostics/aliveness, busy-session count, and timestamp into `lastOpenCodeRestartDiagnostics`; successful startup does not clear this snapshot, and `/health` exposes it for post-restart diagnosis without process environment or credentials.
 
@@ -222,7 +221,7 @@ ConPTY or Console Window Host behavior.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
-- OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery. Automatic discovery prefers legacy `opencode` when both command names exist and falls back to `opencode2`; the selected source command name determines managed-child versus shared-service lifecycle before effective wrapper resolution. Windows discovery excludes the Desktop GUI executable.
+- OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery. Automatic discovery prefers `opencode` and retains `opencode2` as a fallback name. The resolved executable's version determines managed-child versus shared-service ownership. Windows discovery excludes the Desktop GUI executable.
 - Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
 - Returned API:
   - `applyLoginShellEnvSnapshot()`

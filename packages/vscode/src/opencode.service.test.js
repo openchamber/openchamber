@@ -19,6 +19,8 @@ let registryReaps = 0;
 let serviceDiscoveries = 0;
 let serviceStops = 0;
 let serviceEndpoints = [];
+let cliVersion = 'opencode v2.0.10';
+let versionProbes = [];
 let root = '';
 let nextPid = 4100;
 const children = new Map();
@@ -52,6 +54,11 @@ mock.module('vscode', () => ({
 mock.module('child_process', () => ({
   execSync: () => '',
   execFile: (_binary, args, _options, callback) => {
+    if (args.at(-1) === '--version') {
+      versionProbes.push({ binary: _binary, args, options: _options });
+      queueMicrotask(() => callback(null, cliVersion + '\n'));
+      return;
+    }
     const child = children.get(Number(args[1]));
     if (!child) throw new Error('Unknown fixture process');
     child.kill();
@@ -112,7 +119,7 @@ mock.module('./opencodeProcessRegistry', () => ({
   },
 }));
 
-mock.module('@opencode-ai/client/service', () => ({
+mock.module('@opencode/client/service', () => ({
   Service: {
     discover: async () => {
       serviceDiscoveries += 1;
@@ -162,6 +169,8 @@ beforeEach(() => {
   serviceDiscoveries = 0;
   serviceStops = 0;
   serviceEndpoints = [];
+  cliVersion = 'opencode v2.0.10';
+  versionProbes = [];
   delete process.env.OPENCODE_BINARY;
   delete process.env.OPENCODE_SERVER_PASSWORD;
   delete process.env.OPENCODE_SERVER_USERNAME;
@@ -185,8 +194,17 @@ afterAll(() => {
 });
 
 describe('OpenCode V2 global service lifecycle', () => {
-  test('starts the effective service command and stores discovered endpoint auth without private ownership', async () => {
-    binaryPath = createExecutable('opencode2');
+  test.skipIf(process.platform !== 'win32')('unwraps the released npm shim to the referenced native executable', () => {
+    const native = path.join(root, 'node_modules', '@opencode', 'cli', 'bin', 'opencode.exe');
+    fs.mkdirSync(path.dirname(native), { recursive: true });
+    fs.writeFileSync(native, '');
+    const wrapper = path.join(root, 'opencode.cmd');
+    fs.writeFileSync(wrapper, '@ECHO off\n"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe" %*');
+    assert.deepEqual(opencode.resolveWindowsLaunchSpec(wrapper, ['--version']), { binary: native, args: ['--version'] });
+  });
+
+  test('detects released opencode and discovers endpoint auth without starting a service', async () => {
+    binaryPath = createExecutable('opencode');
     process.env.GEMINI_API_KEY = 'provider-secret';
     process.env.OPENCODE_SERVER_USERNAME = 'extension-user';
     process.env.OPENCODE_SERVER_PASSWORD = 'extension-password';
@@ -200,8 +218,8 @@ describe('OpenCode V2 global service lifecycle', () => {
 
     const launch = opencode.resolveWindowsLaunchSpec(binaryPath, []);
     assert.deepEqual(
-      { binary: spawnCalls[0].binary, args: spawnCalls[0].args },
-      { binary: launch.binary, args: [...launch.args, 'service', 'start'] },
+      { binary: versionProbes[0].binary, args: versionProbes[0].args },
+      { binary: launch.binary, args: [...launch.args, '--version'] },
     );
     assert.equal(manager.getApiUrl(), 'http://127.0.0.1:55221');
     assert.deepEqual(manager.getOpenCodeAuthHeaders(), {
@@ -213,10 +231,7 @@ describe('OpenCode V2 global service lifecycle', () => {
     assert.equal(portAllocations, 0);
     assert.equal(passwordGenerations, 0);
     assert.equal(process.env.OPENCODE_SERVER_PASSWORD, 'extension-password');
-    assert.equal(spawnCalls[0].options.env.OPENCODE_SERVER_PASSWORD, undefined);
-    assert.equal(spawnCalls[0].options.env.OPENCODE_SERVER_USERNAME, undefined);
-    assert.equal(spawnCalls[0].options.env.GEMINI_API_KEY, 'provider-secret');
-    assert.equal(spawnCalls[0].options.env.GOOGLE_GENERATIVE_AI_API_KEY, undefined);
+    assert.equal(spawnCalls.length, 0);
     assert.equal(registryReaps, 0);
     assert.equal(registryRegistrations, 0);
 
@@ -247,7 +262,7 @@ describe('OpenCode V2 global service lifecycle', () => {
       { status: 'connecting', url: null },
       { status: 'connected', url: 'http://127.0.0.1:55222' },
     ]);
-    assert.equal(spawnCalls.length, 2);
+    assert.equal(spawnCalls.length, 0);
     assert.equal(serviceDiscoveries, 2);
     assert.equal(serviceStops, 0);
     assert.equal(manager.getApiUrl(), 'http://127.0.0.1:55222');
@@ -264,9 +279,8 @@ describe('OpenCode V2 global service lifecycle', () => {
     await manager.start();
 
     assert.equal(manager.getStatus(), 'error');
-    assert.match(manager.getDebugInfo().lastError, /healthy compatible endpoint/);
-    assert.equal(spawnCalls.length, 1);
-    assert.equal(spawnCalls[0].args.includes('serve'), false);
+    assert.match(manager.getDebugInfo().lastError, /No healthy OpenCode V2 service/);
+    assert.equal(spawnCalls.length, 0);
     assert.equal(portAllocations, 0);
     assert.equal(passwordGenerations, 0);
     assert.equal(registryReaps, 0);
@@ -276,6 +290,7 @@ describe('OpenCode V2 global service lifecycle', () => {
 
 describe('unchanged OpenCode lifecycle modes', () => {
   test('legacy managed CLI retains private serve, password, registry, and cleanup behavior', async () => {
+    cliVersion = '1.18.31';
     binaryPath = createExecutable('opencode');
     const manager = opencode.createOpenCodeManager(createContext());
 

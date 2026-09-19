@@ -49,16 +49,17 @@ openchamber update                   # Update to latest version
 
 `startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` for a minimal service env.
 
-With the legacy `opencode` CLI, OpenChamber launches and owns a private local
+With the V1 OpenCode CLI, OpenChamber launches and owns a private local
 server and registers a native `openchamber` agent tool for project, session,
-and scheduled-task orchestration. With `opencode2`, OpenChamber connects through
-OpenCode's global service registration instead: the daemon is shared and is not
-stopped or reconfigured by OpenChamber. The tool is not injected into shared or
+and scheduled-task orchestration. With V2, OpenChamber discovers an already
+running OpenCode service. Both versions now use the `opencode` command, so
+OpenChamber checks the executable's version. The V2 daemon is shared.
+OpenChamber never starts, stops, upgrades or reconfigures it. The tool is not injected into shared or
 explicit external OpenCode servers.
 Behavior settings can optionally inject a managed system-prompt optimizer on
 the next OpenCode restart. It is disabled by default and is not available for
 shared or explicit external OpenCode servers. Applying OpenCode config while
-using `opencode2` reports a manual global-service restart requirement.
+using V2 reports a manual global-service restart requirement.
 
 ### Tunnel behavior notes
 

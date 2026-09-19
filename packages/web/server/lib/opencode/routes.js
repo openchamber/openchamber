@@ -8,6 +8,7 @@ import {
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
+import { parseOpenCodeHealth } from './network-runtime.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -380,18 +381,19 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
   app.get('/api/opencode/health', async (_req, res) => {
     try {
-      const healthResponse = await fetch(buildOpenCodeUrl(getOpenCodeHealthPath(), ''), {
+      const healthPath = getOpenCodeHealthPath();
+      const healthResponse = await fetch(buildOpenCodeUrl(healthPath, ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
       });
-      const health = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           healthy: false,
-          error: health?.error || healthResponse.statusText || 'OpenCode health check failed',
+          error: healthResponse.statusText || 'OpenCode health check failed',
         });
       }
-      return res.json({ healthy: health?.healthy === true });
+      const health = await parseOpenCodeHealth(healthResponse, healthPath === '/api/info' ? 'opencode2' : 'legacy');
+      return res.json({ healthy: health !== null });
     } catch (error) {
       return res.status(503).json({
         healthy: false,
