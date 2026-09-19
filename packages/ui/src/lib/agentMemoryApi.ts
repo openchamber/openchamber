@@ -49,7 +49,7 @@ interface AgentMemorySnapshot {
 
 /** Mirrors the server's clamps, so the editor stops where storage would cut. */
 export const AGENT_MEMORY_TITLE_MAX_LENGTH = 120;
-export const AGENT_MEMORY_BODY_MAX_LENGTH = 2000;
+export const AGENT_MEMORY_BODY_MAX_LENGTH = 4000;
 
 /** Raised when the server reports the whole memory surface as switched off. */
 export class AgentMemoryDisabledError extends Error {

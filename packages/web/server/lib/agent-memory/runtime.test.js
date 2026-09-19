@@ -151,11 +151,29 @@ describe('create', () => {
     await expect(runtime.create(GLOBAL, { title: 'x', body: '  ' })).rejects.toThrow('body is required');
   });
 
-  test('clamps oversized fields', async () => {
-    const { entry } = await runtime.create(GLOBAL, { title: 'x'.repeat(300), body: 'y'.repeat(5000) });
+  test('rejects a body over the limit instead of truncating it', async () => {
+    // A silent slice left the agent with a success for a body it never
+    // stored, so an over-limit body must come back as an error, not a trim.
+    await expect(runtime.create(GLOBAL, { title: 'x'.repeat(300), body: 'y'.repeat(4001) }))
+      .rejects.toThrow('body holds at most 4000 characters');
+    expect((await runtime.read(GLOBAL)).entries).toHaveLength(0);
 
-    expect(entry.title).toHaveLength(60);
-    expect(entry.body).toHaveLength(2000);
+    const { entry } = await runtime.create(GLOBAL, { title: 'T', body: 'y'.repeat(4000) });
+    expect(entry.body).toHaveLength(4000);
+  });
+
+  test('a legacy over-limit entry still loads, while a new write of that size is rejected', async () => {
+    // Older builds truncated at a shorter limit, and hand-edits can exceed it;
+    // the store must stay loadable, so reads stay tolerant and only writes
+    // enforce the limit.
+    await writeJson(globalPath(), {
+      version: 1,
+      entries: [{ id: 'legacy', title: 'Legacy', body: 'z'.repeat(4500), createdAt: 1, updatedAt: 1 }],
+    });
+    expect((await runtime.read(GLOBAL)).entries[0].body).toHaveLength(4000);
+
+    await expect(runtime.create(GLOBAL, { title: 'Too long', body: 'z'.repeat(4500) }))
+      .rejects.toThrow('body holds at most 4000 characters');
   });
 
   test('the same title updates in place instead of duplicating', async () => {
@@ -352,6 +370,14 @@ describe('user corrections', () => {
 
     await expect(runtime.update(PROJECT, entry.id, { title: '   ' })).rejects.toThrow('title is required');
     await expect(runtime.update(PROJECT, entry.id, { body: '   ' })).rejects.toThrow('body is required');
+  });
+
+  test('rejects an over-limit body instead of truncating it', async () => {
+    const { entry } = await runtime.create(PROJECT, { title: 'T', body: 'b' });
+
+    await expect(runtime.update(PROJECT, entry.id, { body: 'y'.repeat(4001) }))
+      .rejects.toThrow('body holds at most 4000 characters');
+    expect((await runtime.read(PROJECT)).entries[0].body).toBe('b');
   });
 
   test('rejects an empty patch', async () => {

@@ -41,7 +41,8 @@ const MEMORY_VERSION = 1;
  * long enough to say what an entry is about.
  */
 const MEMORY_TITLE_MAX_LENGTH = 60;
-const MEMORY_BODY_MAX_LENGTH = 2000;
+/** Shared with the action layer, which must reject an over-limit body as a 400. */
+export const MEMORY_BODY_MAX_LENGTH = 4000;
 
 /** Global memory stays small on purpose: it is the highest-blast-radius store. */
 const GLOBAL_MEMORY_MAX_ITEMS = 60;
@@ -143,6 +144,16 @@ const clampLength = (value, maxLength) => {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
+/**
+ * Whether a write's body fits the limit after the same trim the store applies.
+ * A missing or non-string body is not this check's business: the required-body
+ * test below answers it, and its message is the truthful one.
+ */
+const bodyFitsLimit = (value) => {
+  if (typeof value !== 'string') return true;
+  return value.trim().length <= MEMORY_BODY_MAX_LENGTH;
+};
+
 const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const limitForScope = (scope) => (scope === 'global' ? GLOBAL_MEMORY_MAX_ITEMS : PROJECT_MEMORY_MAX_ITEMS);
@@ -158,6 +169,10 @@ const sanitizeEntries = (value, now, scope) => {
 
     const id = asNonEmptyString(entry.id);
     const title = clampLength(asNonEmptyString(entry.title) || '', MEMORY_TITLE_MAX_LENGTH);
+    // Tolerant on purpose: entries written by older builds that truncated at a
+    // shorter limit, or hand-edited past it, must still load — the store is the
+    // agent's memory and failing the whole read would look like memory loss.
+    // Only writes enforce the limit now, so the asymmetry never widens.
     const body = clampLength(typeof entry.body === 'string' ? entry.body : '', MEMORY_BODY_MAX_LENGTH).trim();
     if (!id || !title || !body || seen.has(id)) continue;
     seen.add(id);
@@ -297,6 +312,13 @@ export const createAgentMemoryRuntime = (deps) => {
   const create = async (target, value) => {
     const resolved = resolveTarget(target);
     const title = clampLength(asNonEmptyString(value?.title) || '', MEMORY_TITLE_MAX_LENGTH);
+    // Writes reject an over-limit body instead of truncating it: a silent slice
+    // left the agent with a success for a body it never stored, and the store
+    // then read back as a memory the agent never wrote. (Reads in sanitizeEntries
+    // stay tolerant of legacy over-limit entries — this asymmetry is deliberate.)
+    if (!bodyFitsLimit(value?.body)) {
+      throw new Error(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${value.body.trim().length}`);
+    }
     const body = clampLength(typeof value?.body === 'string' ? value.body : '', MEMORY_BODY_MAX_LENGTH).trim();
     if (!title) throw new Error('title is required');
     if (!body) throw new Error('body is required');
@@ -374,6 +396,9 @@ export const createAgentMemoryRuntime = (deps) => {
       throw new Error('title, body or type is required');
     }
     const title = hasTitle ? clampLength(patch.title, MEMORY_TITLE_MAX_LENGTH).trim() : null;
+    if (hasBody && !bodyFitsLimit(patch.body)) {
+      throw new Error(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${patch.body.trim().length}`);
+    }
     const body = hasBody ? clampLength(patch.body, MEMORY_BODY_MAX_LENGTH).trim() : null;
     if (hasTitle && !title) throw new Error('title is required');
     if (hasBody && !body) throw new Error('body is required');
