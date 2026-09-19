@@ -126,8 +126,8 @@ export const CommandsPage: React.FC = () => {
     if (description !== initial.description) return true;
     if (agent !== initial.agent) return true;
     if (model !== initial.model) return true;
-    if (template !== initial.template) return true;
-    return false;
+    return template !== initial.template;
+
   }, [agent, description, draftName, draftScope, isNewCommand, model, template]);
 
   const handleSave = async () => {
@@ -233,7 +233,7 @@ export const CommandsPage: React.FC = () => {
               />
             </div>
             <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
-              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[100px]">
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-25">
                 <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
               </SelectTrigger>
               <SelectContent align="end">
@@ -262,7 +262,7 @@ export const CommandsPage: React.FC = () => {
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('settings.commands.page.field.descriptionPlaceholder')}
               rows={2}
-              className="w-full resize-none min-h-[60px] bg-transparent"
+              className="w-full resize-none min-h-15 bg-transparent"
             />
           </div>
         </div>
@@ -280,6 +280,7 @@ export const CommandsPage: React.FC = () => {
             agentName={agent}
             onChange={(agentName: string) => setAgent(agentName)}
             className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+            dropdownPortalToBody
           />
         </SettingsFieldRow>
 
@@ -298,6 +299,7 @@ export const CommandsPage: React.FC = () => {
               }
             }}
             className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+            dropdownPortalToBody
           />
         </SettingsFieldRow>
       </SettingsSection>
@@ -323,7 +325,7 @@ export const CommandsPage: React.FC = () => {
             onClick={handleSave}
             disabled={isSaving || !isDirty}
             size="xs"
-            className="!font-normal"
+            className="font-normal!"
           >
             {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
           </Button>
