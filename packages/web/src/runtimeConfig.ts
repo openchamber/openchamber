@@ -28,8 +28,38 @@ declare global {
     __OPENCHAMBER_RUNTIME_HEADERS__?: Record<string, string>;
     __OPENCHAMBER_LOCAL_ORIGIN__?: string;
     __OPENCHAMBER_RELAY_HOST_ID__?: string;
+    __OPENCHAMBER_RUNTIME_BOOTSTRAP_READY__?: boolean;
   }
 }
+
+export const DESKTOP_RUNTIME_BOOTSTRAP_READY_EVENT = 'openchamber:runtime-bootstrap-ready';
+const DESKTOP_RUNTIME_BOOTSTRAP_TIMEOUT_MS = 10_000;
+
+/**
+ * The Electron main process creates the splash window before its asynchronous
+ * startup probe finishes. Wait for the main-process init script to publish the
+ * resolved endpoint before importing the shared app, otherwise the first boot
+ * can initialize against the local relative API and ignore the default host.
+ */
+export const waitForDesktopRuntimeBootstrap = async (): Promise<void> => {
+  const currentWindow = globalThis.window;
+  if (!currentWindow?.__OPENCHAMBER_ELECTRON__) return;
+  if (currentWindow.__OPENCHAMBER_RUNTIME_BOOTSTRAP_READY__ === true) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      currentWindow.removeEventListener(DESKTOP_RUNTIME_BOOTSTRAP_READY_EVENT, finish);
+      if (timeoutId !== undefined) currentWindow.clearTimeout(timeoutId);
+      resolve();
+    };
+
+    currentWindow.addEventListener(DESKTOP_RUNTIME_BOOTSTRAP_READY_EVENT, finish, { once: true });
+    const timeoutId = currentWindow.setTimeout(finish, DESKTOP_RUNTIME_BOOTSTRAP_TIMEOUT_MS);
+  });
+};
 
 export const readRuntimeBootstrapConfig = (): EmbeddedSessionRuntimeBootstrap => {
   const readString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
@@ -72,9 +102,6 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
       relay,
     });
   }
-  // createWebAPIs imports UI stores, which instantiate the SDK singleton before
-  // an embedded frame's asynchronous parent bootstrap is available.
-  opencodeClient.reconnectToRuntimeBaseUrl();
   void refreshRuntimeUrlAuthToken(apiBaseUrl || undefined).catch(() => {});
   if (localOrigin && !sameOrigin(apiBaseUrl, localOrigin) && Object.keys(getRuntimeExtraHeadersSync()).length > 0) {
     void refreshLocalRuntimeUrlAuthToken(localOrigin).catch(() => {});
@@ -104,5 +131,10 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
   void desktopRelayRestoreReady.then(() => {
     window.setTimeout(() => { void warmDesktopHostStatuses().catch(() => {}); }, HOST_STATUS_WARMUP_DELAY_MS);
   });
-  return createWebAPIs({ urls });
+  const runtimeApis = createWebAPIs({ urls });
+  // The shared SDK is created during module initialization, before this runtime
+  // configuration is applied. Rebind it after the web APIs are initialized so
+  // an external runtime cannot leave that client pointed at the UI origin.
+  opencodeClient.reconnectToRuntimeBaseUrl();
+  return runtimeApis;
 };

@@ -1,4 +1,8 @@
-import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeConfig';
+import {
+  createConfiguredWebAPIs,
+  getDesktopRelayRestoreReady,
+  waitForDesktopRuntimeBootstrap,
+} from './runtimeConfig';
 import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -86,6 +90,7 @@ const unregisterDevelopmentServiceWorkers = (): void => {
 };
 
 const start = async (): Promise<void> => {
+  await waitForDesktopRuntimeBootstrap();
   const embeddedBootstrap = isEmbeddedSessionChat()
     ? await requestEmbeddedSessionRuntimeBootstrap()
     : null;

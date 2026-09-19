@@ -28,7 +28,8 @@ const trayEnabled = process.platform !== 'darwin' || readArgValue('--openchamber
 //    title bar offsets, etc.). Expose unconditionally.
 //  - __OPENCHAMBER_DESKTOP__ is the IPC channel to the main process. It is
 //    exposed broadly, but privileged commands are gated in main.mjs.
-//    Local-only globals below stay limited to packaged UI / exact localOrigin.
+//    Local-only globals below stay limited to packaged UI / exact localOrigin /
+//    the trusted development HMR UI.
 // Everything driven by localOrigin (home dir, macOS hints) also stays
 // local-only since it leaks info about the Electron host machine.
 const currentOrigin = (() => {
@@ -38,9 +39,14 @@ const currentOrigin = (() => {
     return '';
   }
 })();
+const hmrUiOrigin = process.env.OPENCHAMBER_ELECTRON_DEV === '1'
+  && process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI !== '1'
+  ? `http://127.0.0.1:${process.env.OPENCHAMBER_HMR_UI_PORT || '5173'}`
+  : '';
 const isLocalPage = currentOrigin !== 'null'
   && (currentOrigin === 'openchamber-ui://app'
-  || (localOrigin && currentOrigin === localOrigin));
+  || (localOrigin && currentOrigin === localOrigin)
+  || (hmrUiOrigin && currentOrigin === hmrUiOrigin));
 
 // Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
