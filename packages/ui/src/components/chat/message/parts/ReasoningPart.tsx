@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import { BusyDots } from './BusyDots';
+import { BlockLine } from './BlockLine';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
@@ -447,11 +448,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                             transition: 'opacity 180ms ease-out, transform 180ms ease-out',
                         }}
                     >
-                        <span
-                            aria-hidden="true"
-                            className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
-                            style={{ backgroundColor: 'var(--tools-border)' }}
-                        />
+                        <BlockLine onToggle={handleToggle} />
                         <ScrollableOverlay
                             ref={scrollBoxRef}
                             as="div"
