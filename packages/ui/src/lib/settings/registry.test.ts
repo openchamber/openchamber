@@ -133,6 +133,9 @@ describe('settings registry', () => {
       autoDeleteAfterDays: 365,
       sttProvider: 'openai-compatible',
     });
+    expect(parseSettingsDocument({ sttProvider: 'web-speech' })).toEqual({ sttProvider: 'web-speech' });
+    expect(parseSettingsDocument({ sttProvider: 'browser' })).toEqual({ sttProvider: 'local' });
+    expect(parseSettingsDocument({ sttProvider: 'wasm' })).toEqual({ sttProvider: 'local' });
     expect(parseSettingsDocument(null)).toBeNull();
     expect(parseSettingsDocument([])).toBeNull();
   });
