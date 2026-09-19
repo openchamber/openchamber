@@ -135,7 +135,7 @@ host.onSessionLifecycle((event) => {
 
 `onSessionLifecycle` oturumun ne yaptığını söyler. `phase` model çalışırken `started`, boşa geçtiğinde `completed`, beklenmeyen bir durumda `failure` olur. Geç eklenen bir dinleyici geçerli aşamayı hemen alır.
 
-## Projeler, canlı oturumlar ve depolama
+## Projeler, worktree'ler ve canlı oturumlar
 
 `listProjects()`, `listWorktrees(projectId)` ve `listSessions(projectId)` mevcut `sessions` iznini ve paylaşılan store verilerini kullanır. Her çağrıda Git taraması yapmaz ve konuşma içeriğini açmaz. Projeler kimlik, ad ve dizin; worktree kayıtları dal ve kullanılabilirlik içerir. Oturumlar tarihleri, üst oturumu, worktree ve yalnızca bu uzantının iliştirdiği öğeleri içerir. Bilinen arşiv oturumları da dahildir.
 
@@ -143,7 +143,16 @@ host.onSessionLifecycle((event) => {
 
 `activity`, `unknown`, `idle`, `running`, `retrying`, `waiting-permission` veya `waiting-question` olur. `outcome`, gözlemlenen `completed`, `failed` veya `null` değeridir; yalnızca bellekte en fazla 2.000 oturum için tutulur. Hata sonrası idle, sonraki çalışmaya kadar hatayı korur. Bu, görevin tamamlandığı anlamına gelmez. `openSession(sessionId)` sohbeti açıkça açar.
 
-`host.storage.get(key)`, `set(key, value)`, `delete(key)` ve `keys()` ek izin olmadan bağlı sunucuda uzantının JSON verisini saklar. Olmayan anahtar `undefined`, kaydedilen null ise null döner. Anahtarlar 1 ile 128 karakter arasında, değer en fazla 64 KiB UTF-8, toplam 2 MiB ve 2.000 anahtardır. Projeye özel veri için anahtara proje kimliğini ekleyin. Yazmalar sıralı ve atomiktir; hatalar eski veriyi korur. Kaldırma depolamayı siler.
+## Kalıcı uzantı verisi
+
+```ts
+await host.storage.set("board", { columns: ["Todo", "Review"] });
+const board = await host.storage.get("board");
+const keys = await host.storage.keys();
+await host.storage.delete("board");
+```
+
+Ek izin gerekmez. Depolama, bağlı sunucuda bu uzantıya aittir, yeniden yüklemelerde korunur ve kaldırma işleminde silinir. `get`, olmayan anahtar için `undefined` döndürür; kaydedilmiş JSON null değeri null kalır. Anahtarlar 1 ile 128 karakter arasındadır. Serileştirilmiş her JSON değeri en fazla 64 KiB UTF-8, toplam 2 MiB ve 2.000 anahtardır. Projeye özel veriler için anahtarda proje kimliği kullanın. Yazmalar sıralı ve atomiktir; hatalar mevcut veriyi korur.
 
 ## request
 
