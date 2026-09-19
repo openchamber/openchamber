@@ -1418,7 +1418,6 @@ export const settingsDict = {
   'settings.providers.page.custom.field.apiKey.editInfo': 'Laissez vide pour conserver l\'identifiant existant, ou saisissez une nouvelle clé / {env:VAR_NAME}.',
   'settings.providers.page.custom.field.apiKey.editPlaceholder': 'Laissez vide pour conserver la clé existante',
 
-
   'settings.providers.page.custom.models.title': 'Modèles',
   'settings.providers.page.custom.models.idLabel': 'ID du modèle',
   'settings.providers.page.custom.models.idPlaceholder': 'gpt-4o',
@@ -1449,6 +1448,30 @@ export const settingsDict = {
   'settings.providers.page.custom.error.apiKey.required': 'Une clé API ou {env:VAR_NAME} est requise',
   'settings.providers.page.custom.authFailure.configAfterAuth': 'Les identifiants ont été enregistrés, mais pas la configuration du fournisseur. Corrigez l\'erreur et réessayez, ou déconnectez pour effacer l\'enregistrement partiel.',
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': 'Récupérer les modèles',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': 'Récupération des modèles...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': 'Récupérer les modèles disponibles du fournisseur',
+  'settings.providers.page.custom.models.selectorTitle': 'Sélectionner les modèles à ajouter',
+  'settings.providers.page.custom.models.selectorDescription': 'Choisissez quels modèles ajouter à ce fournisseur. Les modèles déjà dans la liste sont pré-sélectionnés.',
+  'settings.providers.page.custom.models.selectAll': 'Tout sélectionner',
+  'settings.providers.page.custom.models.clearAll': 'Tout désélectionner',
+  'settings.providers.page.custom.models.selectedCount': '{selected} sur {total} modèles sélectionnés',
+  'settings.providers.page.custom.models.addSelected': 'Ajouter les modèles sélectionnés',
+  'settings.providers.page.custom.models.noModelsFound': 'Aucun modèle trouvé',
+  'settings.providers.page.custom.models.discoveryError.authFailed': 'Échec de l\'authentification. Vérifiez votre clé API.',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': 'Accès refusé par le fournisseur.',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': 'Endpoint de découverte de modèles introuvable : GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': 'Impossible de se connecter au fournisseur. Vérifiez l\'URL de base et la connexion.',
+  'settings.providers.page.custom.models.discoveryError.timeout': 'Délai d\'attente dépassé. Le fournisseur n\'a pas répondu à temps.',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': 'Le fournisseur a retourné un format de liste de modèles non supporté.',
+  'settings.providers.page.custom.models.discoveryError.providerError': 'Le fournisseur a retourné une erreur : {message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': 'Échec de la découverte des modèles. Veuillez réessayer.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': 'Nom de variable d\'environnement invalide.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': 'L\'URL de base doit utiliser HTTPS.',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': 'L\'URL de base ne peut pas pointer vers des adresses locales ou privées.',
+  'settings.providers.page.custom.models.existingBadge': '(existant)',
 
   'settings.providers.page.auth.title': 'Authentification',
   'settings.providers.page.auth.loadingMethods': 'Chargement des méthodes d\'authentification...',
@@ -1471,7 +1494,6 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': 'Connecté',
   'settings.providers.page.auth.incomplete': 'Identifiants manquants',
   'settings.providers.page.auth.incompleteHint': '· Ajoutez une clé API ou {env:VAR} avant d’utiliser ce fournisseur dans le chat',
-
 
   'settings.providers.page.auth.useReconnectHint': '· Utilisez Reconnect pour mettre à jour les informations d\'identification',
   'settings.providers.page.connectionDetails.title': 'Détails de connexion',

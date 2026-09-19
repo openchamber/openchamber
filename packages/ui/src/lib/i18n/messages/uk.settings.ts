@@ -1500,7 +1500,6 @@ export const settingsDict = {
   "settings.providers.page.custom.field.apiKey.editInfo": "Залиште порожнім, щоб зберегти наявні облікові дані, або введіть новий ключ / {env:VAR_NAME}.",
   "settings.providers.page.custom.field.apiKey.editPlaceholder": "Залиште порожнім, щоб зберегти наявний ключ",
 
-
   "settings.providers.page.custom.models.title": "Моделі",
   "settings.providers.page.custom.models.idLabel": "ID моделі",
   "settings.providers.page.custom.models.idPlaceholder": "gpt-4o",
@@ -1531,6 +1530,30 @@ export const settingsDict = {
   "settings.providers.page.custom.error.apiKey.required": "Потрібен API-ключ або {env:VAR_NAME}",
   "settings.providers.page.custom.authFailure.configAfterAuth": "Облікові дані збережено, але конфігурацію провайдера — ні. Виправте помилку й спробуйте знову або від’єднайте, щоб очистити часткове збереження.",
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': 'Отримати моделі',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': 'Отримання моделей...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': 'Отримати доступні моделі від провайдера',
+  'settings.providers.page.custom.models.selectorTitle': 'Вибрати моделі для додавання',
+  'settings.providers.page.custom.models.selectorDescription': 'Оберіть, які моделі додати до цього провайдера. Моделі, що вже є у списку, попередньо вибрані.',
+  'settings.providers.page.custom.models.selectAll': 'Вибрати все',
+  'settings.providers.page.custom.models.clearAll': 'Скасувати вибір усього',
+  'settings.providers.page.custom.models.selectedCount': '{selected} з {total} обраних моделей',
+  'settings.providers.page.custom.models.addSelected': 'Додати обрані моделі',
+  'settings.providers.page.custom.models.noModelsFound': 'Моделі не знайдено',
+  'settings.providers.page.custom.models.discoveryError.authFailed': 'Автентифікація не вдалася. Перевірте ваш API ключ.',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': 'Доступ заборонено провайдером.',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': 'Кінцеву точку виявлення моделей не знайдено: GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': 'Не вдалося підключитися до провайдера. Перевірте базовий URL та мережеве з\'єднання.',
+  'settings.providers.page.custom.models.discoveryError.timeout': 'Час запиту вичерпано. Провайдер не відповів учасно.',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': 'Провайдер повернув непідтримуваний формат списку моделей.',
+  'settings.providers.page.custom.models.discoveryError.providerError': 'Провайдер повернув помилку: {message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': 'Не вдалося виявити моделі. Спробуйте ще раз.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': 'Некоректна назва змінної середовища.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': 'Base URL має використовувати HTTPS.',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': 'Base URL не може вказувати на локальні або приватні адреси.',
+  'settings.providers.page.custom.models.existingBadge': '(існуючий)',
 
   "settings.providers.page.auth.title": "Аутентифікація",
   "settings.providers.page.auth.loadingMethods": "Завантаження методів автентифікації...",
@@ -1553,7 +1576,6 @@ export const settingsDict = {
   "settings.providers.page.auth.connected": "Підключено",
   "settings.providers.page.auth.incomplete": "Облікові дані відсутні",
   "settings.providers.page.auth.incompleteHint": "· Додайте API-ключ або {env:VAR} перед використанням цього провайдера в чаті",
-
 
   "settings.providers.page.auth.useReconnectHint": "· Скористайтеся повторним підключенням, щоб оновити облікові дані",
   "settings.providers.page.connectionDetails.title": "Деталі підключення",

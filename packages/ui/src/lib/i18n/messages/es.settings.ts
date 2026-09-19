@@ -1500,7 +1500,6 @@ export const settingsDict = {
   "settings.providers.page.custom.field.apiKey.editInfo": "Déjalo en blanco para conservar la credencial existente, o introduce una clave nueva / {env:VAR_NAME}.",
   "settings.providers.page.custom.field.apiKey.editPlaceholder": "Déjalo en blanco para conservar la clave existente",
 
-
   "settings.providers.page.custom.models.title": "Modelos",
   "settings.providers.page.custom.models.idLabel": "ID del modelo",
   "settings.providers.page.custom.models.idPlaceholder": "gpt-4o",
@@ -1531,6 +1530,30 @@ export const settingsDict = {
   "settings.providers.page.custom.error.apiKey.required": "Se requiere una clave API o {env:VAR_NAME}",
   "settings.providers.page.custom.authFailure.configAfterAuth": "Las credenciales se guardaron, pero no la configuración del proveedor. Corrige el error e inténtalo de nuevo, o desconéctalo para eliminar el guardado parcial.",
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': 'Obtener modelos',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': 'Obteniendo modelos...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': 'Obtener modelos disponibles del proveedor',
+  'settings.providers.page.custom.models.selectorTitle': 'Seleccionar modelos para agregar',
+  'settings.providers.page.custom.models.selectorDescription': 'Elige qué modelos agregar a este proveedor. Los modelos ya en la lista están preseleccionados.',
+  'settings.providers.page.custom.models.selectAll': 'Seleccionar todo',
+  'settings.providers.page.custom.models.clearAll': 'Deseleccionar todo',
+  'settings.providers.page.custom.models.selectedCount': '{selected} de {total} modelos seleccionados',
+  'settings.providers.page.custom.models.addSelected': 'Agregar modelos seleccionados',
+  'settings.providers.page.custom.models.noModelsFound': 'No se encontraron modelos',
+  'settings.providers.page.custom.models.discoveryError.authFailed': 'Error de autenticación. Verifica tu clave API.',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': 'Acceso denegado por el proveedor.',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': 'No se encontró el endpoint de descubrimiento: GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': 'No se puede conectar al proveedor. Verifica la URL base y la conexión.',
+  'settings.providers.page.custom.models.discoveryError.timeout': 'Tiempo de espera agotado. El proveedor no respondió a tiempo.',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': 'El proveedor devolvió un formato de lista de modelos no soportado.',
+  'settings.providers.page.custom.models.discoveryError.providerError': 'El proveedor devolvió un error: {message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': 'No se pudieron descubrir modelos. Intenta de nuevo.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': 'Nombre de variable de entorno inválido.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': 'La URL base debe usar HTTPS.',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': 'La URL base no puede apuntar a direcciones locales o privadas.',
+  'settings.providers.page.custom.models.existingBadge': '(existente)',
 
   "settings.providers.page.auth.title": "Autenticación",
   "settings.providers.page.auth.loadingMethods": "Cargando métodos de autenticación...",
@@ -1553,7 +1576,6 @@ export const settingsDict = {
   "settings.providers.page.auth.connected": "Conectado",
   "settings.providers.page.auth.incomplete": "Faltan credenciales",
   "settings.providers.page.auth.incompleteHint": "· Añade una clave API o {env:VAR} antes de usar este proveedor en el chat",
-
 
   "settings.providers.page.auth.useReconnectHint": "· Usar Reconnect para actualizar credenciales",
   "settings.providers.page.connectionDetails.title": "Detalles de conexión",

@@ -1500,7 +1500,6 @@ export const settingsDict = {
   'settings.providers.page.custom.field.apiKey.editInfo': '비워 두면 기존 자격 증명을 유지합니다. 새 키 또는 {env:VAR_NAME}을(를) 입력할 수도 있습니다.',
   'settings.providers.page.custom.field.apiKey.editPlaceholder': '비워 두면 기존 키 유지',
 
-
   'settings.providers.page.custom.models.title': '모델',
   'settings.providers.page.custom.models.idLabel': '모델 ID',
   'settings.providers.page.custom.models.idPlaceholder': 'gpt-4o',
@@ -1531,6 +1530,30 @@ export const settingsDict = {
   'settings.providers.page.custom.error.apiKey.required': 'API 키 또는 {env:VAR_NAME}이(가) 필요합니다',
   'settings.providers.page.custom.authFailure.configAfterAuth': '자격 증명은 저장되었지만 공급자 구성은 저장되지 않았습니다. 오류를 수정한 뒤 다시 시도하거나, 연결을 해제하여 부분 저장을 지우세요.',
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': '모델 가져오기',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': '모델 가져오는 중...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': '공급자에서 사용 가능한 모델 가져오기',
+  'settings.providers.page.custom.models.selectorTitle': '추가할 모델 선택',
+  'settings.providers.page.custom.models.selectorDescription': '이 공급자에 추가할 모델을 선택하세요. 목록에 이미 있는 모델은 미리 선택되어 있습니다.',
+  'settings.providers.page.custom.models.selectAll': '모두 선택',
+  'settings.providers.page.custom.models.clearAll': '모두 해제',
+  'settings.providers.page.custom.models.selectedCount': '{total}개 중 {selected}개 모델 선택됨',
+  'settings.providers.page.custom.models.addSelected': '선택한 모델 추가',
+  'settings.providers.page.custom.models.noModelsFound': '모델을 찾을 수 없음',
+  'settings.providers.page.custom.models.discoveryError.authFailed': '인증 실패. API 키를 확인하세요.',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': '공급자가 액세스를 거부했습니다.',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': '모델 검색 엔드포인트를 찾을 수 없음: GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': '공급자에 연결할 수 없습니다. 기본 URL과 네트워크 연결을 확인하세요.',
+  'settings.providers.page.custom.models.discoveryError.timeout': '요청 시간 초과. 공급자가 제시간에 응답하지 않았습니다.',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': '공급자가 지원되지 않는 모델 목록 형식을 반환했습니다.',
+  'settings.providers.page.custom.models.discoveryError.providerError': '공급자가 오류를 반환함: {message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': '모델을 검색하지 못했습니다. 다시 시도해 주세요.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': '잘못된 환경 변수 이름입니다.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': '기본 URL은 HTTPS를 사용해야 합니다.',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': '기본 URL은 로컬 또는 사설 주소를 가리킬 수 없습니다.',
+  'settings.providers.page.custom.models.existingBadge': '(기존)',
 
   'settings.providers.page.auth.title': '인증',
   'settings.providers.page.auth.loadingMethods': '인증 방식 로딩 중...',
@@ -1553,7 +1576,6 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': '연결됨',
   'settings.providers.page.auth.incomplete': '자격 증명 없음',
   'settings.providers.page.auth.incompleteHint': '· 채팅에서 이 공급자를 사용하기 전에 API 키 또는 {env:VAR}을(를) 추가하세요',
-
 
   'settings.providers.page.auth.useReconnectHint': '· 인증 정보를 업데이트하려면 Reconnect를 사용하세요',
   'settings.providers.page.connectionDetails.title': '연결 세부 정보',

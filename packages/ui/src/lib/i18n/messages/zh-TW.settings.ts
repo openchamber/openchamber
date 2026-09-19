@@ -1407,7 +1407,6 @@ export const settingsDict = {
   'settings.providers.page.custom.field.apiKey.editInfo': '留空以保留現有憑證，或輸入新金鑰 / {env:VAR_NAME}。',
   'settings.providers.page.custom.field.apiKey.editPlaceholder': '留空以保留現有金鑰',
 
-
   'settings.providers.page.custom.models.title': '模型',
   'settings.providers.page.custom.models.idLabel': '模型 ID',
   'settings.providers.page.custom.models.idPlaceholder': 'gpt-4o',
@@ -1438,6 +1437,30 @@ export const settingsDict = {
   'settings.providers.page.custom.error.apiKey.required': '需要 API 金鑰或 {env:VAR_NAME}',
   'settings.providers.page.custom.authFailure.configAfterAuth': '憑證已儲存，但提供者設定未儲存。請修正錯誤後再試，或中斷連線以清除部分儲存。',
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': '取得模型',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': '正在取得模型...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': '從供應商取得可用模型',
+  'settings.providers.page.custom.models.selectorTitle': '選擇要新增的模型',
+  'settings.providers.page.custom.models.selectorDescription': '選擇要新增至此供應商的模型。清單中已有的模型已預先選取。',
+  'settings.providers.page.custom.models.selectAll': '全選',
+  'settings.providers.page.custom.models.clearAll': '清除選取',
+  'settings.providers.page.custom.models.selectedCount': '已選取 {selected} / {total} 個模型',
+  'settings.providers.page.custom.models.addSelected': '新增已選取的模型',
+  'settings.providers.page.custom.models.noModelsFound': '找不到模型',
+  'settings.providers.page.custom.models.discoveryError.authFailed': '驗證失敗。請檢查您的 API 金鑰。',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': '供應商拒絕存取。',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': '找不到模型探索端點：GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': '無法連線到供應商。請檢查基礎 URL 和網路連線。',
+  'settings.providers.page.custom.models.discoveryError.timeout': '請求逾時。供應商未在規定時間內回應。',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': '供應商回傳不支援的模型清單格式。',
+  'settings.providers.page.custom.models.discoveryError.providerError': '供應商回傳錯誤：{message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': '無法探索模型。請重試。',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': '無效的環境變數名稱。',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': 'Base URL 必須使用 HTTPS。',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': 'Base URL 不能指向本地或私有位址。',
+  'settings.providers.page.custom.models.existingBadge': '(現有)',
 
   'settings.providers.page.auth.title': '驗證',
   'settings.providers.page.auth.loadingMethods': '正在載入驗證方式...',
@@ -1460,7 +1483,6 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': '已連線',
   'settings.providers.page.auth.incomplete': '缺少憑證',
   'settings.providers.page.auth.incompleteHint': '· 在聊天中使用此提供者之前，請新增 API 金鑰或 {env:VAR}',
-
 
   'settings.providers.page.auth.useReconnectHint': '· 使用「重新連線」以更新憑證',
   'settings.providers.page.connectionDetails.title': '連線詳情',

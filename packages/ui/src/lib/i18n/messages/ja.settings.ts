@@ -1533,7 +1533,6 @@ export const settingsDict = {
   'settings.providers.page.custom.field.apiKey.editInfo': '空のままにすると既存の認証情報を保持します。新しいキーまたは {env:VAR_NAME} を入力することもできます。',
   'settings.providers.page.custom.field.apiKey.editPlaceholder': '空のままにすると既存のキーを保持',
 
-
   'settings.providers.page.custom.models.title': 'モデル',
   'settings.providers.page.custom.models.idLabel': 'モデル ID',
   'settings.providers.page.custom.models.idPlaceholder': 'gpt-4o',
@@ -1564,6 +1563,30 @@ export const settingsDict = {
   'settings.providers.page.custom.error.apiKey.required': 'API キーまたは {env:VAR_NAME} が必要です',
   'settings.providers.page.custom.authFailure.configAfterAuth': '認証情報は保存されましたが、プロバイダー設定は保存されませんでした。エラーを修正して再試行するか、切断して不完全な保存を削除してください。',
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': 'モデルを取得',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': 'モデルを取得中...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': 'プロバイダーから利用可能なモデルを取得',
+  'settings.providers.page.custom.models.selectorTitle': '追加するモデルを選択',
+  'settings.providers.page.custom.models.selectorDescription': 'このプロバイダーに追加するモデルを選択してください。リストに既にあるモデルは事前に選択されています。',
+  'settings.providers.page.custom.models.selectAll': 'すべて選択',
+  'settings.providers.page.custom.models.clearAll': 'すべて解除',
+  'settings.providers.page.custom.models.selectedCount': '{selected} / {total} モデルが選択済み',
+  'settings.providers.page.custom.models.addSelected': '選択したモデルを追加',
+  'settings.providers.page.custom.models.noModelsFound': 'モデルが見つかりません',
+  'settings.providers.page.custom.models.discoveryError.authFailed': '認証に失敗しました。APIキーを確認してください。',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': 'プロバイダーによってアクセスが拒否されました。',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': 'モデル検出エンドポイントが見つかりません: GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': 'プロバイダーに接続できません。ベースURLとネットワーク接続を確認してください。',
+  'settings.providers.page.custom.models.discoveryError.timeout': 'リクエストがタイムアウトしました。プロバイダーが時間内に応答しませんでした。',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': 'プロバイダーがサポートされていないモデルリスト形式を返しました。',
+  'settings.providers.page.custom.models.discoveryError.providerError': 'プロバイダーがエラーを返しました: {message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': 'モデルの検出に失敗しました。再試行してください。',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': '無効な環境変数名です。',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': 'ベースURLはHTTPSを使用する必要があります。',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': 'ベースURLをローカルまたはプライベートアドレスに設定することはできません。',
+  'settings.providers.page.custom.models.existingBadge': '(既存)',
 
   'settings.providers.page.auth.title': '認証',
   'settings.providers.page.auth.loadingMethods': '認証方法を読み込み中...',
@@ -1586,7 +1609,6 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': '接続済み',
   'settings.providers.page.auth.incomplete': '認証情報が不足しています',
   'settings.providers.page.auth.incompleteHint': '· チャットでこのプロバイダーを使う前に API キーまたは {env:VAR} を追加してください',
-
 
   'settings.providers.page.auth.useReconnectHint': '· 認証情報を更新するには再接続を使用',
   'settings.providers.page.connectionDetails.title': '接続詳細',

@@ -1514,7 +1514,6 @@ export const settingsDict = {
   'settings.providers.page.auth.incomplete': 'Brak poświadczeń',
   'settings.providers.page.auth.incompleteHint': '· Dodaj klucz API lub {env:VAR} przed użyciem tego dostawcy w czacie',
 
-
   'settings.providers.page.auth.loadingMethods': 'Ładowanie metod uwierzytelniania...',
   'settings.providers.page.auth.oauthMethodFallback': 'Metoda OAuth {index}',
   'settings.providers.page.auth.pasteAuthorizationCodePlaceholder': 'Wklej kod autoryzacyjny',
@@ -1556,7 +1555,6 @@ export const settingsDict = {
   'settings.providers.page.custom.field.apiKey.editInfo': 'Pozostaw puste, aby zachować istniejące poświadczenie, albo wpisz nowy klucz / {env:VAR_NAME}.',
   'settings.providers.page.custom.field.apiKey.editPlaceholder': 'Pozostaw puste, aby zachować istniejący klucz',
 
-
   'settings.providers.page.custom.models.title': 'Modele',
   'settings.providers.page.custom.models.idLabel': 'ID modelu',
   'settings.providers.page.custom.models.idPlaceholder': 'gpt-4o',
@@ -1587,6 +1585,30 @@ export const settingsDict = {
   'settings.providers.page.custom.error.apiKey.required': 'Wymagany jest klucz API lub {env:VAR_NAME}',
   'settings.providers.page.custom.authFailure.configAfterAuth': 'Poświadczenia zostały zapisane, ale konfiguracja dostawcy nie. Napraw błąd i spróbuj ponownie albo rozłącz, aby usunąć częściowy zapis.',
 
+  'settings.providers.page.custom.field.baseURL.fetchModels': 'Pobierz modele',
+  'settings.providers.page.custom.field.baseURL.fetchingModels': 'Pobieranie modeli...',
+  'settings.providers.page.custom.field.baseURL.fetchModelsAria': 'Pobierz dostępne modele od dostawcy',
+  'settings.providers.page.custom.models.selectorTitle': 'Wybierz modele do dodania',
+  'settings.providers.page.custom.models.selectorDescription': 'Wybierz, które modele dodać do tego dostawcy. Modele już na liście są wstępnie wybrane.',
+  'settings.providers.page.custom.models.selectAll': 'Zaznacz wszystkie',
+  'settings.providers.page.custom.models.clearAll': 'Odznacz wszystkie',
+  'settings.providers.page.custom.models.selectedCount': '{selected} z {total} wybranych modeli',
+  'settings.providers.page.custom.models.addSelected': 'Dodaj wybrane modele',
+  'settings.providers.page.custom.models.noModelsFound': 'Nie znaleziono modeli',
+  'settings.providers.page.custom.models.discoveryError.authFailed': 'Uwierzytelnienie nie powiodło się. Sprawdź klucz API.',
+  'settings.providers.page.custom.models.discoveryError.accessDenied': 'Dostęp odrzucony przez dostawcę.',
+  'settings.providers.page.custom.models.discoveryError.endpointNotFound': 'Nie znaleziono punktu końcowego odkrywania modeli: GET {url}/models',
+  'settings.providers.page.custom.models.discoveryError.networkError': 'Nie można połączyć się z dostawcą. Sprawdź bazowy URL i połączenie sieciowe.',
+  'settings.providers.page.custom.models.discoveryError.timeout': 'Upłynął limit czasu żądania. Dostawca nie odpowiedział w czas.',
+  'settings.providers.page.custom.models.discoveryError.invalidResponse': 'Dostawca zwrócił nieobsługiwany format listy modeli.',
+  'settings.providers.page.custom.models.discoveryError.providerError': 'Dostawca zwrócił błąd: {message}',
+  'settings.providers.page.custom.models.discoveryError.unknown': 'Nie udało się odkryć modeli. Spróbuj ponownie.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidEnvName': 'Nieprawidłowa nazwa zmiennej środowiskowej.',
+
+  'settings.providers.page.custom.models.discoveryError.invalidUrl': 'Adres bazowy musi używać HTTPS.',
+  'settings.providers.page.custom.models.discoveryError.ssrfBlocked': 'Adres bazowy nie może wskazywać na adresy lokalne ani prywatne.',
+  'settings.providers.page.custom.models.existingBadge': '(istniejący)',
 
   'settings.providers.page.connect.noProvidersFound': 'Nie znaleziono dostawców',
   'settings.providers.page.connect.providerField': 'Dostawca',

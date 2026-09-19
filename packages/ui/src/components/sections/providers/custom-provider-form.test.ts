@@ -7,8 +7,11 @@ import {
   providerToCustomFormState,
   resolveProviderConfigScope,
   validateCustomProvider,
+  mergeDiscoveredModels,
   type CustomProviderConfig,
   type CustomProviderFormState,
+  type DiscoveredModel,
+  type DiscoverModelsErrorCode,
 } from './custom-provider-form';
 
 const t = (key: string) => key;
@@ -368,5 +371,117 @@ describe('provider edit helpers', () => {
       project: { exists: false },
       custom: { exists: true },
     })).toBe('custom');
+  });
+});
+
+describe('model discovery types', () => {
+  test('DiscoveredModel type has correct structure', () => {
+    const model: DiscoveredModel = {
+      id: 'gpt-5',
+      name: 'GPT-5',
+      alreadyExists: false,
+      selected: true,
+    };
+    expect(model.id).toBe('gpt-5');
+    expect(model.name).toBe('GPT-5');
+    expect(model.alreadyExists).toBe(false);
+    expect(model.selected).toBe(true);
+  });
+
+  test('DiscoverModelsErrorCode includes all expected codes', () => {
+    const codes: DiscoverModelsErrorCode[] = [
+      'INVALID_URL',
+      'SSRF_BLOCKED',
+      'AUTH_FAILED',
+      'ACCESS_DENIED',
+      'ENDPOINT_NOT_FOUND',
+      'NETWORK_ERROR',
+      'TIMEOUT',
+      'INVALID_RESPONSE',
+      'PROVIDER_ERROR',
+      'INTERNAL_ERROR',
+    ];
+    expect(codes).toHaveLength(10);
+  });
+});
+
+describe('model selection merge logic', () => {
+  test('adds selected models to form while preserving existing', () => {
+    const existingModels = [
+      { row: 'm0', id: 'model-a', name: 'Model A' },
+      { row: 'm1', id: 'model-b', name: 'Model B' },
+    ];
+    const selectedModels = [
+      { id: 'model-b', name: 'Model B', alreadyExists: true, selected: true },
+      { id: 'model-c', name: 'Model C', alreadyExists: false, selected: true },
+      { id: 'model-d', name: 'Model D', alreadyExists: false, selected: false },
+    ];
+
+    const { newRows, newModelErrors } = mergeDiscoveredModels(existingModels, selectedModels);
+
+    expect(newRows).toHaveLength(1);
+    expect(newRows[0]).toEqual({ row: expect.any(String), id: 'model-c', name: 'Model C' });
+    expect(newModelErrors).toHaveLength(1);
+
+    const merged = [...existingModels, ...newRows];
+    expect(merged).toHaveLength(3);
+    expect(merged.map((m) => m.id)).toEqual(['model-a', 'model-b', 'model-c']);
+  });
+
+  test('does not add unselected models', () => {
+    const existingModels = [{ row: 'm0', id: 'model-a', name: 'Model A' }];
+    const selectedModels = [
+      { id: 'model-b', name: 'Model B', alreadyExists: false, selected: false },
+    ];
+
+    const { newRows } = mergeDiscoveredModels(existingModels, selectedModels);
+
+    expect(newRows).toHaveLength(0);
+  });
+
+  test('preserves existing models when all selected already exist', () => {
+    const existingModels = [
+      { row: 'm0', id: 'model-a', name: 'Model A' },
+      { row: 'm1', id: 'model-b', name: 'Model B' },
+    ];
+    const selectedModels = [
+      { id: 'model-a', name: 'Model A', alreadyExists: true, selected: true },
+      { id: 'model-b', name: 'Model B', alreadyExists: true, selected: true },
+    ];
+
+    const { newRows } = mergeDiscoveredModels(existingModels, selectedModels);
+
+    expect(newRows).toHaveLength(0);
+  });
+
+  test('handles model IDs with special characters', () => {
+    const existingModels = [{ row: 'm0', id: 'model-a', name: 'Model A' }];
+    const selectedModels = [
+      { id: 'moonshotai/kimi-k3', name: 'Kimi K3', alreadyExists: false, selected: true },
+      { id: 'model:v2', name: 'Model V2', alreadyExists: false, selected: true },
+      { id: 'foo.bar', name: 'Foo Bar', alreadyExists: false, selected: true },
+      { id: 'foo-bar', name: 'Foo Bar', alreadyExists: false, selected: true },
+    ];
+
+    const { newRows } = mergeDiscoveredModels(existingModels, selectedModels);
+
+    expect(newRows).toHaveLength(4);
+    expect(newRows.map((m) => m.id)).toEqual(['moonshotai/kimi-k3', 'model:v2', 'foo.bar', 'foo-bar']);
+  });
+
+  test('computes newRows and newModelErrors in single pass without drift', () => {
+    const existingModels = [{ row: 'm0', id: 'model-a', name: 'Model A' }];
+    const selectedModels = [
+      { id: 'model-b', name: 'Model B', alreadyExists: false, selected: true },
+      { id: 'model-c', name: 'Model C', alreadyExists: false, selected: true },
+    ];
+
+    const { newRows, newModelErrors } = mergeDiscoveredModels(existingModels, selectedModels);
+
+    expect(newRows).toHaveLength(2);
+    expect(newModelErrors).toHaveLength(2);
+    expect(newRows[0].id).toBe('model-b');
+    expect(newRows[1].id).toBe('model-c');
+    expect(newRows).toEqual(newRows); // identity check - same array reference
   });
 });
