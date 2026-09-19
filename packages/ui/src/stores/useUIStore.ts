@@ -1006,6 +1006,7 @@ interface UIStore {
   showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
+  showExpandedTodoTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   desktopWindowControlsPosition: DesktopWindowControlsPosition;
@@ -1201,6 +1202,7 @@ interface UIStore {
   setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
+  setShowExpandedTodoTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
@@ -1381,6 +1383,7 @@ export const useUIStore = create<UIStore>()(
         showTurnChangedFiles: false,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
+        showExpandedTodoTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         desktopWindowControlsPosition: 'right',
@@ -2745,6 +2748,9 @@ export const useUIStore = create<UIStore>()(
         setShowExpandedEditTools: (value) => {
           set({ showExpandedEditTools: value });
         },
+        setShowExpandedTodoTools: (value) => {
+          set({ showExpandedTodoTools: value });
+        },
 
         setTimeFormatPreference: (value) => {
           set({ timeFormatPreference: value });
@@ -3177,6 +3183,7 @@ export const useUIStore = create<UIStore>()(
           showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,
+          showExpandedTodoTools: state.showExpandedTodoTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
