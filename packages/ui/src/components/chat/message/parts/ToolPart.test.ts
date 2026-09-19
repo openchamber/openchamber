@@ -66,6 +66,61 @@ describe('parseDiffToUnified', () => {
 });
 
 describe('renderTerminalOutput', () => {
+    test('drops BEL-only output instead of returning the control byte', () => {
+        expect(renderTerminalOutput('\u0007')).toBe('');
+    });
+
+    test('consumes ESC-prefixed DCS payloads through ST', () => {
+        expect(renderTerminalOutput('before\u001BPsecret payload\u001B\\after')).toBe('beforeafter');
+    });
+
+    test('drops unknown ESC command bytes without exposing standalone ST backslashes', () => {
+        expect(renderTerminalOutput('before\u001Bcafter')).toBe('beforeafter');
+        expect(renderTerminalOutput('before\u001B\\after')).toBe('beforeafter');
+    });
+
+    test('consumes unknown ESC sequences through intermediate and final bytes', () => {
+        expect(renderTerminalOutput('before\u001B(Bafter')).toBe('beforeafter');
+        expect(renderTerminalOutput('before\u001B#8after')).toBe('beforeafter');
+    });
+
+    test('discards incomplete unknown ESC sequences with intermediate bytes', () => {
+        expect(renderTerminalOutput('before\u001B(')).toBe('before');
+    });
+
+    test('drops malformed ESC intermediate bytes while preserving following text', () => {
+        expect(renderTerminalOutput('before\u001B(😀after')).toBe('before😀after');
+    });
+
+    test('drops malformed CSI prefixes while preserving the invalid byte and following text', () => {
+        expect(renderTerminalOutput('before\u001B[31😀after')).toBe('before😀after');
+    });
+
+    test('discards incomplete CSI sequences', () => {
+        expect(renderTerminalOutput('before\u001B[31 ')).toBe('before');
+    });
+
+    test('consumes OSC strings terminated by BEL or ST', () => {
+        expect(renderTerminalOutput('before\u001B]title\u0007after')).toBe('beforeafter');
+        expect(renderTerminalOutput('before\u001B]title\u001B\\after')).toBe('beforeafter');
+    });
+
+    test('drops C0 controls and C1 control sequences', () => {
+        expect(renderTerminalOutput('before\u0000\u000B\u007F\u009B31m\u009B0mafter')).toBe('beforeafter');
+    });
+
+    test('preserves tabs and newlines as visible spacing', () => {
+        expect(renderTerminalOutput('before\t\u0007after\nnext')).toBe('before\tafter\nnext');
+    });
+
+    test('keeps carriage-return rewriting active without another control sequence', () => {
+        expect(renderTerminalOutput('before\rafter')).toBe('aftere');
+    });
+
+    test('discards an incomplete control string payload', () => {
+        expect(renderTerminalOutput('before\u001BPsecret payload')).toBe('before');
+    });
+
     test('renders carriage-return progress updates as their latest value', () => {
         expect(renderTerminalOutput('Downloading 10%\r\u001B[2KDownloading 90%')).toBe('Downloading 90%');
     });
