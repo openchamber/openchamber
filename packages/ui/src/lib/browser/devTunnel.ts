@@ -92,6 +92,15 @@ const isRemoteRuntime = (baseUrl: string): boolean => {
   }
 };
 
+export const isRemoteWebLoopbackUrl = (url: string): boolean => {
+  if (!url || isDesktopRuntime() || !isLoopbackUrl(url) || !globalThis.window) return false;
+  return isRemoteRuntime(getRuntimeApiBaseUrl() || globalThis.window.location.href);
+};
+
+export const resolveIframeBrowserUrl = (url: string): string => (
+  isRemoteWebLoopbackUrl(url) ? '' : url
+);
+
 /**
  * The port a loopback URL addresses, including the one it leaves implicit.
  * Both callers must agree on this: an omitted port is 80 or 443, not nothing.

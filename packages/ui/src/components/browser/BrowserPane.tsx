@@ -22,7 +22,9 @@ import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import {
   DevTunnelUnavailableError,
+  isRemoteWebLoopbackUrl,
   resolveBrowsableUrl,
+  resolveIframeBrowserUrl,
   shouldTunnelLoopbackUrl,
   toDisplayUrl,
 } from '@/lib/browser/devTunnel';
@@ -857,7 +859,8 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
   const startUrl = normalized !== BLANK_URL ? normalized : '';
 
   const [address, setAddress] = React.useState(startUrl);
-  const [loadedUrl, setLoadedUrl] = React.useState(startUrl);
+  const [loadedUrl, setLoadedUrl] = React.useState(resolveIframeBrowserUrl(startUrl));
+  const [unreachableUrl, setUnreachableUrl] = React.useState(isRemoteWebLoopbackUrl(startUrl) ? startUrl : '');
   const [history, setHistory] = React.useState<string[]>(startUrl ? [startUrl] : []);
   const [historyIndex, setHistoryIndex] = React.useState(startUrl ? 0 : -1);
   const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
@@ -879,7 +882,9 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
     const next = normalizeBrowserUrl(value);
     if (next === BLANK_URL) return;
     setAddress(next);
-    setLoadedUrl(next);
+    const iframeUrl = resolveIframeBrowserUrl(next);
+    setLoadedUrl(iframeUrl);
+    setUnreachableUrl(iframeUrl ? '' : next);
     persistUrl(next);
     // The page is opaque here, so there is no load event and no title to wait
     // for; what was asked for is the only thing this runtime can record.
@@ -900,7 +905,9 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
     if (!next) return;
     setHistoryIndex(index);
     setAddress(next);
-    setLoadedUrl(next);
+    const iframeUrl = resolveIframeBrowserUrl(next);
+    setLoadedUrl(iframeUrl);
+    setUnreachableUrl(iframeUrl ? '' : next);
     persistUrl(next);
   }, [history, persistUrl]);
 
@@ -916,12 +923,20 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
         onForward={() => goTo(historyIndex + 1)}
         onReload={bumpReload}
         onOpenExternal={() => void openExternalUrl(loadedUrl || address)}
+        canOpenExternal={!unreachableUrl}
         canGoBack={historyIndex > 0}
         canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
         isLoading={false}
       />
       <div className="relative min-h-0 flex-1 bg-background">
-        {loadedUrl ? (
+        {unreachableUrl ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+            <span className="typography-ui-header text-foreground">{t('contextPanel.browser.tunnelFailed')}</span>
+            <span className="typography-micro text-muted-foreground">
+              {t('contextPanel.browser.devServers.remoteOnly')}
+            </span>
+          </div>
+        ) : loadedUrl ? (
           <iframe
             key={`${loadedUrl}|${reloadNonce}`}
             src={loadedUrl}
@@ -930,7 +945,7 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
             sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
           />
         ) : (
-          <BrowserEmptyState onOpen={navigate} />
+          <BrowserEmptyState onOpen={navigate} directory={directory} />
         )}
       </div>
     </div>
