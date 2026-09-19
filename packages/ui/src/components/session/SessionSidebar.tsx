@@ -47,6 +47,7 @@ import {
   commitDiscoveredRawWorktreesByProject,
   ensureRawWorktreesByProjectScope,
   refreshProjectWorktreeTopology,
+  resolveSessionWorktreeMenuProject,
   startSessionWorktreeMenuLoad,
   type RawWorktreesByProjectScope,
   type StartSessionWorktreeMenuLoadArgs,
@@ -557,9 +558,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   }), [projects]);
 
   const handleSessionWorktreeMenuLoad = React.useCallback((args: StartSessionWorktreeMenuLoadArgs) => {
-    const resolvedProject: ProjectRef | null = args.projectId
-      ? (projects.find((candidate) => candidate.id === args.projectId) ?? null)
-      : (args.sourceDirectory ? resolveProjectRef(args.sourceDirectory) : null);
+    const resolvedProject: ProjectRef | null = resolveSessionWorktreeMenuProject(args, {
+      projects,
+      resolveProject: resolveProjectRef,
+    });
     return startSessionWorktreeMenuLoad(args, {
       ...worktreeRefreshDependencies,
       projectRootBranch: resolvedProject ? (projectRootBranches.get(resolvedProject.id) ?? null) : null,

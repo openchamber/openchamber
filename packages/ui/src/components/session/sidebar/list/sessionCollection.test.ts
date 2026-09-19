@@ -112,6 +112,17 @@ describe('projectSidebarActiveSessions', () => {
     }).map((entry) => entry.id)).toEqual(['unknown', 'empty']);
   });
 
+  test('retains unknown active full-app records when topology directories are known', () => {
+    const restored = { ...session('restored', '/deleted/worktrees/feature'), time: { created: 1, updated: 1 } };
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [restored],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/known']),
+      isVSCode: false,
+    }).map((entry) => entry.id)).toEqual(['restored']);
+  });
+
   test('keeps archived sessions despite directory filtering', () => {
     const archived = session('archived', '/workspace/unknown');
     archived.time.archived = 1;

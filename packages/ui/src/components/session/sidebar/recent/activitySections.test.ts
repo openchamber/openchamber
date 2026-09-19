@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { deriveRecentActivitySections, deriveRecentSessions } from './activitySections';
+import type { DirectoryOwner } from '../sessions/sessionOwnership';
+import { buildRecentSessionLocations, deriveRecentActivitySections, deriveRecentSessions } from './activitySections';
 
 const NOW = 200_000_000;
 const RECENT = NOW - (48 * 60 * 60 * 1000);
@@ -89,5 +90,78 @@ describe('deriveRecentActivitySections', () => {
         secondaryMeta: { projectLabel: 'App', branchLabel: 'release' },
       }],
     }]);
+  });
+});
+
+describe('buildRecentSessionLocations', () => {
+  const projects = [{ id: 'proj-repo', normalizedPath: '/repo', label: 'Repo' }];
+  const owner = (overrides: Partial<DirectoryOwner> = {}): DirectoryOwner => ({
+    projectId: 'proj-repo',
+    projectRoot: '/repo',
+    scopeDirectory: '/repo',
+    kind: 'project',
+    ...overrides,
+  });
+
+  test('locates a restored session whose worktree directory no longer exists through its resolved owner', () => {
+    const restored = { ...session('restored'), directory: '/worktrees/deleted' };
+
+    const locations = buildRecentSessionLocations({
+      sessions: [restored],
+      sessionOwners: new Map([[restored.id, owner()]]),
+      projects,
+      availableWorktreesByProject: new Map(),
+      gitBranches: new Map(),
+      homeDirectory: null,
+    });
+
+    expect(locations.get(restored.id)).toEqual({
+      projectId: 'proj-repo',
+      groupDirectory: '/worktrees/deleted',
+      projectLabel: 'Repo',
+      branchLabel: null,
+    });
+  });
+
+  test('labels a worktree-owned session with its worktree branch', () => {
+    const inWorktree = { ...session('in-worktree'), directory: '/worktrees/feature' };
+
+    const locations = buildRecentSessionLocations({
+      sessions: [inWorktree],
+      sessionOwners: new Map([[inWorktree.id, owner({ scopeDirectory: '/worktrees/feature', kind: 'worktree' })]]),
+      projects,
+      availableWorktreesByProject: new Map([['/repo', [{ path: '/worktrees/feature', branch: 'feature' }]]]),
+      gitBranches: new Map(),
+      homeDirectory: null,
+    });
+
+    expect(locations.get(inWorktree.id)).toEqual({
+      projectId: 'proj-repo',
+      groupDirectory: '/worktrees/feature',
+      projectLabel: 'Repo',
+      branchLabel: 'feature',
+    });
+  });
+
+  test('skips sessions without a resolved owner and hides HEAD or duplicate branch labels', () => {
+    const unowned = { ...session('unowned'), directory: '/elsewhere' };
+    const detached = { ...session('detached'), directory: '/repo/nested' };
+
+    const locations = buildRecentSessionLocations({
+      sessions: [unowned, detached],
+      sessionOwners: new Map([[detached.id, owner()]]),
+      projects,
+      availableWorktreesByProject: new Map(),
+      gitBranches: new Map([['/repo/nested', 'HEAD']]),
+      homeDirectory: null,
+    });
+
+    expect(locations.has(unowned.id)).toBe(false);
+    expect(locations.get(detached.id)).toEqual({
+      projectId: 'proj-repo',
+      groupDirectory: '/repo/nested',
+      projectLabel: 'Repo',
+      branchLabel: null,
+    });
   });
 });

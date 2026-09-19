@@ -1,4 +1,5 @@
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { Project as OpenCodeProject } from '@opencode-ai/sdk/v2/client';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
 
 type Project = {
@@ -9,6 +10,19 @@ type Project = {
 type Worktree = {
   path: string;
 };
+
+type SessionProjectMetadata = {
+  id?: string | null;
+  worktree?: string | null;
+};
+
+export type SessionOwnershipRecord = Session & {
+  directory?: string | null;
+  projectID?: string | null;
+  project?: SessionProjectMetadata | null;
+};
+
+type AuthoritativeOpenCodeProject = Pick<OpenCodeProject, 'id' | 'worktree'>;
 
 export type DirectoryOwner = {
   projectId: string;
@@ -42,20 +56,21 @@ const setOwner = (owners: Map<string, DirectoryOwner>, directory: string, candid
   }
 };
 
-const resolveSessionDirectory = (session: Session): string | null => {
-  const record = session as Session & {
-    directory?: string | null;
-    project?: { worktree?: string | null } | null;
-  };
-  return normalizePath(record.directory) ?? normalizePath(record.project?.worktree);
+const resolveSessionDirectory = (session: SessionOwnershipRecord): string | null => {
+  return normalizePath(session.directory) ?? normalizePath(session.project?.worktree);
+};
+
+const getOpenCodeProjectId = (session: SessionOwnershipRecord): string | null => {
+  return session.projectID || session.project?.id || null;
 };
 
 export const createSessionOwnershipIndex = (
-  sessions: Session[],
+  sessions: SessionOwnershipRecord[],
   projects: Project[],
   availableWorktreesByProject: Map<string, Worktree[]>,
   isVSCode: boolean,
-  archivedSessions: Session[] = [],
+  archivedSessions: SessionOwnershipRecord[] = [],
+  authoritativeProjects: readonly AuthoritativeOpenCodeProject[] = [],
 ): SessionOwnershipIndex => {
   const ownerByDirectory = new Map<string, DirectoryOwner>();
   const projectByRoot = new Map<string, Project>();
@@ -91,6 +106,43 @@ export const createSessionOwnershipIndex = (
         });
       }
     }
+  }
+
+  // OpenCode project IDs are not OpenChamber's path-derived project IDs. Only
+  // project metadata whose canonical worktree is itself a configured root can
+  // bridge the two namespaces. Conflicting metadata stays unresolved.
+  const canonicalOwnerByOpenCodeProjectId = new Map<string, DirectoryOwner | null>();
+  const authoritativeProjectIds = new Set<string>();
+  const registerCanonicalOwner = (openCodeProjectId: string, worktree: string | null | undefined): void => {
+    const canonicalRoot = normalizePath(worktree ?? null);
+    const project = canonicalRoot ? projectByRoot.get(canonicalRoot) : undefined;
+    const candidate = project && canonicalRoot ? {
+      projectId: project.id,
+      projectRoot: canonicalRoot,
+      scopeDirectory: canonicalRoot,
+      kind: 'project' as const,
+    } : null;
+    if (!canonicalOwnerByOpenCodeProjectId.has(openCodeProjectId)) {
+      canonicalOwnerByOpenCodeProjectId.set(openCodeProjectId, candidate);
+      return;
+    }
+    const existing = canonicalOwnerByOpenCodeProjectId.get(openCodeProjectId);
+    if (!existing || !candidate || existing.projectRoot !== candidate.projectRoot) {
+      canonicalOwnerByOpenCodeProjectId.set(openCodeProjectId, null);
+    }
+  };
+
+  for (const project of authoritativeProjects) {
+    if (!project.id) continue;
+    authoritativeProjectIds.add(project.id);
+    registerCanonicalOwner(project.id, project.worktree);
+  }
+  for (const session of [...sessions, ...archivedSessions]) {
+    const openCodeProjectId = session.project?.id;
+    if (!openCodeProjectId || authoritativeProjectIds.has(openCodeProjectId)) continue;
+    const canonicalRoot = normalizePath(session.project?.worktree ?? null);
+    if (!canonicalRoot || !projectByRoot.has(canonicalRoot)) continue;
+    registerCanonicalOwner(openCodeProjectId, session.project?.worktree);
   }
 
   const resolvedOwners = new Map<string, DirectoryOwner | null>();
@@ -131,12 +183,15 @@ export const createSessionOwnershipIndex = (
   };
 
   const bucket = (
-    input: Session[],
+    input: SessionOwnershipRecord[],
     target: Map<string, Session[]>,
     scopeTarget?: Map<string, Set<string>>,
   ): void => {
     for (const session of input) {
-      const owner = resolveOwner(resolveSessionDirectory(session));
+      const exactOwner = resolveOwner(resolveSessionDirectory(session));
+      const owner = exactOwner ?? (!isVSCode
+        ? canonicalOwnerByOpenCodeProjectId.get(getOpenCodeProjectId(session) ?? '') ?? null
+        : null);
       if (!owner) continue;
       bySessionId.set(session.id, owner);
       const projectSessions = target.get(owner.projectId);

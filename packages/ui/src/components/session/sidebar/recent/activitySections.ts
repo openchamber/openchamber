@@ -1,11 +1,54 @@
 import type { Session } from '@opencode-ai/sdk/v2';
+import { formatDirectoryName } from '@/lib/utils';
+import type { DirectoryOwner } from '../sessions/sessionOwnership';
 import type { SessionNode } from '../types';
+import { formatProjectLabel, normalizePath } from '../utils';
 
 export type RecentSessionLocation = {
   projectId: string | null;
   groupDirectory: string | null;
   projectLabel: string | null;
   branchLabel: string | null;
+};
+
+// Recent rows resolve their owner through the shared ownership index, not by
+// re-matching directory prefixes: the index already covers linked worktrees
+// and the canonical-project fallback for restored sessions whose worktree
+// directory no longer exists. The row keeps the session's own directory; only
+// display ownership comes from the index.
+export const buildRecentSessionLocations = (args: {
+  sessions: readonly Session[];
+  sessionOwners: ReadonlyMap<string, DirectoryOwner>;
+  projects: ReadonlyArray<{ id: string; normalizedPath: string; label?: string }>;
+  availableWorktreesByProject: ReadonlyMap<string, ReadonlyArray<{ path: string; branch?: string | null }>>;
+  gitBranches: ReadonlyMap<string, string | null>;
+  homeDirectory: string | null;
+}): Map<string, RecentSessionLocation> => {
+  const locations = new Map<string, RecentSessionLocation>();
+  const projectsById = new Map(args.projects.map((project) => [project.id, project]));
+  for (const session of args.sessions) {
+    const owner = args.sessionOwners.get(session.id);
+    if (!owner) continue;
+    const project = projectsById.get(owner.projectId);
+    if (!project) continue;
+    const directory = normalizePath(session.directory ?? null);
+    const worktree = directory
+      ? args.availableWorktreesByProject.get(owner.projectRoot)?.find((entry) => normalizePath(entry.path) === directory)
+      : undefined;
+    const projectLabel = formatProjectLabel(
+      project.label?.trim() || formatDirectoryName(project.normalizedPath, args.homeDirectory) || project.normalizedPath,
+    );
+    const branch = worktree?.branch?.trim()
+      || (directory ? args.gitBranches.get(directory)?.trim() : undefined)
+      || null;
+    locations.set(session.id, {
+      projectId: project.id,
+      groupDirectory: directory,
+      projectLabel,
+      branchLabel: branch && branch !== 'HEAD' && branch !== projectLabel ? branch : null,
+    });
+  }
+  return locations;
 };
 
 type RecentActivitySection = {
