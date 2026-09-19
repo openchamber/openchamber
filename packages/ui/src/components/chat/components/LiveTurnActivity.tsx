@@ -16,11 +16,22 @@ interface LiveTurnActivityProps {
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
+const isCompactionSummaryMessage = (message: ChatMessageEntry): boolean => {
+    return message.info.summary === true;
+};
+
 export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, renderMessage }: LiveTurnActivityProps) {
     const { t } = useI18n();
     const contentId = React.useId();
     const finalContentId = React.useId();
-    const finalMessage = getLiveFinalMessage(turn.assistantMessages);
+    // Compaction summaries are internal context snapshots. OMP stores them as
+    // completed assistant messages in the same parent turn, but they are not
+    // model output to replay in the live activity timeline.
+    const liveAssistantMessages = React.useMemo(
+        () => turn.assistantMessages.filter((message) => !isCompactionSummaryMessage(message)),
+        [turn.assistantMessages],
+    );
+    const finalMessage = getLiveFinalMessage(liveAssistantMessages);
     const settled = Boolean(finalMessage) || hasLaterAssistant;
     const isExpanded = !settled || expanded;
     const previouslySettled = React.useRef(settled);
@@ -31,8 +42,8 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     } : null, [finalMessage, isExpanded, finalContentId, animateFinalCollapse]);
     // No diff parsing at token frequency. The report is only shown once the
     // turn settles; later authoritative tool metadata can refine it.
-    const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
-        [settled, turn.assistantMessages]);
+    const summary = React.useMemo(() => settled ? summarizeLiveActivity(liveAssistantMessages) : null,
+        [settled, liveAssistantMessages]);
     const fileLabel = summary && summary.files > 0
         ? t(summary.files === 1 ? 'chat.liveActivity.changedFile' : 'chat.liveActivity.changedFiles', { count: summary.files })
         : null;
@@ -76,7 +87,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                 </div>
             ) : null}
             <LiveActivityCollapse expanded={isExpanded} id={contentId}>
-                {turn.assistantMessages.map((message) => message === finalMessage ? null : renderMessage(message))}
+                {liveAssistantMessages.map((message) => message === finalMessage ? null : renderMessage(message))}
             </LiveActivityCollapse>
             <LiveFinalActivityContext.Provider value={finalContext}>
                 {finalMessage ? renderMessage(finalMessage) : null}
