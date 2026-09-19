@@ -110,10 +110,12 @@ class TTSService {
     }
 
     try {
-      // OpenAI-compatible servers (custom baseURL) may not support `instructions`
-      // or `response_format`, but do support `speed`. Send the safe subset.
+      // OpenAI-compatible servers (custom baseURL) may not support `instructions`,
+      // but do support `speed`. `response_format: 'mp3'` is the documented default
+      // for /v1/audio/speech, and strict servers (e.g. OpenRouter) reject requests
+      // that omit it.
       const speechParams = normalizedBaseURL
-        ? { model, voice, input: text, speed }
+        ? { model, voice, input: text, speed, response_format: 'mp3' }
         : {
             model,
             voice,

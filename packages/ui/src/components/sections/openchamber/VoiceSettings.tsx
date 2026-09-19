@@ -522,6 +522,8 @@ export const VoiceSettings: React.FC = () => {
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
+    const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
+    const setTtsChunkedMode = useConfigStore((state) => state.setTtsChunkedMode);
     // STT settings
     const sttProvider = useConfigStore((state) => state.sttProvider);
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
@@ -1167,6 +1169,16 @@ export const VoiceSettings: React.FC = () => {
                                     ]}
                                 />
                             </SettingsControlGroup>
+
+                            {(voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                                <SettingsCheckboxRow
+                                    checked={ttsChunkedMode}
+                                    onChange={setTtsChunkedMode}
+                                    label={t('settings.voice.page.field.ttsChunkedMode')}
+                                    ariaLabel={t('settings.voice.page.field.ttsChunkedModeAria')}
+                                    info={t('settings.voice.page.tooltip.ttsChunked')}
+                                />
+                            )}
                     </>
                 )}
             </SettingsSection>
