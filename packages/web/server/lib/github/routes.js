@@ -1,3 +1,5 @@
+import { parseGitHubReference } from './reference.js';
+
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
@@ -115,28 +117,101 @@ function withTimeout(promise, timeoutMs, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+// @octokit/request rethrows a fetch AbortError unwrapped but wraps a
+// TimeoutError from AbortSignal.timeout in octokit.js into a RequestError
+// (name "HttpError") with the original error on `cause`. Check both so a real
+// octokit timeout is still recognised.
+function isTimeoutError(error) {
+  return error?.name === 'TimeoutError'
+    || error?.name === 'AbortError'
+    || error?.cause?.name === 'TimeoutError'
+    || error?.cause?.name === 'AbortError';
+}
+
 function getRequestedRepo(req) {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
   const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
   return owner && repo ? { owner, repo } : null;
 }
 
+const repoKey = (owner, repo) => (owner && repo ? `${owner}/${repo}`.toLowerCase() : '');
+
+// Resolve the repo a request targets while preserving repo identity: a local
+// match keeps its resolved `url` and is labelled `origin`; a fork-network match
+// is returned as-is because it carries its own `url`/`source`.
 async function resolveRepoForRequest(octokit, directory, requestedRepo) {
   const { resolveGitHubRepoFromDirectory } = await import('./index.js');
   const { repo } = await resolveGitHubRepoFromDirectory(directory);
   if (!requestedRepo) {
     return repo;
   }
-  if (repo?.owner === requestedRepo.owner && repo?.repo === requestedRepo.repo) {
-    return requestedRepo;
+  const requestedKey = repoKey(requestedRepo.owner, requestedRepo.repo);
+  if (repoKey(repo?.owner, repo?.repo) === requestedKey) {
+    return { ...repo, source: 'origin' };
   }
 
   const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
   const network = await resolveRepoNetwork(octokit, directory).catch(() => null);
-  const allowed = Array.isArray(network)
-    ? network.some((item) => item?.owner === requestedRepo.owner && item?.repo === requestedRepo.repo)
-    : false;
-  return allowed ? requestedRepo : null;
+  const matched = Array.isArray(network)
+    ? network.find((item) => repoKey(item?.owner, item?.repo) === requestedKey)
+    : null;
+  return matched ?? null;
+}
+
+// Map an octokit pull-request payload into the shared UI summary shape. The
+// sourceRepo identifies which repo in the fork network the item came from.
+function mapPrSummary(pr, repoRef) {
+  const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
+  const headRepo = pr.head?.repo
+    ? {
+        owner: pr.head.repo.owner?.login,
+        repo: pr.head.repo.name,
+        url: pr.head.repo.html_url,
+        cloneUrl: pr.head.repo.clone_url,
+        sshUrl: pr.head.repo.ssh_url,
+      }
+    : null;
+  return {
+    number: pr.number,
+    title: pr.title,
+    url: pr.html_url,
+    state: mergedState,
+    draft: Boolean(pr.draft),
+    base: pr.base?.ref,
+    head: pr.head?.ref,
+    headSha: pr.head?.sha,
+    mergeable: pr.mergeable,
+    mergeableState: pr.mergeable_state,
+    author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
+    headLabel: pr.head?.label,
+    headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
+      ? headRepo
+      : null,
+    sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source ?? 'origin' },
+  };
+}
+
+// Map an octokit issue payload into the shared UI summary shape. The
+// sourceRepo identifies which repo in the fork network the item came from.
+function mapIssueSummary(item, repoRef) {
+  return {
+    number: item.number,
+    title: item.title,
+    url: item.html_url,
+    state: item.state === 'closed' ? 'closed' : 'open',
+    author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
+    labels: Array.isArray(item.labels)
+      ? item.labels
+          .map((label) => {
+            if (typeof label === 'string') return null;
+            const name = typeof label?.name === 'string' ? label.name : '';
+            if (!name) return null;
+            return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+          })
+          .filter(Boolean)
+      : [],
+    sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source ?? 'origin' },
+  };
 }
 
 function setPrStatusCache(key, data, fetchedAt) {
@@ -1212,6 +1287,48 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
+      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
+
+      // An exact reference (bare number/#N or a GitHub issue URL) resolves the
+      // single issue directly, before the fork network is queried. A URL may
+      // name another repo in the project's network; anything outside it is an
+      // explicit rejection, never a free-text search.
+      const reference = searchQuery && effectivePage <= 1 ? parseGitHubReference(searchQuery) : null;
+      if (reference) {
+        const requestedRepo = reference.owner && reference.repo
+          ? { owner: reference.owner, repo: reference.repo }
+          : null;
+        const resolvedRepo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+        if (!resolvedRepo) {
+          return res.status(422).json({ error: 'Repository is not available for this project', code: 'repo_unavailable' });
+        }
+        const repoRef = { ...resolvedRepo, source: resolvedRepo.source ?? 'origin' };
+        if (reference.kind && reference.kind !== 'issue') {
+          return res.status(404).json({ error: 'Issue not found', code: 'not_found' });
+        }
+
+        const result = await octokit.rest.issues.get({
+          owner: repoRef.owner,
+          repo: repoRef.repo,
+          issue_number: reference.number,
+        }).catch((error) => {
+          if (error?.status === 404) return null;
+          throw error;
+        });
+        const issue = result?.data;
+        if (!issue || issue.pull_request) {
+          return res.status(404).json({ error: 'Issue not found', code: 'not_found' });
+        }
+
+        return res.json({
+          connected: true,
+          repo: repoRef,
+          issues: [mapIssueSummary(issue, repoRef)],
+          page: 1,
+          hasMore: false,
+        });
+      }
+
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
       const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
 
@@ -1221,27 +1338,7 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: true, repo: null, issues: [] });
       }
 
-      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
-
-      const mapIssueSummary = (item, repoRef) => ({
-        number: item.number,
-        title: item.title,
-        url: item.html_url,
-        state: item.state === 'closed' ? 'closed' : 'open',
-        author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
-        labels: Array.isArray(item.labels)
-          ? item.labels
-              .map((label) => {
-                if (typeof label === 'string') return null;
-                const name = typeof label?.name === 'string' ? label.name : '';
-                if (!name) return null;
-                return { name, color: typeof label?.color === 'string' ? label.color : undefined };
-              })
-              .filter(Boolean)
-          : [],
-        sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-      });
 
       if (searchQuery) {
         const repoQualifiers = reposToQuery
@@ -1268,7 +1365,10 @@ export function registerGitHubRoutes(app) {
           return res.json({ connected: true, repo, issues, page: effectivePage, hasMore });
         } catch (error) {
           console.error('Failed to search GitHub issues:', error);
-          return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
+          if (!isTimeoutError(error)) {
+            throw error;
+          }
+          return res.status(504).json({ error: 'Search timed out', code: 'search_timeout' });
         }
       }
 
@@ -1425,6 +1525,47 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
+      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
+
+      // An exact reference (bare number/#N or a GitHub pull URL) resolves the
+      // single pull request directly, before the fork network is queried. A URL
+      // may name another repo in the project's network; anything outside it is
+      // an explicit rejection, never a free-text search.
+      const reference = searchQuery && effectivePage <= 1 ? parseGitHubReference(searchQuery) : null;
+      if (reference) {
+        const requestedRepo = reference.owner && reference.repo
+          ? { owner: reference.owner, repo: reference.repo }
+          : null;
+        const resolvedRepo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+        if (!resolvedRepo) {
+          return res.status(422).json({ error: 'Repository is not available for this project', code: 'repo_unavailable' });
+        }
+        const repoRef = { ...resolvedRepo, source: resolvedRepo.source ?? 'origin' };
+        if (reference.kind && reference.kind !== 'pr') {
+          return res.status(404).json({ error: 'Pull request not found', code: 'not_found' });
+        }
+
+        const result = await octokit.rest.pulls.get({
+          owner: repoRef.owner,
+          repo: repoRef.repo,
+          pull_number: reference.number,
+        }).catch((error) => {
+          if (error?.status === 404) return null;
+          throw error;
+        });
+        if (!result?.data) {
+          return res.status(404).json({ error: 'Pull request not found', code: 'not_found' });
+        }
+
+        return res.json({
+          connected: true,
+          repo: repoRef,
+          prs: [mapPrSummary(result.data, repoRef)],
+          page: 1,
+          hasMore: false,
+        });
+      }
+
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
       const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
 
@@ -1434,39 +1575,7 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: true, repo: null, prs: [] });
       }
 
-      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
-
-      const mapPrSummary = (pr, repoRef) => {
-        const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
-        const headRepo = pr.head?.repo
-          ? {
-              owner: pr.head.repo.owner?.login,
-              repo: pr.head.repo.name,
-              url: pr.head.repo.html_url,
-              cloneUrl: pr.head.repo.clone_url,
-              sshUrl: pr.head.repo.ssh_url,
-            }
-          : null;
-        return {
-          number: pr.number,
-          title: pr.title,
-          url: pr.html_url,
-          state: mergedState,
-          draft: Boolean(pr.draft),
-          base: pr.base?.ref,
-          head: pr.head?.ref,
-          headSha: pr.head?.sha,
-          mergeable: pr.mergeable,
-          mergeableState: pr.mergeable_state,
-          author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
-          headLabel: pr.head?.label,
-          headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
-            ? headRepo
-            : null,
-          sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-        };
-      };
 
       if (searchQuery) {
         const repoQualifiers = reposToQuery
@@ -1513,7 +1622,10 @@ export function registerGitHubRoutes(app) {
           return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
         } catch (error) {
           console.error('Failed to search GitHub PRs:', error);
-          throw error;
+          if (!isTimeoutError(error)) {
+            throw error;
+          }
+          return res.status(504).json({ error: 'Search timed out', code: 'search_timeout' });
         }
       }
 

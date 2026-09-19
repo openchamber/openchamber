@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GitHubPullRequestSummary } from '@/lib/api/types';
+import { getGitHubApiErrorCode } from '@/lib/api/github-errors';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n } from '@/lib/i18n';
@@ -85,7 +86,14 @@ export function usePullRequestComparison(directory: string | null, branch: strin
       setList({ key, status: 'ready', prs: [...merged.values()], page, hasMore: Boolean(result.hasMore), error: null });
     } catch (error) {
       if (requestId.current === id && getRuntimeKey() === runtime && owner.current.key === key && owner.current.enabled) {
-        const message = error instanceof Error ? error.message : t('session.githubPrPicker.toast.loadMoreFailed');
+        const code = getGitHubApiErrorCode(error);
+        const message = code === 'search_timeout'
+          ? t('session.githubPrPicker.error.searchTimedOut')
+          : code === 'not_found'
+            ? t('session.githubPrPicker.error.prNotFound')
+            : code === 'repo_unavailable'
+              ? t('session.githubPrPicker.error.repoNotResolvable')
+              : error instanceof Error ? error.message : t('session.githubPrPicker.toast.loadMoreFailed');
         setList(previous ? { ...previous, error: message } : { key, status: 'error', message });
       }
     } finally {
