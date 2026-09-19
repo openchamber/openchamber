@@ -575,3 +575,42 @@ export function SettingsChipGroup<T extends string>({
     </div>
   );
 }
+
+interface SettingsChipMultiGroupProps {
+  values: readonly string[];
+  options: readonly string[];
+  onToggle: (value: string) => void;
+  className?: string;
+  'aria-label'?: string;
+}
+
+/** Multi-select chip picker: each chip toggles one member of `values`. */
+export function SettingsChipMultiGroup({
+  values,
+  options,
+  onToggle,
+  className,
+  'aria-label': ariaLabel,
+}: SettingsChipMultiGroupProps) {
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className={cn('flex flex-wrap items-center gap-1', className)}
+    >
+      {options.map((option) => (
+        <Button
+          key={option}
+          type="button"
+          variant="chip"
+          size="xs"
+          aria-pressed={values.includes(option)}
+          className="!font-normal"
+          onClick={() => onToggle(option)}
+        >
+          {option}
+        </Button>
+      ))}
+    </div>
+  );
+}

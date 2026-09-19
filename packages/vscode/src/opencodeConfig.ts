@@ -2198,11 +2198,27 @@ export const getProviderSources = (providerId: string, workingDirectory?: string
   const userExists = Object.prototype.hasOwnProperty.call(userProviders, providerId)
     || Object.prototype.hasOwnProperty.call(userProvidersAlias, providerId);
 
+  // Winning authored block, resolved with the same layer precedence the write
+  // path uses (custom > project > user, primary key before the legacy
+  // `providers` alias) so edit read-back reflects exactly the entry a save
+  // would rewrite — never catalog-resolved defaults.
+  const providerBlock = [
+    customProviders,
+    customProvidersAlias,
+    projectProviders,
+    projectProvidersAlias,
+    userProviders,
+    userProvidersAlias,
+  ].map((providers) => providers[providerId]).find(isPlainObject) ?? null;
+
   return {
-    auth: { exists: false },
-    user: { exists: userExists, path: layers.paths.userPath },
-    project: { exists: projectExists, path: layers.paths.projectPath ?? null },
-    custom: { exists: customExists, path: layers.paths.customPath },
+    sources: {
+      auth: { exists: false },
+      user: { exists: userExists, path: layers.paths.userPath },
+      project: { exists: projectExists, path: layers.paths.projectPath ?? null },
+      custom: { exists: customExists, path: layers.paths.customPath },
+    },
+    providerBlock,
   };
 };
 
@@ -2344,7 +2360,84 @@ export const validateCustomProviderConfig = (
     if (!modelName) {
       return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
     }
-    normalizedModels[trimmedId] = { name: modelName };
+
+    const normalizedModel: NormalizedCustomProviderModel = { name: modelName };
+
+    if (modelValue.attachment !== undefined) {
+      if (typeof modelValue.attachment !== 'boolean') {
+        return { ok: false as const, error: `Model "${trimmedId}" attachment must be a boolean` };
+      }
+      normalizedModel.attachment = modelValue.attachment;
+    }
+
+    if (modelValue.modalities !== undefined) {
+      if (!isPlainObject(modelValue.modalities)) {
+        return { ok: false as const, error: `Model "${trimmedId}" modalities must be an object` };
+      }
+      const modalities: Record<string, JsonValue> = {};
+      for (const channel of ['input', 'output'] as const) {
+        const raw = modelValue.modalities[channel];
+        if (raw === undefined) {
+          continue;
+        }
+        const stringItems = (Array.isArray(raw) ? raw : []).filter(
+          (token): token is string => typeof token === 'string' && token.trim().length > 0,
+        );
+        if (!Array.isArray(raw) || stringItems.length !== raw.length) {
+          return { ok: false as const, error: `Model "${trimmedId}" modalities.${channel} must be an array of strings` };
+        }
+        const tokens = [...new Set(stringItems.map((token) => token.trim()))];
+        if (tokens.length > 0) {
+          modalities[channel] = tokens;
+        }
+      }
+      if (Object.keys(modalities).length > 0) {
+        normalizedModel.modalities = modalities;
+      }
+    }
+
+    if (modelValue.limit !== undefined) {
+      if (!isPlainObject(modelValue.limit)) {
+        return { ok: false as const, error: `Model "${trimmedId}" limit must be an object` };
+      }
+      const limit: Record<string, JsonValue> = {};
+      for (const key of ['context', 'input', 'output'] as const) {
+        const raw = modelValue.limit[key];
+        if (raw === undefined) {
+          continue;
+        }
+        if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || !Number.isInteger(raw)) {
+          return { ok: false as const, error: `Model "${trimmedId}" limit.${key} must be a non-negative integer` };
+        }
+        limit[key] = raw;
+      }
+      if (Object.keys(limit).length > 0) {
+        normalizedModel.limit = limit;
+      }
+    }
+
+    if (modelValue.variants !== undefined) {
+      if (!isPlainObject(modelValue.variants)) {
+        return { ok: false as const, error: `Model "${trimmedId}" variants must be an object` };
+      }
+      const variants: Record<string, JsonValue> = {};
+      for (const [variantName, variantValue] of Object.entries(modelValue.variants)) {
+        const trimmedName = typeof variantName === 'string' ? variantName.trim() : '';
+        if (!trimmedName) {
+          return { ok: false as const, error: `Model "${trimmedId}" variant names must be non-empty` };
+        }
+        if (!isPlainObject(variantValue)) {
+          return { ok: false as const, error: `Model "${trimmedId}" variant "${trimmedName}" must be an object` };
+        }
+        // SAFETY: config comes from the JSONC parser, so a validated object value is JSON.
+        variants[trimmedName] = variantValue as JsonValue;
+      }
+      if (Object.keys(variants).length > 0) {
+        normalizedModel.variants = variants;
+      }
+    }
+
+    normalizedModels[trimmedId] = normalizedModel;
   }
 
   const normalized: NormalizedCustomProviderConfig = {
@@ -2389,9 +2482,12 @@ export const validateCustomProviderConfig = (
   return { ok: true as const, value: { providerId, config: normalized } };
 };
 
+const MANAGED_MODEL_KEYS = ['attachment', 'modalities', 'limit', 'variants'];
+
 const mergeCustomProviderConfig = (
   existingValue: JsonValue | undefined,
   normalizedConfig: NormalizedCustomProviderConfig,
+  manageModelCapabilities = false,
 ) => {
   const existing = isPlainObject(existingValue) ? existingValue : {};
   const existingOptions = isPlainObject(existing.options) ? existing.options : {};
@@ -2403,8 +2499,16 @@ const mergeCustomProviderConfig = (
   const existingModels = isPlainObject(existing.models) ? existing.models : {};
   const mergedModels = Object.fromEntries(
     Object.entries(normalizedConfig.models).map(([modelId, normalizedModel]) => {
-      const existingModel = isPlainObject(existingModels[modelId]) ? existingModels[modelId] : {};
-      return [modelId, { ...existingModel, ...normalizedModel }];
+      const existingModel = existingModels[modelId];
+      // SAFETY: existing models come from a parsed JSONC config file, so a plain-object
+      // entry holds only JSON values.
+      const baseModel = isPlainObject(existingModel) ? { ...(existingModel as Record<string, JsonValue>) } : {};
+      if (manageModelCapabilities) {
+        for (const key of MANAGED_MODEL_KEYS) {
+          delete baseModel[key];
+        }
+      }
+      return [modelId, { ...baseModel, ...normalizedModel }];
     }),
   );
 
@@ -2425,7 +2529,7 @@ export const upsertProviderConfig = (
   config: unknown,
   workingDirectory?: string,
   scope: 'user' | 'project' | 'custom' = 'user',
-  options: { hasStoredAuth?: boolean } = {},
+  options: { hasStoredAuth?: boolean; manageModelCapabilities?: boolean } = {},
 ) => {
   const validated = validateCustomProviderConfig(providerId, config, options);
   if (!validated.ok) {
@@ -2462,7 +2566,11 @@ export const upsertProviderConfig = (
     ?? providersAlias[validated.value.providerId];
   // SAFETY: config layers come from the JSONC parser, so provider entries are JSON values.
   const existingProvider = existingProviderValue as JsonValue | undefined;
-  const mergedConfig = mergeCustomProviderConfig(existingProvider, validated.value.config);
+  const mergedConfig = mergeCustomProviderConfig(
+    existingProvider,
+    validated.value.config,
+    Boolean(options.manageModelCapabilities),
+  );
   providerConfig[validated.value.providerId] = mergedConfig;
   targetConfig.provider = providerConfig;
   if (Object.prototype.hasOwnProperty.call(providersAlias, validated.value.providerId)) {

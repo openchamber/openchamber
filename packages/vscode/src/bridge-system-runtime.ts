@@ -474,10 +474,10 @@ export async function handleSystemBridgeMessage(
         const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
           ? directory.trim()
           : ctx?.manager?.getWorkingDirectory();
-        const sources = getProviderSources(providerId, workingDirectory);
+        const { sources, providerBlock } = getProviderSources(providerId, workingDirectory);
         const auth = getProviderAuth(providerId);
         sources.auth.exists = Boolean(auth);
-        return { id, type, success: true, data: { providerId, sources } };
+        return { id, type, success: true, data: { providerId, sources, providerBlock } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
@@ -491,12 +491,14 @@ export async function handleSystemBridgeMessage(
         config,
         scope,
         directory,
+        manageModelCapabilities,
       } = (payload || {}) as {
         providerID?: string;
         providerId?: string;
         config?: unknown;
         scope?: string;
         directory?: string;
+        manageModelCapabilities?: boolean;
       };
       const providerId = (typeof providerID === 'string' && providerID.trim())
         || (typeof providerIdAlias === 'string' && providerIdAlias.trim())
@@ -520,7 +522,7 @@ export async function handleSystemBridgeMessage(
           config,
           workingDirectory,
           normalizedScope,
-          { hasStoredAuth: Boolean(getProviderAuth(providerId)) },
+          { hasStoredAuth: Boolean(getProviderAuth(providerId)), manageModelCapabilities: manageModelCapabilities === true },
         );
         await ctx?.manager?.restart();
         return {

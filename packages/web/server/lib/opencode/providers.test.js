@@ -134,6 +134,18 @@ describe('custom provider config persistence', () => {
     const sources = getProviderSources('campus-llm', projectDir);
     expect(sources.sources.project.exists).toBe(true);
     expect(sources.sources.project.path).toBe(result.path);
+    expect(sources.providerBlock).toEqual({
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Campus LLM',
+      env: ['CAMPUS_KEY'],
+      options: {
+        baseURL: 'https://llm.example.edu/v1',
+        headers: { 'X-Campus': '1' },
+      },
+      models: {
+        'fast-model': { name: 'Fast' },
+      },
+    });
   });
 
   test('upsertProviderConfig updates existing entry and clears disabled_providers', () => {
@@ -302,6 +314,52 @@ describe('custom provider config persistence', () => {
     expect(getProviderSources('temp-provider', projectDir).sources.project.exists).toBe(false);
   });
 
+  test('getProviderSources returns the winning authored block with custom > project precedence', () => {
+    writeJson(path.join(projectDir, 'opencode.json'), {
+      provider: {
+        'campus-llm': {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'Project layer',
+          options: { baseURL: 'https://project.example.com/v1' },
+          models: { m: { name: 'M' } },
+        },
+      },
+    });
+
+    expect(getProviderSources('campus-llm', projectDir).providerBlock.name).toBe('Project layer');
+
+    const customPath = path.join(projectDir, 'custom-opencode.json');
+    const previousEnv = process.env.OPENCODE_CONFIG;
+    process.env.OPENCODE_CONFIG = customPath;
+    try {
+      // Legacy `providers` alias must be picked up like the primary key.
+      writeJson(customPath, {
+        providers: {
+          'campus-llm': {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'Custom layer',
+            options: { baseURL: 'https://custom.example.com/v1' },
+            models: { m: { name: 'M' } },
+          },
+        },
+      });
+
+      const sources = getProviderSources('campus-llm', projectDir);
+      expect(sources.providerBlock.name).toBe('Custom layer');
+      expect(sources.sources.custom.exists).toBe(true);
+    } finally {
+      if (previousEnv === undefined) {
+        delete process.env.OPENCODE_CONFIG;
+      } else {
+        process.env.OPENCODE_CONFIG = previousEnv;
+      }
+    }
+  });
+
+  test('getProviderSources omits providerBlock for catalog-only providers', () => {
+    expect(getProviderSources('never-authored', projectDir).providerBlock).toBeNull();
+  });
+
   test('failed validation does not write config', () => {
     const configPath = path.join(projectDir, 'opencode.json');
     expect(() => upsertProviderConfig('ok', {
@@ -411,5 +469,142 @@ describe('custom provider config persistence', () => {
         process.env.OPENCODE_CONFIG = previousEnv;
       }
     }
+  });
+
+  test('validateCustomProviderConfig rejects malformed model capabilities', () => {
+    const base = { name: 'X', options: { baseURL: 'https://api.example.com' } };
+    const invalid = [
+      { m: { name: 'M', attachment: 'true' } },
+      { m: { name: 'M', attachment: 1 } },
+      { m: { name: 'M', limit: { context: -1 } } },
+      { m: { name: 'M', limit: { context: 1.5 } } },
+      { m: { name: 'M', modalities: { input: 'text' } } },
+      { m: { name: 'M', modalities: { input: ['', '  '] } } },
+      { m: { name: 'M', variants: { '': {} } } },
+      { m: { name: 'M', variants: { low: 'nope' } } },
+    ];
+    for (const models of invalid) {
+      expect(validateCustomProviderConfig('ok', { ...base, models }, { hasStoredAuth: true }).ok).toBe(false);
+    }
+  });
+
+  test('manageModelCapabilities does not clear capabilities when a malformed attachment is sent', () => {
+    const configPath = path.join(projectDir, 'opencode.json');
+    writeJson(configPath, {
+      provider: {
+        'campus-llm': {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'Old',
+          options: { baseURL: 'https://old.example.edu/v1' },
+          models: {
+            kept: { name: 'Kept', attachment: true },
+          },
+        },
+      },
+    });
+
+    expect(() => upsertProviderConfig('campus-llm', {
+      name: 'Campus LLM',
+      options: { baseURL: 'https://new.example.edu/v1' },
+      models: { kept: { name: 'Kept', attachment: 'true' } },
+    }, projectDir, 'project', { hasStoredAuth: true, manageModelCapabilities: true })).toThrow();
+
+    expect(readJson(configPath).provider['campus-llm'].models.kept).toEqual({
+      name: 'Kept',
+      attachment: true,
+    });
+  });
+
+  test('upsertProviderConfig normalizes and persists model capabilities', () => {
+    const result = upsertProviderConfig('cap-llm', {
+      name: 'Cap LLM',
+      options: { baseURL: 'https://cap.example.edu/v1' },
+      models: {
+        m: {
+          name: 'M',
+          attachment: true,
+          modalities: { input: ['text', ' image '], output: ['text'] },
+          limit: { context: 128000, output: 4096 },
+          variants: { low: { reasoningEffort: 'low' } },
+        },
+      },
+      env: ['CAP_KEY'],
+    }, projectDir, 'project');
+
+    expect(readJson(result.path).provider['cap-llm'].models.m).toEqual({
+      name: 'M',
+      attachment: true,
+      modalities: { input: ['text', 'image'], output: ['text'] },
+      limit: { context: 128000, output: 4096 },
+      variants: { low: { reasoningEffort: 'low' } },
+    });
+  });
+
+  test('manageModelCapabilities clears removed capability fields but keeps unmanaged metadata', () => {
+    const configPath = path.join(projectDir, 'opencode.json');
+    writeJson(configPath, {
+      provider: {
+        'campus-llm': {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'Old',
+          options: { baseURL: 'https://old.example.edu/v1' },
+          models: {
+            kept: {
+              name: 'Kept',
+              attachment: true,
+              reasoning: true,
+              modalities: { input: ['text', 'image'], output: ['text'] },
+              limit: { context: 1000, output: 200 },
+              variants: { low: { reasoningEffort: 'low' } },
+              options: { instructions: 'stay' },
+            },
+          },
+        },
+      },
+    });
+
+    // The capability-aware form resubmits the model with only the fields still set.
+    upsertProviderConfig('campus-llm', {
+      name: 'Campus LLM',
+      options: { baseURL: 'https://new.example.edu/v1' },
+      models: { kept: { name: 'Kept' } },
+    }, projectDir, 'project', { hasStoredAuth: true, manageModelCapabilities: true });
+
+    expect(readJson(configPath).provider['campus-llm'].models.kept).toEqual({
+      name: 'Kept',
+      reasoning: true,
+      options: { instructions: 'stay' },
+    });
+  });
+
+  test('upsertProviderConfig reads and rewrites a project opencode.jsonc', () => {
+    const configPath = path.join(projectDir, 'opencode.jsonc');
+    fs.writeFileSync(configPath, [
+      '{',
+      '  // capabilities live here',
+      '  "provider": {',
+      '    "campus-llm": {',
+      '      "npm": "@ai-sdk/openai-compatible",',
+      '      "name": "Old",',
+      '      "options": { "baseURL": "https://old.example.edu/v1" },',
+      '      "models": { "a": { "name": "A" } },',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n'), 'utf8');
+
+    const result = upsertProviderConfig('campus-llm', {
+      name: 'Campus LLM',
+      options: { baseURL: 'https://llm.example.edu/v1' },
+      models: { b: { name: 'B' } },
+    }, projectDir, 'project', { hasStoredAuth: true });
+
+    expect(result.path).toBe(configPath);
+    // Rewrite drops comments but keeps JSON valid at the same .jsonc path and backs up first.
+    const written = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(written.provider['campus-llm'].name).toBe('Campus LLM');
+    expect(written.provider['campus-llm'].models).toEqual({ b: { name: 'B' } });
+    expect(fs.existsSync(`${configPath}.openchamber.backup`)).toBe(true);
   });
 });

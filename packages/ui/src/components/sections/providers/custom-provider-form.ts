@@ -21,16 +21,45 @@ export type CustomProviderTranslator = (
   vars?: Record<string, string | number | boolean>,
 ) => string;
 
-export type ModelRow = {
-  row: string;
-  id: string;
-  name: string;
-};
-
 export type HeaderRow = {
   row: string;
   key: string;
   value: string;
+};
+
+/** Tri-state for `attachment`: '' leaves the field out of the config. */
+export type ModelAttachmentState = '' | 'true' | 'false';
+
+type FormJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FormJsonValue[]
+  | { [key: string]: FormJsonValue };
+type FormJsonObject = { [key: string]: FormJsonValue };
+
+/** Modality tokens offered as chips; other tokens found in configs are preserved. */
+export const MODEL_MODALITY_OPTIONS = ['text', 'image', 'audio', 'video', 'pdf'] as const;
+
+/** Reasoning efforts offered as variant chips; each serializes to `{ reasoningEffort: <name> }`. */
+export const MODEL_REASONING_EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+const REASONING_EFFORT_OPTION_SET: ReadonlySet<string> = new Set(MODEL_REASONING_EFFORT_OPTIONS);
+
+export type ModelRow = {
+  row: string;
+  id: string;
+  name: string;
+  attachment: ModelAttachmentState;
+  modalitiesInput: string[];
+  modalitiesOutput: string[];
+  limitContext?: number;
+  limitInput?: number;
+  limitOutput?: number;
+  variantEfforts: string[];
+  // Hand-authored variants the chips cannot express; kept verbatim so editing never loses them.
+  variantExtras: FormJsonObject;
 };
 
 export type CustomProviderFormState = {
@@ -60,6 +89,21 @@ export type HeaderFieldErrors = {
   value?: string;
 };
 
+export type ModelCapabilityConfig = {
+  name: string;
+  attachment?: boolean;
+  modalities?: {
+    input?: string[];
+    output?: string[];
+  };
+  limit?: {
+    context?: number;
+    input?: number;
+    output?: number;
+  };
+  variants?: FormJsonObject;
+};
+
 export type CustomProviderConfig = {
   npm: CustomProviderNpm;
   name: string;
@@ -68,7 +112,7 @@ export type CustomProviderConfig = {
     baseURL: string;
     headers?: Record<string, string>;
   };
-  models: Record<string, { name: string }>;
+  models: Record<string, ModelCapabilityConfig>;
 };
 
 export type CustomProviderPersistPlan = {
@@ -100,13 +144,51 @@ export type ValidateCustomProviderResult = {
   result?: CustomProviderPersistPlan;
 };
 
+export type ProviderModelLikeForCustomForm = {
+  id?: string;
+  name?: string;
+  api?: { npm?: string };
+  attachment?: boolean;
+  modalities?: { input?: string[]; output?: string[] };
+  limit?: { context?: number; input?: number; output?: number };
+  /** Read-only view of authored variants; the SDK types values as `unknown`. */
+  variants?: { [key: string]: unknown };
+};
+
 export type ProviderLikeForCustomForm = {
   id: string;
   name?: string;
+  /** Authored protocol adapter (`@ai-sdk/...`) straight from the config block. */
+  npm?: string;
   env?: string[];
   options?: Record<string, unknown> | null;
-  models?: Array<{ id?: string; name?: string; api?: { npm?: string } }> | Record<string, unknown>;
+  models?: Array<ProviderModelLikeForCustomForm> | Record<string, ProviderModelLikeForCustomForm>;
 };
+
+/**
+ * Authored provider block as stored in an OpenCode config layer, where the map
+ * key is the provider id. Matches the SDK `Config.provider` entry shape.
+ */
+export type AuthoredProviderBlock = Omit<ProviderLikeForCustomForm, 'id'> & { id?: string };
+
+/**
+ * Stamps the provider id onto an authored provider block handed over by the
+ * owning runtime (OpenChamber server route / VS Code bridge). The block carries
+ * exactly the keys the user authored — capability fields read from it must not
+ * be seeded with resolver defaults from the resolved provider list. Returns
+ * null when the runtime delivered no block, which callers must surface as a
+ * read failure instead of falling back to resolved data. Both runtimes deliver
+ * a plain object or null; fields are validated where they are read.
+ */
+export function findAuthoredProviderBlock(
+  providerId: string,
+  block: AuthoredProviderBlock | null | undefined,
+): ProviderLikeForCustomForm | null {
+  if (!block) {
+    return null;
+  }
+  return { ...block, id: block.id || providerId };
+}
 
 let rowCounter = 0;
 
@@ -116,6 +198,11 @@ export const createModelRow = (): ModelRow => ({
   row: nextRow(),
   id: '',
   name: '',
+  attachment: '',
+  modalitiesInput: [],
+  modalitiesOutput: [],
+  variantEfforts: [],
+  variantExtras: {},
 });
 
 export const createHeaderRow = (): HeaderRow => ({
@@ -224,6 +311,116 @@ export function resolveProviderConfigScope(
   return 'user';
 }
 
+function readModalities(model: ProviderModelLikeForCustomForm) {
+  return {
+    input: model.modalities?.input ?? [],
+    output: model.modalities?.output ?? [],
+  };
+}
+
+function readAttachment(model: ProviderModelLikeForCustomForm): ModelAttachmentState {
+  if (model.attachment === true) {
+    return 'true';
+  }
+  if (model.attachment === false) {
+    return 'false';
+  }
+  return '';
+}
+
+function readVariants(value: ProviderModelLikeForCustomForm['variants']) {
+  const efforts: string[] = [];
+  const extras: FormJsonObject = {};
+  for (const [name, rawValue] of Object.entries(value ?? {})) {
+    const jsonText = JSON.stringify(rawValue ?? {});
+    if (REASONING_EFFORT_OPTION_SET.has(name) && jsonText === JSON.stringify({ reasoningEffort: name })) {
+      efforts.push(name);
+      continue;
+    }
+    try {
+      // SAFETY: jsonText comes straight from JSON.stringify, so parsing it back yields a JSON value.
+      extras[name] = JSON.parse(jsonText) as FormJsonValue;
+    } catch {
+      extras[name] = {};
+    }
+  }
+  return { efforts, extras };
+}
+
+function modelRowFromProviderModel(model: ProviderModelLikeForCustomForm): ModelRow {
+  const id = model.id ?? '';
+  const modalities = readModalities(model);
+  const variants = readVariants(model.variants);
+  return {
+    row: nextRow(),
+    id,
+    name: model.name || id,
+    attachment: readAttachment(model),
+    modalitiesInput: modalities.input,
+    modalitiesOutput: modalities.output,
+    limitContext: model.limit?.context,
+    limitInput: model.limit?.input,
+    limitOutput: model.limit?.output,
+    variantEfforts: variants.efforts,
+    variantExtras: variants.extras,
+  };
+}
+
+function serializeModelConfig(model: ModelRow): ModelCapabilityConfig {
+  const entry: ModelCapabilityConfig = { name: model.name.trim() };
+
+  if (model.attachment === 'true') {
+    entry.attachment = true;
+  } else if (model.attachment === 'false') {
+    entry.attachment = false;
+  }
+
+  if (model.modalitiesInput.length > 0 || model.modalitiesOutput.length > 0) {
+    const modalities: NonNullable<ModelCapabilityConfig['modalities']> = {};
+    if (model.modalitiesInput.length > 0) {
+      modalities.input = [...model.modalitiesInput];
+    }
+    if (model.modalitiesOutput.length > 0) {
+      modalities.output = [...model.modalitiesOutput];
+    }
+    entry.modalities = modalities;
+  }
+
+  const limit: NonNullable<ModelCapabilityConfig['limit']> = {};
+  if (model.limitContext !== undefined) {
+    limit.context = model.limitContext;
+  }
+  if (model.limitInput !== undefined) {
+    limit.input = model.limitInput;
+  }
+  if (model.limitOutput !== undefined) {
+    limit.output = model.limitOutput;
+  }
+  if (Object.keys(limit).length > 0) {
+    entry.limit = limit;
+  }
+
+  const variants: FormJsonObject = {};
+  for (const effort of model.variantEfforts) {
+    variants[effort] = { reasoningEffort: effort };
+  }
+  for (const [name, value] of Object.entries(model.variantExtras)) {
+    variants[name] = value;
+  }
+  if (Object.keys(variants).length > 0) {
+    entry.variants = variants;
+  }
+
+  return entry;
+}
+
+/**
+ * Maps an authored provider config block into editable form state.
+ * Expects the raw config-layer block (`findAuthoredProviderBlock` result) —
+ * capability fields reflect exactly the keys the user authored, so unsetting
+ * one in the form and saving deletes it instead of materializing resolver
+ * defaults from the resolved provider list.
+ */
 export function providerToCustomFormState(provider: ProviderLikeForCustomForm): CustomProviderFormState {
   const options = provider.options && typeof provider.options === 'object' ? provider.options : {};
   const baseURL = typeof options.baseURL === 'string' ? options.baseURL : '';
@@ -234,37 +431,26 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string')
     .map(([key, value]) => ({ row: nextRow(), key, value }));
 
-  const modelEntries = Array.isArray(provider.models)
+  const rawModelEntries: ProviderModelLikeForCustomForm[] = Array.isArray(provider.models)
     ? provider.models
     : (provider.models && typeof provider.models === 'object'
-      ? Object.entries(provider.models).map(([id, value]) => ({
-          id,
-          name: value && typeof value === 'object' && 'name' in value && typeof (value as { name?: unknown }).name === 'string'
-            ? (value as { name: string }).name
-            : id,
-        }))
+      ? Object.entries(provider.models).map(([id, value]) => ({ ...value, id: value?.id ?? id }))
       : []);
 
-  const models = modelEntries.length > 0
-    ? modelEntries.map((model) => ({
-        row: nextRow(),
-        id: typeof model?.id === 'string' ? model.id : '',
-        name: typeof model?.name === 'string' ? model.name : (typeof model?.id === 'string' ? model.id : ''),
-      }))
+  const models = rawModelEntries.length > 0
+    ? rawModelEntries.map(modelRowFromProviderModel)
     : [createModelRow()];
 
   const envName = Array.isArray(provider.env)
     ? provider.env.find((entry) => typeof entry === 'string' && entry.trim().length > 0)?.trim()
     : undefined;
 
-  const modelWithApi = modelEntries.find(
-    (model): model is { id?: string; name?: string; api?: { npm?: string } } => 'api' in model,
-  );
+  const modelWithApi = rawModelEntries.find((model) => model && typeof model.api === 'object' && model.api !== null);
 
   return {
     providerID: provider.id,
     name: typeof provider.name === 'string' && provider.name.trim() ? provider.name : provider.id,
-    protocol: protocolFromNpm(modelWithApi?.api?.npm),
+    protocol: protocolFromNpm(provider.npm || modelWithApi?.api?.npm),
     baseURL,
     apiKey: envName ? `{env:${envName}}` : '',
     models,
@@ -313,7 +499,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       : undefined;
 
   const seenModels = new Set<string>();
-  const modelErrors = input.form.models.map((model) => {
+  const modelErrors: ModelFieldErrors[] = input.form.models.map((model) => {
     const id = model.id.trim();
     const modelIdError = !id
       ? input.t('settings.providers.page.custom.error.required')
@@ -326,12 +512,16 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
     const modelNameError = !model.name.trim()
       ? input.t('settings.providers.page.custom.error.required')
       : undefined;
-    return { id: modelIdError, name: modelNameError };
+
+    return {
+      id: modelIdError,
+      name: modelNameError,
+    };
   });
 
   const modelsValid = modelErrors.every((entry) => !entry.id && !entry.name);
   const modelConfig = Object.fromEntries(
-    input.form.models.map((model) => [model.id.trim(), { name: model.name.trim() }]),
+    input.form.models.map((model) => [model.id.trim(), serializeModelConfig(model)]),
   );
 
   const seenHeaders = new Set<string>();
@@ -417,6 +607,10 @@ export function buildAuthSetRequest(plan: CustomProviderPersistPlan): {
  * Builds the OpenChamber provider upsert request body (config persistence).
  * `scope` selects the OpenCode config layer (user/project/custom). Create
  * defaults to user; edit must pass the provider's effective existing layer.
+ *
+ * `manageModelCapabilities` tells the server this form authors the four model
+ * capability fields (attachment/modalities/limit/variants), so it should apply
+ * removals rather than passively preserving stale values for those keys.
  */
 export function buildProviderUpsertRequest(
   plan: CustomProviderPersistPlan,
@@ -425,10 +619,12 @@ export function buildProviderUpsertRequest(
   providerID: string;
   config: CustomProviderConfig;
   scope: ProviderConfigScope;
+  manageModelCapabilities: true;
 } {
   return {
     providerID: plan.providerID,
     config: plan.config,
     scope: options?.scope ?? 'user',
+    manageModelCapabilities: true,
   };
 }

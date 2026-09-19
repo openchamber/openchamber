@@ -626,6 +626,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       return res.json({
         providerId,
         sources: sources.sources,
+        providerBlock: sources.providerBlock,
       });
     } catch (error) {
       console.error('Failed to get provider sources:', error);
@@ -673,7 +674,8 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
       const { getProviderAuth } = await getAuthLibrary();
       const hasStoredAuth = Boolean(getProviderAuth(providerID));
-      const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
+      const manageModelCapabilities = req.body?.manageModelCapabilities === true;
+      const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth, manageModelCapabilities });
 
       return res.json({
         ...buildDeferredRestartResponse(

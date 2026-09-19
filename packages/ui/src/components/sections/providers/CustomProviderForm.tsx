@@ -2,19 +2,29 @@ import React from 'react';
 import {
   SettingsSection,
   SettingsStackedField,
+  SettingsChipMultiGroup,
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
   SETTINGS_HELPER_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_CONTROL_CLUSTER_CLASS,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import {
   CUSTOM_PROVIDER_PROTOCOLS,
+  MODEL_MODALITY_OPTIONS,
+  MODEL_REASONING_EFFORT_OPTIONS,
   createEmptyCustomProviderForm,
   createHeaderRow,
   createModelRow,
@@ -25,6 +35,7 @@ import {
   type FieldErrors,
   type HeaderFieldErrors,
   type ModelFieldErrors,
+  type ModelRow,
 } from './custom-provider-form';
 
 type CustomProviderFormProps = {
@@ -94,6 +105,24 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
       return next;
     });
   };
+
+  const patchModel = (index: number, patch: Partial<ModelRow>) => {
+    setForm((prev) => ({
+      ...prev,
+      models: prev.models.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)),
+    }));
+    setModelErrors((prev) => {
+      const next = [...prev];
+      next[index] = {};
+      return next;
+    });
+  };
+
+  const toggleToken = (list: readonly string[], value: string): string[] => (
+    list.includes(value)
+      ? list.filter((entry) => entry !== value)
+      : [...list, value]
+  );
 
   const setHeader = (index: number, key: 'key' | 'value', value: string) => {
     setForm((prev) => ({
@@ -248,7 +277,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
         contentClassName={SETTINGS_FIELDS_STACK_CLASS}
       >
         {form.models.map((model, index) => (
-          <div key={model.row} className={`${SETTINGS_CONTROL_CLUSTER_CLASS} space-y-2`}>
+          <div key={model.row} className="w-full max-w-[36rem] space-y-2">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1 space-y-2">
                 <div>
@@ -301,6 +330,154 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
                 <Icon name="delete-bin" className="size-4" />
               </Button>
             </div>
+
+            <Collapsible className="rounded-lg border border-border">
+              <CollapsibleTrigger className="group">
+                <span className={SETTINGS_FIELD_LABEL_CLASS}>
+                  {t('settings.providers.page.custom.models.capabilities.title')}
+                </span>
+                <Icon name="arrow-down-s" className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-4 border-t border-border px-3 pb-3 pt-3">
+                  <SettingsStackedField
+                    label={t('settings.providers.page.custom.models.capabilities.attachment.label')}
+                    info={t('settings.providers.page.custom.models.capabilities.attachment.info')}
+                  >
+                    <Select
+                      value={model.attachment === '' ? 'unset' : model.attachment}
+                      onValueChange={(value) => {
+                        const next = value === 'true' ? 'true' : value === 'false' ? 'false' : '';
+                        patchModel(index, { attachment: next });
+                      }}
+                      disabled={busy}
+                    >
+                      <SelectTrigger
+                        size={SETTINGS_SELECT_SIZE}
+                        className={SETTINGS_SELECT_TRIGGER_CLASS}
+                        aria-label={t('settings.providers.page.custom.models.capabilities.attachment.label')}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unset">{t('settings.providers.page.custom.models.capabilities.attachment.unset')}</SelectItem>
+                        <SelectItem value="true">{t('settings.providers.page.custom.models.capabilities.attachment.enabled')}</SelectItem>
+                        <SelectItem value="false">{t('settings.providers.page.custom.models.capabilities.attachment.disabled')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </SettingsStackedField>
+
+                  <SettingsStackedField
+                    label={t('settings.providers.page.custom.models.capabilities.modalities.input.label')}
+                    info={t('settings.providers.page.custom.models.capabilities.modalities.info')}
+                  >
+                    <SettingsChipMultiGroup
+                      values={model.modalitiesInput}
+                      options={[...new Set([...MODEL_MODALITY_OPTIONS, ...model.modalitiesInput])]}
+                      onToggle={(value) => patchModel(index, { modalitiesInput: toggleToken(model.modalitiesInput, value) })}
+                      aria-label={t('settings.providers.page.custom.models.capabilities.modalities.input.label')}
+                    />
+                  </SettingsStackedField>
+
+                  <SettingsStackedField
+                    label={t('settings.providers.page.custom.models.capabilities.modalities.output.label')}
+                  >
+                    <SettingsChipMultiGroup
+                      values={model.modalitiesOutput}
+                      options={[...new Set([...MODEL_MODALITY_OPTIONS, ...model.modalitiesOutput])]}
+                      onToggle={(value) => patchModel(index, { modalitiesOutput: toggleToken(model.modalitiesOutput, value) })}
+                      aria-label={t('settings.providers.page.custom.models.capabilities.modalities.output.label')}
+                    />
+                  </SettingsStackedField>
+
+                  <div className="space-y-1.5">
+                    <label className={SETTINGS_FIELD_LABEL_CLASS}>
+                      {t('settings.providers.page.custom.models.capabilities.limit.title')}
+                    </label>
+                    <div className="grid grid-cols-1 gap-2 @xl:grid-cols-3">
+                      <div className="min-w-0 space-y-1">
+                        <span className={SETTINGS_FIELD_LABEL_CLASS}>
+                          {t('settings.providers.page.custom.models.capabilities.limit.context')}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={model.limitContext === undefined ? '' : String(model.limitContext)}
+                          onChange={(event) => {
+                            const raw = event.target.value.trim();
+                            const parsed = raw === '' ? Number.NaN : Number(raw);
+                            patchModel(index, {
+                              limitContext: Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : undefined,
+                            });
+                          }}
+                          disabled={busy}
+                          aria-label={t('settings.providers.page.custom.models.capabilities.limit.context')}
+                          className="h-8 rounded-md px-3 font-mono text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <span className={SETTINGS_FIELD_LABEL_CLASS}>
+                          {t('settings.providers.page.custom.models.capabilities.limit.input')}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={model.limitInput === undefined ? '' : String(model.limitInput)}
+                          onChange={(event) => {
+                            const raw = event.target.value.trim();
+                            const parsed = raw === '' ? Number.NaN : Number(raw);
+                            patchModel(index, {
+                              limitInput: Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : undefined,
+                            });
+                          }}
+                          disabled={busy}
+                          aria-label={t('settings.providers.page.custom.models.capabilities.limit.input')}
+                          className="h-8 rounded-md px-3 font-mono text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <span className={SETTINGS_FIELD_LABEL_CLASS}>
+                          {t('settings.providers.page.custom.models.capabilities.limit.output')}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={model.limitOutput === undefined ? '' : String(model.limitOutput)}
+                          onChange={(event) => {
+                            const raw = event.target.value.trim();
+                            const parsed = raw === '' ? Number.NaN : Number(raw);
+                            patchModel(index, {
+                              limitOutput: Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : undefined,
+                            });
+                          }}
+                          disabled={busy}
+                          aria-label={t('settings.providers.page.custom.models.capabilities.limit.output')}
+                          className="h-8 rounded-md px-3 font-mono text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className={SETTINGS_FIELD_LABEL_CLASS}>
+                      {t('settings.providers.page.custom.models.capabilities.variants.title')}
+                    </label>
+                    <SettingsChipMultiGroup
+                      values={model.variantEfforts}
+                      options={[...MODEL_REASONING_EFFORT_OPTIONS]}
+                      onToggle={(value) => patchModel(index, { variantEfforts: toggleToken(model.variantEfforts, value) })}
+                      aria-label={t('settings.providers.page.custom.models.capabilities.variants.title')}
+                    />
+                    <p className={SETTINGS_HELPER_CLASS}>
+                      {t('settings.providers.page.custom.models.capabilities.variants.info')}
+                    </p>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         ))}
         <Button

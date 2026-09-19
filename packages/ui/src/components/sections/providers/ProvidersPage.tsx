@@ -45,9 +45,11 @@ import {
   buildAuthSetRequest,
   buildProviderUpsertRequest,
   CUSTOM_PROVIDER_ID,
+  findAuthoredProviderBlock,
   isConfigDefinedCustomProvider,
   providerToCustomFormState,
   resolveProviderConfigScope,
+  type AuthoredProviderBlock,
   type CustomProviderFormState,
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
@@ -183,6 +185,11 @@ export const ProvidersPage: React.FC = () => {
   const [providerSearchQuery, setProviderSearchQuery] = React.useState('');
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
+  // Authored provider blocks delivered alongside the source snapshot. Editing
+  // must map from this raw config-layer data: resolved provider payloads carry
+  // catalog defaults whose materialization into user config is exactly what
+  // capability management has to avoid.
+  const [providerConfigBlocks, setProviderConfigBlocks] = React.useState<Record<string, AuthoredProviderBlock>>({});
   // Bumped after auth writes so the source snapshot is refetched even when the
   // selected provider id is unchanged (OAuth/API key success path).
   const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
@@ -388,11 +395,27 @@ export const ProvidersPage: React.FC = () => {
         }
 
         const sources = (payload?.sources ?? payload?.data?.sources) as ProviderSources | undefined;
+        // SAFETY: the owning runtime (server route / VS Code bridge) serializes the authored
+        // provider block; providerToCustomFormState validates every field it reads from it.
+        const providerBlock = (payload?.providerBlock ?? payload?.data?.providerBlock) as AuthoredProviderBlock | undefined;
         if (!cancelled && sources) {
           setProviderSources((prev) => ({
             ...prev,
             [selectedProviderId]: sources,
           }));
+        }
+        if (!cancelled) {
+          setProviderConfigBlocks((prev) => {
+            if (providerBlock) {
+              return { ...prev, [selectedProviderId]: providerBlock };
+            }
+            if (!(selectedProviderId in prev)) {
+              return prev;
+            }
+            const next = { ...prev };
+            delete next[selectedProviderId];
+            return next;
+          });
         }
       } catch (error) {
         if (!cancelled) {
@@ -935,7 +958,19 @@ export const ProvidersPage: React.FC = () => {
                 className="!font-normal"
                 onClick={() => {
                   setCustomAuthFailureHint(null);
-                  setEditingCustomFormInitial(providerToCustomFormState(selectedProvider));
+                  // Map from the authored config block, not the resolved
+                  // provider: capability fields must reflect the keys the user
+                  // actually wrote, so clearing one deletes it on save instead
+                  // of materializing resolver defaults.
+                  const authoredProvider = findAuthoredProviderBlock(
+                    selectedProvider.id,
+                    providerConfigBlocks[selectedProvider.id],
+                  );
+                  if (!authoredProvider) {
+                    toast.error(t('settings.providers.page.toast.customProviderEditLoadFailed'));
+                    return;
+                  }
+                  setEditingCustomFormInitial(providerToCustomFormState(authoredProvider));
                   setEditingCustomScope(resolveProviderConfigScope(selectedSources));
                   setEditingCustomProviderId(selectedProvider.id);
                 }}
