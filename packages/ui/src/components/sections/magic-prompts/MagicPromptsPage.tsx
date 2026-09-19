@@ -205,6 +205,13 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'session.fusion.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'composer.enhance': {
+    titleKey: 'settings.magicPrompts.page.group.composerEnhance.title',
+    descriptionKey: 'settings.magicPrompts.page.group.composerEnhance.description',
+    blocks: [
+      { id: 'composer.enhance.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
 };
 
 const hasOwn = (input: Record<string, string>, key: string) => Object.prototype.hasOwnProperty.call(input, key);

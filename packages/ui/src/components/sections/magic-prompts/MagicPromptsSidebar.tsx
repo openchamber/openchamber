@@ -63,6 +63,12 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
           { id: 'session.fusion', titleKey: 'settings.magicPrompts.sidebar.item.sessionFusion' },
         ],
       },
+      {
+        groupKey: 'settings.magicPrompts.sidebar.group.composer',
+        items: [
+          { id: 'composer.enhance', titleKey: 'settings.magicPrompts.sidebar.item.composerEnhance' },
+        ],
+      },
     ] as const;
   }, []);
 

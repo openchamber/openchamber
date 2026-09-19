@@ -24,6 +24,7 @@ import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 import { FocusModeButton } from './FocusModeButton';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
+import { PromptEnhanceButton } from './PromptEnhanceButton';
 import type { BtwSelection } from '@/stores/useBtwStore';
 
 const MemoModelControls = React.memo(ModelControls);
@@ -52,6 +53,11 @@ export interface ComposerFooterProps {
     permissionAutoAcceptEnabled: boolean;
     isPermissionAutoAcceptInteractive: boolean;
     dictationActive: boolean;
+
+    canEnhance: boolean;
+    isEnhancing: boolean;
+    onEnhance: () => void;
+    onCancelEnhance?: () => void;
 
     onOpenSettings?: () => void;
     onPickLocalFiles: () => void;
@@ -100,6 +106,10 @@ export function ComposerFooter(props: ComposerFooterProps) {
         permissionAutoAcceptEnabled,
         isPermissionAutoAcceptInteractive,
         dictationActive,
+        canEnhance,
+        isEnhancing,
+        onEnhance,
+        onCancelEnhance,
         onOpenSettings,
         onPickLocalFiles,
         onOpenIssuePicker,
@@ -162,6 +172,14 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                 isInteractive={isPermissionAutoAcceptInteractive}
                                 permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                 handlePermissionAutoAcceptToggle={onTogglePermissionAutoAccept}
+                            />
+                            <PromptEnhanceButton
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                                canEnhance={canEnhance}
+                                isEnhancing={isEnhancing}
+                                onEnhance={onEnhance}
+                                onCancel={onCancelEnhance}
                             />
                             {!isBtw ? <SessionGoalButton
                                 sessionId={currentSessionId}
@@ -242,6 +260,14 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                             handlePermissionAutoAcceptToggle={onTogglePermissionAutoAccept}
                             withTooltip
+                        />
+                        <PromptEnhanceButton
+                            footerIconButtonClass={footerIconButtonClass}
+                            iconSizeClass={iconSizeClass}
+                            canEnhance={canEnhance}
+                            isEnhancing={isEnhancing}
+                            onEnhance={onEnhance}
+                            onCancel={onCancelEnhance}
                         />
                         {!isBtw ? <SessionGoalButton
                             sessionId={currentSessionId}

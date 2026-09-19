@@ -345,6 +345,70 @@ The unsent panel shows "Ask your question" until fork creation starts.
 Existing panels hide titles. Promotion retains the existing internal title, without
 transcript fetching or Small Model generation.
 
+## Enhance Prompt
+
+The Enhance Prompt button rewrites the current draft with the Small Model,
+instructed by the `composer.enhance.instructions` magic prompt
+(Settings → Magic Prompts → Composer). The instructions normalize the
+meaning of the complete draft into outcome, target, scope, deliverable,
+action ceiling, constraints, and uncertainty. The model does not route from
+literal trigger phrases; strong semantic implications may be made explicit,
+unsupported factual context is never invented, and unresolved references
+("this", "the option above") stay unresolved. Semantic eval cases for that
+contract live in `enhance/SEMANTIC_EVAL.md`. The request carries the draft
+alone, no conversation history or attachments. What comes back is cleaned of
+model dressing, checked by the protected-token guard, and written back
+through `setMessage`, whose controlled writeback produces a native undo
+entry (Cmd/Ctrl+Z restores the pre-enhance draft).
+
+The invariants that hold wherever the button is mounted:
+
+- Enhance never sends. It only replaces the draft; the user still sends.
+- A stale response never overwrites newer text. `usePromptEnhancer` tracks one
+  authoritative operation (a generation id) and compares the language context;
+  ChatInput applies a result only when the draft is byte-identical to the
+  snapshot the request started from and the draft identity has not moved. An
+  operation is also invalidated outright — settling silently as obsolete —
+  when the draft is edited or the draft identity (runtime, directory, session)
+  switches, so the outcome settles promptly and the new draft or scope can
+  enhance again immediately.
+- A failure never touches the draft. Failures map to toasts: unavailable,
+  context-too-small, empty-result, invalid-result, and timed-out get
+  Enhance-specific copy; provider-failed uses the request layer's generic
+  Small Model toast; aborts and stale responses stay silent.
+- One attempt has one deadline. Both awaits — the instructions fetch and the
+  generate request — share a 90s client deadline (over the server's 60s
+  provider cap), because the transports give a lost response frame no
+  rejection of their own; a fired deadline toasts `timed-out` instead of
+  spinning forever. While the request runs, the same button is the cancel
+  control, so the user is never trapped on the spinner.
+- The instructions fetch has two lifetimes. The shared `/api/magic-prompts`
+  overrides request is coalesced across all consumers and carries its own
+  internal 20s deadline — Enhance's own 90s budget is not spent waiting on a
+  fetch that should take seconds. That deadline is transport-internal: when
+  it fires, the shared rejection is translated into the same plain
+  load-failure error a non-ok response produces, so every consumer (Enhance
+  included) degrades to the built-in/default prompt — for Enhance that means
+  the generate request still goes out on the default template, not a
+  `timed-out` failure — and the cleared slot lets the next caller retry.
+  Each caller races that shared request with its own signals
+  (scope/cancellation/deadline) and stops waiting early without aborting the
+  shared transport; only a caller's own cancellation or deadline reaches
+  `enhancePrompt` abort-named, which maps it (`aborted` vs `timed-out`).
+- The request refuses truncation: `onOverflow: 'error'` turns an
+  over-budget draft into a 413 error instead of a silently clipped rewrite.
+- The guard rejects corruption, not creativity: a rewrite that loses a
+  token the user typed — `@` mention, `/` command, or `#` snippet — fails
+  validation, and so does one that invents a token of any kind the source
+  did not use.
+
+All logic lives in `enhance/`: `promptEnhancer.ts` (request, deadline,
+cleaning, typed `PromptEnhanceError`), `protectedTokens.ts` (the guard), and
+`usePromptEnhancer.ts` (the state machine); `ui/PromptEnhanceButton.tsx`
+renders it. `ChatInput.tsx` only decides whether an enhance may run (never in
+BTW mode, never on a slash-command draft), applies the result, and maps
+failures to toasts.
+
 ## Mobile
 
 `state/useMobileComposerShell.ts` and `state/useMobileViewportPin.ts` are

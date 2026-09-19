@@ -153,7 +153,14 @@ other runtime API.
    `/api/openchamber/models-metadata`).
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
-  model?, directory? }` → `{ text, providerID, modelID, source }`).
+  model?, directory?, onOverflow? }` → `{ text, providerID, modelID, source }`).
+  `onOverflow` chooses the input-clamp behavior above: `truncate` (default —
+  anything unrecognized also keeps the historical clamp) or `error`, which
+  hard-fails a `413` with the backend message passed through verbatim
+  (required/available characters). Like `404`, that `413` is a status whose
+  error copy is actionable, so the route forwards the backend message for
+  `404` and `413` only; every other status is replaced by the generic
+  model-guidance copy.
 
 ## Which providers the pickers may offer
 
