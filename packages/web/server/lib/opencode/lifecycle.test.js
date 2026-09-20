@@ -471,6 +471,52 @@ describe('OpenCode lifecycle', () => {
     expect(server.exitCode).toBe(1);
   });
 
+  it('does not spawn a duplicate OpenCode when the child dies during waitForReady', async () => {
+    const firstChild = createMockChild();
+    const onOpenCodeRestarted = vi.fn();
+    let markWaitForReadyEntered;
+    const waitForReadyEntered = new Promise((resolve) => {
+      markWaitForReadyEntered = resolve;
+    });
+    let releaseReady;
+    const readyGate = new Promise((resolve) => {
+      releaseReady = resolve;
+    });
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        firstChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return firstChild;
+    });
+    const runtime = createRuntime({
+      onOpenCodeRestarted,
+      waitForReady: vi.fn(async () => {
+        markWaitForReadyEntered();
+        await readyGate;
+        return true;
+      }),
+    });
+
+    const starting = runtime.startOpenCode();
+    await waitForReadyEntered;
+
+    firstChild.exitCode = 1;
+    firstChild.emit('exit', 1, null);
+
+    // becameReady is already true here (listen URL printed) but startOpenCode
+    // still owns the attempt. Exit recovery must not race a second spawn.
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    releaseReady();
+    const server = await starting;
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    await server.close();
+  });
+
   it('does not treat an intentional managed close as unexpected death', async () => {
     const child = createMockChild();
     const onOpenCodeRestarted = vi.fn();
