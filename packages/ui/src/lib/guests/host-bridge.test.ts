@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type ResolveResultPayload, type StartSessionRequest } from '@openchamber/sdk';
+import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
 import type { GuestFileProxyResult, GuestFileRequest } from './files.ts';
 import type { GuestGenerateProxyResult } from './generate.ts';
 
@@ -48,11 +48,21 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
 });
 
 describe('answerGuestMessage', () => {
+  test('forwards toast buttons and persistence to the host without awaiting a click', async () => {
+    const request: ToastRequest = { kind: 'info', message: 'Summary', copy: { text: 'Source' }, dismiss: true, persistent: true };
+    const seen: ToastRequest[] = [];
+    const reply = await answerGuestMessage({ ...toast, payload: request }, effects({
+      toast: (payload) => { seen.push(payload); },
+    }));
+    expect(seen).toEqual([request]);
+    expect(reply).toMatchObject({ type: 'result', ok: true });
+  });
+
   test('toasts and answers ok', async () => {
     const seen: string[] = [];
     const reply = await answerGuestMessage(toast, effects({
-      toast: (_kind, message) => {
-        seen.push(message);
+      toast: (request) => {
+        seen.push(request.message);
       },
     }));
     expect(seen).toEqual(['Hello']);

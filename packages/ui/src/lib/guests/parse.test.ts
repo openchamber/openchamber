@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
+import { browserProviderGuests } from './browser-providers.ts';
 import { parseGuestCatalogJson, parseInstalledGuestJson } from './parse.ts';
+import { enabledGuestSurfaces } from './surfaces.ts';
 
 describe('parseGuestCatalogJson', () => {
   test('reads a valid catalog', () => {
@@ -166,6 +168,30 @@ describe('parseGuestCatalogJson', () => {
         },
       },
     ]);
+  });
+
+  test('keeps a service\'s provider role and surface, so the dropdown and the rail see them', () => {
+    const [guest] = parseGuestCatalogJson(JSON.stringify({
+      guests: [{
+        id: 'server-chrome',
+        name: 'Server Chrome',
+        icon: 'window',
+        capabilities: { requested: ['service'], granted: ['service'] },
+        service: { runtime: 'host', granted: true, provides: ['browser'], surface: true },
+      }],
+    })) ?? [];
+    expect(guest?.service).toEqual({ runtime: 'host', granted: true, provides: ['browser'], surface: true });
+    expect(browserProviderGuests(guest ? [guest] : [])).toHaveLength(1);
+    expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(1);
+
+    // An unknown role is a newer server; the row still parses, minus that field.
+    const [newer] = parseGuestCatalogJson(JSON.stringify({
+      guests: [{
+        id: 'x', name: 'X', icon: 'window', capabilities: { requested: [], granted: [] },
+        service: { runtime: 'host', granted: true, provides: ['printer'] },
+      }],
+    })) ?? [];
+    expect(newer?.service).toEqual({ runtime: 'host', granted: true });
   });
 
   test('keeps declared tool presentations and drops a malformed list', () => {

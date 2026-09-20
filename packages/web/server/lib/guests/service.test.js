@@ -194,6 +194,86 @@ describe('guest service proxy', () => {
   });
 });
 
+describe('host-driven services', () => {
+  const request = (extra) => ({
+    guestId: 'docker',
+    packageRoot: extra.packageRoot,
+    service: { entry: 'service/main.js' },
+    granted: ['service'],
+    persistPath: extra.persistPath,
+    method: 'GET',
+    path: '/ping',
+    ...extra,
+  });
+
+  test('stops itself after the idle window and restarts on the next request', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      const first = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 150 }));
+      expect(first.status).toBe(200);
+      const pid = readServicePid('docker');
+      expect(pid).not.toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(getServiceStatus('docker')).toBe('stopped');
+      expect(readServicePid('docker')).toBeNull();
+
+      const second = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 150 }));
+      expect(second.status).toBe(200);
+      expect(readServicePid('docker')).not.toBe(pid);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a request keeps re-arming the window, and a panel request never arms one', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 200 }));
+      const pid = readServicePid('docker');
+      for (let i = 0; i < 3; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 200 }));
+      }
+      expect(readServicePid('docker')).toBe(pid);
+
+      await stopGuestService('docker');
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(getServiceStatus('docker')).toBe('ready');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a longer timeout and a bigger response cap are honoured', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      const result = await proxyGuestServiceRequest(request({ packageRoot, persistPath, timeoutMs: 45_000, responseMax: 5 }));
+      expect(result).toEqual({ status: 200, body: '{"pon' });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an aborted request reports cancellation, not a failed service', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
+      const controller = new AbortController();
+      controller.abort();
+      await expect(proxyGuestServiceRequest(request({ packageRoot, persistPath, signal: controller.signal })))
+        .rejects.toMatchObject({ code: 'CANCELLED' });
+      expect(getServiceStatus('docker')).toBe('ready');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('pause during startup', () => {
   test('a stop that lands while the service is coming up wins', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();

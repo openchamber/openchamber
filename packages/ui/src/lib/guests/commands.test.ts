@@ -14,6 +14,12 @@ const guest = (id: string, names: string[], overrides: Partial<InstalledGuest> =
 });
 
 describe('guestCommandEntries', () => {
+  test('background-only guests can contribute slash commands without a panel', () => {
+    const background = guest('background', ['count'], { entry: undefined, backgroundEntry: 'background/index.html' });
+    expect(guestCommandEntries([background], new Set()).map((entry) => entry.command.name)).toEqual(['count']);
+    expect(guestCommandEntries([{ ...background, enabled: false }], new Set())).toEqual([]);
+    expect(guestCommandEntries([{ ...background, backgroundEntry: undefined }], new Set())).toEqual([]);
+  });
   test('lists active guests only, first guest wins a name, reserved names lose', () => {
     const originalWarn = console.warn;
     const warnings: string[] = [];

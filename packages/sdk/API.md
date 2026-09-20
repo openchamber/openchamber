@@ -25,8 +25,8 @@ Two entrypoints:
 | Must exist                                                                       | When                                            | Failure code       |
 | -------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------ |
 | Semver `version` on `package.json` (`1.0.0`)                                     | Always on install                               | `invalid-manifest` |
-| `panel.entry` HTML file                                                          | When `panel.entry` is set (a tools-only package may omit it) | `invalid-manifest` |
-| Every relative `<script src="…">` `.js` from that HTML (usually `panel/main.js`) | When `panel.entry` is set                       | `missing-build`    |
+| `panel.entry` or `background.entry` HTML file | Every declared entry | `invalid-manifest` |
+| Every relative `<script src="…">` `.js` from that HTML | Every declared entry | `missing-build` |
 | File named by `panel.icon`                                                       | Only when icon ends in `.svg` (e.g. `icon.svg`) | `invalid-manifest` |
 | File named by `service.entry` (e.g. `service/main.js`)                               | When `contributes.service` is set                 | `missing-build`    |
 
@@ -73,6 +73,7 @@ Each returns an unsubscribe function. Late subscribers get the last known value 
 | `onSettings(listener)`         | `GuestSettings`         | Declared integration fields only (`Record<string, string>`)  |
 | `onItem(listener)`             | `GuestItem              | null`                                                        | The item this surface was opened for: the chip (`AttachIssueRequest`), a message (`GuestMessageItem`), or a session (`GuestSessionItem`); `null` from the rail icon or + menu |
 | `onResolve(handler)`           | `{ command, args }` → `Promise<AttachIssueRequest \| null>` | Answers a `contributes.commands` slash command. Return the chip to attach, `null` for nothing (the user sees a short notice), or throw (the message reaches the user). One handler at a time |
+| `onAction(handler)` | `GuestActionItem` → `void \| Promise<void>` | Runs a `mode: "background"` message or session action. Register synchronously after `connectHost`. Await every operation; the frame is removed when the handler settles. Throw to report an error. One handler at a time; returns an unsubscribe function |
 
 
 `HostReadyContext`
@@ -85,7 +86,7 @@ Each returns an unsubscribe function. Late subscribers get the last known value 
 | `locale`       | `string`                 | Host language tag                                                                        |
 | `directory`    | `string                  | null`                                                                                    |
 | `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present |
-| `surface`      | `'panel'                 | 'dialog'`                                                                                |
+| `surface` | `'panel' \| 'dialog' \| 'page' \| 'background'` | Where the host mounted this frame |
 | `connection`   | `{ connected, account }` | Integration link state                                                                   |
 | `settings`     | `Record<string, string>` | Declared keys only                                                                       |
 | `item`         | `GuestItem               | null`                                                                                    | Set when the user clicked this guest's chip on the composer, or ran one of this guest's `contributes.actions`. Narrow with `isGuestMessageItem` / `isGuestSessionItem` / `isGuestAttachItem` |
@@ -130,7 +131,7 @@ Access tokens never appear in `ready` or in request results.
 
 | Method            | Arguments                         | Returns                        | Behavior                                                                              |
 | ----------------- | --------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
-| `toast`           | `{ kind: 'info'                   | 'success'                      | 'error', message }`                                                                   |
+| `toast` | `{ kind: 'info' \| 'success' \| 'error', message, copy?, dismiss?, persistent? }` | `Promise<void>` | Show a toast, optionally with host-owned Copy and OK buttons; see Toast buttons below |
 | `openUrl`         | `url: string`                     | `Promise<void>`                | Open URL in the host                                                                  |
 | `openSurface`     | `surfaceId: string`               | `Promise<void>`                | Switch host chrome to that surface                                                    |
 | `writeClipboard`  | `text: string`                    | `Promise<void>`                | Copy in the host (1–32000 chars)                                                      |
@@ -216,6 +217,30 @@ Storage belongs to the extension on the connected server and needs no extra capa
 
 `request` **/** `serviceRequest` **rules:** `method` is `GET` | `POST` | `PUT` | `PATCH` | `DELETE`. `path` must start with `/`, no scheme, stay on the declared origin (cloud API or service loopback). Guest parses `body` as JSON when needed.
 
+### Toast buttons
+
+`ToastRequest.copy` is an optional boolean or `{ text: string }`. `true` copies the displayed message; an object supplies the clipboard value. `false` or omission adds no Copy button. The custom text must contain 1 to `GUEST_CLIPBOARD_TEXT_MAX` characters, with whitespace preserved. The displayed message is trimmed and must contain 1 to `GUEST_TOAST_MAX` characters. The client rejects invalid text lengths as `HOST_REJECTED` before sending; the host independently validates the wire payload.
+
+`dismiss: true` adds OK. `persistent: true` disables automatic expiry and always adds OK regardless of `dismiss`, so every persistent toast can be closed. Omitted or false `persistent` retains the host's usual duration.
+
+Copy leaves the toast open, reports success on the button, and shows a retryable error when the clipboard fails. OK dismisses only its own toast. Buttons use the host's locale and clipboard helper. They retain only the supplied text and toast identity, work after guest disposal or a runtime switch, and never call back into the extension. The `toast` promise resolves after display acknowledgement, without waiting for a click. Web and desktop use the same behavior; extension support on other runtimes is unchanged.
+
+### Background actions
+
+`contributes.actions[].mode` accepts `"open"` or `"background"`. Omitted mode keeps the existing panel/dialog routing and `onItem` delivery. Background actions load `background.entry` when declared, otherwise `panel.entry`. They never use separate attach-dialog HTML. They run on web and desktop, including connections through the private relay; VS Code and mobile still do not load extensions.
+
+`contributes.background` is `{ entry: "<package-local .html>" }`. It starts on demand for an action or command and adds no visible UI. With a background entry, `panel.entry` may be omitted: there is no rail icon, attach picker, or full-screen page, but background actions, slash commands, storage and granted APIs work. Identity remains in `panel.id/name/icon`. Open-mode actions, `page`, and enabled `attach` require `panel.entry`; invalid combinations fail as `invalid-panel`. Without either entry, the extension remains tools-only. Invalid background paths or a missing entry field fail as `invalid-background`.
+
+When both entries exist, the visible panel cannot register the slash-command resolver: the hidden background entry handles `onResolve` and receives `surface: "background"`. Existing panel-only commands retain their current behavior. Clicking an attached chip from a background-only extension shows a no-panel notice; its browser action remains available.
+
+Every background click mounts a fresh sandboxed iframe and sends one `action` request with an invocation `id` and a `GuestActionItem` payload. `host.onAction` receives that message or session item and sends `action-result` with `{ ok: true }` when the handler finishes, or `{ ok: false, error }` when it throws. The error is limited to `GUEST_RESOLVE_ERROR_MAX` characters. The host validates the reply and accepts only the matching invocation from that frame. It sends no acknowledgement for `action-result`.
+
+`ready.surface` is `"background"` and `ready.item` is `null`. Context updates never replay the action. The session and directory context remain scoped to the clicked target; the item itself is the snapshot captured at click time. Calls that explicitly write the composer still write the currently visible composer. `close()` is a no-op in a background frame; returning from the handler completes the action.
+
+The 20-second deadline covers loading and execution. At most eight background invocations may run concurrently. Completion, failure, timeout, disabling, lost approval, extension update/removal, runtime switch, and host unmount release the frame and its listeners. Late messages are ignored. Already completed or server-accepted effects are not undone, and the host does not automatically retry actions. A background action has the same declared capabilities as its extension. It does not hide the extension's rail icon.
+
+See [Actions without opening a panel](./README.md#actions-without-opening-a-panel) for a toast example.
+
 ### 1.3 Error codes (`HostRequestError.code`)
 
 
@@ -259,6 +284,7 @@ Storage belongs to the extension on the connected server and needs no extra capa
 | Request response                 | 256 000   |
 | Request timeout                  | 20 000 ms |
 | `resolve` answer (host waits)    | 20 000 ms |
+| Background action loading and execution | 20 000 ms |
 | Badge count                      | 999       |
 | Message item `text`              | 200 000   |
 | Session item (serialized)        | 2 000 000 |
@@ -400,15 +426,16 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | `engines.openchamber` | Optional. Only `1.22.0` or `>=1.22.0`. Older host → `host-too-old`                                                                                                                   |
 | `panel.id`            | kebab-case                                                                                                                                                                           |
 | `panel.icon`          | Remixicon kebab name (`window`) **or** package `.svg` path. Remixicon needs no file. An `.svg` path must exist on disk or install fails (`invalid-manifest`). No URLs/absolute paths |
-| `panel.entry`         | Optional. Path inside package. No `..`, absolute, or URL. HTML must exist; its relative `.js` scripts must exist (`missing-build` if not). Omit it for a page-less extension: then only `tools` (plus `engines` and `version`) may be declared; `attach`, `actions`, `commands`, `service`, `integration`, `capabilities`, or `filesystem` without an entry fail parse as `invalid-panel`. A page-less extension has no rail icon, + menu row, or frame; the Extensions card says "No panel". `hasGuestPage(contributes)` tells the two apart |
+| `panel.entry` | Optional visible-panel HTML path inside the package. No `..`, absolute path, or URL. Its scripts must be built. Omitting it removes the rail icon and visible views; `background.entry` can still run code. With neither entry, only `tools` plus package identity/version/engines are allowed. `hasGuestPage` means a visible panel, not background execution |
+| `background.entry` | Optional package-local `.html` path. Loaded on demand for background actions and slash commands, preferred over `panel.entry` for these calls. Adds no rail icon. The file and its built scripts must exist. Malformed declarations are `invalid-background` |
 | `attach`              | `true` / `"panel"` → + menu opens rail; `"dialog"` → host window; omit/`false` → off menus. Object form `{ "mode": "panel" \| "dialog", "entry"?: "panel/attach.html" }`: `entry` (dialog only, same path rules as `panel.entry`, must exist with built scripts) is the page the dialog loads instead of `panel.entry` |
 | `capabilities`        | Optional list of `prompt`, `sessions`, `files`, `model`. `files` is read **and** write inside the open project; `model` is `generate`. Approved once at install                     |
-| `actions`             | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` (same rules as `panel.icon`, falls back to it), `where: "message" \| "session"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]` (default both); session actions may ask for `payload: ["messages"]`, which adds the `conversation` capability. Bad shape is `invalid-actions`. The entry shows in that message's or session's menu and opens the guest with the item as `ready.item` (the attach window for `attach: "dialog"`, otherwise the rail) |
+| `actions` | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` with the `panel.icon` rules, `where: "message" \| "session"`, optional `mode: "open" \| "background"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]`, default both. Session actions may request `payload: ["messages"]`, adding the `conversation` capability. Invalid shape is `invalid-actions`. Default `open` mode opens the guest with `ready.item`, using the attach dialog for `attach: "dialog"` and the rail otherwise. `background` calls `onAction` in a temporary hidden frame; see Background actions above |
 | `commands`            | Optional, 1–8 entries, unique `name` matching `/^[a-z][a-z0-9-]{0,23}$/`, optional `description` 1–80 chars (`invalid-commands`). `/name args` in the chat box calls `onResolve` instead of the model and attaches what it returns. A name the composer already has (built-in, OpenCode command, skill) is ignored with a console warning |
 | `tools`               | Optional, 1–16 entries that say how the extension's tool calls look in the chat. `match` is the full tool name OpenCode reports (`mcp.jira.search`, `jira_search`), 1–128 chars of `[A-Za-z0-9_.:-]`, with `*` allowed once at the end as a suffix wildcard (`mcp.jira.*`). Optional `name` (1–40, the header title when `title` is absent or renders empty), `icon` (Remixicon name or package `.svg` path, same rules as `panel.icon`; the SVG is drawn in the text colour at the glyph size), `title` / `subtitle` templates (1–200, `{input.path}` / `{output.path}` / `{metadata.path}` placeholders, a missing path renders empty, values are cut at 200), `output` `"auto"` (default) \| `"text"` \| `"json"` \| `"markdown"` \| `"code"` \| `"table"`, `language` (code only), `columns` (table only, 1–16 dotted paths; rows are the output array or `output.items`). Bad shape is `invalid-tools`. An exact `match` beats a wildcard from any extension; among equals the first extension wins. Only an enabled, fully approved extension's rules apply |
 | `filesystem`          | Optional, 1–16 globs, each 1–256 chars, starting with `/` or `~/`; `**` spans folders, `*` / `?` stay in one segment; no `..`, empty segment, or backslash (`invalid-filesystem`). Declaring it adds the `filesystem` capability and the dialog lists the globs |
 | `integration`         | Optional. Exactly one of `oauth`, `token`, or `host` (`provider: "linear"` only)                                                                                                     |
-| `service`               | Optional. `entry` must be a built `.js` file on disk. See [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md)                        |
+| `service`               | Optional. `entry` must be a built `.js` file on disk. `provides: ["browser"]` makes it the agent's browser when the user selects it; `surface: true` gives it a host-drawn live panel the user can take over (no `panel.entry` then). Neither needs a panel or background entry. See [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md) |
 
 
 Extra keys are dropped, not forwarded.
@@ -422,7 +449,7 @@ Extra keys are dropped, not forwarded.
 | `parseManifestJson(json)` (`@openchamber/sdk/schemas`) | String → same result                                      |
 | `resolveAttachMode(attach)`                        | Normalize to `'panel'                                     |
 | `resolveAttachEntry(contributes)`                  | Dialog page from the object form, or `null` when the dialog reuses `panel.entry` |
-| `hasGuestPage(contributes)`                        | `true` when `panel.entry` is set; a page-less package may only declare `tools` |
+| `hasGuestPage(contributes)` | `true` when `panel.entry` is set; background-only and tools-only packages return `false` |
 | `resolveIntegrationAuth` / `resolveIntegrationApi` | Auth kind and API origin                                  |
 | `toPublicIntegration` / `toPublicService`            | Catalog-safe public slices                                |
 | `isGuestPackageSvgIcon`                            | Whether icon is a package SVG path                        |
@@ -467,6 +494,10 @@ Panel → `serviceRequest` → host → `127.0.0.1:port` → service process →
 
 
 Manifest sketch: `service.entry` (path to **built** JS, e.g. `service/main.js`), `runtime: "host"`, `permissions.sockets` and/or `permissions.exec`. Install refuses with `missing-build` when that file is absent. Declaring a service adds `service` to the capabilities the user approves at install; until then `serviceRequest` is `NO_SERVICE`.
+
+A service with `provides: ["browser"]` answers the agent's `browser.*` actions at `POST /browser-control` instead of the desktop app's browser panel, once the user selects it in Settings → OpenChamber Tools. The host starts it on the first action and stops it when idle. Parse the body with `readBrowserProviderRequest`; request and answer types (`BrowserProviderRequest`, `BrowserProviderResult`, per-action `Browser*Parameters` / `Browser*Data`) and the limits (`BROWSER_PROVIDER_*`) are exported from `@openchamber/sdk`. Full contract in [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md#browser-provider-provides-browser).
+
+A service with `surface: true` shows a live picture in the extension's rail panel: the host pulls frames from `GET /surface/frame`, draws them, sends the user's input to `POST /surface/input`, and owns who is in control (nobody, the agent, the user). Paths, event types, and the `readSurface*` parsers are exported from `@openchamber/sdk`; contract in [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md#shared-surface-surface-true).
 
 Bundle the service with the Node target:
 

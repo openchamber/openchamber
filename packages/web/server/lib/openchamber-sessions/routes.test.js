@@ -361,6 +361,55 @@ describe('openchamber session routes', () => {
     }
   });
 
+  it('lets the routing hook replace an Auto default before the prompt leaves', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes('/prompt_async')) {
+        return { ok: true, text: async () => '' };
+      }
+      if (text.includes('/config/providers')) {
+        return { ok: true, json: async () => ({ providers: [{ id: 'openai', models: { 'gpt-5.5': { id: 'gpt-5.5' } } }] }) };
+      }
+      if (text.includes('/agent')) {
+        return { ok: true, json: async () => [{ name: 'build', mode: 'primary' }] };
+      }
+      if (text.includes('/config')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    globalThis.fetch = fetchMock;
+    const seen = [];
+    const resolvePromptBody = vi.fn(async (body, target) => {
+      seen.push({ model: body.model, target });
+      body.model = { providerID: 'openai', modelID: 'gpt-5.5' };
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openchamber/auto',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+      resolvePromptBody,
+    });
+    try {
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this' })
+        .expect(200);
+
+      expect(seen).toEqual([{
+        model: { providerID: 'openchamber', modelID: 'auto' },
+        target: { sessionId: 'ses_123', directory: '/repo/app' },
+      }]);
+      const promptCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/prompt_async'));
+      expect(JSON.parse(promptCall?.[1]?.body).model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it.each([
     ['', { projectId: 'proj_1' }],
     ['', { directory: '/repo/app', worktree: { name: 'side-task' } }],

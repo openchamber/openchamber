@@ -213,6 +213,19 @@ describe('projectSidebarCollection', () => {
     })).toEqual([]);
   });
 
+  test('keeps a canonical managed chat visible when the server root uses different home casing', () => {
+    const managed = session('canonical-chat', '/HOME/.config/openchamber/chats/day/session-a');
+    const project = session('project', '/workspace/a');
+    const projection = buildSidebarSessionProjection({
+      globalActiveSessions: [managed, project], liveSessions: [],
+      knownDirectories: new Set(['/workspace/a']), isVSCode: false,
+      pinnedSessionIds: new Set(), sessionOrderRanks: new Map(),
+    });
+    expect(projection.chatSessions.map(entry => entry.id)).toEqual(['canonical-chat']);
+    expect(projection.projectSessions.map(entry => entry.id)).toEqual(['project']);
+    expect(projection.orderedSessions.map(entry => entry.id)).toContain('canonical-chat');
+  });
+
   test('excludes a /btw fork before project ownership and restores it when the marker is removed', () => {
     const fork = {
       ...session('fork', '/home/.config/openchamber/chats/2026-08-24/session-fork'),
@@ -402,6 +415,10 @@ describe('buildActiveSessionNode', () => {
 });
 
 const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
-opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home' });
+opencodeClient.getFilesystemHomeInfo = async () => ({
+  home: '/home',
+  canonicalChatsRoot: '/HOME/.config/openchamber/chats',
+  canonicalLegacyChatsRoot: '/HOME/.config/openchamber/chats',
+});
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

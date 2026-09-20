@@ -1,7 +1,6 @@
 import {
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
-  hasGuestPage,
   type GuestActionContribution,
   type GuestActionRole,
   type GuestItemRole,
@@ -36,8 +35,9 @@ export const guestActionEntries = (
 ): GuestActionEntry[] => {
   const entries: GuestActionEntry[] = [];
   for (const guest of guests) {
-    if (!isGuestActive(guest) || !hasGuestPage({ panel: guest }) || !guest.actions?.length) continue;
+    if (!isGuestActive(guest) || (!guest.entry && !guest.backgroundEntry) || !guest.actions?.length) continue;
     for (const action of guest.actions) {
+      if (action.mode !== 'background' && !guest.entry) continue;
       const icon = action.icon ?? guest.icon;
       entries.push({
         guest,

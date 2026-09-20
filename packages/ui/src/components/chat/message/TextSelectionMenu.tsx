@@ -1,5 +1,5 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessions } from '@/sync/sync-context';
@@ -17,6 +17,10 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
+import {
+    useMobileCommentComposerController,
+    useMobileCommentDraft,
+} from '../composer/comment/MobileCommentComposerContext';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
@@ -127,39 +131,9 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const effectiveDirectory = useEffectiveDirectory();
   const sessions = useSessions();
-
-  // Mobile: the comment bar is rendered inside the composer form (its
-  // positioning context), so it inherits the runtime's own keyboard handling
-  // — browser viewport resizing and Capacitor choreography alike. This effect
-  // only centers it on the composer pill in the form's local coordinates; no
-  // viewport math, which Safari's keyboard handling reliably breaks for
-  // fixed elements.
-  React.useEffect(() => {
-    if (!commentMode || !isMobile) return;
-    const update = () => {
-      const element = menuRef.current;
-      const host = element?.offsetParent;
-      if (!element || !host) return;
-      const pill = document.querySelector('[data-mobile-composer-pill="true"]')
-        ?? document.querySelector('[data-chat-input="true"]');
-      const pillRect = pill?.getBoundingClientRect();
-      if (!pillRect || pillRect.height <= 0) return;
-      const hostRect = host.getBoundingClientRect();
-      element.style.top = `${pillRect.top - hostRect.top + (pillRect.height - element.offsetHeight) / 2}px`;
-      element.style.left = `${pillRect.left - hostRect.left}px`;
-      element.style.width = `${pillRect.width}px`;
-      element.style.bottom = 'auto';
-    };
-    update();
-    const raf = window.requestAnimationFrame(update);
-    // The composer relayouts with its own transitions and timeouts that emit
-    // no event; a light poll keeps the overlay glued to the pill.
-    const poll = window.setInterval(update, 200);
-    return () => {
-      window.cancelAnimationFrame(raf);
-      window.clearInterval(poll);
-    };
-  }, [commentMode, isMobile]);
+  const mobileCommentController = useMobileCommentComposerController();
+  const mobileCommentDraft = useMobileCommentDraft(mobileCommentController);
+  const mobileCommentActive = mobileCommentDraft.status === 'open';
 
   React.useEffect(() => {
     isMenuVisibleRef.current = position.show;
@@ -206,6 +180,19 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     setCommentText('');
     isMenuVisibleRef.current = false;
   }, []);
+
+  // Listener-facing mirror of the composer's comment state: the document
+  // listeners below must not clear the quote highlight for taps inside the
+  // comment shell, which lives outside this menu's DOM.
+  const mobileCommentActiveRef = React.useRef(false);
+  React.useEffect(() => {
+    mobileCommentActiveRef.current = mobileCommentActive;
+    // The composer ended the comment (attach, cancel, or a scope change):
+    // drop the highlight overlay and the retained range with it.
+    if (!mobileCommentActive && isMobile && commentModeRef.current) {
+      hideMenu();
+    }
+  }, [hideMenu, isMobile, mobileCommentActive]);
 
   // The boundary is the scroller holding the message (the chat, or the btw
   // panel body), not the message itself: bounding by the message pushed the
@@ -386,6 +373,12 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       if (commentModeRef.current && menuRef.current?.contains(event.target as Node)) {
         return;
       }
+      // The composer's comment mode owns the selection: taps anywhere —
+      // including the transcript — keep the quote highlight until the
+      // comment ends.
+      if (mobileCommentActiveRef.current) {
+        return;
+      }
       isDraggingRef.current = true;
       hideMenu();
     };
@@ -424,6 +417,11 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     // Hide menu when clicking outside
     const handleClickOutside = (e: MouseEvent) => {
+      // The comment shell and its voice overlay sit outside this menu; taps
+      // there must not clear the quote highlight.
+      if (mobileCommentActiveRef.current) {
+        return;
+      }
       if (
         menuRef.current &&
         !menuRef.current.contains(e.target as Node) &&
@@ -476,13 +474,44 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     });
   }, [selectedTextMarkdown, updateCommentRects]);
 
+  // Mobile: no floating input here. The quote is handed to this column's
+  // composer, which swaps its input for the comment shell. The scope is
+  // captured from the visible composer, including BTW. Switching its target
+  // closes the comment instead of re-targeting. The menu keeps the quoted range
+  // highlighted until the comment ends.
+  // flushSync mounts and focuses the comment editor while the tap's call
+  // stack is still live; that synchronous focus is the only one iOS raises
+  // the soft keyboard for.
+  const handleOpenMobileComment = React.useCallback(() => {
+    if (!selectedTextMarkdown) return;
+    if (!mobileCommentController) {
+      hideMenu();
+      return;
+    }
+    const quote = {
+      plainText: selectedText,
+      markdownText: selectedTextMarkdown,
+      messageId: selectedMessageId,
+    };
+    setCommentMode(true);
+    commentModeRef.current = true;
+    updateCommentRects();
+    window.getSelection()?.removeAllRanges();
+    const opened = flushSync(() => (
+      mobileCommentController.open(quote)
+    ));
+    if (!opened) {
+      hideMenu();
+    }
+  }, [hideMenu, mobileCommentController, selectedMessageId, selectedText, selectedTextMarkdown, updateCommentRects]);
+
   const handleAttachComment = React.useCallback(() => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
     if (!selectedTextMarkdown || !sessionKey || !effectiveDirectory) {
       hideMenu();
       return;
     }
-    addContextDraft({ directory: effectiveDirectory, sessionKey }, {
+    const draftId = addContextDraft({ directory: effectiveDirectory, sessionKey }, {
       source: 'chat-quote',
       fileLabel: selectedMessageId ?? '',
       startLine: 1,
@@ -491,11 +520,15 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       language: '',
       text: commentText.trim(),
     });
+    if (!draftId) {
+      toast.error(t('chat.textSelection.comment.attachFailed'));
+      return;
+    }
     hideMenu();
     queueMicrotask(() => {
       focusChatInput();
     });
-  }, [addContextDraft, commentText, currentSessionId, effectiveDirectory, hideMenu, newSessionDraftOpen, selectedMessageId, selectedTextMarkdown]);
+  }, [addContextDraft, commentText, currentSessionId, effectiveDirectory, hideMenu, newSessionDraftOpen, selectedMessageId, selectedTextMarkdown, t]);
 
   const currentSession = React.useMemo(() => {
     if (!currentSessionId) {
@@ -590,9 +623,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           // An IME candidate is confirmed with Enter and abandoned with
           // Escape; neither keystroke belongs to the comment yet.
           if (isIMECompositionEvent(event)) return;
-          // Desktop: Enter attaches, Shift+Enter breaks the line. Mobile
-          // keyboards use Enter for line breaks; attaching is the button's job.
-          if (event.key === 'Enter' && !event.shiftKey && !isMobile) {
+          // Desktop: Enter attaches, Shift+Enter breaks the line. (Mobile has
+          // no floating input anymore; its comment editor keeps Enter as a
+          // line break and attaches through the button.)
+          if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             handleAttachComment();
           } else if (event.key === 'Escape') {
@@ -603,10 +637,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         placeholder={t('chat.textSelection.comment.placeholder')}
         className={cn(
           'flex-1 resize-none bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60',
-          // The width cap sizes the floating desktop pill; on mobile the pill
-          // spans the bottom bar and the cap would strand slack space to the
-          // right of the attach button.
-          isMobile ? 'w-full min-w-0 py-1.5 text-base leading-6' : 'w-64 max-w-[70vw] py-1.5'
+          'w-64 max-w-[70vw] py-1.5'
         )}
         style={{ minHeight: 0, height: 'auto' }}
       />
@@ -615,7 +646,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         onClick={handleAttachComment}
         className={cn(
           'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity duration-150',
-          isMobile ? 'h-9 w-9' : 'h-8 w-8'
+          'h-8 w-8'
         )}
         aria-label={t('chat.textSelection.comment.attach')}
         title={t('chat.textSelection.comment.attach')}
@@ -625,33 +656,14 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     </div>
   );
 
-  // Mobile: Show as a bar at the bottom of the screen, above the keyboard
+  // Mobile: while the composer's comment mode is active, only the quoted
+  // range's highlight overlay stays; the action sheet is gone and the comment
+  // UI lives in the composer. Otherwise the action sheet only — commenting
+  // hands off to the column's composer (see handleOpenMobileComment); no
+  // floating comment input, no overlay positioning on this path.
   if (isMobile) {
     if (commentMode) {
-      // Overlay the comment input onto the composer pill: rendering into the
-      // composer form (position: relative) inherits the runtime's keyboard
-      // handling in both browser and Capacitor; the centering effect above
-      // glues it to the pill in the form's local coordinates.
-      const composerHost = document.querySelector('form.oc-mobile-composer');
-      const bar = (
-        <div
-          ref={menuRef}
-          className={cn(
-            'z-50',
-            composerHost
-              ? 'absolute inset-x-0 bottom-[var(--oc-safe-area-bottom-visual,0.5rem)]'
-              : 'oc-chat-comment-bar fixed left-3 right-3 mx-auto max-w-[420px]',
-          )}
-        >
-          {commentInput}
-        </div>
-      );
-      return (
-        <>
-          {commentHighlightOverlay}
-          {createPortal(bar, composerHost ?? document.body)}
-        </>
-      );
+      return commentHighlightOverlay;
     }
     return createPortal(
       <div
@@ -670,7 +682,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       >
         <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={handleOpenComment}
+            onClick={handleOpenMobileComment}
             className={cn(
               'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left',
               'text-sm font-medium leading-tight',

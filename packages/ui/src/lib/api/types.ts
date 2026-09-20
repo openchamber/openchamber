@@ -164,7 +164,16 @@ export interface GitStatus {
   upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;
-  diffStats?: Record<string, { insertions: number; deletions: number }>;
+  /**
+   * Per-file line stats split by Git scope. A file with edits in both scopes
+   * appears in both maps; the values are never summed into each other.
+   */
+  diffStats?: {
+    /** HEAD -> index (`git diff --cached --numstat`). */
+    staged: Record<string, { insertions: number; deletions: number }>;
+    /** index -> working tree (`git diff --numstat`). */
+    working: Record<string, { insertions: number; deletions: number }>;
+  };
   /** Present when a merge is in progress with conflicts */
   mergeInProgress?: GitMergeInProgress | null;
   /** Present when a rebase is in progress */

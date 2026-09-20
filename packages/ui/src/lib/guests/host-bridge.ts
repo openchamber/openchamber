@@ -28,7 +28,7 @@ import {
   type ResolveResultPayload,
   type SessionSnapshot,
   type StartSessionResult,
-  type ToastKind,
+  type ToastRequest,
 } from '@openchamber/sdk';
 
 import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files';
@@ -43,7 +43,7 @@ type HostBridgeEffects = {
   workspaceUnsubscribe: (subscriptionId: string) => void;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
   openSession: (sessionId: string) => void;
-  toast: (kind: ToastKind, message: string) => void;
+  toast: (request: ToastRequest) => void;
   openUrl: (url: string) => Promise<boolean>;
   openSurface: (mode: ContextPanelMode) => void;
   writeClipboard: (text: string) => Promise<boolean>;
@@ -242,9 +242,10 @@ export const answerGuestMessage = async (
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);
     case 'hello':
+    case 'action-result':
       return null;
     case 'toast':
-      effects.toast(message.payload.kind, message.payload.message);
+      effects.toast(message.payload);
       return okResult(message.id);
     case 'open-url': {
       if (!isHttpUrl(message.payload.url)) {

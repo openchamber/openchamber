@@ -8,6 +8,7 @@ import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tokenUtils';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
@@ -676,8 +677,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const providers = useConfigStore((state) => state.providers);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   // Same rollup the work-status panel reports, so the header and the panel
@@ -701,29 +700,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     void loadQuotaSettings();
   }, [loadQuotaSettings]);
 
-  const currentModel = getCurrentModel();
-  const latestAssistantModel = React.useMemo(() => {
-    for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i];
-      if (message.role !== 'assistant') {
-        continue;
-      }
-
-      const provider = providers.find((entry) => entry.id === message.providerID);
-      const model = provider?.models.find((entry) => entry.id === message.modelID);
-      if (model) {
-        return model;
-      }
-    }
-
-    return undefined;
-  }, [currentSessionMessages, providers]);
-  const modelForLimits = currentModel?.limit ? currentModel : latestAssistantModel;
-  const limit = modelForLimits && typeof modelForLimits.limit === 'object' && modelForLimits.limit !== null
-    ? (modelForLimits.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = limit && typeof limit.context === 'number' ? limit.context : 0;
-  const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
+  const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
   const contextUsage = React.useMemo<SessionContextUsage | null>(() => (
     currentSessionId ? buildSessionContextUsage(currentSessionMessages, contextLimit, outputLimit) : null

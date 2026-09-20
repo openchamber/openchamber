@@ -39,3 +39,19 @@ test('remote-only Desktop has no local backend to stop', async () => {
     warn() { assert.fail('missing local backend is normal'); },
   });
 });
+
+test('the default deadline leaves room for terminal grace and subsequent cleanup', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release;
+  let stopped = false;
+  const cleanup = new Promise(resolve => { release = resolve; });
+  const stopping = stopEmbeddedServer({ stop: () => cleanup }, {
+    launchFallback() { assert.fail('a 20-second terminal shutdown is within the desktop deadline'); },
+    warn() { assert.fail('normal shutdown must succeed'); },
+  }).then(() => { stopped = true; });
+  t.mock.timers.tick(25_000);
+  await Promise.resolve();
+  assert.equal(stopped, false);
+  release();
+  await stopping;
+});

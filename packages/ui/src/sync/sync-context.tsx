@@ -51,6 +51,7 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useRoutingStore } from "@/stores/useRoutingStore"
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
 import {
@@ -58,7 +59,7 @@ import {
   processVSCodeReconciledPermissionAutoAccept,
 } from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
@@ -71,6 +72,7 @@ import {
   getDirectoryOwnedSessionIds,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
+import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -264,6 +266,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
   applySessionEventsToGlobalSessions(batch.globalSessionEvents)
   for (const [directory, events] of batch.globalStatusEventsByDirectory) {
     applyGlobalSessionStatusEvents(directory, events)
+    applyGlobalBlockingRequestEvents(directory, events)
   }
   for (const store of batch.changedStores) {
     const state = batch.states.get(store)
@@ -1192,6 +1195,11 @@ const getActiveDirectoryFallback = (
   return childStores.getChild(_activeDirectory) ? _activeDirectory : null
 }
 
+const resolveCachedSessionDirectory = (sessionID: string): string | null => {
+  const session = useGlobalSessionsStore.getState().entityById.get(sessionID)
+  return session ? resolveGlobalSessionDirectory(session) : null
+}
+
 const resolveDirectoryFromRoutingIndex = (
   routingIndex: EventRoutingIndex,
   rawDirectory: string,
@@ -1218,6 +1226,15 @@ const resolveDirectoryFromRoutingIndex = (
     const found = findSessionInChildStores(sessionID, childStores, routingIndex, batch)
     if (found) {
       return found
+    }
+
+    // Unopened directories have no store, so a session the global cache lists
+    // for one of them is routed to that recorded directory. Without this, the
+    // active-session and single-store fallbacks below would file another
+    // project's events into whichever directory happens to be open.
+    const cachedDirectory = resolveCachedSessionDirectory(sessionID)
+    if (cachedDirectory) {
+      return cachedDirectory
     }
 
     // The global stream does not always include a directory. During a session
@@ -1587,6 +1604,94 @@ async function resyncDirectoryAfterReconnect(
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
+// Only top-level sessions raise notifications. The directory store knows the
+// parent when the directory is open; the global cache covers the rest.
+const isSubtaskSession = (
+  sessionID: string,
+  directory: string,
+  childStores: ChildStoreManager,
+  batch?: DirectoryEventBatch,
+): boolean => {
+  const store = childStores.getChild(directory)
+  const stored = store ? getDirectoryEventState(store, batch).session.find((s) => s.id === sessionID) : undefined
+  const session = stored ?? useGlobalSessionsStore.getState().entityById.get(sessionID)
+  return Boolean(session?.parentID)
+}
+
+const notifyPermissionAsked = (permission: PermissionRequest, directory: string): void => {
+  showPermissionNeededToast({
+    permission,
+    directory,
+    isViewed: isViewedInCurrentSession(directory, permission.sessionID),
+    pendingIds: pendingPermissionToastIds,
+    show: (title, options) => toast.info(title, options),
+    openSession: openSessionFromToast,
+  })
+}
+
+const notifyQuestionAsked = (question: QuestionRequest, directory: string): void => {
+  const sessionID = question.sessionID
+  const toastKey = getQuestionToastKey(sessionID, question.id)
+  if (isViewedInCurrentSession(directory, sessionID) || !toastKey || pendingQuestionToastIds.has(toastKey)) return
+  pendingQuestionToastIds.add(toastKey)
+  const firstQuestion = question.questions?.[0]
+  const title = firstQuestion?.header?.trim() || "Input needed"
+  const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
+  toast.info(title, {
+    id: `question-${toastKey}`,
+    description,
+    action: {
+      label: "Open session",
+      onClick: () => openSessionFromToast(sessionID, directory),
+    },
+  })
+}
+
+// Blocking requests in a directory without a store still deserve the in-app
+// toast: the sidebar row and tray approvals need the directory store, but the
+// toast only needs the request and where to open it. VS Code keeps its
+// extension-host auto-accept path, which runs on the store branch only.
+const notifyBlockingRequestWithoutStore = (payload: Event, directory: string): void => {
+  if (isVSCodeRuntime()) return
+  if (payload.type === "permission.asked") {
+    // SAFETY: permission.asked properties are the SDK permission request.
+    const permission = payload.properties as PermissionRequest
+    if (usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) return
+    notifyPermissionAsked(permission, directory)
+    return
+  }
+  if (payload.type === "question.asked") {
+    // SAFETY: question.asked properties are the SDK question request.
+    notifyQuestionAsked(payload.properties as QuestionRequest, directory)
+  }
+}
+
+const recordTurnOutcomeNotification = (
+  payload: Event,
+  directory: string,
+  childStores: ChildStoreManager,
+  batch?: DirectoryEventBatch,
+): void => {
+  // SAFETY: session.idle and session.error properties carry the addressed session ID and the optional OpenCode error payload.
+  const props = payload.properties as { sessionID?: string; error?: OpenCodeSessionErrorPayload }
+  const sessionID = props.sessionID
+  if (!sessionID) return
+  const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(props.error) : null
+  if (errorSummary) {
+    recordSessionError({ sessionId: sessionID, directory, ...errorSummary })
+  }
+  if (isSubtaskSession(sessionID, directory, childStores, batch)) return
+  appendNotification({
+    directory,
+    session: sessionID,
+    time: Date.now(),
+    viewed: isViewedInCurrentSession(directory, sessionID),
+    ...(errorSummary
+      ? { type: "error" as const, error: errorSummary }
+      : { type: "turn-complete" as const }),
+  })
+}
+
 export function handleEvent(
   rawDirectory: string,
   payload: Event,
@@ -1640,10 +1745,18 @@ export function handleEvent(
       else batch.globalStatusEventsByDirectory.set(directory, [payload])
     } else {
       applySessionEventToGlobalSessions(payload)
-      // Child stores remain the primary source for synced directories; this
-      // index covers unopened directories and list/status races.
+      // Child stores remain the primary source for synced directories; these
+      // indexes cover unopened directories and list/status races.
       applyGlobalSessionStatusEvent(directory, payload)
+      applyGlobalBlockingRequestEvents(directory, [payload])
     }
+  }
+
+  // Turn-complete and error notifications are recorded before the directory
+  // store lookup. Unopened directories are never bootstrapped and have no
+  // store, yet their collapsed sidebar rows still need the unread dot.
+  if ((payload.type === "session.idle" || payload.type === "session.error") && directory && directory !== "global") {
+    recordTurnOutcomeNotification(payload, directory, childStores, batch)
   }
 
   // Global events
@@ -1701,6 +1814,7 @@ export function handleEvent(
   }
 
   if (!store) {
+    notifyBlockingRequestWithoutStore(payload, directory)
     // Try as global event for unknown directories
     const result = reduceGlobalEvent(payload)
     if (result?.type === "refresh") {
@@ -1750,19 +1864,13 @@ export function handleEvent(
       return
     }
 
-    const isViewed = isViewedInCurrentSession(resolvedDirectory, permission.sessionID)
-    showPermissionNeededToast({
-      permission,
-      directory: resolvedDirectory,
-      isViewed,
-      pendingIds: pendingPermissionToastIds,
-      show: (title, options) => toast.info(title, options),
-      openSession: openSessionFromToast,
-    })
+    notifyPermissionAsked(permission, resolvedDirectory)
   }
 
   if (payload.type === "permission.replied") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
+    // A request the routing safety net was holding is settled either way.
+    if (props.requestID) useRoutingStore.getState().releasePermission(props.requestID)
     const toastKey = getPermissionToastKey(props.sessionID, props.requestID)
     const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, props.sessionID, props.requestID)
     if (eventKey) pendingVSCodePermissionEvents.delete(eventKey)
@@ -1773,24 +1881,7 @@ export function handleEvent(
   }
 
   if (payload.type === "question.asked") {
-    const question = payload.properties as QuestionRequest
-    const sessionID = question.sessionID
-    const toastKey = getQuestionToastKey(sessionID, question.id)
-    const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
-    if (!isViewed && toastKey && !pendingQuestionToastIds.has(toastKey)) {
-      pendingQuestionToastIds.add(toastKey)
-      const firstQuestion = question.questions?.[0]
-      const title = firstQuestion?.header?.trim() || "Input needed"
-      const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
-      toast.info(title, {
-        id: `question-${toastKey}`,
-        description,
-        action: {
-          label: "Open session",
-          onClick: () => openSessionFromToast(sessionID, resolvedDirectory),
-        },
-      })
-    }
+    notifyQuestionAsked(payload.properties as QuestionRequest, resolvedDirectory)
   }
 
   if (payload.type === "question.replied" || payload.type === "question.rejected") {
@@ -1799,33 +1890,6 @@ export function handleEvent(
     if (toastKey) {
       pendingQuestionToastIds.delete(toastKey)
       toast.dismiss(`question-${toastKey}`)
-    }
-  }
-
-  // Notification dispatch for session turn-complete and error events.
-  // These are NOT handled by the event reducer — only the notification store.
-  if (payload.type === "session.idle" || payload.type === "session.error") {
-    const props = payload.properties as { sessionID?: string; error?: OpenCodeSessionErrorPayload }
-    const sessionID = props.sessionID
-    const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(props.error) : null
-    if (errorSummary && sessionID) {
-      recordSessionError({ sessionId: sessionID, directory: resolvedDirectory ?? null, ...errorSummary })
-    }
-    // Skip subtask sessions — only top-level sessions generate notifications
-    const storeState = getDirectoryEventState(store, batch)
-    const session = storeState.session.find((s) => s.id === sessionID)
-    if (session && (session as { parentID?: string }).parentID) {
-      // subtask — skip notification
-    } else if (sessionID) {
-      appendNotification({
-        directory: resolvedDirectory,
-        session: sessionID,
-        time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
-        ...(errorSummary
-          ? { type: "error" as const, error: errorSummary }
-          : { type: "turn-complete" as const }),
-      })
     }
   }
 

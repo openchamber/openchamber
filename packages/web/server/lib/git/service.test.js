@@ -8,6 +8,7 @@ import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sourc
 import { registerGitRoutes } from './routes.js';
 
 import {
+  unsupportedRepositoryRootReason,
   checkoutBranch,
   checkoutCommit,
   cherryPick,
@@ -21,6 +22,7 @@ import {
   getCommitFiles,
   getLog,
   getStatus,
+  getTrackingBranch,
   getWorktrees,
   isGitRepository,
   observeWorktreeTopology,
@@ -129,6 +131,23 @@ async function createTempRepo() {
 // ---------------------------------------------------------------------------
 // resolveBaseRefForLog
 // ---------------------------------------------------------------------------
+
+describe('unsupportedRepositoryRootReason', () => {
+  it('rejects a repository rooted at a filesystem root or the home directory', () => {
+    const home = path.join(os.tmpdir(), 'unsupported-root-home');
+    expect(unsupportedRepositoryRootReason('/', home)).toBe('filesystem-root');
+    expect(unsupportedRepositoryRootReason(path.parse(process.cwd()).root, home)).toBe('filesystem-root');
+    expect(unsupportedRepositoryRootReason(home, home)).toBe('home');
+    expect(unsupportedRepositoryRootReason(`${home}${path.sep}`, home)).toBe('home');
+  });
+
+  it('accepts an ordinary project root, including one directly under home', () => {
+    const home = path.join(os.tmpdir(), 'unsupported-root-home');
+    expect(unsupportedRepositoryRootReason(path.join(home, 'project'), home)).toBeNull();
+    expect(unsupportedRepositoryRootReason(path.join(os.tmpdir(), 'repo'), home)).toBeNull();
+    expect(unsupportedRepositoryRootReason('', home)).toBeNull();
+  });
+});
 
 describe('resolveBaseRefForLog', () => {
   it('returns the local ref unchanged when it exists, even if origin also exists', async () => {
@@ -730,6 +749,52 @@ describe('getStatus', () => {
     } finally {
       process.chdir(previousCwd);
     }
+  });
+
+  it('scopes diff stats by staged and working instead of combining a partially staged file', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    const file = 'test.txt';
+    const filePath = path.join(repo, file);
+    fs.writeFileSync(filePath, 'one\ntwo\nthree\n');
+    runGit(repo, ['add', file]);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    // Stage one new line, then keep editing without staging another.
+    fs.writeFileSync(filePath, 'one\ntwo\nthree\nstaged\n');
+    runGit(repo, ['add', file]);
+    fs.writeFileSync(filePath, 'one\ntwo\nthree\nstaged\nworking\n');
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.staged[file]).toEqual({ insertions: 1, deletions: 0 });
+    expect(status.diffStats.working[file]).toEqual({ insertions: 1, deletions: 0 });
+  });
+
+  it('scopes untracked files to working stats and staged additions to staged stats', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n');
+    runGit(repo, ['add', 'tracked.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    fs.writeFileSync(path.join(repo, 'untracked.txt'), 'a\nb\n');
+    fs.writeFileSync(path.join(repo, 'staged.txt'), 'c\nd\ne\n');
+    runGit(repo, ['add', 'staged.txt']);
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.working['untracked.txt']).toEqual({ insertions: 2, deletions: 0 });
+    expect(status.diffStats.staged['staged.txt']).toEqual({ insertions: 3, deletions: 0 });
+    expect(status.diffStats.working['staged.txt']).toBeUndefined();
   });
 });
 
@@ -2477,5 +2542,140 @@ describe.runIf(canRunGit())('getRangeFiles', () => {
     const copyEntry = files.find((file) => file.status === 'C');
     expect(copyEntry).toBeDefined();
     expect(copyEntry.path).toBe('copied destination.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getTrackingBranch
+// ---------------------------------------------------------------------------
+
+describe('getTrackingBranch', () => {
+  const createCommittedRepo = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    return repo;
+  };
+
+  it('reports the same upstream name as status, including a gone upstream', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    await expect(getTrackingBranch(repo)).resolves.toBeNull();
+
+    runGit(repo, ['remote', 'add', 'origin', 'https://example.invalid/repo.git']);
+    runGit(repo, ['config', 'branch.main.remote', 'origin']);
+    runGit(repo, ['config', 'branch.main.merge', 'refs/heads/main']);
+    await expect(getTrackingBranch(repo)).resolves.toBe('origin/main');
+    expect((await getStatus(repo)).tracking).toBe('origin/main');
+
+    runGit(repo, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    await expect(getTrackingBranch(repo)).resolves.toBe('origin/main');
+  });
+
+  it('is null for a detached HEAD and outside a repository', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    runGit(repo, ['checkout', '--detach']);
+    await expect(getTrackingBranch(repo)).resolves.toBeNull();
+    await expect(getTrackingBranch(createTempDir())).resolves.toBeNull();
+  });
+});
+
+describe('getStatus concurrency', () => {
+  it('answers overlapping reads of one repository and reflects changes made while a read ran', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+
+    const first = getStatus(repo);
+    fs.writeFileSync(path.join(repo, 'late.txt'), 'added after the first read was admitted\n');
+    const second = getStatus(repo, { mode: 'light' });
+    const third = getStatus(repo);
+
+    const [firstStatus, secondStatus, thirdStatus] = await Promise.all([first, second, third]);
+    expect(firstStatus.current).toBe('main');
+    expect(secondStatus.files.map((file) => file.path)).toContain('late.txt');
+    expect(thirdStatus.files.map((file) => file.path)).toContain('late.txt');
+    // The follow-up run served both later callers at the widest requested mode.
+    expect(secondStatus.diffStats).toBeDefined();
+    expect(thirdStatus.diffStats).toBeDefined();
+  });
+});
+
+describe('getStatus untracked directories', () => {
+  const callDiffRoute = async (endpoint, query) => {
+    const routes = new Map();
+    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {} });
+    let status = 200;
+    let body;
+    await routes.get(`/api/git/${endpoint}`)({ query }, {
+      status(value) { status = value; return this; },
+      json(value) { body = value; },
+    });
+    return { status, body };
+  };
+
+  const createCommittedRepo = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    return repo;
+  };
+
+  const writeFiles = (root, count) => {
+    fs.mkdirSync(root, { recursive: true });
+    for (let index = 0; index < count; index += 1) {
+      fs.writeFileSync(path.join(root, `file-${String(index).padStart(5, '0')}.txt`), `${index}\n`);
+    }
+  };
+
+  it('lists the files of an ordinary new directory one by one', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    writeFiles(path.join(repo, 'feature', 'deep'), 3);
+    fs.writeFileSync(path.join(repo, 'loose.txt'), 'loose\n');
+
+    const paths = (await getStatus(repo)).files.map((file) => file.path);
+    expect(paths).toEqual([
+      'feature/deep/file-00000.txt',
+      'feature/deep/file-00001.txt',
+      'feature/deep/file-00002.txt',
+      'loose.txt',
+    ]);
+  });
+
+  it('keeps a directory with more than a thousand new files as one entry the diff routes explain', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    writeFiles(path.join(repo, 'node_modules', 'pkg'), 1001);
+    writeFiles(path.join(repo, 'small'), 2);
+
+    const status = await getStatus(repo);
+    expect(status.files.map((file) => file.path)).toEqual([
+      'node_modules/',
+      'small/file-00000.txt',
+      'small/file-00001.txt',
+    ]);
+    expect(status.files[0]).toMatchObject({ index: '?', working_dir: '?' });
+
+    for (const endpoint of ['diff', 'file-diff']) {
+      const { status: httpStatus, body } = await callDiffRoute(endpoint, { directory: repo, path: 'node_modules/' });
+      expect(httpStatus).toBe(422);
+      expect(body).toEqual({ code: 'untracked_directory', error: 'Path is a directory of untracked files: node_modules/' });
+    }
   });
 });

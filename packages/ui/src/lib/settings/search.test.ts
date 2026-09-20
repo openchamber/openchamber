@@ -14,9 +14,23 @@ const runtimeCtx = {
   isWindows: false,
   isLinux: false,
   isWindowsArm64: false,
+  routingAvailable: false,
 };
 
 describe('settings search', () => {
+  test('Enter-to-send is searchable only outside mobile', () => {
+    for (const isMobile of [false, true]) {
+      const results = buildSettingsSearchResults({
+        query: 'shift enter',
+        runtimeCtx: { ...runtimeCtx, isMobile },
+        t,
+        getPageTitle: (page) => page,
+      });
+
+      expect(results.some((result) => result.id === 'chat.enter-to-send')).toBe(!isMobile);
+    }
+  });
+
   test('finds the scrollbar preference on every surface', () => {
     for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
       const results = buildSettingsSearchResults({

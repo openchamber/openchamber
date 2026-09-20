@@ -59,7 +59,7 @@ export type SessionSnapshot = {
 };
 
 /** Which host chrome mounted this iframe. Not `openSurface`. */
-export type GuestHostSurface = 'panel' | 'dialog' | 'page';
+export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background';
 
 export type GuestConnection = {
   connected: boolean;
@@ -241,6 +241,11 @@ export type GuestSessionItem = {
 
 export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem;
 
+/** The captured target of a background action. Delivered once through `onAction`, not `onItem`. */
+export type GuestActionItem = GuestMessageItem | GuestSessionItem;
+
+export type ActionResultPayload = { ok: true } | { ok: false; error: string };
+
 export const isGuestMessageItem = (item: GuestItem | null): item is GuestMessageItem => (
   item !== null && item.kind === 'message'
 );
@@ -275,6 +280,12 @@ export type ToastKind = 'info' | 'success' | 'error';
 export type ToastRequest = {
   kind: ToastKind;
   message: string;
+  /** Show Copy. `true` copies the message; an object supplies different text, up to 32,000 characters. */
+  copy?: boolean | { text: string };
+  /** Show an OK button that dismisses the toast. */
+  dismiss?: boolean;
+  /** Keep the toast until dismissed. Always includes OK, even when `dismiss` is false. */
+  persistent?: boolean;
 };
 
 export type ComposeRequest = {
@@ -537,6 +548,7 @@ export type HostSessionLifecycleMessage = Envelope & { type: 'session-lifecycle'
 export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestItem | null } };
 /** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
 export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
+export type HostActionMessage = Envelope & { type: 'action'; id: string; payload: GuestActionItem };
 export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
   | { ok: true; payload?: HostResultPayload }
   | { ok: false; error: string; code: HostRequestErrorCode }
@@ -552,6 +564,7 @@ export type HostMessage =
   | HostSessionLifecycleMessage
   | HostItemMessage
   | HostResolveMessage
+  | HostActionMessage
   | HostResultMessage;
 
 type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; id: string } & (
@@ -582,6 +595,8 @@ export type GuestGenerateMessage = GuestCall<'generate', GenerateRequest>;
 export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
 /** Answers a host `resolve` by `id`. The host sends no `result` back for it. */
 export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
+/** Completes a host `action`. The host sends no `result` back. */
+export type GuestActionResultMessage = Envelope & { type: 'action-result'; id: string; payload: ActionResultPayload };
 
 export type GuestMessage =
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
@@ -611,6 +626,7 @@ export type GuestMessage =
   | GuestFileStatMessage
   | GuestGenerateMessage
   | GuestBadgeMessage
+  | GuestActionResultMessage
   | GuestResolveResultMessage;
 
 const serviceStatusSet: ReadonlySet<string> = new Set(SERVICE_STATUS_VALUES);
@@ -649,7 +665,7 @@ export const isGenerateResult = (
 
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
-  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve',
+  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
 ]);
 
 /** What a postMessage payload may carry before it is read as a host message. */

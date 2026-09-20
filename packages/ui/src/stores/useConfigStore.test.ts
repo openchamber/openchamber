@@ -936,6 +936,189 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentModelId).toBe('retired-model');
   });
 
+  test('setAgent switching from agent with pinned model to agent without pinned model uses default model, does not leak pinned model', () => {
+    const sessionId = 'ses_pinned_to_unpinned_leak';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.6-sol'), provider('google', 'antigravity-gemini-3.8-flash')],
+      agents: [
+        testAgent('plan'),
+        testAgent('Plan - Gemini', { model: { providerID: 'google', modelID: 'antigravity-gemini-3.8-flash' } }),
+      ],
+      settingsDefaultModel: 'openai/gpt-5.6-sol',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentAgentName: 'plan',
+      selectionSource: 'auto',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('Plan - Gemini');
+    let state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('Plan - Gemini');
+    expect(state.currentProviderId).toBe('google');
+    expect(state.currentModelId).toBe('antigravity-gemini-3.8-flash');
+    expect(state.selectionSource).toBe('auto');
+
+    useConfigStore.getState().setAgent('plan');
+    state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('plan');
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.6-sol');
+    expect(state.selectionSource).toBe('auto');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toBeNull();
+  });
+
+  test('cycling through agents with and without pinned models respects each agent config after sending message', () => {
+    const sessionId = 'ses_tab_cycle_all_agents';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('openai', 'gpt-5.6-sol'),
+        provider('google', 'antigravity-gemini-3.8-flash'),
+      ],
+      agents: [
+        testAgent('plan'),
+        testAgent('Plan - Gemini', { model: { providerID: 'google', modelID: 'antigravity-gemini-3.8-flash' } }),
+        testAgent('build'),
+        testAgent('Build - Gemini', { model: { providerID: 'google', modelID: 'antigravity-gemini-3.8-flash' } }),
+      ],
+      settingsDefaultModel: 'openai/gpt-5.6-sol',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentAgentName: 'plan',
+      selectionSource: 'auto',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('Plan - Gemini');
+    expect(useConfigStore.getState().currentAgentName).toBe('Plan - Gemini');
+    expect(useConfigStore.getState().currentModelId).toBe('antigravity-gemini-3.8-flash');
+
+    // Message reconciliation records the sent model as the live manual selection.
+    useSelectionStore.getState().saveSessionModelSelection(sessionId, 'google', 'antigravity-gemini-3.8-flash');
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'Plan - Gemini', 'google', 'antigravity-gemini-3.8-flash');
+    useConfigStore.setState({ selectionSource: 'manual' });
+
+    useConfigStore.getState().setAgent('build');
+    expect(useConfigStore.getState().currentAgentName).toBe('build');
+    expect(useConfigStore.getState().currentModelId).toBe('gpt-5.6-sol');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'build')).toBeNull();
+
+    useConfigStore.getState().setAgent('Build - Gemini');
+    expect(useConfigStore.getState().currentAgentName).toBe('Build - Gemini');
+    expect(useConfigStore.getState().currentModelId).toBe('antigravity-gemini-3.8-flash');
+
+    useConfigStore.getState().setAgent('plan');
+    expect(useConfigStore.getState().currentAgentName).toBe('plan');
+    expect(useConfigStore.getState().currentModelId).toBe('gpt-5.6-sol');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toBeNull();
+  });
+
+  test('a picked agent survives an agents reload, with its inherited model still inherited', async () => {
+    const agentsList = [
+      testAgent('build', { model: { providerID: 'openai', modelID: 'gpt-5.6-sol' } }),
+      testAgent('Build - Gemini', { model: { providerID: 'google', modelID: 'antigravity-gemini-3.8-flash' } }),
+      testAgent('plan'),
+    ];
+    const providersList = [
+      provider('openai', 'gpt-5.6-sol'),
+      provider('google', 'antigravity-gemini-3.8-flash'),
+    ];
+    listAgentsImpl = async () => agentsList;
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: providersList,
+      agents: agentsList,
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentAgentName: 'build',
+      selectionSource: 'auto',
+      agentSelectionSource: 'auto',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('Build - Gemini');
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:pickedPinnedAgent' });
+
+    expect(useConfigStore.getState().currentAgentName).toBe('Build - Gemini');
+    expect(useConfigStore.getState().currentModelId).toBe('antigravity-gemini-3.8-flash');
+    // The pin was inherited, not chosen: a reload must not promote it.
+    expect(useConfigStore.getState().selectionSource).toBe('auto');
+
+    useConfigStore.getState().setAgent('plan');
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:pickedUnpinnedAgent' });
+
+    expect(useConfigStore.getState().currentAgentName).toBe('plan');
+  });
+
+  test('default selection clears an agent pick so the next draft resolves defaults again', async () => {
+    const agentsList = [
+      testAgent('build', { model: { providerID: 'openai', modelID: 'gpt-5.6-sol' } }),
+      testAgent('Build - Gemini', { model: { providerID: 'google', modelID: 'antigravity-gemini-3.8-flash' } }),
+    ];
+    listAgentsImpl = async () => agentsList;
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('openai', 'gpt-5.6-sol'),
+        provider('google', 'antigravity-gemini-3.8-flash'),
+      ],
+      agents: agentsList,
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentAgentName: 'build',
+      selectionSource: 'auto',
+      agentSelectionSource: 'auto',
+      settingsDefaultsLoaded: true,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('Build - Gemini');
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:pickCleared' });
+
+    expect(useConfigStore.getState().agentSelectionSource).toBe('auto');
+    expect(useConfigStore.getState().currentAgentName).toBe('build');
+  });
+
+  test('setAgent carries an explicit override from a pinned agent to an unpinned agent', () => {
+    const sessionId = 'ses_explicit_override_from_pinned';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('openai', 'gpt-5.6-sol'),
+        provider('google', 'antigravity-gemini-3.8-flash'),
+        provider('anthropic', 'claude-sonnet'),
+      ],
+      agents: [
+        testAgent('plan'),
+        testAgent('Plan - Gemini', { model: { providerID: 'google', modelID: 'antigravity-gemini-3.8-flash' } }),
+      ],
+      settingsDefaultModel: 'openai/gpt-5.6-sol',
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude-sonnet',
+      currentAgentName: 'Plan - Gemini',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    expect(useConfigStore.getState().currentModelId).toBe('claude-sonnet');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toEqual({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet',
+    });
+  });
+
   test('loadAgents does not fetch OpenCode config directly', async () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
@@ -1271,6 +1454,29 @@ describe('useConfigStore provider persistence', () => {
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen', currentVariant: 'high' });
     expect(useConfigStore.getState().getCurrentModel()?.id).toBe('chosen');
+  });
+
+  test('an effort picked in a draft survives the settings document arriving late', async () => {
+    persistedOpenChamberSettings = { defaultModel: 'sidecar/chosen', defaultVariant: 'high' };
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('sidecar', 'chosen')],
+      agents: [testAgent('build')],
+      currentProviderId: 'sidecar',
+      currentModelId: 'chosen',
+      currentAgentName: 'build',
+      selectionSource: 'auto',
+      agentSelectionSource: 'auto',
+      settingsDefaultsLoaded: false,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setCurrentVariantOverride('low', 'high');
+    await useConfigStore.getState().loadSessionDefaults();
+
+    expect(useConfigStore.getState().settingsDefaultVariant).toBe('high');
+    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
   });
 
   test('does not choose Big Pickle while settings are still loading', async () => {

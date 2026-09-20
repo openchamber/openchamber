@@ -37,6 +37,25 @@ A short intro.
 - Faster.`);
   });
 
+  it('shows SDK notes between Fixes and Misc and omits an empty SDK group', () => {
+    const withSdk = [{
+      ...index[0],
+      app: { ...index[0].app, sdk: ['Actions: background execution.'], misc: ['Packaging update.'] },
+    }];
+    expect(renderUpdateNotes(withSdk, '1.2.2', '1.2.3', compare)).toContain(`### Fixes
+
+- Chat: no freeze.
+
+### SDK
+
+- Actions: background execution.
+
+### Misc
+
+- Packaging update.`);
+    expect(renderUpdateNotes([{ ...index[0], app: { sdk: [] } }], '1.2.2', '1.2.3', compare)).not.toContain('### SDK');
+  });
+
   it('returns null when nothing lies in the range or the payload is not an index', () => {
     expect(renderUpdateNotes(index, '1.2.3', '1.2.3', compare)).toBe(null);
     expect(renderUpdateNotes({ entries: [] }, '1.0.0', '9.9.9', compare)).toBe(null);

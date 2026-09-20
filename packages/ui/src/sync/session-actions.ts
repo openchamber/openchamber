@@ -1797,7 +1797,9 @@ export async function optimisticSend(input: {
     agent: input.agent ?? "",
     model: `${input.providerID}/${input.modelID}`,
     metadata: {} as Record<string, unknown>,
-    time: { created: Date.now(), completed: 0 },
+    // A user message never completes a turn; only assistant messages carry
+    // `time.completed`, and readers treat its presence as "turn finished".
+    time: { created: Date.now() },
   } as unknown as Message
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)

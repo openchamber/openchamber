@@ -182,7 +182,7 @@ const RELEASE_CHANGELOG_FILES = ['changelog', 'packages/vscode/CHANGELOG.md', ..
 function printReleaseNextSteps(version) {
   log.success(`Release v${version} prepared locally`);
   log.info('Next steps (only the release files are staged, unrelated changes stay out):');
-  console.log(`  git add ${[...RELEASE_PACKAGE_FILES, ...RELEASE_CHANGELOG_FILES].join(' ')}`);
+  console.log(`  git add ${[...RELEASE_PACKAGE_FILES, 'bun.lock', ...RELEASE_CHANGELOG_FILES].join(' ')}`);
   console.log(`  git commit -m "release v${version}"`);
   console.log(`  git tag v${version}`);
   console.log(`  git push origin main v${version}`);

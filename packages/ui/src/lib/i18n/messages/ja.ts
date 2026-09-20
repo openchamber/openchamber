@@ -2,7 +2,9 @@ import type { I18nKey } from './en';
 import { settingsDict } from './ja.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': 'AIで名前を変更',
@@ -31,7 +33,9 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n.ja,
   ...linearPanelI18n.ja,
+  ...routingI18n.ja,
   ...pluginPanelI18n.ja,
+  ...surfacePanelI18n.ja,
   'terminalView.actions.attachSelection': '選択した出力を添付',
   'terminalView.actions.copySelection': '選択した出力をコピー',
   'terminalView.toast.selectionCopied': '出力をコピーしました',
@@ -425,6 +429,7 @@ export const dict: Record<I18nKey, string> = {
   'multirun.launcher.models.info': '2つ以上のモデルを選択。同じモデルを複数回追加できます。',
   'multirun.launcher.toast.fileTooLarge': 'ファイル「{fileName}」が大きすぎます（最大10MB）',
   'multirun.launcher.toast.attachFailed': '「{fileName}」の添付に失敗しました',
+  'multirun.launcher.toast.partialFailure': '一部のセッションを作成できませんでした。失敗数: {failed}。',
   'multirun.launcher.toast.attachedSingle': '{count}ファイルを添付しました',
   'multirun.launcher.toast.attachedPlural': '{count}ファイルを添付しました',
   'multirun.modelMultiSelect.actions.addModel': 'モデルを追加',
@@ -627,6 +632,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
   'sessions.sidebar.session.status.questionPendingSingle': '保留中の質問が1件あります',
   'sessions.sidebar.session.status.questionPendingMany': '保留中の質問が{count}件あります',
+  'sessions.sidebar.session.status.questionPending': '保留中の質問',
   'sessions.sidebar.session.status.activeFor': 'アクティブ時間 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '前回のターンの所要時間 {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',
@@ -1623,6 +1629,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.unavailable.missingDescription': '変更一覧の読み込み後に削除されました。一覧を更新しています。',
   'diffView.unavailable.nestedRepositoryTitle': '別の Git リポジトリ',
   'diffView.unavailable.nestedRepositoryDescription': 'このフォルダーには独自の Git 履歴があります。変更を見るにはプロジェクトとして開いてください。',
+  'diffView.unavailable.untrackedDirectoryTitle': '新規ファイルのフォルダー',
+  'diffView.unavailable.untrackedDirectoryDescription': 'このフォルダーには新規ファイルが多すぎるため、個別に一覧表示できません。ステージするか、リポジトリに不要であれば .gitignore に追加してください。',
   'diffView.submodule.title': 'サブモジュール',
   'diffView.submodule.commitChanged': 'コミット {from} → {to}',
   'diffView.submodule.commitUnchanged': 'コミット {commit} のまま',
@@ -1653,8 +1661,6 @@ export const dict: Record<I18nKey, string> = {
   'diffView.actions.renderAnyway': 'とにかくレンダリング',
   'diffView.actions.expandAll': 'すべて展開',
   'diffView.actions.collapseAll': 'すべて折りたたむ',
-  'diffView.actions.loadFullFiles': '全ファイルを読み込む',
-  'diffView.actions.disableFullFiles': '全ファイルの読み込みを解除',
   'diffView.actions.disableLineWrap': '行の折り返しを無効にする',
   'diffView.actions.enableLineWrap': '行の折り返しを有効にする',
   'diffView.actions.openFileInEditorAtChange': '変更箇所でファイルをエディターで開く',
@@ -2329,6 +2335,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.commentOnSelection': '選択範囲にコメント',
   'chat.textSelection.comment.placeholder': '任意のコメントを追加...',
   'chat.textSelection.comment.attach': '添付',
+  'chat.textSelection.comment.attachFailed': 'コメントを添付できませんでした。コメントを短くするか、他の添付コンテキストを削除してから、もう一度お試しください。',
   'chat.textSelection.actions.addToNotes': 'メモに追加',
   'chat.textSelection.title.addToCurrentChat': '現在のチャットに追加',
   'chat.textSelection.title.saveInsightToNotes': '選択テキストをメモに保存',
@@ -2444,6 +2451,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.someFilesSkipped': '一部のファイルがスキップされました:\n{summary}',
   'chat.chatInput.toast.vscodePickFailed': 'VS Codeでのファイル選択に失敗しました',
   'chat.chatInput.toast.openSessionFirst': '先にセッションを開いてください',
+  'chat.chatInput.toast.dictationKeptForOriginalSession': '音声入力は、開始したセッションの下書きとして保存されました',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': '権限の自動承認の切り替えに失敗しました',
   'chat.chatInput.reviewComments': 'レビューコメント:',
   'chat.chatInput.reviewCommentsRemove': 'レビューコメントを削除',
@@ -2931,6 +2939,9 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.failedToSave': '保存に失敗しました',
   'desktopHostSwitcher.error.failedToLoad': '読み込みに失敗しました',
   'desktopHostSwitcher.error.invalidUrl': '無効なURL（http/httpsである必要があります）',
+  'desktopHostSwitcher.error.pairingRejected': 'ペアリングリンクが無効か、期限切れです。新しいリンクを生成してください。',
+  'desktopHostSwitcher.error.pairingFailed': 'ペアリングに失敗しました（HTTP {status}）。',
+  'desktopHostSwitcher.error.pairingInvalidResponse': 'サーバーが無効なペアリング応答を返しました。',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '新しいウィンドウを開けませんでした',
   'desktopHostSwitcher.instance.local': 'ローカル',
   'desktopHostSwitcher.instance.fallback': 'インスタンス',
@@ -3084,6 +3095,9 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.desktopRecovery.actions.retrying': '再試行中…',
   'onboarding.desktopRecovery.actions.retryConnection': '接続を再試行',
   'startup.initRecovery.title': '起動に失敗しました',
+  'startup.initRecovery.openCodeUnavailable': 'OpenChamberには接続できますが、OpenCodeの準備ができていません。サーバー上のOpenCodeを確認してから再試行してください。',
+  'startup.initRecovery.binary': 'OpenCodeの実行ファイル',
+  'startup.initRecovery.error': 'OpenCodeのエラー',
   'startup.initRecovery.description': 'OpenChamberが初期化を完了できませんでした。サーバーが実行中であることを確認してから再試行してください。',
   'startup.initRecovery.retry': '再試行',
   'startup.initRecovery.retrying': '再試行中…',

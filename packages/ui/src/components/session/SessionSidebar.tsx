@@ -81,6 +81,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
+  const resetSessionSearch = React.useCallback(() => {
+    setSessionSearchQuery('');
+    setIsSessionSearchOpen(false);
+  }, []);
   // Reported by the session list below: the header cannot see what matched.
   const [searchMatchCount, setSearchMatchCount] = React.useState(0);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -693,10 +697,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           rowActions: {
             allowReselect,
             onSessionSelected,
-            isSessionSearchOpen,
-            sessionSearchQuery,
-            setSessionSearchQuery,
-            setIsSessionSearchOpen,
+            resetSessionSearch,
           },
           alwaysShowActions: alwaysShowSidebarActions,
           notifyOnSubtasks,

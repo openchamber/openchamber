@@ -11,6 +11,7 @@ import {
   GUEST_COMMAND_NAME,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   GUEST_FILESYSTEM_PATTERN_MAX,
+  GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_COLUMNS_MAX,
   GUEST_TOOL_COLUMN_MAX,
@@ -197,6 +198,10 @@ const serviceSchema = z.object({
   entry: z.string().trim().refine(isSafeAssetPath),
   runtime: z.literal('host'),
   permissions: servicePermissionsSchema.optional(),
+  provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).min(1).max(GUEST_SERVICE_PROVIDES.length)
+    .refine((roles) => new Set(roles).size === roles.length, { message: 'provides entries must be unique' })
+    .optional(),
+  surface: z.literal(true).optional(),
 });
 
 const uniqueBy = <T,>(items: T[], key: (item: T) => string): boolean => (
@@ -210,6 +215,7 @@ const actionSchema = z.object({
   label: z.string().trim().min(1).max(GUEST_ACTION_LABEL_MAX),
   icon: z.string().trim().refine(isPanelIcon).optional(),
   where: z.enum(['message', 'session']),
+  mode: z.enum(['open', 'background']).optional(),
   roles: z.array(z.enum(['user', 'assistant'])).min(1).max(2).optional(),
   payload: z.array(z.enum(['messages'])).max(1).optional(),
 }).refine((value) => value.where === 'message' || value.roles === undefined, { path: ['roles'] })
@@ -245,6 +251,9 @@ const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
 const contributesSchema = z.object({
   panel: panelSchema,
+  background: z.object({
+    entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
+  }).optional(),
   attach: attachSchema.optional(),
   page: z.union([z.literal(true), z.object({
     entry: z.string().trim().refine(isSafeAssetPath),
@@ -262,18 +271,18 @@ const contributesSchema = z.object({
 });
 
 /**
- * Everything that only makes sense with an iframe to mount. Without
- * `panel.entry` there is nothing to open from the rail, the + menu, a menu
- * action, or a slash command, and nothing to hand a capability, a service,
- * an integration, or a filesystem grant to; only `tools` stays meaningful.
+ * Contributions that need either the panel or background execution frame.
  */
-const pageOnlyContributions = (contributes: z.output<typeof contributesSchema>): string[] => {
+const runtimeContributions = (contributes: z.output<typeof contributesSchema>): string[] => {
   const declared: string[] = [];
   if (contributes.page !== undefined) declared.push('page');
   if (contributes.attach !== undefined && contributes.attach !== false) declared.push('attach');
   if (contributes.capabilities && contributes.capabilities.length > 0) declared.push('capabilities');
   if (contributes.integration !== undefined) declared.push('integration');
-  if (contributes.service !== undefined) declared.push('service');
+  // A service the host starts itself (it provides a role or a surface) needs
+  // no frame; one that only answers a panel's `serviceRequest` has no caller
+  // without one.
+  if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
   if (contributes.actions !== undefined) declared.push('actions');
   if (contributes.commands !== undefined) declared.push('commands');
@@ -286,13 +295,31 @@ export const openChamberManifestSchema = z.object({
     openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
   }).strict().optional(),
   contributes: contributesSchema.superRefine((contributes, ctx) => {
+    if (contributes.service?.surface && hasGuestPage(contributes)) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'surface'],
+        message: 'service.surface draws the panel itself; drop panel.entry.',
+      });
+      return;
+    }
     if (hasGuestPage(contributes)) return;
-    const needsPage = pageOnlyContributions(contributes);
-    if (needsPage.length === 0) return;
+    if (contributes.background) {
+      const needsPanel = [];
+      if (contributes.page !== undefined) needsPanel.push('page');
+      if (contributes.attach !== undefined && contributes.attach !== false) needsPanel.push('attach');
+      if (contributes.actions?.some((action) => action.mode !== 'background')) needsPanel.push('actions with mode "open"');
+      if (needsPanel.length > 0) ctx.addIssue({
+        code: 'custom', path: ['panel'],
+        message: `${needsPanel.join(', ')} needs panel.entry; background-only actions must declare mode "background".`,
+      });
+      return;
+    }
+    const needsRuntime = runtimeContributions(contributes);
+    if (needsRuntime.length === 0) return;
     ctx.addIssue({
       code: 'custom',
       path: ['panel'],
-      message: `${needsPage.map((key) => `contributes.${key}`).join(', ')} needs panel.entry; an extension without a page may only declare tools.`,
+      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools.`,
     });
   }),
 });
@@ -365,6 +392,9 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path === 'contributes.page' || path.startsWith('contributes.page.')) {
     return fail('invalid-page', 'contributes.page must be true or { entry: "<package HTML>", title?: "Page title" }.');
   }
+  if (path === 'contributes.background' || path.startsWith('contributes.background.')) {
+    return fail('invalid-background', 'contributes.background needs an entry ending in .html inside the package.');
+  }
   if (path === 'contributes.attach' || path.startsWith('contributes.attach.')) {
     return fail(
       'invalid-attach',
@@ -405,7 +435,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     );
   }
   if (path.startsWith('contributes.service')) {
-    return fail('invalid-service', 'contributes.service needs entry, runtime "host", and optional permissions.');
+    return fail('invalid-service', 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser"), and optional surface (true, without panel.entry).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

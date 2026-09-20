@@ -5,6 +5,8 @@ import { Window } from 'happy-dom';
 import { create } from 'zustand';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getThemeById } from '@/lib/theme/themes';
+import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
+import { useRoutingStore } from '@/stores/useRoutingStore';
 
 /**
  * Restoring a session must not invent an effort choice.
@@ -39,7 +41,13 @@ const model = {
   variants: { low: {}, high: {} },
 };
 const provider = { id: PROVIDER_ID, name: PROVIDER_ID, models: [model] };
-const agent = { name: AGENT, mode: 'primary' as const };
+type Agent = {
+  name: string;
+  mode: 'primary';
+  model?: { providerID: string; modelID: string };
+  variant?: string;
+};
+const agent: Agent = { name: AGENT, mode: 'primary' };
 
 let latestUserChoice: UserModelChoice | null = null;
 let forcePreserveManualOverride: boolean | null = null;
@@ -51,7 +59,7 @@ const overrideWrites: Array<{ override: VariantChoice; inherited: string | undef
 
 type ConfigState = {
   providers: typeof provider[];
-  agents: typeof agent[];
+  agents: Agent[];
   providersLoaded: boolean;
   agentsLoaded: boolean;
   settingsDefaultsLoaded: boolean;
@@ -71,8 +79,8 @@ type ConfigState = {
   setCurrentVariant: (variant: string | undefined) => void;
   setCurrentVariantOverride: (override: VariantChoice, inherited: string | undefined) => void;
   getCurrentProvider: () => typeof provider | undefined;
-  getCurrentAgent: () => typeof agent;
-  getVisibleAgents: () => typeof agent[];
+  getCurrentAgent: () => Agent;
+  getVisibleAgents: () => Agent[];
   getCurrentModelVariants: () => string[];
   getModelMetadata: () => undefined;
 };
@@ -117,7 +125,7 @@ const useConfigStore = create<ConfigState>((set, get) => ({
     });
   },
   getCurrentProvider: () => get().providers.find((entry) => entry.id === get().currentProviderId),
-  getCurrentAgent: () => agent,
+  getCurrentAgent: () => get().agents.find((entry) => entry.name === get().currentAgentName) ?? agent,
   getVisibleAgents: () => get().agents,
   getCurrentModelVariants: () => Object.keys(model.variants),
   getModelMetadata: () => undefined,
@@ -373,6 +381,31 @@ describe('ModelControls effort restore', () => {
     });
   });
 
+  test('a draft inherits a pinned agent variant over the settings default', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      agents: [{
+        ...agent,
+        model: { providerID: PROVIDER_ID, modelID: MODEL_ID },
+        variant: 'high',
+      }],
+      currentVariant: 'high',
+      currentVariantSelection: { override: undefined, inherited: 'high' },
+      settingsDefaultVariant: 'low',
+    });
+
+    const { cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: 'high',
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('restores the concrete effort the session history carries', async () => {
     latestUserChoice = { id: 'msg-1', agent: AGENT, providerID: PROVIDER_ID, modelID: MODEL_ID, variant: 'low' };
     useUIStore.setState({ isModelSelectorOpen: true });
@@ -423,6 +456,37 @@ describe('ModelControls effort restore', () => {
       await cleanup();
     }
   });
+
+  for (const ready of [true, false]) {
+    test(`a saved Auto ${ready ? 'wins over' : 'is not overwritten by'} the model history ran on`, async () => {
+      latestUserChoice = { id: 'msg-1', agent: AGENT, providerID: PROVIDER_ID, modelID: MODEL_ID, variant: undefined };
+      const selections = useSelectionStore.getState();
+      // Picking Auto records it for the session and for the agent alike.
+      const auto = { providerId: AUTO_PROVIDER_ID, modelId: AUTO_MODEL_ID };
+      const getSaved = spyOn(selections, 'getSessionModelSelection');
+      const getAgentSaved = spyOn(selections, 'getAgentModelForSession');
+      getSaved.mockReturnValue(auto);
+      getAgentSaved.mockReturnValue(auto);
+      const saveModel = spyOn(selections, 'saveSessionModelSelection');
+      useRoutingStore.setState({ available: ready, autoReady: ready });
+      const { cleanup } = await renderModelControls();
+      try {
+        const { currentProviderId, currentModelId } = useConfigStore.getState();
+        if (ready) {
+          expect([currentProviderId, currentModelId]).toEqual([AUTO_PROVIDER_ID, AUTO_MODEL_ID]);
+        } else {
+          expect([currentProviderId, currentModelId]).toEqual([PROVIDER_ID, MODEL_ID]);
+        }
+        // History must never replace the saved Auto, ready or not.
+        expect(saveModel.mock.calls.some(([, providerId, modelId]) => !isAutoModel(providerId, modelId))).toBe(false);
+      } finally {
+        await cleanup();
+        for (const spy of [getSaved, getAgentSaved, saveModel]) spy.mockRestore();
+        useSelectionStore.setState(selections);
+        useRoutingStore.setState({ available: false, autoReady: false });
+      }
+    });
+  }
 
   for (const savedVariant of ['high', null]) {
     test(`a saved effort choice wins over older message history: ${savedVariant}`, async () => {
@@ -516,6 +580,23 @@ describe('ModelControls effort restore', () => {
       expect(useSelectionStore.getState().savedVariant).toBe(undefined);
       expect(useConfigStore.getState().currentVariantSelection.override).toBe(undefined);
     } finally {
+      await cleanup();
+    }
+  });
+
+  test('does not reapply persisted session selections after a live agent change', async () => {
+    const selections = useSelectionStore.getState();
+    const getSessionModel = spyOn(selections, 'getSessionModelSelection');
+    const { cleanup } = await renderModelControls();
+    try {
+      const callsAfterHydration = getSessionModel.mock.calls.length;
+
+      await act(async () => useConfigStore.setState({ currentAgentName: 'plan' }));
+
+      expect(getSessionModel.mock.calls.length).toBe(callsAfterHydration);
+      expect(useConfigStore.getState().currentAgentName).toBe('plan');
+    } finally {
+      getSessionModel.mockRestore();
       await cleanup();
     }
   });

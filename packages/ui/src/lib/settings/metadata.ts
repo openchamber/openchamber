@@ -20,6 +20,7 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'routing'
   | 'magic-prompts'
   | 'snippets'
   | 'notifications'
@@ -40,6 +41,8 @@ export interface SettingsRuntimeContext {
   isWeb: boolean;
   isDesktop: boolean;
   isMobile: boolean;
+  /** Whether this server build has Jev routing (`OPENCHAMBER_ROUTING_ENABLE`). */
+  routingAvailable: boolean;
 }
 
 export interface SettingsPageMeta {
@@ -184,6 +187,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
   },
   {
+    slug: 'routing',
+    title: 'Routing',
+    group: 'general',
+    kind: 'single',
+    description: 'Pick the right model for each message automatically, and get asked before risky actions in auto-accepted sessions.',
+    keywords: ['routing', 'auto', 'jev', 'typesafe', 'model routing', 'categories', 'safety net', 'auto-accept', 'fallback'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
+  },
+  {
     slug: 'magic-prompts',
     title: 'Magic Prompts',
     group: 'content',
@@ -275,6 +287,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'command';
     case 'sessions':
       return 'chat-history';
+    case 'routing':
+      return 'signpost';
 
     case 'providers':
       return 'cloud';

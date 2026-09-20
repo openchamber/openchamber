@@ -69,7 +69,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   useGitHubAuthStore.setState({ hasChecked: true, status: { connected: true } });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
-  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: {} };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
   const seed = (directory: string, nextStatus = status) => {
     useGitStore.getState().setActiveDirectory(directory);
     const previous = useGitStore.getState().getDirectoryState(directory);

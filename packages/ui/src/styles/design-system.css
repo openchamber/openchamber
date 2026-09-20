@@ -1,6 +1,7 @@
 @layer base {
   :root {
     color-scheme: light;
+    -webkit-font-smoothing: antialiased;
     --oc-safe-area-top: 0px;
     --oc-safe-area-right: 0px;
     --oc-safe-area-bottom: 0px;
@@ -27,7 +28,7 @@
     --text-markdown: 0.875rem;
     --text-code: 0.75rem;
     --text-ui-header: 0.875rem;
-    --text-ui-label: 0.8125rem;
+    --text-ui-label: 0.84375rem;
     --text-meta: 0.8125rem;
     --text-micro: 0.8125rem;
     --text-settings-page-title: 1.0625rem;
@@ -568,7 +569,7 @@
   --markdown-heading4-size: var(--text-markdown);
   --markdown-heading5-size: var(--text-markdown);
   --markdown-heading6-size: var(--text-markdown);
-  --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace;
   --font-family-sans: var(--font-sans);

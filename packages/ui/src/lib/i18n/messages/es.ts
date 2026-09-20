@@ -2,7 +2,9 @@ import type { I18nKey } from './en';
 import { settingsDict } from './es.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': 'Renombrar con IA',
@@ -31,7 +33,9 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n.es,
   ...linearPanelI18n.es,
+  ...routingI18n.es,
   ...pluginPanelI18n.es,
+  ...surfacePanelI18n.es,
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
   'terminalView.toast.selectionCopied': 'Salida copiada',
@@ -425,6 +429,7 @@ export const dict: Record<I18nKey, string> = {
   "multirun.launcher.models.info": "Selecciona 2 o más modelos. El mismo modelo puede añadirse varias veces.",
   "multirun.launcher.toast.fileTooLarge": "El archivo \"{fileName}\" es demasiado grande (máximo 10MB)",
   "multirun.launcher.toast.attachFailed": "No se pudo adjuntar \"{fileName}\"",
+  'multirun.launcher.toast.partialFailure': 'No se pudieron crear algunas sesiones. Fallidas: {failed}.',
   "multirun.launcher.toast.attachedSingle": "Archivo adjuntado ({count})",
   "multirun.launcher.toast.attachedPlural": "Archivos adjuntados ({count})",
   "multirun.modelMultiSelect.actions.addModel": "Añadir modelo",
@@ -627,6 +632,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",
   "sessions.sidebar.session.status.questionPendingSingle": "1 pregunta pendiente",
   "sessions.sidebar.session.status.questionPendingMany": "{count} preguntas pendientes",
+  "sessions.sidebar.session.status.questionPending": "Pregunta pendiente",
   "sessions.sidebar.session.status.activeFor": "Activa desde hace {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "El último turno duró {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Colapsar subsesiones",
@@ -1593,6 +1599,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.unavailable.missingDescription": "Se eliminó después de cargar la lista de cambios. La lista se está actualizando.",
   "diffView.unavailable.nestedRepositoryTitle": "Repositorio Git independiente",
   "diffView.unavailable.nestedRepositoryDescription": "Esta carpeta tiene su propio historial de Git. Ábrela como proyecto para ver sus cambios.",
+  "diffView.unavailable.untrackedDirectoryTitle": "Carpeta con archivos nuevos",
+  "diffView.unavailable.untrackedDirectoryDescription": "Esta carpeta contiene demasiados archivos nuevos para listarlos uno por uno. Prepárala (stage) o añádela a .gitignore si no pertenece al repositorio.",
   "diffView.submodule.title": "Submódulo",
   "diffView.submodule.commitChanged": "Commit {from} → {to}",
   "diffView.submodule.commitUnchanged": "Sigue en el commit {commit}",
@@ -1623,8 +1631,6 @@ export const dict: Record<I18nKey, string> = {
   "diffView.actions.renderAnyway": "Renderizar de todos modos",
   "diffView.actions.expandAll": "Expandir todo",
   "diffView.actions.collapseAll": "Contraer todo",
-  "diffView.actions.loadFullFiles": "Cargar archivos completos",
-  "diffView.actions.disableFullFiles": "No cargar archivos completos",
   "diffView.actions.disableLineWrap": "Desactivar ajuste de línea",
   "diffView.actions.enableLineWrap": "Activar ajuste de línea",
   "diffView.actions.openFileInEditorAtChange": "Abrir este archivo en el editor en el cambio",
@@ -2311,6 +2317,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.title.commentOnSelection": "Comentar la selección",
   "chat.textSelection.comment.placeholder": "Añade un comentario opcional...",
   "chat.textSelection.comment.attach": "Adjuntar",
+  "chat.textSelection.comment.attachFailed": "No se pudo adjuntar el comentario. Acórtalo o elimina otro contexto adjunto e inténtalo de nuevo.",
   "chat.textSelection.actions.addToNotes": "Añadir a las notas",
   "chat.textSelection.title.addToCurrentChat": "Añadir al chat actual",
   "chat.textSelection.title.saveInsightToNotes": "Guardar texto seleccionado en notas",
@@ -2411,6 +2418,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.someFilesSkipped": "Algunos archivos se omitieron:\n{summary}",
   "chat.chatInput.toast.vscodePickFailed": "No se pudieron seleccionar archivos en VS Code",
   "chat.chatInput.toast.openSessionFirst": "Abre una sesión primero",
+  "chat.chatInput.toast.dictationKeptForOriginalSession": "Dictado guardado como borrador en la sesión donde lo iniciaste",
   "chat.chatInput.toast.togglePermissionAutoAcceptFailed": "No se pudo cambiar la aceptación automática de permisos",
   "chat.chatInput.reviewComments": "Comentarios de revisión:",
   "chat.chatInput.reviewCommentsRemove": "Quitar comentarios de revisión",
@@ -2898,6 +2906,9 @@ export const dict: Record<I18nKey, string> = {
   "desktopHostSwitcher.error.failedToSave": "No se pudo guardar",
   "desktopHostSwitcher.error.failedToLoad": "No se pudo cargar",
   "desktopHostSwitcher.error.invalidUrl": "URL inválida (debe ser http/https)",
+  "desktopHostSwitcher.error.pairingRejected": "El enlace de vinculación no es válido o ha caducado. Genera uno nuevo.",
+  "desktopHostSwitcher.error.pairingFailed": "Error de vinculación (HTTP {status}).",
+  "desktopHostSwitcher.error.pairingInvalidResponse": "El servidor devolvió una respuesta de vinculación no válida.",
   "desktopHostSwitcher.error.failedToOpenNewWindow": "No se pudo abrir nueva ventana",
   "desktopHostSwitcher.instance.local": "Local",
   "desktopHostSwitcher.instance.fallback": "Instancia",
@@ -3053,6 +3064,9 @@ export const dict: Record<I18nKey, string> = {
   "onboarding.desktopRecovery.actions.retrying": "Reintentando…",
   "onboarding.desktopRecovery.actions.retryConnection": "Reintentar conexión",
   "startup.initRecovery.title": "Error al iniciar",
+  "startup.initRecovery.openCodeUnavailable": "OpenChamber está accesible, pero OpenCode no está listo. Comprueba OpenCode en el servidor y vuelve a intentarlo.",
+  "startup.initRecovery.binary": "Ejecutable de OpenCode",
+  "startup.initRecovery.error": "Error de OpenCode",
   "startup.initRecovery.description": "OpenChamber no pudo completar la inicialización. Comprueba que el servidor esté en ejecución y vuelve a intentarlo.",
   "startup.initRecovery.retry": "Reintentar",
   "startup.initRecovery.retrying": "Reintentando…",

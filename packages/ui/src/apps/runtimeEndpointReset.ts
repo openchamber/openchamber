@@ -27,9 +27,13 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import { useAgentGroupsStore } from '@/stores/useAgentGroupsStore';
+import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
 import { syncDesktopSettings } from '@/lib/persistence';
+import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
 // to the new transport WITHOUT tearing down connection/session state or remounting
@@ -68,8 +72,12 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+  useAgentGroupsStore.getState().resetForRuntimeSwitch();
+  useMultiRunStore.getState().resetForRuntimeSwitch();
+  useSessionMultiSelectStore.getState().disable();
   useCommandsStore.getState().resetForRuntimeSwitch();
   replaceGlobalSessionStatusById(new Map());
+  resetGlobalBlockingRequests();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.

@@ -263,11 +263,11 @@ describe('page-less packages', () => {
     expect(row).not.toHaveProperty('entry');
     expect(row.tools).toEqual([{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }]);
 
-    const hasPage = false;
-    expect((await resolveGuestServedFile(guestRoot, 'icons/tool.svg', { hasPage }))?.contentType).toBe('image/svg+xml');
-    expect(await resolveGuestServedFile(guestRoot, 'stray.html', { hasPage })).toBeNull();
-    expect(await resolveGuestServedFile(guestRoot, 'stray.js', { hasPage })).toBeNull();
-    expect((await resolveGuestServedFile(guestRoot, 'stray.html', { hasPage: true }))?.contentType).toContain('html');
+    const hasRuntime = false;
+    expect((await resolveGuestServedFile(guestRoot, 'icons/tool.svg', { hasRuntime }))?.contentType).toBe('image/svg+xml');
+    expect(await resolveGuestServedFile(guestRoot, 'stray.html', { hasRuntime })).toBeNull();
+    expect(await resolveGuestServedFile(guestRoot, 'stray.js', { hasRuntime })).toBeNull();
+    expect((await resolveGuestServedFile(guestRoot, 'stray.html', { hasRuntime: true }))?.contentType).toContain('html');
 
     await fs.rm(dir, { recursive: true, force: true });
   });

@@ -97,7 +97,7 @@ For a board, use `host.storage` for persistent JSON and the project/worktree/ses
 
 `contributes.integration` is optional. It adds a card at Settings → Integrations where the user connects an account. See [Accounts and network](#accounts-and-network).
 
-`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`.
+`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel.
 
 ## Capabilities
 

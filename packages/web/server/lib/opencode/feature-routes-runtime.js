@@ -18,6 +18,7 @@ import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
+import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -101,6 +102,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitBinaryForSpawn,
       createFsSearchRuntime,
       openchamberDataDir,
+      onGuestDeactivated,
       openchamberUserConfigRoot,
       managedChatsRoot,
       normalizeDirectoryPath,
@@ -141,6 +143,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
       messageQueueRuntime,
+      routingRuntime,
       openchamberVersion,
     } = routeDependencies;
 
@@ -154,6 +157,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
+    registerRoutingRoutes(app, routingRuntime);
+    // Before the generic OpenCode proxy: turns `openchamber/auto` into a real model.
+    registerRoutingPromptRewrite(app, routingRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,
@@ -316,7 +322,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated });
     registerGitRoutes(app, {
       emitWorktreeChanged: ({ directories, at }) => {
         const clients = getOpenChamberEventClients();

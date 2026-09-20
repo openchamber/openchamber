@@ -74,27 +74,26 @@ export const guestAssetContentType = (filePath) => {
   return MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? null;
 };
 
-/** What an iframe loads: the document and its scripts. A page-less guest has neither. */
+/** Documents and scripts are served only to extensions with an execution entry. */
 const isGuestFrameContentType = (contentType) => (
   contentType.startsWith('text/html') || contentType.startsWith('text/javascript')
 );
 
 /**
  * A `.js` URL can be served from a sibling `.ts` that the host compiles.
- * `hasPage` is whether the guest declared `panel.entry`; without one only
- * assets (its SVG icons) are served, never HTML or JS, so nothing of a
- * page-less package can end up mounted in a frame.
+ * `hasRuntime` means the guest declared panel.entry or background.entry.
+ * Tools-only packages can serve assets, never HTML or JS.
  */
-export const resolveGuestServedFile = async (packageRoot, relativePath, { hasPage = true } = {}) => {
+export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRuntime = true } = {}) => {
   const filePath = await resolveGuestAssetPath(packageRoot, relativePath);
   const contentType = filePath ? guestAssetContentType(filePath) : null;
-  if (contentType && !hasPage && isGuestFrameContentType(contentType)) {
+  if (contentType && !hasRuntime && isGuestFrameContentType(contentType)) {
     return null;
   }
   if (filePath && contentType) {
     return { filePath, contentType };
   }
-  if (!hasPage || !relativePath.endsWith('.js')) {
+  if (!hasRuntime || !relativePath.endsWith('.js')) {
     return null;
   }
   const tsPath = await resolveGuestAssetPath(packageRoot, `${relativePath.slice(0, -3)}.ts`);
@@ -173,8 +172,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     }
   }
   const panel = parsed.manifest.contributes.panel;
-  // A page-less package (tools only) has no HTML to check; parse already
-  // refused every contribution that would need a frame.
+  // The visible panel and background runtime are optional independent entries.
   if (hasGuestPage(parsed.manifest.contributes)) {
     const entryPath = await resolveGuestAssetPath(packageRoot, panel.entry);
     if (!entryPath) {
@@ -198,6 +196,16 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   };
   if (panel.entry) {
     guest.entry = panel.entry;
+  }
+  const backgroundEntry = parsed.manifest.contributes.background?.entry;
+  if (backgroundEntry) {
+    if (!await resolveGuestAssetPath(packageRoot, backgroundEntry)) {
+      return { ok: false, code: 'invalid-manifest' };
+    }
+    if (!await guestBuiltScriptsReady(packageRoot, backgroundEntry)) {
+      return { ok: false, code: 'missing-build' };
+    }
+    guest.backgroundEntry = backgroundEntry;
   }
   if (parsed.version) {
     guest.version = parsed.version;
@@ -284,6 +292,9 @@ export const toPublicGuest = (guest) => {
   };
   if (guest.entry) {
     row.entry = guest.entry;
+  }
+  if (guest.backgroundEntry) {
+    row.backgroundEntry = guest.backgroundEntry;
   }
   if (typeof guest.version === 'string' && guest.version) {
     row.version = guest.version;

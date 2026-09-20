@@ -95,6 +95,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         <div className="flex items-center">
             <div
                 data-mobile-composer-pill="true"
+                // The morph measures and animates this box (see mobileComposerMorph).
+                data-composer-box="true"
                 className={cn(
                     'oc-glass-composer flex min-w-0 flex-1 flex-col border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
                     topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
@@ -120,6 +122,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 />
                 <button
                     type="button"
+                    // The morph moves the editor block to and from this line.
+                    data-composer-morph-prompt="true"
                     className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-left"
                     onClick={onExpand}
                 >

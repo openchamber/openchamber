@@ -1,8 +1,9 @@
 import simpleGit from 'simple-git';
+import { createSerialRefresh } from './serial-refresh.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 
@@ -349,12 +350,22 @@ const buildGitEnv = async () => {
       env.SSH_AUTH_SOCK = resolved;
     }
   }
+  // The server has no terminal a user could answer. Without this, Git asks
+  // for a username or password on its (hidden, on Windows) console and waits
+  // forever; credential helpers and GUI prompts still run before this point.
+  if (env.GIT_TERMINAL_PROMPT === undefined) {
+    env.GIT_TERMINAL_PROMPT = '0';
+  }
   return env;
 };
 
-const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false } = {}) => {
+const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false, stallTimeoutMs = 0 } = {}) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
+  // simple-git's block timeout kills the process once it has produced no
+  // output for this long. Opt-in per caller: a background read must never hold
+  // a limiter slot forever, while a silent long push or fetch must not be cut.
+  const timeout = stallTimeoutMs > 0 ? { block: stallTimeoutMs } : undefined;
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary || allowUnsafeSshCommand || allowUnsafeCredentialHelper
@@ -379,6 +390,7 @@ const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafe
     spawnOptions,
     binary,
     unsafe,
+    ...(timeout ? { timeout } : {}),
   });
 };
 
@@ -484,14 +496,14 @@ const resolveGitRepositoryRoot = async (directoryPath, git) => {
     : path.resolve(directoryPath, normalizedTopLevel);
 };
 
-const createRepositoryGitContext = async (directory) => {
+const createRepositoryGitContext = async (directory, gitOptions = {}) => {
   const directoryPath = normalizeDirectoryPath(directory);
   if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
     throw new Error('Git directory is required');
   }
-  const directoryGit = await createGit(directoryPath);
+  const directoryGit = await createGit(directoryPath, gitOptions);
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
-  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot, gitOptions);
   return { directoryPath, directoryGit, repoRoot, git };
 };
 
@@ -517,13 +529,15 @@ const GITLINK_MODE = '160000';
 // tell these apart by `code`, and diff routes send the code to clients as is.
 const GIT_PATH_NOT_FOUND = 'path_not_found';
 const GIT_PATH_IS_NESTED_REPOSITORY = 'nested_repository';
+const GIT_PATH_IS_UNTRACKED_DIRECTORY = 'untracked_directory';
 
-const createGitPathError = (code, filePath) => {
-  const message = code === GIT_PATH_IS_NESTED_REPOSITORY
-    ? `Path is a separate Git repository: ${filePath}`
-    : `Path not found in working tree, index, or HEAD: ${filePath}`;
-  return Object.assign(new Error(message), { code });
+const GIT_PATH_ERROR_MESSAGES = {
+  [GIT_PATH_IS_NESTED_REPOSITORY]: (filePath) => `Path is a separate Git repository: ${filePath}`,
+  [GIT_PATH_IS_UNTRACKED_DIRECTORY]: (filePath) => `Path is a directory of untracked files: ${filePath}`,
+  [GIT_PATH_NOT_FOUND]: (filePath) => `Path not found in working tree, index, or HEAD: ${filePath}`,
 };
+
+const createGitPathError = (code, filePath) => Object.assign(new Error(GIT_PATH_ERROR_MESSAGES[code](filePath)), { code });
 
 // Mode of the exact entry at `repoPath`, or null. `cat-file -e` cannot answer
 // this: a gitlink's commit lives in the submodule's object store, so git exits 1
@@ -547,6 +561,7 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
     path.resolve(directoryPath, filePath),
   ]));
   let nestedRepository = false;
+  let untrackedDirectory = false;
 
   for (const absolutePath of candidates) {
     if (!isInsideOrSameDirectory(repoRoot, absolutePath)) {
@@ -570,12 +585,20 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
       };
     }
 
-    if (worktreeEntry?.isDirectory() && await fsp.lstat(path.join(absolutePath, '.git')).then(() => true, () => false)) {
-      nestedRepository = true;
+    if (worktreeEntry?.isDirectory()) {
+      if (await fsp.lstat(path.join(absolutePath, '.git')).then(() => true, () => false)) {
+        nestedRepository = true;
+      } else {
+        // Status lists a directory whose untracked files were not expanded
+        // (see readStatus) as `dir/`; there is no single patch for it.
+        untrackedDirectory = true;
+      }
     }
   }
 
-  throw createGitPathError(nestedRepository ? GIT_PATH_IS_NESTED_REPOSITORY : GIT_PATH_NOT_FOUND, filePath);
+  if (nestedRepository) throw createGitPathError(GIT_PATH_IS_NESTED_REPOSITORY, filePath);
+  if (untrackedDirectory) throw createGitPathError(GIT_PATH_IS_UNTRACKED_DIRECTORY, filePath);
+  throw createGitPathError(GIT_PATH_NOT_FOUND, filePath);
 };
 
 /**
@@ -996,13 +1019,16 @@ const isMissingDirectoryError = (error) => {
   return /directory that does not exist|does not exist|no such file or directory/i.test(text);
 };
 
-const runGitCommand = async (cwd, args) => {
+const runGitCommand = async (cwd, args, { timeoutMs = 0 } = {}) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
       env: await buildGitEnv(),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
+      // Only short probes pass a timeout; commands that legitimately run long
+      // (a fetch into a temporary clone) keep the default of none.
+      ...(timeoutMs > 0 ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
     });
     return {
       success: true,
@@ -2129,14 +2155,45 @@ const applyUpstreamConfiguration = async (args) => {
   );
 };
 
+/**
+ * A repository whose root is the user's home directory or a filesystem root
+ * (`C:\`, `/`) covers the whole disk. Every status read walks Program Files
+ * or the entire home tree, which is minutes of Git work per refresh and, on
+ * Windows, the process pile-ups users report. Such a repository is nearly
+ * always an accidental `git init` in the wrong place, so OpenChamber treats
+ * it as no repository at all. Returns the reason or null for a normal root.
+ */
+export const unsupportedRepositoryRootReason = (repoRoot, home = os.homedir()) => {
+  if (typeof repoRoot !== 'string' || !repoRoot.trim()) return null;
+  const resolved = path.resolve(repoRoot.trim());
+  if (path.resolve(path.parse(resolved).root) === resolved) return 'filesystem-root';
+  if (typeof home === 'string' && home.trim() && path.resolve(home.trim()) === resolved) return 'home';
+  return null;
+};
+
+const warnedUnsupportedRoots = new Set();
+
 export async function isGitRepository(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
     return false;
   }
 
-  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir']);
-  return result.success;
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir'], { timeoutMs: GIT_PROBE_TIMEOUT_MS });
+  if (!result.success) return false;
+
+  // `--show-toplevel` has no answer inside a bare repository or a .git
+  // directory; those keep the previous answer rather than being rejected.
+  const topLevel = await runGitCommand(directoryPath, ['rev-parse', '--show-toplevel'], { timeoutMs: GIT_PROBE_TIMEOUT_MS });
+  if (!topLevel.success) return true;
+  const repoRoot = topLevel.stdout.trim();
+  const reason = unsupportedRepositoryRootReason(repoRoot);
+  if (!reason) return true;
+  if (!warnedUnsupportedRoots.has(repoRoot)) {
+    warnedUnsupportedRoots.add(repoRoot);
+    console.warn(`[git] Ignoring repository rooted at ${repoRoot} (${reason}): Git features are disabled for ${directoryPath}`);
+  }
+  return false;
 }
 
 export async function getGlobalIdentity() {
@@ -2258,13 +2315,193 @@ export async function setLocalIdentity(directory, profile) {
   }
 }
 
+// Beyond this many untracked files, a directory stays one `dir/` entry in
+// status. Every file would otherwise become a row, a diff request, and a stat
+// on the server, and the only directories that large are ones that belong in
+// .gitignore.
+const UNTRACKED_DIRECTORY_EXPANSION_LIMIT = 1000;
+
+// A status read holds one of MAX_CONCURRENT_STATUS_READS slots until it
+// finishes. Git never gets a terminal here, but a process can still hang on
+// Windows (a locked index, a stuck filesystem monitor, an unreachable network
+// drive), and a hung process would hold its slot forever: four of them and no
+// status read runs again until someone kills them by hand. Every process the
+// read spawns is therefore killed when it stops producing output for this long,
+// and the read fails instead of wedging the limiter. Two minutes is far above
+// what a healthy read spends silent, even on a very large tree.
+const GIT_STATUS_STALL_TIMEOUT_MS = 120_000;
+const GIT_UNTRACKED_LISTING_STALL_TIMEOUT_MS = 60_000;
+const GIT_PROBE_TIMEOUT_MS = 30_000;
+
+// Untracked files under `dirPath` (repository-relative, trailing slash), read
+// Git for Windows runs commands through a launcher: the `git.exe` we spawn is a
+// wrapper whose child is the real `git`. Killing only the wrapper leaves that
+// child alive, still walking the tree on its own (a repository rooted at a
+// drive root sends it through Program Files), and it shows up in Task Manager
+// as a stuck pair until someone ends it by hand. Windows has no process groups
+// to signal, so the tree is ended through taskkill.
+const killProcessTree = (child) => {
+  if (!child.pid) return;
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+    } catch {
+      child.kill('SIGKILL');
+    }
+    return;
+  }
+  child.kill('SIGKILL');
+};
+
+// from a streamed `ls-files` that is stopped once the bound is exceeded so a
+// huge directory is never listed in full. `paths` is complete when
+// `truncated` is false.
+const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
+  const env = await buildGitEnv();
+  return new Promise((resolve, reject) => {
+    const child = spawn(getGitBinary(), ['ls-files', '--others', '--exclude-standard', '-z', '--', dirPath], {
+      cwd: repoRoot,
+      env,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const paths = [];
+    let pending = '';
+    let truncated = false;
+    let settled = false;
+    let stallTimer = null;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      if (stallTimer) clearTimeout(stallTimer);
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ paths, truncated });
+    };
+    // A listing that goes silent is killed rather than left holding the
+    // status read (and its limiter slot) open.
+    const armStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        killProcessTree(child);
+        finish(new Error(`git ls-files produced no output for ${GIT_UNTRACKED_LISTING_STALL_TIMEOUT_MS}ms in ${dirPath}`));
+      }, GIT_UNTRACKED_LISTING_STALL_TIMEOUT_MS);
+    };
+    armStallTimer();
+    child.stdout.on('data', (chunk) => {
+      armStallTimer();
+      if (truncated) return;
+      pending += chunk.toString('utf8');
+      const records = pending.split('\0');
+      pending = records.pop() ?? '';
+      for (const record of records) {
+        if (!record) continue;
+        paths.push(record);
+        if (paths.length > limit) {
+          truncated = true;
+          killProcessTree(child);
+          finish();
+          return;
+        }
+      }
+    });
+    child.on('error', (error) => finish(error));
+    child.on('close', (code) => {
+      if (truncated) {
+        finish();
+        return;
+      }
+      if (code !== 0) {
+        finish(new Error(`git ls-files exited with code ${code} for ${dirPath}`));
+        return;
+      }
+      if (pending) paths.push(pending);
+      finish();
+    });
+  });
+};
+
+// Replaces each untracked `dir/` entry from `-unormal` with one entry per file
+// inside it, the listing `-uall` would have produced, unless the directory
+// holds more than the bound; then the `dir/` entry stays. A nested repository
+// lists as itself and stays a `dir/` entry too, which is what the diff routes
+// expect. A listing failure keeps the `dir/` entry rather than dropping the
+// change from the status.
+const expandUntrackedDirectories = async (repoRoot, files) => {
+  const expanded = [];
+  for (const file of files) {
+    const isUntrackedDirectory = file.path.endsWith('/')
+      && (file.working_dir || '').trim() === '?'
+      && (file.index || '').trim() === '?';
+    if (!isUntrackedDirectory) {
+      expanded.push(file);
+      continue;
+    }
+    const listing = await listUntrackedFilesBounded(repoRoot, file.path, UNTRACKED_DIRECTORY_EXPANSION_LIMIT)
+      .catch((error) => {
+        console.warn(`[GitService] Could not expand untracked directory ${file.path}:`, error?.message || error);
+        return null;
+      });
+    if (!listing || listing.truncated || listing.paths.some((entry) => entry === file.path)) {
+      expanded.push(file);
+      continue;
+    }
+    for (const entryPath of listing.paths) {
+      expanded.push({ ...file, path: entryPath });
+    }
+  }
+  return expanded;
+};
+
+// A status read walks the working tree and runs a dozen Git processes; on a
+// large repository it takes seconds. Clients ask for it after every completed
+// agent tool call, from several surfaces, and from PR polling, so without a
+// bound one slow repository ends up with many identical `git status` processes
+// side by side. Runs are serialized per directory and capped across
+// directories; a caller that asks during a run gets a run started after it
+// asked, so results are never older than the request.
+const MAX_CONCURRENT_STATUS_READS = 4;
+const statusRefresh = createSerialRefresh({ maxConcurrent: MAX_CONCURRENT_STATUS_READS });
+
 export async function getStatus(directory, options = {}) {
-  const lightMode = options.mode === 'light';
   const normalizedDirectory = normalizeDirectoryPath(directory);
   if (typeof normalizedDirectory !== 'string' || !normalizedDirectory.trim()) {
     throw new Error('directory is required');
   }
+  const lightMode = options.mode === 'light';
+  // A full read satisfies light callers too, so one run serves whichever
+  // callers it answers, at the widest mode any of them asked for.
+  return statusRefresh.run(
+    normalizedDirectory,
+    { lightMode },
+    (requests) => readStatus(normalizedDirectory, requests.every((request) => request.lightMode)),
+  );
+}
 
+/**
+ * Upstream of the checked-out branch as `remote/branch`, or `null` when HEAD
+ * is detached, unborn, or the branch has no upstream configured. Reads refs
+ * and config only, never the working tree: callers that only need the
+ * tracking name must not pay for a status read.
+ */
+export async function getTrackingBranch(directory) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (!normalizedDirectory) {
+    return null;
+  }
+  const head = await runGitCommand(normalizedDirectory, ['symbolic-ref', '--quiet', 'HEAD']);
+  const headRef = head.success ? head.stdout.trim() : '';
+  if (!headRef.startsWith('refs/heads/')) {
+    return null;
+  }
+  const upstream = await runGitCommand(normalizedDirectory, ['for-each-ref', '--format=%(upstream:short)', headRef]);
+  const tracking = upstream.success ? upstream.stdout.trim() : '';
+  return tracking || null;
+}
+
+async function readStatus(normalizedDirectory, lightMode) {
   try {
     // Prefer an explicit non-repo check before simple-git status so a missing
     // repository never depends on process.cwd() or an opaque GitError shape.
@@ -2272,12 +2509,22 @@ export async function getStatus(directory, options = {}) {
       throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
 
-    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory);
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory, {
+      stallTimeoutMs: GIT_STATUS_STALL_TIMEOUT_MS,
+    });
 
-    // Use -uall to show all untracked files individually, not just directories
-    const status = await git.status(['-uall']);
+    // `-unormal` lists a directory with no tracked files as one `dir/` entry
+    // and stops walking it at its first file. `-uall` would walk every file
+    // in it: on a forgotten build or dependency directory that is a scan of
+    // tens of thousands of files and hundreds of megabytes per status read.
+    // Directories are expanded to their files afterwards, up to a bound.
+    const status = await git.status(['-unormal']);
+    status.files = await expandUntrackedDirectories(repoRoot, status.files);
 
-    // Light mode: skip numstat + new-file line counting for faster response
+    // Light mode: skip numstat + new-file line counting for faster response.
+    // Staged (`--cached`: HEAD -> index) and working (`--numstat`: index -> worktree)
+    // stay in separate maps. A partially staged file has an entry in both, and the
+    // UI shows each row's own scope instead of a combined total.
     const [stagedStatsRaw, workingStatsRaw] = lightMode
       ? ['', '']
       : await Promise.all([
@@ -2285,9 +2532,10 @@ export async function getStatus(directory, options = {}) {
           git.raw(['diff', '--numstat']).catch(() => ''),
         ]);
 
-    const diffStatsMap = new Map();
+    const stagedDiffStats = {};
+    const workingDiffStats = {};
 
-    const accumulateStats = (raw) => {
+    const accumulateStats = (raw, target) => {
       if (!raw) return;
       raw
         .split('\n')
@@ -2306,18 +2554,18 @@ export async function getStatus(directory, options = {}) {
           const insertions = insertionsRaw === '-' ? 0 : parseInt(insertionsRaw, 10) || 0;
           const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
 
-          const existing = diffStatsMap.get(path) || { insertions: 0, deletions: 0 };
-          diffStatsMap.set(path, {
+          const existing = target[path] || { insertions: 0, deletions: 0 };
+          target[path] = {
             insertions: existing.insertions + insertions,
             deletions: existing.deletions + deletions,
-          });
+          };
         });
     };
 
-    accumulateStats(stagedStatsRaw);
-    accumulateStats(workingStatsRaw);
+    accumulateStats(stagedStatsRaw, stagedDiffStats);
+    accumulateStats(workingStatsRaw, workingDiffStats);
 
-    const diffStats = Object.fromEntries(diffStatsMap.entries());
+    const diffStats = { staged: stagedDiffStats, working: workingDiffStats };
 
     const MAX_NEW_FILE_STATS = 200;
     const MAX_NEW_FILE_STAT_SIZE = 1024 * 1024;
@@ -2337,7 +2585,10 @@ export async function getStatus(directory, options = {}) {
           continue;
         }
 
-        const existing = diffStats[file.path];
+        // Untracked and working-tree-added files belong to the working scope;
+        // a file whose 'A' code is on the index belongs to the staged scope.
+        const target = working === '?' || working === 'A' ? workingDiffStats : stagedDiffStats;
+        const existing = target[file.path];
         if (existing && existing.insertions > 0) {
           continue;
         }
@@ -2353,6 +2604,7 @@ export async function getStatus(directory, options = {}) {
           const buffer = await fsp.readFile(absolutePath);
           if (buffer.indexOf(0) !== -1) {
             newFileStats.push({
+              target,
               path: file.path,
               insertions: existing?.insertions ?? 0,
               deletions: existing?.deletions ?? 0,
@@ -2363,6 +2615,7 @@ export async function getStatus(directory, options = {}) {
           const normalized = buffer.toString('utf8').replace(/\r\n/g, '\n');
           if (!normalized.length) {
             newFileStats.push({
+              target,
               path: file.path,
               insertions: 0,
               deletions: 0,
@@ -2377,6 +2630,7 @@ export async function getStatus(directory, options = {}) {
 
           const lineCount = segments.length;
           newFileStats.push({
+            target,
             path: file.path,
             insertions: lineCount,
             deletions: 0,
@@ -2390,7 +2644,7 @@ export async function getStatus(directory, options = {}) {
     }
 
     for (const entry of newFileStats) {
-      diffStats[entry.path] = {
+      entry.target[entry.path] = {
         insertions: entry.insertions,
         deletions: entry.deletions,
       };
@@ -5162,7 +5416,7 @@ export async function canonicalizeWorktreeState(directory) {
 
   // Detect attention reasons from getStatus side-effects
   try {
-    const status = await git.status(['-uall']);
+    const status = await git.status(['-unormal']);
     if (status.current && (await git.raw(['rev-parse', '--verify', 'MERGE_HEAD']).then(() => true).catch(() => false))) {
       attentionReason = 'merge';
     } else {

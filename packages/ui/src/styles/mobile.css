@@ -553,26 +553,6 @@
    any input above the keyboard instead of hiding it underneath. The opacity term
    preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
    be overridden by this rule's `transition` shorthand). */
-/* The chat comment bar (quote-and-comment input) is a body-level portal, so it
-   does not inherit the shell's keyboard inset. Anchor it against the same
-   keyboard vars with the same curve so it rides the keyboard exactly like the
-   composer does, and sits at the composer's own gap above it. */
-.oc-chat-comment-bar {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--oc-safe-area-bottom-visual, 0.5rem));
-}
-
-:root.oc-capacitor-app .oc-chat-comment-bar {
-  /* The composer keeps --oc-safe-area-bottom-visual of padding above the
-     keyboard (see .bottom-safe-area); using the same term here makes the
-     comment bar land exactly on the compact composer pill. */
-  bottom: calc(
-    var(--oc-keyboard-inset, 0px)
-    + max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--oc-keyboard-inset, 0px)))
-    + var(--oc-safe-area-bottom-visual, 0.5rem)
-  );
-  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
-}
-
 :root.oc-capacitor-app .oc-keyboard-inset-surface {
   bottom: var(--oc-keyboard-inset, 0px);
   transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;
@@ -771,6 +751,20 @@
 @keyframes oc-composer-morph-fade {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* Pill ↔ full-composer morph (native iOS; see mobileComposerMorph.ts). While
+   the box carries data-composer-morph its height is animated inline, so it
+   clips instead of overflowing and its contents sit on the bottom edge: the
+   footer icon row and the model/agent row stay where the pill's rows were
+   and the editor block travels above them. flex-shrink: 0 keeps the children
+   at their natural size (a squeezed editor would distort instead of clip). */
+:root.oc-capacitor-app [data-composer-box][data-composer-morph] {
+  overflow: clip !important;
+  justify-content: flex-end;
+}
+:root.oc-capacitor-app [data-composer-box][data-composer-morph] > * {
+  flex-shrink: 0;
 }
 
 /* Voice overlay variant: the overlay BACKGROUND appears immediately (it rides

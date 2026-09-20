@@ -17,7 +17,7 @@ describe('buildKnownSessionDirectories', () => {
     ]);
   });
 
-  test('layout and expanded sidebar demand share one directory identity at startup', () => {
+  test('known topology is never bootstrap demand, however large it is', () => {
     const projects = Array.from({ length: 4 }, (_, index) => ({
       id: `project-${index}`,
       path: `/Users/Developer/Project-${index}`,
@@ -30,28 +30,15 @@ describe('buildKnownSessionDirectories', () => {
         label: `worktree-${index}`,
       })),
     ]));
-    const common = {
-      activeProjectId: projects[0].id,
-      collapsedProjects: new Set<string>(),
-      collapsedGroups: new Set<string>(),
+
+    // The known set still feeds global-list refreshes for topology additions.
+    expect(buildKnownSessionDirectories(projects, worktrees).size).toBe(24);
+    // Bootstrap demand ignores it: only the directory being worked in is initialized.
+    const demands = buildSessionBootstrapDemands({
       currentDirectory: projects[0].path,
       currentSessionDirectory: null,
-    };
-    const layout = buildSessionBootstrapDemands({
-      ...common,
-      knownDirectories: buildKnownSessionDirectories(projects, worktrees),
     });
-    const sidebar = buildSessionBootstrapDemands({
-      ...common,
-      projectSections: projects.map((project) => ({
-        project: { id: project.id, normalizedPath: project.path },
-        groups: (worktrees.get(project.path) ?? []).map((worktree) => ({
-          id: worktree.path, directory: worktree.path, isMain: false,
-        })),
-      })),
-    });
-    expect(layout).toHaveLength(24);
-    expect(new Set([...layout, ...sidebar].map((demand) => demand.directory)).size).toBe(24);
+    expect(demands.map((demand) => demand.directory)).toEqual([projects[0].path]);
   });
 
   test('preserves case-sensitive directories and normalizes Windows separators without lowercasing names', () => {

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import { isRoutingFeatureAvailable } from '../routing/feature-flag.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -598,6 +599,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentWebToolEnabled === 'boolean') {
       result.agentWebToolEnabled = candidate.agentWebToolEnabled;
     }
+    if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
+      result.browserProvider = candidate.browserProvider.trim();
+    }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
     }
@@ -1013,6 +1017,8 @@ export const createSettingsHelpers = (dependencies) => {
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.
       agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // Same idea for Jev routing: absent from the picker and Settings unless the build has it.
+      routingFeatureAvailable: isRoutingFeatureAvailable(),
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

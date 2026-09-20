@@ -30,6 +30,8 @@ export interface ChangesGroupConfig {
   id: string;
   title: string;
   entries: GitStatus['files'];
+  /** Which diff stat scope this group's line counts come from. */
+  statsScope: 'staged' | 'working';
   /** Per-file primary action: '+' stages, '-' unstages. */
   actionSymbol: '+' | '-';
   /** aria/title for the bulk header action (stage all / unstage all). */
@@ -46,7 +48,7 @@ export interface ChangesGroupConfig {
 
 interface ChangesPanelProps {
   groups: ChangesGroupConfig[];
-  diffStats: Record<string, { insertions: number; deletions: number }> | undefined;
+  diffStats: GitStatus['diffStats'];
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
   headerBackgroundClassName?: string;
@@ -455,7 +457,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           actionLabel={group.getActionLabel(file.path)}
           actionSymbol={group.actionSymbol}
           onAction={() => group.onActionFile(file.path)}
-          stats={diffStats?.[file.path]}
+          stats={diffStats?.[group.statsScope]?.[file.path]}
           onViewDiff={() => group.onViewDiff(file.path)}
           onRevert={() => group.onRevertFile(file.path)}
           isReverting={revertingPaths.has(file.path) || isRevertingAll}

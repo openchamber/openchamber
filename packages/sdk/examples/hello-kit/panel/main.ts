@@ -7,6 +7,7 @@ const root = document.querySelector('#root');
 if (!root) throw new Error('Missing root');
 let mounted = false;
 host.onReady((context) => {
+  if (context.surface === 'background') return;
   applyHostReady(context, document.documentElement);
   if (mounted) return;
   mounted = true;

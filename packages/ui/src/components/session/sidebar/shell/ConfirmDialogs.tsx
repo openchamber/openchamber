@@ -95,6 +95,7 @@ export function SessionDeleteConfirmDialog(props: {
 }
 
 export type BulkDeleteSessionsConfirmState = {
+  sessionIds: string[];
   sessionCount: number;
   archivedBucket: boolean;
 } | null;

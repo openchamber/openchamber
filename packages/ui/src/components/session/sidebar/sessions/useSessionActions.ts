@@ -26,15 +26,15 @@ type Args = {
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  isSessionSearchOpen: boolean;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (value: string) => void;
-  setIsSessionSearchOpen: (open: boolean) => void;
+  resetSessionSearch: () => void;
   descendantIds: readonly string[];
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   deleteSessionConfirm: DeleteSessionConfirmState;
   setEditingId: (id: string | null) => void;
+  setEditingRowKey: (key: string | null) => void;
+  editingSessionId: string;
+  editingOccurrenceKey: string;
   setEditTitle: (value: string) => void;
   editingId: string | null;
   editTitle: string;
@@ -67,14 +67,14 @@ export const useSessionActions = (args: Args) => {
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    isSessionSearchOpen,
-    sessionSearchQuery,
-    setSessionSearchQuery,
-    setIsSessionSearchOpen,
+    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
     setEditingId,
+    setEditingRowKey,
+    editingSessionId,
+    editingOccurrenceKey,
     setEditTitle,
     setCopiedSessionId,
   } = args;
@@ -93,14 +93,6 @@ export const useSessionActions = (args: Args) => {
       // Selecting a session always leaves any full-page surface, even when
       // the session is already the current one (no store transition fires).
       useUIStore.getState().closeMainSurfaces();
-      const resetSessionSearch = () => {
-        if (!isSessionSearchOpen && sessionSearchQuery.length === 0) {
-          return;
-        }
-        setSessionSearchQuery('');
-        setIsSessionSearchOpen(false);
-      };
-
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
       }
@@ -117,29 +109,32 @@ export const useSessionActions = (args: Args) => {
       onSessionSelected?.(sessionId);
       resetSessionSearch();
     },
-    [allowReselect, isSessionSearchOpen, mobileVariant, onSessionSelected, sessionSearchQuery, setCurrentSession, setIsSessionSearchOpen, setSessionSearchQuery, setSessionSwitcherOpen],
+    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
     setEditingId(sessionId);
+    setEditingRowKey(editingOccurrenceKey);
     setEditTitle(sessionTitle);
-  }, [setEditTitle, setEditingId]);
+  }, [editingOccurrenceKey, setEditTitle, setEditingId, setEditingRowKey]);
 
   const handleSaveEdit = React.useCallback(async (titleOverride?: string) => {
     const editingId = editingIdRef.current;
     if (!editingId) return;
     const trimmed = (titleOverride ?? editTitleRef.current).trim();
     if (trimmed) {
-      await updateSessionTitle(editingId, trimmed);
+      await updateSessionTitle(editingSessionId, trimmed);
     }
     setEditingId(null);
+    setEditingRowKey(null);
     setEditTitle('');
-  }, [setEditTitle, setEditingId, updateSessionTitle]);
+  }, [editingSessionId, setEditTitle, setEditingId, setEditingRowKey, updateSessionTitle]);
 
   const handleCancelEdit = React.useCallback(() => {
     setEditingId(null);
+    setEditingRowKey(null);
     setEditTitle('');
-  }, [setEditTitle, setEditingId]);
+  }, [setEditTitle, setEditingId, setEditingRowKey]);
 
   const copyShareUrl = React.useCallback(async (url: string, sessionId: string): Promise<boolean> => {
     try {

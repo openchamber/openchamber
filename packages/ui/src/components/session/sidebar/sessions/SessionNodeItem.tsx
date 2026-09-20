@@ -35,7 +35,9 @@ import { usePrefetchSessionMessages, useSessionMessageRecordsForExport } from '@
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
+import { useSessionRowOrderRegistry } from './sessionRowOrder';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes, selectRowBadgeVisibilityClass } from './sessionNodeItemUtils';
+import { useSessionRowMenuState } from './useSessionRowMenuState';
 import type { SessionNode } from '../types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -52,7 +54,7 @@ import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/session
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getChatsRootFromDirectory } from '@/lib/chatDirectories';
-import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
+import { getMultiRunIdentity, sameMultiRunIdentity } from '@/lib/multirun/identity';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
@@ -82,6 +84,8 @@ export type SessionNodeItemProps = {
   depth?: number;
   groupDirectory?: string | null;
   projectId?: string | null;
+  folderOwnerKey?: string | null;
+  selectionScopeKey?: string | null;
   archivedBucket?: boolean;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
@@ -89,7 +93,9 @@ export type SessionNodeItemProps = {
   normalizedSessionSearchQuery: string;
   notifyOnSubtasks: boolean;
   editingId: string | null;
+  editingRowKey: string | null;
   setEditingId: (id: string | null) => void;
+  setEditingRowKey: (key: string | null) => void;
   editTitle: string;
   setEditTitle: (value: string) => void;
   handleSaveEdit: (titleOverride?: string) => void;
@@ -116,6 +122,8 @@ export type SessionNodeItemProps = {
   alwaysShowActions: boolean;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent';
+  rowKey?: string;
+  dragKey?: string;
   /**
    * Precomputed set of session IDs whose subtree contains the session
    * currently being edited. Precomputed once per group render.
@@ -276,6 +284,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     depth = 0,
     groupDirectory,
     projectId,
+    folderOwnerKey,
+    selectionScopeKey: explicitSelectionScopeKey,
     archivedBucket = false,
     pinnedSessionIds,
     expandedParents,
@@ -283,7 +293,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     normalizedSessionSearchQuery,
     notifyOnSubtasks,
     editingId,
+    editingRowKey,
     setEditingId,
+    setEditingRowKey,
     editTitle,
     setEditTitle,
     handleSaveEdit,
@@ -306,6 +318,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     alwaysShowActions,
     secondaryMeta,
     renderContext = 'project',
+    rowKey,
+    dragKey,
     children,
   } = props;
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
@@ -354,7 +368,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const pendingFolderCreateRef = React.useRef(false);
   const handleSaveEditRef = React.useRef(handleSaveEdit);
   handleSaveEditRef.current = handleSaveEdit;
-  const [renameDraft, setRenameDraft] = React.useState(editTitle);
+  const renameDraft = editTitle;
   const renameDraftRef = React.useRef(renameDraft);
   renameDraftRef.current = renameDraft;
   const renameTargetRef = React.useRef<string | null>(null);
@@ -418,7 +432,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Multi-select scope: sessions are flat per project, so selection groups by
   // project (falling back to the directory when no project is known) — a
   // selection must survive mixing sessions from different worktrees.
-  const selectionScopeKey = projectId ?? sessionDirectory ?? null;
+  const selectionScopeKey = explicitSelectionScopeKey !== undefined
+    ? explicitSelectionScopeKey
+    : projectId ?? sessionDirectory ?? null;
   const loadExportRecords = useSessionMessageRecordsForExport();
   const prefetchSessionMessages = usePrefetchSessionMessages();
   // Same gate as the sidebar's neighbor prefetch: the VS Code webview keeps
@@ -431,6 +447,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
   const toggleRowSelected = useSessionMultiSelectStore((state) => state.toggleSelected);
   const setRowRange = useSessionMultiSelectStore((state) => state.setRange);
+  const sessionRowOrderRegistry = useSessionRowOrderRegistry();
+  const sessionRowKey = rowKey ?? session.id;
+  const isEditing = editingId === session.id && editingRowKey === sessionRowKey;
 
   const collectNodeDescendantIds = React.useCallback((root: SessionNode): string[] => {
     const out: string[] = [];
@@ -459,7 +478,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
   const [exportIncludeSubtasks, setExportIncludeSubtasks] = React.useState(true);
 
-  const menuInstanceKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
+  const legacyContextKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
+  const menuInstanceKey = rowKey ? `session-menu:${rowKey}` : legacyContextKey;
+  const contextMenuInstanceKey = rowKey ? `session-context:${rowKey}` : null;
   const isZombie = useViewportStore(
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
@@ -496,7 +517,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Per-render-context expansion key: the same session can appear in both
   // the project's root and the "Recent" list, and expanding one should not
   // expand the other. Matches the format of menuInstanceKey.
-  const expansionKey = menuInstanceKey;
+  const expansionKey = legacyContextKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
   const questionBadgeSessionScopes = React.useMemo(
     () => selectQuestionBadgeSessionScopes(node, isExpanded, sessionDirectory),
@@ -509,10 +530,30 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
-  const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
-  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const {
+    isMenuOpen,
+    isContextMenuOpen,
+    handleMenuOpenChange,
+    handleContextMenuOpenChange,
+    handleMenuOpenChangeComplete,
+    toggleMenu,
+  } = useSessionRowMenuState({
+    menuInstanceKey,
+    contextMenuInstanceKey,
+    openSidebarMenuKey,
+    setOpenSidebarMenuKey,
+    hasDeferredCloseWork: () => pendingRenameRef.current !== null,
+    onCloseComplete: () => {
+      if (!pendingRenameRef.current) return;
+      const { id, title } = pendingRenameRef.current;
+      pendingRenameRef.current = null;
+      setEditingId(id);
+      setEditingRowKey(sessionRowKey);
+      setEditTitle(title);
+    },
+  });
   const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
-  const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
+  const isMultiRunLikeSession = React.useMemo(() => getMultiRunIdentity(resolvedSession) !== null, [resolvedSession]);
   const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
 
   const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
@@ -604,6 +645,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const handleGuestSessionAction = React.useCallback((entry: GuestActionEntry) => {
     void runGuestSessionAction({
       entry,
+      t,
       session: { id: session.id, title: resolvedSession.title, directory: sessionDirectory },
       loadRecords: () => (sessionDirectory
         ? loadExportRecords({ directory: sessionDirectory, sessionID: session.id }).catch(() => null)
@@ -634,35 +676,32 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
 
   // Capture outside-clicks to save edits — immune to focus-race with onBlur.
   React.useEffect(() => {
-    if (editingId !== session.id) return;
+    if (!isEditing) return;
     const handleDocMouseDown = (e: MouseEvent) => {
-      // The same session can be rendered twice (recent + project), each with
-      // its own rename form. A click inside ANY rename form for this session
-      // must not count as "outside", or the sibling instance would save and
-      // exit the rename mid-edit.
+      // Rename ownership is occurrence-keyed, so only this row's form keeps
+      // the edit open when duplicate session rows exist elsewhere.
       // SAFETY: DOM mousedown targets are Nodes; closest is used only when the target is an Element.
       const target = e.target instanceof HTMLElement ? e.target : null;
-      const withinRenameForm = target?.closest?.(`[data-session-rename-form="${CSS.escape(session.id)}"]`);
+      const withinRenameForm = target?.closest?.(`[data-session-rename-form="${CSS.escape(sessionRowKey)}"]`);
       if (formRef.current && !withinRenameForm) {
         handleSaveEditRef.current(renameDraftRef.current);
       }
     };
     document.addEventListener('mousedown', handleDocMouseDown);
     return () => document.removeEventListener('mousedown', handleDocMouseDown);
-  }, [editingId, session.id]);
+  }, [isEditing, sessionRowKey]);
 
   React.useLayoutEffect(() => {
-    if (editingId !== session.id) {
-      if (renameTargetRef.current === session.id) {
+    if (!isEditing) {
+      if (renameTargetRef.current === sessionRowKey) {
         renameTargetRef.current = null;
       }
       return;
     }
-    if (renameTargetRef.current === session.id) return;
-    renameTargetRef.current = session.id;
+    if (renameTargetRef.current === sessionRowKey) return;
+    renameTargetRef.current = sessionRowKey;
     pendingRenameSelectRef.current = true;
-    setRenameDraft(editTitle);
-  }, [editingId, editTitle, session.id]);
+  }, [editTitle, isEditing, sessionRowKey]);
 
   // Entering rename mode selects the whole title, so the first keystroke
   // replaces it instead of appending to it. The selection waits for the commit
@@ -670,15 +709,15 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // row mounts, so on a session whose title changed since then the input still
   // holds the old text during the commit that opens the form.
   React.useLayoutEffect(() => {
-    if (editingId !== session.id || !pendingRenameSelectRef.current) return;
+    if (!isEditing || !pendingRenameSelectRef.current) return;
     const input = renameInputRef.current;
     if (!input || input.value !== editTitle) return;
     pendingRenameSelectRef.current = false;
     input.focus();
     input.select();
-  }, [editingId, editTitle, renameDraft, session.id]);
+  }, [editTitle, isEditing, renameDraft]);
 
-  if (editingId === session.id) {
+  if (isEditing) {
     return (
       <div
         key={session.id}
@@ -690,7 +729,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         <div className="flex min-w-0 flex-1 flex-col gap-0">
           <form
             ref={formRef}
-            data-session-rename-form={session.id}
+            data-session-rename-form={sessionRowKey}
             className="flex w-full items-center gap-2"
             onSubmit={(event) => {
               event.preventDefault();
@@ -700,7 +739,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             <input
               ref={renameInputRef}
               value={renameDraft}
-              onChange={(event) => setRenameDraft(event.target.value)}
+              onChange={(event) => setEditTitle(event.target.value)}
               className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
               autoFocus
               placeholder={t('sessions.sidebar.session.menu.rename')}
@@ -826,30 +865,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     ? <Icon name="error-warning" className="h-4 w-4 text-status-warning" />
     : null;
 
-  const handleMenuOpenChange = (open: boolean) => {
-    if (open) {
-      setIsContextMenuOpen(false);
-    }
-    setOpenSidebarMenuKey(open ? menuInstanceKey : null);
-  };
-
-  const handleMenuOpenChangeComplete = (open: boolean) => {
-    if (!open && pendingRenameRef.current) {
-      const { id, title } = pendingRenameRef.current;
-      pendingRenameRef.current = null;
-      setEditingId(id);
-      setEditTitle(title);
-    }
-  };
-
-  const handleContextMenuOpenChange = (open: boolean) => {
-    setIsContextMenuOpen(open);
-  };
-
   const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
+    toggleMenu();
   };
 
   const handleMenuTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -911,17 +930,22 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       event?.preventDefault();
       event?.stopPropagation();
       if (event?.shiftKey) {
-        const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-session-row]'));
-        const orderedIds = rows
-          .map((el) => el.getAttribute('data-session-row'))
-          .filter((id): id is string => id !== null && id.length > 0);
-        const currentAnchor = useSessionMultiSelectStore.getState().anchorId;
+        const registeredEntries = sessionRowOrderRegistry?.getEntries();
+        // The recursive renderer remains mounted until the flat renderer cutover;
+        // keep its range behavior intact when no logical registry owns the list.
+        const entries = registeredEntries ?? Array.from(document.querySelectorAll<HTMLElement>('[data-session-row]'))
+          .map((element) => element.getAttribute('data-session-row'))
+          .filter((id): id is string => Boolean(id))
+          .map((id) => ({ id, rowKey: id, scopeKey: selectionScopeKey, archived: archivedBucket }));
+        const currentAnchor = registeredEntries
+          ? useSessionMultiSelectStore.getState().anchorRowKey
+          : useSessionMultiSelectStore.getState().anchorId;
         const descendantsById = new Map<string, string[]>();
         descendantsById.set(session.id, collectNodeDescendantIds(node));
-        setRowRange(currentAnchor, session.id, orderedIds, selectionScopeKey, descendantsById);
+        setRowRange(currentAnchor, sessionRowKey, entries, sessionRowOrderRegistry?.getDescendantIds() ?? [], selectionScopeKey, descendantsById);
         return;
       }
-      toggleRowSelected(session.id, selectionScopeKey, collectNodeDescendantIds(node));
+      toggleRowSelected(session.id, selectionScopeKey, collectNodeDescendantIds(node), sessionRowKey);
       return;
     }
     if (event?.currentTarget) holdSessionRowPosition(event.currentTarget);
@@ -1389,7 +1413,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
 
   return (
     <React.Fragment key={session.id}>
-      <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle}>
+      <DraggableSessionRow sessionId={session.id} dragKey={dragKey ?? sessionRowKey} ownerKey={folderOwnerKey ?? selectionScopeKey} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} archivedBucket={archivedBucket}>
         <ContextMenu.Root open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
           <ContextMenu.Trigger
             render={
@@ -1420,7 +1444,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 <TooltipTrigger asChild>
                   <button
                     type="button"
- 	                    onPointerDown={handleRowPointerDown}
+	                    aria-pressed={selectionModeEnabled ? isRowSelected : undefined}
+	                    onPointerDown={handleRowPointerDown}
  	                    onPointerUp={handleRowPointerEnd}
  	                    onPointerCancel={handleRowPointerEnd}
  	                    onMouseDown={handleRowMouseDown}
@@ -1713,6 +1738,10 @@ const isSecondaryMetaEqual = (prev?: SecondaryMeta | null, next?: SecondaryMeta 
 
 const getMenuSessionIdFromKey = (props: SessionNodeItemProps): string | null => {
   if (!props.openSidebarMenuKey) return null;
+  if (props.rowKey && (
+    props.openSidebarMenuKey === `session-menu:${props.rowKey}`
+    || props.openSidebarMenuKey === `session-context:${props.rowKey}`
+  )) return props.node.session.id;
   const bucketTag = props.archivedBucket ? 'archived' : 'active';
   const prefix = `${props.renderContext ?? 'project'}:${bucketTag}:`;
   return props.openSidebarMenuKey.startsWith(prefix)
@@ -1781,6 +1810,7 @@ const areSessionRenderSemanticsEqual = (prev: Session, next: Session): boolean =
   && prev.time?.created === next.time?.created
   && prev.time?.updated === next.time?.updated
   && prev.time?.archived === next.time?.archived
+  && sameMultiRunIdentity(prev, next)
 );
 
 // Returns the name of the first prop whose change requires a render, or null
@@ -1829,6 +1859,11 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
     return 'editingId';
   }
 
+  if (prev.editingRowKey !== next.editingRowKey
+    && (prev.editingRowKey === prev.rowKey || next.editingRowKey === next.rowKey)) {
+    return 'editingRowKey';
+  }
+
   if (prev.editTitle !== next.editTitle
     && (
       subtreeContainsSession(prev, prev.editingId, prev.subtreeContainsEditing)
@@ -1854,6 +1889,7 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
   }
 
   const callbacksEqual = prev.setEditingId === next.setEditingId
+    && prev.setEditingRowKey === next.setEditingRowKey
     && prev.setEditTitle === next.setEditTitle
     && prev.handleSaveEdit === next.handleSaveEdit
     && prev.handleCancelEdit === next.handleCancelEdit

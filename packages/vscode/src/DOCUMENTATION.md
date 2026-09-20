@@ -90,7 +90,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/notification/update-check message handlers.
-  - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
+  - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories).
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
   - Owns managed OpenCode upgrade status and mutation handlers, including capability reporting, upgrade serialization, and process restart after a successful upgrade.
   - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API). Updates preserve existing provider, option, and retained-model fields that the form does not manage while honoring explicit model, header, and env removal. Legacy `providers` entries migrate to the canonical `provider` key when edited.

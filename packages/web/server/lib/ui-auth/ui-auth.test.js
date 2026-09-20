@@ -261,6 +261,22 @@ describe('ui auth client credential seam', () => {
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
 
+    // An extension surface socket takes the session-wide URL token, never a
+    // guest-scoped one: it carries the user's pointer and keyboard.
+    const surfaceWsReq = {
+      method: 'GET',
+      path: '/api/guests/server-chrome/surface/ws',
+      url: `/api/guests/server-chrome/surface/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.ensureSessionToken(surfaceWsReq, null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken({ ...surfaceWsReq, url: `/api/guests/server-chrome/surface/ws?oc_url_token=${encodeURIComponent(guestToken)}` }, null)).toBe(null);
+    expect(await auth.ensureSessionToken({
+      ...surfaceWsReq,
+      path: '/api/guests/server-chrome/surface/ws/extra',
+      url: `/api/guests/server-chrome/surface/ws/extra?oc_url_token=${encodeURIComponent(urlToken)}`,
+    }, null)).toBe(null);
+
     const devTunnelWsReq = {
       method: 'GET',
       path: '/api/dev-tunnel',

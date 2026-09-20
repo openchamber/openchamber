@@ -41,6 +41,7 @@ import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar'
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
+import { RoutingPage } from '@/components/sections/routing/RoutingPage';
 import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
@@ -103,6 +104,7 @@ const pageOrder: SettingsPageSlug[] = [
   'chat',
   'notifications',
   'sessions',
+  'routing',
   'shortcuts',
   'voice',
   'integrations',
@@ -132,10 +134,10 @@ const NAV_GROUP_ORDER = ['general', 'projects', 'opencode', 'content'] as const;
 
 const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
 
-function buildRuntimeContext(isDesktop: boolean, isMobile: boolean): SettingsRuntimeContext {
+function buildRuntimeContext(isDesktop: boolean, isMobile: boolean, routingAvailable: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop, isMobile };
+  return { isVSCode, isWeb, isDesktop, isMobile, routingAvailable };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -247,7 +249,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   // keep platform check available for future window chrome tweaks
 
-  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp, isMobile), [isDesktopApp, isMobile]);
+  const routingAvailable = useUIStore((state) => state.routingFeatureAvailable);
+  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp, isMobile, routingAvailable), [isDesktopApp, isMobile, routingAvailable]);
 
   const visiblePages = React.useMemo(() => {
     const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
@@ -373,6 +376,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.shortcuts.title');
       case 'sessions':
         return t('settings.page.sessions.title');
+      case 'routing':
+        return t('settings.page.routing.title');
       case 'magic-prompts':
         return t('settings.page.magicPrompts.title');
       case 'snippets':
@@ -670,6 +675,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <GitPage />;
       case 'integrations':
         return <IntegrationsPage />;
+      case 'routing':
+        return <RoutingPage />;
       case 'extensions':
         return <ExtensionsPage />;
       case 'general':

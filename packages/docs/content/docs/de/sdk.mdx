@@ -97,7 +97,7 @@ Für Boards gibt es `host.storage` sowie Projekt-, Worktree- und Sitzungslisten 
 
 `contributes.integration` ist optional. Es fügt unter Einstellungen → Integrationen eine Karte hinzu, auf der der Nutzer ein Konto verbindet. Siehe [Konten und Netzwerk](#konten-und-netzwerk).
 
-`contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`.
+`contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`. Ein Service mit `provides: ["browser"]` kann außerdem den Browser des Agenten vertreten: Er beantwortet die `browser.*`-Aktionen auf dem Server, sodass Agenten ohne geöffnete Desktop-App browsen, und der Nutzer wählt ihn unter Einstellungen → OpenChamber-Werkzeuge. Ein solcher Service braucht kein Panel.
 
 ## Berechtigungen
 

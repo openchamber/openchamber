@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
+import { GuestHosts } from '@/components/layout/GuestHosts';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { toContextUsageReading } from '@/components/ui/contextUsageReading';
@@ -300,6 +301,7 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDr
           </ChatSurfaceProvider>
         )}
       </main>
+      <GuestHosts />
     </div>
   );
 };

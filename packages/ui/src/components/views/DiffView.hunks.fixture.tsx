@@ -101,7 +101,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       }).join('')).join('');
   };
   const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 3, deletions: 3, isNew: false };
-  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: {} };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 3, deletions: 3 } } } };
   const base = createWebAPIs();
   const apis = { ...base, git: { ...base.git,
     checkIsGitRepository: async () => true,

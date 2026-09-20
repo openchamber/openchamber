@@ -97,7 +97,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 `contributes.integration` 可选。它会在 设置 → 集成 中添加一张卡片，用户在那里连接账户。见[账户与网络](#账户与网络)。
 
-`contributes.service` 可选。它声明一个由 OpenChamber 在扩展旁启动的本地进程，用于网页无法访问的东西，比如 Docker socket。该进程以用户的完整权限运行，且没有沙箱隔离，因此批准对话框会对此发出警告；只有当网页无法完成这项工作时才声明它。见包内文件 `GUEST_SERVICES.md`。
+`contributes.service` 可选。它声明一个由 OpenChamber 在扩展旁启动的本地进程，用于网页无法访问的东西，比如 Docker socket。该进程以用户的完整权限运行，且没有沙箱隔离，因此批准对话框会对此发出警告；只有当网页无法完成这项工作时才声明它。见包内文件 `GUEST_SERVICES.md`。 带有 `provides: ["browser"]` 的服务还可以替代智能体的浏览器：它在服务器上响应 `browser.*` 动作，因此智能体无需打开桌面应用即可浏览，用户在设置 → OpenChamber 工具中选择它。这样的服务不需要面板。
 
 ## 能力
 

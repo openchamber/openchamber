@@ -18,7 +18,7 @@ import MessageBody, { type MessageExtraAction } from './message/MessageBody';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { buildGuestMessageItem, guestMessageActionsFor } from '@/lib/guests/actions';
-import { openGuestWithItem } from '@/lib/guests/dialog-store';
+import { runGuestAction } from '@/lib/guests/run-action';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
@@ -757,10 +757,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 const sessionTitle = useGlobalSessionsStore.getState().entityById.get(sessionId)?.title ?? null;
                 const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
                 const item = buildGuestMessageItem(entry.action.id, { sessionId, sessionTitle, directory }, messageRecordRef.current);
-                openGuestWithItem(entry.guest, item, directory);
+                void runGuestAction(entry, item, t);
             },
         }));
-    }, [guestActionEntries, isUser, sessionId]);
+    }, [guestActionEntries, isUser, sessionId, t]);
 
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {

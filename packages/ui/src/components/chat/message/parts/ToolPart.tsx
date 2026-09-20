@@ -2285,7 +2285,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             {justificationText && (
                                 <span
                                     className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
-                                    style={{ color: 'var(--tools-description)', opacity: 0.8 }}
+                                    style={{ color: 'var(--tools-description)' }}
                                     title={justificationText}
                                 >
                                     {justificationText}

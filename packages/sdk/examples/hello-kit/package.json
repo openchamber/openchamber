@@ -11,7 +11,11 @@
         "icon": "palette",
         "entry": "panel/index.html"
       },
-      "page": true
+      "page": true,
+      "background": { "entry": "background/index.html" },
+      "actions": [
+        { "id": "message-length", "label": "Show message length", "where": "message", "mode": "background" }
+      ]
     }
   },
   "dependencies": {

@@ -180,7 +180,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const [remotes, setRemotes] = React.useState<GitRemote[]>([]);
   const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
-  const [nestedRepositoryKey, setNestedRepositoryKey] = React.useState<string | null>(null);
+  // The route path whose diff the server declined for a reason the detail
+  // view explains instead of showing an error.
+  const [unavailablePath, setUnavailablePath] = React.useState<{ key: string; reason: 'nested_repository' | 'untracked_directory' } | null>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
   const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
 
@@ -388,7 +390,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     const cacheKey = diffCacheKey(route.path, route.staged);
     // A path reported as a nested repository by an earlier read may be diffable
     // now; each read decides again.
-    setNestedRepositoryKey(null);
+    setUnavailablePath(null);
     if (!currentDirectory || getDiff(currentDirectory, cacheKey)) {
       setDiffLoadError(null);
       return;
@@ -409,8 +411,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       })
       .catch((error) => {
         if (cancelled) return;
-        if (error instanceof GitPathUnavailableError && error.reason === 'nested_repository') {
-          setNestedRepositoryKey(`${currentDirectory}\u0000${route.path}`);
+        if (error instanceof GitPathUnavailableError && error.reason !== 'path_not_found') {
+          setUnavailablePath({ key: `${currentDirectory}\u0000${route.path}`, reason: error.reason });
           return;
         }
         if (error instanceof GitPathUnavailableError) {
@@ -607,6 +609,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         id: 'staged',
         title: t('gitView.changes.stagedTitle'),
         entries: stagedChangeEntries,
+        statsScope: 'staged',
         actionSymbol: '-',
         actionAllLabel: t('gitView.changes.unstageAllAria'),
         getActionLabel: (path: string) => t('gitView.changes.unstageFileAria', { path }),
@@ -624,6 +627,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         id: 'unstaged',
         title: t('gitView.changes.title'),
         entries: unstagedChangeEntries,
+        statsScope: 'working',
         actionSymbol: '+',
         actionAllLabel: t('gitView.changes.stageAllAria'),
         getActionLabel: (path: string) => t('gitView.changes.stageFileAria', { path }),
@@ -703,7 +707,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         diff={selectedDiff}
         staged={route.staged}
         fileExists={Boolean(selectedFileEntry)}
-        isNestedRepository={nestedRepositoryKey === `${currentDirectory}\u0000${route.path}`}
+        unavailableReason={unavailablePath?.key === `${currentDirectory}\u0000${route.path}` ? unavailablePath.reason : null}
         error={diffLoadError}
         onBack={() => setRoute({ type: 'list' })}
         onRetry={() => setDiffRetryNonce((value) => value + 1)}
@@ -967,11 +971,11 @@ const MobileDiffDetail: React.FC<{
   diff: MobileDiffData | null;
   staged?: boolean;
   fileExists: boolean;
-  isNestedRepository?: boolean;
+  unavailableReason?: 'nested_repository' | 'untracked_directory' | null;
   error: string | null;
   onBack: () => void;
   onRetry: () => void;
-}> = ({ path, subtitle, diff, staged = false, fileExists, isNestedRepository = false, error, onBack, onRetry }) => {
+}> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error, onBack, onRetry }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
 
@@ -994,8 +998,10 @@ const MobileDiffDetail: React.FC<{
       <div className="min-h-0 flex-1 overflow-hidden">
         {!fileExists ? (
           <MobileChangesState icon message={t('mobile.changes.diffDetail.missingTitle')} description={t('mobile.changes.diffDetail.missingDescription')} />
-        ) : isNestedRepository ? (
+        ) : unavailableReason === 'nested_repository' ? (
           <MobileChangesState icon message={t('diffView.unavailable.nestedRepositoryTitle')} description={t('diffView.unavailable.nestedRepositoryDescription')} />
+        ) : unavailableReason === 'untracked_directory' ? (
+          <MobileChangesState icon message={t('diffView.unavailable.untrackedDirectoryTitle')} description={t('diffView.unavailable.untrackedDirectoryDescription')} />
         ) : error ? (
           <div className="flex h-full items-center justify-center px-6 text-center">
             <div className="flex max-w-sm flex-col items-center gap-3">

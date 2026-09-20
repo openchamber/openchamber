@@ -422,6 +422,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
+    // Auto routing. Prompts dispatched here go straight to OpenCode, not
+    // through the proxy that rewrites the Auto sentinel, so the same hook runs
+    // on the body before it is sent. Null when routing is not wired in.
+    resolvePromptBody = null,
   } = dependencies;
 
   // Last user message of an existing session, as a selection to reuse. Returns
@@ -596,25 +600,21 @@ export const createOpenChamberSessionService = (dependencies) => {
         ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
           .catch(() => ({ text: '', signature: '' }))
         : { text: '', signature: '' };
+      const payload = {
+        model,
+        ...(agent ? { agent } : {}),
+        ...(variant ? { variant } : {}),
+        parts: [
+          ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
+          { type: 'text', text: expandedPrompt },
+          ...(goalInput.enabled
+            ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
+            : []),
+        ],
+      };
+      await resolvePromptBody?.(payload, { sessionId: sessionID, directory });
       try {
-        await runPromptAsync({
-          baseUrl,
-          authHeaders,
-          sessionID,
-          directory,
-          payload: {
-            model,
-            ...(agent ? { agent } : {}),
-            ...(variant ? { variant } : {}),
-            parts: [
-              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
-              { type: 'text', text: expandedPrompt },
-              ...(goalInput.enabled
-                ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
-                : []),
-            ],
-          },
-        });
+        await runPromptAsync({ baseUrl, authHeaders, sessionID, directory, payload });
       } catch (error) {
         throw markGoalPartial(error);
       }

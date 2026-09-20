@@ -7,7 +7,7 @@ type RegisterHeader = (entry: HeaderEntry) => () => void;
 type HostParent = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
 const HeaderContext = React.createContext<RegisterHeader | null>(null);
 
-// Layout offsets exclude the transforms used while sortable sections settle.
+// Layout offsets include virtual positioning but exclude transient sortable transforms.
 function getLayoutTop(element: HTMLElement): number {
   let top = 0;
   let current: HTMLElement | null = element;
@@ -16,7 +16,9 @@ function getLayoutTop(element: HTMLElement): number {
     const parent: Element | null = current.offsetParent;
     current = parent instanceof HTMLElement ? parent : null;
   }
-  return top;
+  const virtualRow = element.closest<HTMLElement>('[data-sidebar-virtual-start]');
+  const virtualStart = Number(virtualRow?.dataset.sidebarVirtualStart ?? '0');
+  return top + (Number.isFinite(virtualStart) ? virtualStart : 0);
 }
 
 /** Keep the live controls mounted in one portal while moving its host between
@@ -127,8 +129,13 @@ export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '
       sync();
     };
     const resize = new ResizeObserver(measure);
+    const positionObserver = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
     resize.observe(root);
     const refresh = () => {
+      positionObserver.disconnect();
       for (const entry of observed) {
         if (!entriesRef.current.has(entry)) {
           resize.unobserve(entry.host);
@@ -137,6 +144,13 @@ export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '
         }
       }
       for (const entry of entriesRef.current) {
+        const virtualRow = entry.slot.closest<HTMLElement>('[data-sidebar-virtual-start]');
+        if (virtualRow) {
+          positionObserver.observe(virtualRow, {
+            attributes: true,
+            attributeFilter: ['data-sidebar-virtual-start'],
+          });
+        }
         if (!observed.has(entry)) {
           resize.observe(entry.host);
           // Section size changes move later boundaries without resizing the
@@ -159,6 +173,7 @@ export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '
       cancelAnimationFrame(frame);
       root.removeEventListener('scroll', sync);
       resize.disconnect();
+      positionObserver.disconnect();
       clearAnimation();
       layer.hidden = true;
       if (active) {

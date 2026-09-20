@@ -1,6 +1,6 @@
 # @openchamber/sdk
 
-Build extensions for [OpenChamber](https://openchamber.dev). An extension is a small web page that OpenChamber shows on its right-hand rail. It can read the current project and session, show toasts, put text in the chat box, attach a task to a session, and, once the user approves it, start sessions and send prompts. This package is the contract between that page and the app.
+Build extensions for [OpenChamber](https://openchamber.dev). An extension can show a panel on the right-hand rail or run actions in the background without a panel. It can read the current project and session, show toasts, put text in the chat box, attach a task to a session, and, once the user approves it, start sessions and send prompts. This package is the contract between the extension and the app.
 
 Full guide: [Build an extension](https://openchamber.dev/docs/sdk/). Reference: [Host API](https://openchamber.dev/docs/sdk/host/) and [UI kit](https://openchamber.dev/docs/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
 
@@ -88,14 +88,70 @@ Git installs also accept SSH addresses such as `git@github.com:owner/extension.g
 - `version` is required semver. Settings → Extensions shows it on the card.
 - `apiVersion` is `1`. Anything else is refused.
 - `engines.openchamber` is optional (`1.24.0` or `>=1.24.0`). Older OpenChamber builds refuse the install.
-- `panel.id` is kebab-case and unique. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG inside the folder. `entry` is the HTML file inside the folder. Leave `entry` out for an extension that only declares `tools`: it gets no rail icon or page, just its tool rules in the chat (`examples/tools-only`).
+- `panel.id` is kebab-case and unique. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG inside the folder. `entry` is the visible panel's HTML file. Leave `entry` out to have no rail icon or panel. Add `background.entry` for executable actions and commands; with neither entry, the extension can only declare `tools`, as in `examples/tools-only`.
+- `background: { "entry": "background/index.html" }` supplies separate sandboxed HTML for background actions and slash commands. Its scripts must be built. It runs on demand, not continuously or at installation. A panel can coexist with it.
 - `attach` is optional. `"dialog"` opens the page in a window from the + menu next to the chat box; `true` or `"panel"` opens the rail panel instead. `ctx.surface` tells the page which one it is in. The object form `{ "mode": "dialog", "entry": "panel/attach.html" }` gives the window its own page. When the user clicks the attached chip, the page opens again with that item in `ctx.item` (`null` from the + menu), so it can show the item instead of the list.
-- `actions` is optional: menu entries on messages (`where: "message"`, optionally only `roles: ["assistant"]`) and on sessions (`where: "session"`). Picking one opens your page with that message or session in `ctx.item` (`kind: "message"` with the text, or `kind: "session"`; add `payload: ["messages"]` to get the conversation too). Up to 8.
+- `actions` is optional: menu entries on messages (`where: "message"`, optionally only `roles: ["assistant"]`) and on sessions (`where: "session"`). By default, picking one opens your page with that message or session in `ctx.item` (`kind: "message"` with the text, or `kind: "session"`; add `payload: ["messages"]` to get the conversation too). Set `mode: "background"` to call `onAction` without opening UI, as shown below. Up to 8.
 - `commands` is optional: slash commands for the chat box, up to 8. `/task DEMO-2` calls your `host.onResolve` handler instead of the model; return a chip to attach it, or `null` for nothing. A name the app already has is ignored.
 - `tools` is optional: how your tool calls look in the chat, up to 16, no code. `match` is the tool name OpenCode reports (`mcp.tasks.*` matches every tool under that prefix); `name` and `icon` (a Remixicon name or an SVG inside the folder, like `panel.icon`) set the header, `title` and `subtitle` are templates like `{input.id}` or `{output.total} open`, and `output` picks the body: `text`, `json`, `markdown`, `code` (with `language`), or `table` (with `columns`, rows from the output array or `output.items`). Leave `output` out to keep the app's own detection.
 - `capabilities` lists what needs the user's approval: `prompt` to send messages, `sessions` to create sessions and worktrees, `files` to read and write inside the open project, `model` for one-off text generation with the user's Small Model (`host.generate`, no session involved). An `integration` adds `network`, a `service` adds `service`, `filesystem` patterns (like `["~/.config/opencode/opencode.json"]`) add `filesystem`, which lets `readFile`, `writeFile`, `listDir`, and `stat` reach those paths outside the project, and a session action with `payload: ["messages"]` adds `conversation`. The user approves the whole list once at install. Calls outside it fail with `NOT_GRANTED`.
 - `integration` is optional. It adds a card at Settings → Integrations. `token` takes a pasted API token (`scheme: "bearer"` for `Authorization: Bearer`, `"basic"` for a username and token pair as Jira Cloud wants), `oauth` runs an authorize flow with a pasted client id, and `host: { "provider": "linear" }` reuses the Linear account already connected in OpenChamber. The page never sees the token; OpenChamber makes the calls through `host.request`.
-- `service` is optional. It declares a local process OpenChamber starts next to the extension. It runs with the user's full access and no sandbox, so declare one only when the page cannot do the job. See [GUEST_SERVICES.md](./GUEST_SERVICES.md).
+- `service` is optional. It declares a local process OpenChamber starts next to the extension. It runs with the user's full access and no sandbox, so declare one only when the page cannot do the job. See [GUEST_SERVICES.md](./GUEST_SERVICES.md). With `provides: ["browser"]` the service can stand in for the agent's browser, so agents browse on the server with no desktop app open; the user picks it in Settings → OpenChamber Tools. With `surface: true` it shows a live picture in the rail that the user can watch and take over, and hand back to the agent.
+
+## Actions without opening a panel
+
+Set `mode: "background"` on a message or session action to run it without opening the rail or a dialog:
+
+```json
+{ "id": "message-length", "label": "Show message length", "where": "message", "mode": "background" }
+```
+
+Register `onAction` immediately after `connectHost` in your background script, or your panel script when no background entry is declared:
+
+```ts
+const host = connectHost();
+host.onAction(async (item) => {
+  if (item.kind === 'message' && item.action === 'message-length') {
+    await host.toast({
+      kind: 'info',
+      message: `Message length: ${item.text.length} characters.`,
+      copy: true,
+      dismiss: true,
+      persistent: true,
+    });
+  }
+});
+```
+
+Each click runs in a fresh hidden iframe. Await all work inside the handler, including the toast. OpenChamber removes the iframe when the handler finishes and reports thrown errors as toasts. Loading and execution together have a 20-second limit. A runtime switch, disabling the extension, or withdrawing approval also ends the invocation. Completed side effects are not rolled back or retried.
+
+`ctx.surface` is `"background"`; skip drawing your UI in that case. `ctx.item` stays `null`, so the action runs only through `onAction`, without repeated `onItem` snapshots. The session and directory context stay with the clicked target even if the user changes chats. OpenChamber loads `background.entry` when declared and falls back to `panel.entry` for existing extensions. Omit `mode`, or use `"open"`, to open a visible panel or dialog. See `examples/hello-kit` for separate panel and background scripts.
+
+To remove the panel and its rail icon entirely, use this `contributes` block:
+
+```json
+{
+  "panel": { "id": "message-tools", "name": "Message Tools", "icon": "apps" },
+  "background": { "entry": "background/index.html" },
+  "actions": [
+    { "id": "message-length", "label": "Show message length", "where": "message", "mode": "background" }
+  ]
+}
+```
+
+The `panel` object retains the extension's identity for Settings and approval dialogs; only `panel.entry` creates a visible panel. Without it, every action must use `mode: "background"`, and `attach` and `page` cannot open a view. Slash commands call `onResolve` in the background entry, with `ctx.surface` also set to `"background"`. Capabilities, services, integrations, storage, and file access use the same approval checks. An attached chip can still be sent to the model or opened with its browser button; clicking to reopen the extension shows a no-panel notice.
+
+This addition requires a matching OpenChamber build. For unreleased SDK preview builds, use the app built from the same revision.
+
+## Toast buttons
+
+`host.toast` accepts three optional fields:
+
+- `copy: true` adds Copy for the displayed message. Use `copy: { text: "..." }` to copy a different value, up to 32,000 characters. Whitespace in that value is preserved.
+- `dismiss: true` adds OK to close the toast.
+- `persistent: true` keeps the toast on screen until dismissed and always adds OK, even if `dismiss` is false.
+
+Copy keeps the toast open and shows Copied on success. A failed copy shows an error beside the button so the user can retry. OpenChamber translates the buttons and handles clicks itself, so they work after a background action's iframe has closed. `await host.toast(...)` waits only for the host to show the toast, not for a button click. Omit these fields for an ordinary timed toast.
 
 ## In the page
 

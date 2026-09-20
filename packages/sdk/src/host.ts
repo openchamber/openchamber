@@ -3,6 +3,8 @@ import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSna
 import type { JsonValue } from './contract.ts';
 import {
   GUEST_FILE_CONTENT_MAX,
+  GUEST_CLIPBOARD_TEXT_MAX,
+  GUEST_TOAST_MAX,
   GUEST_FILE_PATH_MAX,
   GUEST_GENERATE_OUTPUT_TOKENS_MAX,
   GUEST_GENERATE_PROMPT_MAX,
@@ -18,6 +20,8 @@ import {
   clampStartSessionRequest,
   readHostMessage,
   type AttachIssueRequest,
+  type ActionResultPayload,
+  type GuestActionItem,
   type ComposeRequest,
   type PromptRequest,
   type PromptResult,
@@ -106,6 +110,12 @@ export type HostClient = {
    * toast. One handler at a time; the returned function removes it.
    */
   onResolve: (handler: (request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) => () => void;
+  /**
+   * Run a `mode: "background"` action. Register synchronously after connectHost.
+   * Await all work, including toast calls: the hidden frame is removed when
+   * this handler settles. Throw to report failure. One handler at a time.
+   */
+  onAction: (handler: (item: GuestActionItem) => void | Promise<void>) => () => void;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
   openSurface: (surfaceId: string) => Promise<void>;
@@ -199,6 +209,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const settingsListeners = new Set<(settings: GuestSettings) => void>();
   const itemListeners = new Set<(item: GuestItem | null) => void>();
   let resolveHandler: ((request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) | null = null;
+  let actionHandler: ((item: GuestActionItem) => void | Promise<void>) | null = null;
   const pending = new Map<string, Pending>();
   const workspaceListeners = new Map<string, (snapshot: GuestWorkspaceSnapshot) => void>();
   let disposed = false;
@@ -304,6 +315,26 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         lastReady = { ...lastReady, item: message.payload.item };
       }
       emit(itemListeners, message.payload.item);
+      return;
+    }
+
+    if (message.type === 'action') {
+      const answer = (payload: ActionResultPayload): void => {
+        if (!disposed) post({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+          type: 'action-result', id: message.id, payload });
+      };
+      const handler = actionHandler;
+      if (!handler) {
+        answer({ ok: false, error: 'This extension does not handle background actions.' });
+        return;
+      }
+      Promise.resolve().then(() => handler(message.payload)).then(
+        () => answer({ ok: true }),
+        (error) => {
+          const text = (error instanceof Error ? error.message : String(error)).trim();
+          answer({ ok: false, error: (text || 'Action failed.').slice(0, GUEST_RESOLVE_ERROR_MAX) });
+        },
+      );
       return;
     }
 
@@ -417,6 +448,10 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   };
 
   return {
+    onAction: (handler) => {
+      actionHandler = handler;
+      return () => { if (actionHandler === handler) actionHandler = null; };
+    },
     listProjects: async () => {
       const result = await readWorkspace({ kind: 'projects' });
       if (result.kind !== 'projects') throw new HostRequestError('HOST_REJECTED', 'Expected projects.');
@@ -507,13 +542,22 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         if (resolveHandler === handler) resolveHandler = null;
       };
     },
-    toast: (payload) => request({
-      channel: OPENCHAMBER_SDK_CHANNEL,
-      v: OPENCHAMBER_SDK_API_VERSION,
-      type: 'toast',
-      id: nextId(ids),
-      payload,
-    }),
+    toast: (payload) => {
+      const message = payload.message.trim();
+      if (!message || message.length > GUEST_TOAST_MAX) {
+        return Promise.reject(new HostRequestError('HOST_REJECTED', `Toast message must contain 1 to ${GUEST_TOAST_MAX} characters.`));
+      }
+      if (payload.copy && payload.copy !== true && (!payload.copy.text.length || payload.copy.text.length > GUEST_CLIPBOARD_TEXT_MAX)) {
+        return Promise.reject(new HostRequestError('HOST_REJECTED', `Toast copy text must contain 1 to ${GUEST_CLIPBOARD_TEXT_MAX} characters.`));
+      }
+      return request({
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'toast',
+        id: nextId(ids),
+        payload: { ...payload, message },
+      });
+    },
     openUrl: (url) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
@@ -745,6 +789,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       workspaceListeners.clear();
       disposed = true;
       resolveHandler = null;
+      actionHandler = null;
       target.removeEventListener('message', onMessage);
       for (const waiter of pending.values()) {
         clearTimeout(waiter.timer);

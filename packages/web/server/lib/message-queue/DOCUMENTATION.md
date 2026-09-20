@@ -22,6 +22,12 @@ session-knowledge runtime; routes registered in
 JSON bodies enabled in `opencode/core-routes.js`; stopped by
 `opencode/shutdown-runtime.js`.
 
+## Auto routing
+
+`resolvePromptBody` (the routing runtime) runs on the assembled body right
+before the prompt or command send, turning a queued `openchamber/auto` model
+into a real one. The queue captures the sentinel like any other send config.
+
 ## Item
 
 An item is what the UI would have sent itself, captured at queue time so the
@@ -98,7 +104,10 @@ persisted "sending" flag would strand a message forever.
    next one: `GET /session/status` must not list the session as busy/retry,
    and the trailing message must not be an unfinished assistant reply (the
    status map only lists busy sessions, so a missed busy event leaves no
-   entry while a turn still streams). A failed fetch is unknown, never idle:
+   entry while a turn still streams). An unfinished reply created before this
+   runtime started does not block: its run died with the previous server and
+   will never complete, so a restored queue would wait on it forever. A reply
+   with no `created` time still blocks. A failed fetch is unknown, never idle:
    the tick re-arms with backoff.
 5. The head is marked in flight (broadcast), then sent:
    - text starting with `/` that names a command in OpenCode's `/command`

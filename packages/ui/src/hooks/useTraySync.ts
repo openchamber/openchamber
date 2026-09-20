@@ -4,8 +4,8 @@ import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } f
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores } from '@/sync/sync-refs';
-import { opencodeClient } from '@/lib/opencode/client';
-import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
@@ -285,42 +285,11 @@ const collectLiveData = (): LiveData => {
 // landing in useGlobalSessionStatusStore (the fallback in the rollup below):
 //  - live: the global event stream carries status events for every directory;
 //    the sync dispatcher routes the ones without a child store into the store;
-//  - polled: events only deliver changes, so an initial per-directory snapshot
-//    seeds the state and a slow poll reconciles anything missed. Per directory
-//    because the upstream `/session/status` endpoint is directory-scoped
-//    (querying it without a directory covers only the server's own cwd, NOT
-//    all projects).
-
-// Directories worth polling: everywhere the tray's visible sessions live —
-// including synced ones, so the poll reconciles any status event a child
-// store missed (e.g. a session created from another window mid-race). Returns
-// each directory with the session ids the global list places there, so the
-// snapshot can authoritatively clear stale entries by session id.
-const collectStatusPollDirectories = (): Map<string, string[]> => {
-  const allSessions = useGlobalSessionsStore.getState().activeSessions;
-  const rootDirs = new Set<string>();
-  allSessions
-    .filter((s) => s?.id && !s.parentID)
-    .slice()
-    .sort(compareSessionOrder)
-    .slice(0, MAX_SESSIONS)
-    .forEach((session) => {
-      const directory = resolveGlobalSessionDirectory(session);
-      if (directory) rootDirs.add(directory);
-    });
-
-  const targets = new Map<string, string[]>();
-  for (const session of allSessions) {
-    if (!session?.id) continue;
-    const directory = resolveGlobalSessionDirectory(session);
-    if (!directory || !rootDirs.has(directory)) continue;
-    const ids = targets.get(directory) ?? [];
-    ids.push(session.id);
-    targets.set(directory, ids);
-  }
-  return targets;
-};
-
+//  - seeded: events only deliver changes, so the root global-sessions poll
+//    seeds the store from the host's cross-project map (`/api/sessions/status`,
+//    see `sync/host-session-status-seed.ts`). The tray no longer polls the
+//    upstream `/session/status?directory=` endpoint: that call creates an
+//    OpenCode instance per directory.
 const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot => {
   const notif = useNotificationStore.getState().index.session;
 
@@ -418,7 +387,23 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
       };
     });
 
+  // Directory stores list approvals for open directories; the cross-directory
+  // index adds the ones from directories this window never initialized.
   const approvals = live.approvals.map((a) => ({ ...a, sessionTitle: titleById.get(a.sessionId) || '' }));
+  const seen = new Set(approvals.map((a) => a.id));
+  for (const [sessionId, pending] of useGlobalBlockingRequestsStore.getState().bySession) {
+    const sessionTitle = titleById.get(sessionId) || '';
+    for (const request of pending.permissions) {
+      if (seen.has(request.id)) continue;
+      seen.add(request.id);
+      approvals.push({ kind: 'permission', id: request.id, sessionId, sessionTitle, label: permissionLabel(request), directory: pending.directory });
+    }
+    for (const request of pending.questions) {
+      if (seen.has(request.id)) continue;
+      seen.add(request.id);
+      approvals.push({ kind: 'question', id: request.id, sessionId, sessionTitle, label: questionLabel(request), directory: pending.directory });
+    }
+  }
 
   return { sessions, approvals, instanceName, usage: buildUsage(), dockBadgeCount };
 };
@@ -441,21 +426,6 @@ export const useTraySync = (): void => {
       if (serialized === lastSerialized) return;
       lastSerialized = serialized;
       void invokeDesktop('desktop_tray_update', snapshot);
-    };
-
-    // Seed + reconcile the cross-project status map. The live path is the
-    // global event stream (captured by the sync dispatcher); this poll covers
-    // sessions already busy before this window opened and any missed events.
-    // Cheap: ~ms per directory, bounded by the tray's visible session count.
-    const refreshGlobalStatus = async () => {
-      const targets = collectStatusPollDirectories();
-      await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
-        // null = fetch failed → keep that directory's current entries;
-        // {} = authoritative "everything here is idle".
-        const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
-        if (disposed || raw === null) return;
-        applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
-      }));
     };
 
     // Coalesce bursts (e.g. token-by-token streaming updates a store rapidly)
@@ -540,15 +510,14 @@ export const useTraySync = (): void => {
     const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
     const unsubscribeGit = useGitStore.subscribe(() => scheduleFlush());
     // Cross-project status map: fed live by the sync dispatcher from the global
-    // event stream, and seeded/reconciled by the poll below.
+    // event stream and seeded from the host by the root global-sessions poll.
+    // The tray used to poll `/session/status?directory=` for up to 20
+    // directories every 5 seconds, which made OpenCode create an instance for
+    // each of them; the host seed covers the same startup gap for free.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
+    const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
     const unsubscribePinnedSessions = useSessionPinnedStore.subscribe(() => scheduleFlush());
-
-    // Global busy/retry status: fetch now and poll, so unsynced sessions don't
-    // sit looking idle. Synced directories stay instant via their SSE stores.
-    void refreshGlobalStatus();
-    const globalStatusInterval = window.setInterval(() => { void refreshGlobalStatus(); }, POLL_INTERVAL_MS);
 
     // Usage: push to the tray whenever the quota store changes, and do one
     // initial fetch for enabled providers so the submenu isn't empty on launch.
@@ -570,11 +539,11 @@ export const useTraySync = (): void => {
     return () => {
       stopBadgeSync();
       window.clearInterval(interval);
-      window.clearInterval(globalStatusInterval);
       unsubscribeProjects();
       unsubscribeWorktrees();
       unsubscribeGit();
       unsubscribeGlobalStatus();
+      unsubscribeGlobalRequests();
       unsubscribeSessionOrder();
       unsubscribePinnedSessions();
       unsubscribeQuota();

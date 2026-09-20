@@ -97,7 +97,7 @@ Tablica może używać `host.storage` oraz list projektów, worktree i sesji ze 
 
 `contributes.integration` jest opcjonalne. Dodaje kartę w Ustawienia → Integracje, gdzie użytkownik podłącza konto. Zobacz [Konta i sieć](#konta-i-sieć).
 
-`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie.
+`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie. Usługa z `provides: ["browser"]` może też zastąpić przeglądarkę agenta: odpowiada na działania `browser.*` na serwerze, więc agenci przeglądają bez otwartej aplikacji desktopowej, a użytkownik wybiera ją w Ustawienia → Narzędzia OpenChamber. Taka usługa nie potrzebuje panelu.
 
 ## Uprawnienia
 

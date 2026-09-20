@@ -2,7 +2,9 @@ import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': 'Перейменувати за допомогою ШІ',
@@ -31,7 +33,9 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n.uk,
   ...linearPanelI18n.uk,
+  ...routingI18n.uk,
   ...pluginPanelI18n.uk,
+  ...surfacePanelI18n.uk,
   'terminalView.actions.attachSelection': 'Прикріпити вибраний вивід',
   'terminalView.actions.copySelection': 'Скопіювати вибраний вивід',
   'terminalView.toast.selectionCopied': 'Вивід скопійовано',
@@ -425,6 +429,7 @@ export const dict: Record<I18nKey, string> = {
   "multirun.launcher.models.info": "Вибрати 2 або більше моделей. Ту саму модель можна додавати кілька разів.",
   "multirun.launcher.toast.fileTooLarge": "Файл \"{fileName}\" завеликий (макс. 10 МБ)",
   "multirun.launcher.toast.attachFailed": "Не вдалося вкласти \"{fileName}\"",
+  'multirun.launcher.toast.partialFailure': 'Частину сесій не вдалося створити. Кількість невдалих: {failed}.',
   "multirun.launcher.toast.attachedSingle": "Прикріплено файл: {count}",
   "multirun.launcher.toast.attachedPlural": "Прикріплено файлів: {count}",
   "multirun.modelMultiSelect.actions.addModel": "Додати модель",
@@ -627,6 +632,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
   "sessions.sidebar.session.status.questionPendingSingle": "1 запитання очікує відповіді",
   "sessions.sidebar.session.status.questionPendingMany": "Кількість запитань, що очікують відповіді: {count}",
+  "sessions.sidebar.session.status.questionPending": "Запитання очікує відповіді",
   "sessions.sidebar.session.status.activeFor": "Активна вже {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "Останній хід тривав {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",
@@ -1593,6 +1599,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.unavailable.missingDescription": "Його видалили після того, як завантажився список змін. Список оновлюється.",
   "diffView.unavailable.nestedRepositoryTitle": "Окремий Git-репозиторій",
   "diffView.unavailable.nestedRepositoryDescription": "Ця тека має власну історію Git. Відкрийте її як проєкт, щоб побачити її зміни.",
+  "diffView.unavailable.untrackedDirectoryTitle": "Тека з новими файлами",
+  "diffView.unavailable.untrackedDirectoryDescription": "У цій теці забагато нових файлів, щоб показувати їх окремо. Застейджте її або додайте в .gitignore, якщо їй не місце в репозиторії.",
   "diffView.submodule.title": "Субмодуль",
   "diffView.submodule.commitChanged": "Коміт {from} → {to}",
   "diffView.submodule.commitUnchanged": "Досі на коміті {commit}",
@@ -1623,8 +1631,6 @@ export const dict: Record<I18nKey, string> = {
   "diffView.actions.renderAnyway": "Все одно відрендерити",
   "diffView.actions.expandAll": "Розгорнути все",
   "diffView.actions.collapseAll": "Згорнути все",
-  "diffView.actions.loadFullFiles": "Завантажити повні файли",
-  "diffView.actions.disableFullFiles": "Не завантажувати повні файли",
   "diffView.actions.disableLineWrap": "Вимкнути перенос рядків",
   "diffView.actions.enableLineWrap": "Увімкнути перенос рядків",
   "diffView.actions.openFileInEditorAtChange": "Відкрити цей файл у редакторі на зміні",
@@ -2311,6 +2317,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.title.commentOnSelection": "Коментувати виділене",
   "chat.textSelection.comment.placeholder": "Додайте коментар за бажанням...",
   "chat.textSelection.comment.attach": "Прикріпити",
+  "chat.textSelection.comment.attachFailed": "Не вдалося прикріпити коментар. Скоротіть його або приберіть інший прикріплений контекст і спробуйте знову.",
   "chat.textSelection.actions.addToNotes": "Додати до нотаток",
   "chat.textSelection.title.addToCurrentChat": "Додати до поточного чату",
   "chat.textSelection.title.saveInsightToNotes": "Зберегти вибраний текст у нотатках",
@@ -2411,6 +2418,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.someFilesSkipped": "Деякі файли були пропущені:\n{summary}",
   "chat.chatInput.toast.vscodePickFailed": "Не вдалося вибрати файли в VS Code",
   "chat.chatInput.toast.openSessionFirst": "Спочатку відкрийте сесію",
+  "chat.chatInput.toast.dictationKeptForOriginalSession": "Диктування збережено як чернетку в сесії, де ви його почали",
   "chat.chatInput.toast.togglePermissionAutoAcceptFailed": "Не вдалося ввімкнути автоматичне прийняття дозволів",
   "chat.chatInput.reviewComments": "Коментарі рев’ю:",
   "chat.chatInput.reviewCommentsRemove": "Прибрати коментарі рев’ю",
@@ -2898,6 +2906,9 @@ export const dict: Record<I18nKey, string> = {
   "desktopHostSwitcher.error.failedToSave": "Не вдалося зберегти",
   "desktopHostSwitcher.error.failedToLoad": "Не вдалося завантажити",
   "desktopHostSwitcher.error.invalidUrl": "Некоректний URL (має бути http/https)",
+  "desktopHostSwitcher.error.pairingRejected": "Посилання для сполучення недійсне або прострочене. Створіть нове.",
+  "desktopHostSwitcher.error.pairingFailed": "Не вдалося виконати сполучення (HTTP {status}).",
+  "desktopHostSwitcher.error.pairingInvalidResponse": "Сервер повернув некоректну відповідь на запит сполучення.",
   "desktopHostSwitcher.error.failedToOpenNewWindow": "Не вдалося відкрити нове вікно",
   "desktopHostSwitcher.instance.local": "Local",
   "desktopHostSwitcher.instance.fallback": "Інстанс",
@@ -3053,6 +3064,9 @@ export const dict: Record<I18nKey, string> = {
   "onboarding.desktopRecovery.actions.retrying": "Повторна спроба…",
   "onboarding.desktopRecovery.actions.retryConnection": "Повторити підключення",
   "startup.initRecovery.title": "Не вдалося запустити",
+  "startup.initRecovery.openCodeUnavailable": "OpenChamber доступний, але OpenCode не готовий. Перевірте OpenCode на сервері й повторіть спробу.",
+  "startup.initRecovery.binary": "Виконуваний файл OpenCode",
+  "startup.initRecovery.error": "Помилка OpenCode",
   "startup.initRecovery.description": "OpenChamber не зміг завершити ініціалізацію. Перевірте, що сервер запущений, і повторіть спробу.",
   "startup.initRecovery.retry": "Повторити спробу",
   "startup.initRecovery.retrying": "Повторна спроба…",

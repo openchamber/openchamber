@@ -33,7 +33,7 @@ import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
 import { normalizePath } from "@/lib/pathNormalization";
-import { sessionStatusSnapshotSchema } from "./session-status";
+import { hostSessionStatusSnapshotSchema, sessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -349,7 +349,12 @@ const getDesktopFilesApi = (): FilesAPI | null => {
 // /api/fs/home parsing boundary. Older servers answer without chatsRoot;
 // only a valid home response may use the legacy chats-root fallback.
 const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/);
-const fsHomeResponseSchema = z.object({ home: fsAbsolutePathSchema, chatsRoot: fsAbsolutePathSchema.optional() });
+const fsHomeResponseSchema = z.object({
+  home: fsAbsolutePathSchema,
+  chatsRoot: fsAbsolutePathSchema.optional(),
+  canonicalChatsRoot: fsAbsolutePathSchema.optional(),
+  canonicalLegacyChatsRoot: fsAbsolutePathSchema.optional(),
+});
 
 class OpencodeService {
   private client: OpencodeClient;
@@ -1181,6 +1186,28 @@ class OpencodeService {
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
     return (await this.getSessionStatusForDirectory(null)) ?? {};
+  }
+
+  /**
+   * Cross-project busy/retry/idle map kept by the OpenChamber host from the
+   * single upstream event stream. One request that creates no OpenCode
+   * instance, unlike `/session/status?directory=`. `null` means the fetch
+   * failed; callers must preserve their current state.
+   */
+  async getHostSessionStatusSnapshot(): Promise<HostSessionStatusSnapshot | null> {
+    try {
+      const response = await runtimeFetch('/api/sessions/status', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const parsed = hostSessionStatusSnapshotSchema.safeParse(await response.json().catch(() => null));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

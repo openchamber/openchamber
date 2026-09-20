@@ -1337,6 +1337,28 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
     });
   });
 
+  it('status --json reports the address a registered server was asked to bind', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const server = await startMockOpenChamberServer();
+      const child = spawnOpenChamberLikeIdleProcess();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        fs.writeFileSync(await getPidFilePath(server.port), String(child.pid));
+        fs.writeFileSync(await getInstanceFilePath(server.port), JSON.stringify({ port: server.port, host: '0.0.0.0', launchMode: 'daemon' }, null, 2));
+
+        const output = await captureStdout(() => commands.status({ json: true }));
+
+        // The probe answers on loopback; the bind address comes from the registry.
+        expect(JSON.parse(output).instances).toEqual([
+          expect.objectContaining({ runtime: 'cli', port: server.port, launchMode: 'daemon', bindHost: '0.0.0.0' }),
+        ]);
+      } finally {
+        child.kill('SIGKILL');
+        await server.close();
+      }
+    });
+  });
+
   it('stop --port reaches unmanaged shutdown when the registry is empty', async () => {
     await withTempOpenChamberDataDir(async () => {
       const server = await startMockOpenChamberServer();

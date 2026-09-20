@@ -16,7 +16,7 @@ Six examples to use, explore, and adapt. The five panel extensions also have ful
 1. Run `bun run dev` from the repository root and open the printed URL.
 2. In **Settings → Extensions**, add an absolute example folder, such as `<repo>/packages/sdk/examples/hello-kit`.
 3. Approve the requested capabilities. Remove uninstalls the extension, so its panel will not run.
-4. Open its context-rail panel or choose its full-screen page from the Extension pages menu above the session list.
+4. Open its context-rail panel or choose its full-screen page from the Extension pages menu above the session list. SDK Playground also adds **Show message length** to chat message actions. It shows a persistent toast with Copy and OK without opening a panel, using `mode: "background"` and `host.onAction`. Copy copies the result and keeps the toast open; OK closes it.
 
 The checked-in JavaScript makes each folder installable without a build step. Provider requests and agent sessions are real when you connect an account or click Start session. Task Board's initial tasks and Repository Explorer's disconnected sample collection are sample data. An idle agent does not mark a task Done.
 
@@ -29,6 +29,7 @@ Config Studio validates JSON syntax, not every OpenCode configuration option. Re
 - `shared.ts` is presentation code for these examples, not a new SDK API. It supplies the responsive shell, section layout, plain-text output, and theme-token CSS. Bundles embed it, so installations do not need that source file.
 - `tasks-demo/panel/tasks.ts` owns task validation and storage; `board.ts` composes the UI; `workspace.ts` owns live project/session subscriptions and generation guards.
 - Every panel applies `applyHostReady` on repeated snapshots and mounts once. Controlled inputs call their handle's `update`. Provider and conversation data render as text.
+- SDK Playground keeps its message action in `hello-kit/background/main.ts`, separate from the panel. To make a background-only variant, omit `panel.entry` and `page` from its manifest; the action remains available and the rail icon disappears.
 - Example source uses the workspace SDK and the repository's existing Zod dependency for boundary validation. To move an example into its own repository, copy `shared.ts` into that package, adjust its imports, and declare `@openchamber/sdk` and `zod` where used.
 - The optional Tool Gallery MCP fixture is a separate process. Installing the extension never starts it or changes OpenCode configuration.
 
@@ -41,6 +42,7 @@ From the repository root:
 ```bash
 bun run --cwd packages/sdk build
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/hello-kit/panel/main.ts packages/sdk/examples/hello-kit/panel/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/hello-kit/background/main.ts packages/sdk/examples/hello-kit/background/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/github-token/panel/main.ts packages/sdk/examples/github-token/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/service-echo/panel/main.ts packages/sdk/examples/service-echo/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/service-echo/service/main.ts packages/sdk/examples/service-echo/service/main.js
@@ -62,4 +64,4 @@ bun run --cwd packages/sdk test
 bun test packages/ui/src/lib/guests/sdk-examples.test.ts
 ```
 
-SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, and freshness of all nine bundles. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.
+SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, and freshness of all ten bundles. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.

@@ -675,6 +675,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, []);
 
     const shouldShow = (setting: VisibleSetting): boolean => {
+        if (setting === 'enterToSend' && isMobile) return false;
         if (!visibleSettings) return true;
         return visibleSettings.includes(setting);
     };

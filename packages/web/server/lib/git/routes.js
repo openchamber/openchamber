@@ -12,7 +12,7 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   // A path from an earlier status listing that no longer resolves is a stale
   // row or a nested repository, not a server fault.
-  const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422]]);
+  const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]]);
   const sendGitPathError = (res, error) => {
     const status = GIT_PATH_ERROR_STATUS.get(error?.code);
     if (!status) return false;

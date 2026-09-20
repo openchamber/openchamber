@@ -15,7 +15,7 @@ interface SessionFolderItemProps<TSessionNode> {
    * indentation.
    */
   displayName?: string;
-  sessions: TSessionNode[];
+  sessions: readonly TSessionNode[];
   /** Sub-folders that belong directly to this folder */
   subFolderItems?: React.ReactNode;
   isCollapsed: boolean;
@@ -24,6 +24,7 @@ interface SessionFolderItemProps<TSessionNode> {
   onRename: (name: string) => void;
   onDelete: () => void;
   children?: React.ReactNode;
+  renderBody?: boolean;
   groupDirectory?: string | null;
   projectId?: string | null;
   mobileVariant?: boolean;
@@ -58,6 +59,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   onRename,
   onDelete,
   children,
+  renderBody = true,
   mobileVariant = false,
   alwaysShowActions = mobileVariant,
   isRenaming = false,
@@ -249,11 +251,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 • {sessions.length}
               </span>
               {collapsedActivityState ? (
-                <CollapsedActivityIndicator
-                  state={collapsedActivityState}
-                  activeLabel={t('sessions.sidebar.session.status.active')}
-                  unreadLabel={t('sessions.sidebar.session.status.unread')}
-                />
+                <CollapsedActivityIndicator state={collapsedActivityState} />
               ) : null}
               {isCollapsed ? (
                 <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
@@ -322,7 +320,7 @@ const SessionFolderItemBase = <TSessionNode,>({
       </div>
 
       {/* Folder body */}
-      {!isCollapsed ? (
+      {!isCollapsed && renderBody ? (
         <div className="pb-1">
           {/* Sub-folders first */}
           {subFolderItems}

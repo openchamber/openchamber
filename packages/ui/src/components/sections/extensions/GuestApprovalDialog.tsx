@@ -1,5 +1,5 @@
 import React from 'react';
-import type { GuestCapability } from '@openchamber/sdk';
+import { serviceProvides, type GuestCapability } from '@openchamber/sdk';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -45,6 +45,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const filesystemPatterns = guest?.filesystem ?? [];
   const serviceExec = guest?.service?.permissions?.exec ?? [];
   const serviceSockets = guest?.service?.permissions?.sockets ?? [];
+  const providesBrowser = serviceProvides(guest?.service, 'browser');
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
 
   return (
@@ -98,6 +99,11 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                     <p className="typography-meta mt-0.5 text-foreground">
                       {t('settings.extensions.capability.service.sockets')}{' '}
                       <span className="break-all font-mono">{serviceSockets.join(', ')}</span>
+                    </p>
+                  ) : null}
+                  {capability === 'service' && providesBrowser ? (
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t('settings.extensions.capability.service.providesBrowser')}
                     </p>
                   ) : null}
                 </div>

@@ -17,6 +17,21 @@ const validBlock = {
 };
 
 describe('parseManifest', () => {
+  test('preserves background action mode without changing legacy actions', () => {
+    const actions = [
+      { id: 'toast', label: 'Toast', where: 'message', mode: 'background' },
+      { id: 'inspect', label: 'Inspect', where: 'session' },
+    ];
+    const result = parseManifestJson(JSON.stringify({ ...validBlock, contributes: { ...validBlock.contributes, actions } }));
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { actions } } });
+    expect(parseManifestJson(JSON.stringify({ ...validBlock, contributes: {
+      ...validBlock.contributes, actions: [{ ...actions[0], mode: 'silent' }],
+    } }))).toMatchObject({ ok: false, code: 'invalid-actions' });
+    expect(parseManifestJson(JSON.stringify({ ...validBlock, contributes: {
+      panel: { id: 'toast', name: 'Toast', icon: 'window' }, actions,
+    } }))).toMatchObject({ ok: false, code: 'invalid-panel' });
+  });
+
   test('reads a bare manifest block', () => {
     const result = parseManifest(validBlock);
     expect(result).toEqual({
@@ -860,6 +875,42 @@ describe('page-less extensions', () => {
     contributes: { panel: pageless, ...extra },
   });
 
+  test('background entry enables actions, commands and granted APIs without a visible panel', () => {
+    const result = withContributes({
+      background: { entry: 'background/index.html' },
+      actions: [{ id: 'inspect', label: 'Inspect', where: 'message', mode: 'background' }],
+      commands: [{ name: 'task' }], attach: false,
+      capabilities: ['files', 'model', 'sessions', 'prompt'], filesystem: ['~/notes/**'],
+      service: { entry: 'service/main.js', runtime: 'host' },
+      integration: { name: 'Tasks', description: 'Tasks', token: { apiOrigin: 'https://example.com' } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(hasGuestPage(result.manifest.contributes)).toBe(false);
+    expect(result.manifest.contributes.background).toEqual({ entry: 'background/index.html' });
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['prompt', 'sessions', 'files', 'model', 'service', 'network', 'filesystem']);
+    expect(parseManifest({ ...validBlock, contributes: { ...validBlock.contributes, background: { entry: 'background/index.html' } } })).toMatchObject({ ok: true });
+  });
+
+  test('background-only packages reject visible surfaces and actions that would open a panel', () => {
+    const visible: Partial<Omit<OpenChamberContributes, 'panel'>>[] = [
+      { page: true }, { page: { entry: 'page.html' } }, { attach: true }, { attach: 'dialog' },
+      { actions: [{ id: 'inspect', label: 'Inspect', where: 'message' }] },
+      { actions: [{ id: 'inspect', label: 'Inspect', where: 'session', mode: 'open' }] },
+    ];
+    for (const extra of visible) {
+      expect(withContributes({ ...extra, background: { entry: 'background/index.html' } })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    }
+  });
+
+  test('background entries must be package-local HTML', () => {
+    for (const background of [{}, { entry: '' }, { entry: '../index.html' }, { entry: '/index.html' },
+      { entry: 'https://example.com/index.html' }, { entry: 'background/main.js' }, { entry: 'a\\b.html' }]) {
+      expect(parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: { panel: pageless, background } })))
+        .toMatchObject({ ok: false, code: 'invalid-background' });
+    }
+  });
+
   test('accepts a panel without entry that only declares tools', () => {
     const result = withContributes({ tools: [{ match: 'mcp.*', output: 'json' }] });
     expect(result).toEqual({
@@ -901,6 +952,52 @@ describe('page-less extensions', () => {
         expect(result.message).toContain('needs panel.entry');
       }
     }
+  });
+
+  test('a service that provides the browser needs no panel or background entry', () => {
+    const result = withContributes({
+      service: { entry: 'service/main.js', runtime: 'host', provides: ['browser'] },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.service?.provides).toEqual(['browser']);
+      expect(hasGuestPage(result.manifest.contributes)).toBe(false);
+      expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    }
+  });
+
+  test('refuses an unknown or repeated provides role as invalid-service', () => {
+    expect(withContributes({
+      service: { entry: 'service/main.js', runtime: 'host', provides: ['browser', 'browser'] },
+    })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: { panel: pageless, service: { entry: 'service/main.js', runtime: 'host', provides: ['printer'] } },
+    }))).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: { panel: pageless, service: { entry: 'service/main.js', runtime: 'host', provides: [] } },
+    }))).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('a surface service needs no panel entry and refuses one', () => {
+    const ok = withContributes({ service: { entry: 'service/main.js', runtime: 'host', surface: true } });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.manifest.contributes.service?.surface).toBe(true);
+
+    const withPanel = parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: { ...pageless, entry: 'panel/index.html' },
+        service: { entry: 'service/main.js', runtime: 'host', surface: true },
+      },
+    });
+    expect(withPanel).toMatchObject({ ok: false, code: 'invalid-service' });
+
+    expect(parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: { panel: pageless, service: { entry: 'service/main.js', runtime: 'host', surface: false } },
+    }))).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
   test('still reports a malformed page-only field by its own code', () => {

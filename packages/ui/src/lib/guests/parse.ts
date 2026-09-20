@@ -3,6 +3,7 @@ import {
   GUEST_CAPABILITIES,
   GUEST_COMMANDS_MAX,
   GUEST_COMMAND_NAME,
+  GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
@@ -43,6 +44,10 @@ const publicServiceSchema = z.object({
     exec: z.array(z.string().trim().min(1)).optional(),
   }).optional(),
   socketBindings: z.array(publicSocketBindingSchema).optional(),
+  // A role this build does not know (a newer server) drops the field, not the
+  // catalog: every other extension must keep working.
+  provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).optional().catch(undefined),
+  surface: z.literal(true).optional().catch(undefined),
 });
 
 const guestActionSchema = z.object({
@@ -50,6 +55,7 @@ const guestActionSchema = z.object({
   label: z.string().trim().min(1),
   icon: z.string().trim().min(1).optional(),
   where: z.enum(['message', 'session']),
+  mode: z.enum(['open', 'background']).optional(),
   roles: z.array(z.enum(['user', 'assistant'])).optional(),
   payload: z.array(z.enum(['messages'])).optional(),
 });
@@ -79,6 +85,7 @@ const installedGuestSchema = z.object({
   name: z.string().trim().min(1),
   icon: z.string().trim().min(1),
   entry: z.string().trim().min(1).optional(),
+  backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
   attachEntry: z.string().trim().min(1).optional(),

@@ -1,4 +1,4 @@
-import { hasGuestPage, type GuestCommandContribution } from '@openchamber/sdk';
+import type { GuestCommandContribution } from '@openchamber/sdk';
 
 import { isGuestActive } from './capabilities.ts';
 import type { InstalledGuest } from './types.ts';
@@ -24,7 +24,7 @@ export const guestCommandEntries = (
   const entries: GuestCommandEntry[] = [];
   const taken = new Set<string>();
   for (const guest of guests) {
-    if (!isGuestActive(guest) || !hasGuestPage({ panel: guest }) || !guest.commands?.length) continue;
+    if (!isGuestActive(guest) || (!guest.entry && !guest.backgroundEntry) || !guest.commands?.length) continue;
     for (const command of guest.commands) {
       const name = command.name;
       const collides = reservedNames.has(name) || taken.has(name);

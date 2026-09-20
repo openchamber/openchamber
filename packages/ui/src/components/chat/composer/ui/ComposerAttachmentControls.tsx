@@ -36,6 +36,11 @@ type ComposerAttachmentControlsProps = {
     onOpenMobileSheet?: () => void;
     attachGuests?: readonly GuestAttachItem[];
     onOpenGuestAttach?: (guestId: string) => void;
+    /**
+     * Only offer local files. The `/btw` composer takes files but none of the
+     * linked context (issues, PRs, guests), which stays with the main draft.
+     */
+    filesOnly?: boolean;
 };
 
 export const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -52,12 +57,13 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         onOpenSettings,
         attachGuests,
         onOpenGuestAttach,
+        filesOnly = false,
     } = props;
 
     return (
         <div className="flex items-center gap-x-1.5">
             <div className="relative inline-flex">
-                {props.onOpenMobileSheet ? (
+                {props.onOpenMobileSheet && !filesOnly ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -77,7 +83,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                     >
                         <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
                     </button>
-                ) : isVSCode ? (
+                ) : isVSCode || filesOnly ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -172,6 +178,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
     && prev.onOpenGuestAttach === next.onOpenGuestAttach
+    && prev.filesOnly === next.filesOnly
     && (prev.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
         === (next.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
 ));

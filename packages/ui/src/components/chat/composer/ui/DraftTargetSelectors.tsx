@@ -421,7 +421,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                                 ref={worktreeTriggerRef}
                                 onKeyDown={handlePickerKeyDown}
                                 size="sm"
-                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
+                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
                             >
                                 {hasUncommittedChanges ? (
                                     <Icon

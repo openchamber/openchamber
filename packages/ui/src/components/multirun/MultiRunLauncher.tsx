@@ -393,6 +393,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
       const result = await createMultiRun(params);
       if (result) {
+        if (result.failedCount > 0) toast.error(t('multirun.launcher.toast.partialFailure', { failed: result.failedCount }));
         if (result.firstSessionId) {
           useSessionUIStore.getState().setCurrentSession(result.firstSessionId);
         }

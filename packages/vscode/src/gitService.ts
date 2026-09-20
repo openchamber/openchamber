@@ -394,7 +394,10 @@ export interface GitStatusResult {
   behind: number;
   files: GitStatusFile[];
   isClean: boolean;
-  diffStats?: Record<string, { insertions: number; deletions: number }>;
+  diffStats?: {
+    staged: Record<string, { insertions: number; deletions: number }>;
+    working: Record<string, { insertions: number; deletions: number }>;
+  };
   /** Present when a merge is in progress with conflicts */
   mergeInProgress?: GitMergeInProgress | null;
   /** Present when a rebase is in progress */
@@ -563,6 +566,9 @@ async function checkInProgressOperations(directory: string): Promise<{
  * Fallback: Get git status using raw git commands
  */
 async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
+  // Deliberately `-uall`: the web server lists a large untracked directory as
+  // one `dir/` entry (readStatus in web/server/lib/git/service.js) and the
+  // shared UI explains such an entry; this runtime has not adopted that bound.
   const statusResult = await execGit(['status', '--porcelain=v1', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {

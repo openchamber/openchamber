@@ -97,7 +97,7 @@ Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durum
 
 `contributes.integration` isteğe bağlıdır. Ayarlar → Entegrasyonlar sayfasına kullanıcının hesap bağladığı bir kart ekler. Bkz. [Hesaplar ve ağ](#hesaplar-ve-ağ).
 
-`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın.
+`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur.
 
 ## Yetenekler
 

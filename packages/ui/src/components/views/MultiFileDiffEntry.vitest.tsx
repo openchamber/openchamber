@@ -99,7 +99,7 @@ test('status paths without file contents render what git records instead of an e
     checkIsGitRepository: async () => true,
     getGitStatus: async (directory: string) => {
       statusRequests.push(directory);
-      return { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: {} };
+      return { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
     },
     getGitDiff: async (_directory: string, options: { path: string }) => {
       if (options.path === 'nested/') throw new GitPathUnavailableError('Path is a separate Git repository: nested/', 'nested_repository');

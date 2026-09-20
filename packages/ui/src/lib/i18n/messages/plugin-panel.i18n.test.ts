@@ -5,9 +5,15 @@ import { pluginPanelI18n } from './plugin-panel.i18n';
 const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
+  'chat.chatInput.toast.guestHasNoPanel',
   'contextRail.surface.plugin',
   'contextRail.surface.plugin.description',
   'contextPanel.plugin.loadFailed',
+  'contextPanel.plugin.actionFailed',
+  'contextPanel.plugin.toast.copy',
+  'contextPanel.plugin.toast.copied',
+  'contextPanel.plugin.toast.ok',
+  'contextPanel.plugin.toast.copyFailed',
   'contextPanel.plugin.attachDialog.description',
   'contextPanel.plugin.startSession.noProject',
   'contextPanel.plugin.startSession.failed',
@@ -40,6 +46,7 @@ const requiredKeys = [
 ] as const;
 
 const sameInEveryLocale = new Set<string>([
+  'contextPanel.plugin.toast.ok',
   'contextRail.surface.plugin',
   'chat.chatInput.linked.guest.pr.number',
   // "item" is the same word in Portuguese, so the singular forms match English there.

@@ -12,8 +12,10 @@ import {
   type DiffLineAnnotation,
   type SelectedLineRange,
   type AnnotationSide,
+  type ExpansionDirections,
   type VirtualFileMetrics,
 } from '@pierre/diffs';
+import type { WorkerPoolManager } from '@pierre/diffs/worker';
 import {
   buildPierreLineAnnotations,
   type PierreAnnotationData,
@@ -31,6 +33,16 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
+
+/**
+ * A click on a collapsed-context separator of a partial (patch-only) diff.
+ * The separator sits above the hunk that starts at `additionStart` in the
+ * new file; the owner loads the full file and replays the expansion.
+ */
+export interface ContextExpansionRequest {
+  additionStart: number;
+  direction: ExpansionDirections;
+}
 
 export interface DiffHunkActions {
   anchors: readonly PatchHunkAnchor[];
@@ -60,6 +72,16 @@ interface PierreDiffViewerProps {
   layout?: 'fill' | 'inline';
   enableComments?: boolean;
   hunkActions?: DiffHunkActions;
+  /**
+   * Present when the owner can replace a partial diff with full file contents.
+   * Partial diffs then show the same expand affordance as full ones; a click
+   * reports the gap instead of expanding, because the lines are not loaded.
+   */
+  onExpandContextRequest?: (request: ContextExpansionRequest) => void;
+  /** Expansion to replay once the diff is no longer partial. Applied once per object. */
+  pendingContextExpansion?: ContextExpansionRequest | null;
+  /** The owner is fetching the full file for `pendingContextExpansion`. */
+  contextLoading?: boolean;
 }
 
 /**
@@ -227,6 +249,53 @@ const WEBKIT_SCROLL_FIX_CSS = `
       text-decoration: underline;
     }
   }
+
+  /* Partial diffs get no expand buttons from Pierre (the lines are not
+     loaded). When the owner can load them on demand, the gutter separator
+     itself becomes the button and shows the same glyphs as the real one. */
+  :host([data-oc-expand-on-demand]) [data-diff-type="single"] [data-gutter] [data-separator-wrapper],
+  :host([data-oc-expand-on-demand]) [data-diff-type="split"] [data-deletions] [data-gutter] [data-separator-wrapper] {
+    cursor: pointer;
+
+    &::before {
+      content: '\\2195';
+      display: block;
+      flex-shrink: 0;
+    }
+
+    &:hover {
+      color: var(--diffs-fg);
+    }
+  }
+
+  :host([data-oc-expand-on-demand]) [data-diff-type="single"] [data-gutter] [data-separator-first] [data-separator-wrapper]::before,
+  :host([data-oc-expand-on-demand]) [data-diff-type="split"] [data-deletions] [data-gutter] [data-separator-first] [data-separator-wrapper]::before {
+    content: '\\2191';
+  }
+
+  /* Full file requested: the glyph becomes a spinner and the separators stop
+     taking clicks until the highlighted full diff replaces this one. */
+  :host([data-oc-expand-loading]) [data-diff-type="single"] [data-gutter] [data-separator-wrapper],
+  :host([data-oc-expand-loading]) [data-diff-type="split"] [data-deletions] [data-gutter] [data-separator-wrapper] {
+    cursor: default;
+    pointer-events: none;
+    opacity: 0.6;
+
+    &::before {
+      content: '';
+      width: 9px;
+      height: 9px;
+      margin-right: 3px;
+      border-radius: 50%;
+      border: 1.5px solid currentColor;
+      border-right-color: transparent;
+      animation: oc-expand-spin 0.8s linear infinite;
+    }
+  }
+
+  @keyframes oc-expand-spin {
+    to { transform: rotate(360deg); }
+  }
   `;
 
 // Fast cache key - use length + samples instead of full hash
@@ -248,6 +317,69 @@ function makeContentCacheKey(contents: string): string {
     : contents;
   return `${contents.length}:${fnv1a32(sample)}`;
 }
+
+const FULL_DIFF_SWAP_TIMEOUT_MS = 2000;
+
+/**
+ * A partial diff replaced by the full diff of the same file (context loaded
+ * on demand) would paint unhighlighted and light up when the worker answers,
+ * so the file visibly flashes to plain text. Keep the old diff on screen while
+ * the worker primes the new one, then swap; fall back to a plain swap when
+ * no worker pool is available or priming takes too long.
+ */
+const useDiffSwapAfterHighlight = (
+  incoming: FileDiffMetadata | undefined,
+  workerPool: WorkerPoolManager | undefined,
+): FileDiffMetadata | undefined => {
+  const [displayed, setDisplayed] = React.useState(incoming);
+  const displayedRef = useRef(incoming);
+
+  useEffect(() => {
+    if (incoming === displayedRef.current) return;
+    const previous = displayedRef.current;
+    const show = () => {
+      displayedRef.current = incoming;
+      setDisplayed(incoming);
+    };
+
+    const isContextReload = previous !== undefined && incoming !== undefined
+      && previous.isPartial && !incoming.isPartial && previous.name === incoming.name
+      && workerPool?.isWorkingPool() === true;
+    if (!isContextReload) {
+      show();
+      return;
+    }
+
+    incoming.cacheKey ??= [
+      'diff', incoming.name,
+      incoming.prevObjectId ?? makeContentCacheKey(incoming.deletionLines.join('\n')),
+      incoming.newObjectId ?? makeContentCacheKey(incoming.additionLines.join('\n')),
+    ].join(':');
+
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      clearTimeout(timer);
+    };
+    const swap = () => {
+      if (settled) return;
+      settle();
+      show();
+    };
+    const swapWhenHighlighted = () => {
+      if (workerPool.getDiffResultCache(incoming)) swap();
+    };
+    const unsubscribe = workerPool.subscribeToStatChanges(swapWhenHighlighted);
+    const timer = setTimeout(swap, FULL_DIFF_SWAP_TIMEOUT_MS);
+    workerPool.primeDiffHighlightCache(incoming);
+    swapWhenHighlighted();
+    return settle;
+  }, [incoming, workerPool]);
+
+  return displayed;
+};
 
 const extractSelectedCode = (
   original: string,
@@ -316,6 +448,42 @@ const preserveScrollPosition = (wrapper: HTMLElement | null, container: HTMLElem
     if (delta) {
       scrollParent.scrollTop += delta;
     }
+  };
+};
+
+/**
+ * Maps a click inside a partial diff's separator to the hunk below it. Pierre
+ * renders no expand buttons for partial diffs, so the separator carries no
+ * hunk index; the first rendered line after it does, through `data-line-index`
+ * (`unified,split`), which falls inside the hunk's own line range.
+ */
+const resolveContextExpansionRequest = (
+  path: readonly EventTarget[],
+  fileDiff: FileDiffMetadata,
+): ContextExpansionRequest | null => {
+  const separator = path.find((node): node is HTMLElement =>
+    node instanceof HTMLElement && node.hasAttribute('data-separator'));
+  if (!separator) return null;
+
+  let next: Element | null = separator.nextElementSibling;
+  while (next && !next.hasAttribute('data-line-index')) next = next.nextElementSibling;
+  const [unifiedRaw, splitRaw] = next?.getAttribute('data-line-index')?.split(',') ?? [];
+  const unifiedIndex = Number.parseInt(unifiedRaw ?? '', 10);
+  const splitIndex = Number.parseInt(splitRaw ?? '', 10);
+  if (Number.isNaN(unifiedIndex) || Number.isNaN(splitIndex)) return null;
+
+  // Nothing is expanded in a partial diff, so any rendered line of hunk N
+  // sits inside N's own index range.
+  const hunk = fileDiff.hunks.find((candidate) =>
+    candidate.unifiedLineStart <= unifiedIndex
+    && unifiedIndex < candidate.unifiedLineStart + candidate.unifiedLineCount
+    && candidate.splitLineStart <= splitIndex
+    && splitIndex < candidate.splitLineStart + candidate.splitLineCount);
+  if (!hunk) return null;
+
+  return {
+    additionStart: hunk.additionStart,
+    direction: separator.hasAttribute('data-separator-first') ? 'down' : 'both',
   };
 };
 
@@ -500,7 +668,7 @@ const wakeVirtualizer = (
 export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   original,
   modified,
-  fileDiff,
+  fileDiff: incomingFileDiff,
   language,
   fileName,
   renderSideBySide,
@@ -508,6 +676,9 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   layout = 'fill',
   enableComments = true,
   hunkActions,
+  onExpandContextRequest,
+  pendingContextExpansion = null,
+  contextLoading = false,
 }) => {
   const themeContext = useOptionalThemeSystem();
 
@@ -527,7 +698,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     source: 'diff',
     fileLabel: fileName || 'unknown',
     language,
-    getCodeForRange: (range) => extractSelectedCode(original, modified, fileDiff, range),
+    getCodeForRange: (range) => extractSelectedCode(original, modified, incomingFileDiff, range),
     toStoreRange: (range) => ({
       startLine: range.start,
       endLine: range.end,
@@ -915,14 +1086,14 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   const diffThemeKey = `${lightTheme.metadata.id}:${darkTheme.metadata.id}:${isDark ? 'dark' : 'light'}`;
 
   const isLargeContent = useMemo(() => {
-    if (fileDiff) {
-      const deletionLength = fileDiff.deletionLines.reduce((total, line) => total + line.length, 0);
-      const additionLength = fileDiff.additionLines.reduce((total, line) => total + line.length, 0);
+    if (incomingFileDiff) {
+      const deletionLength = incomingFileDiff.deletionLines.reduce((total, line) => total + line.length, 0);
+      const additionLength = incomingFileDiff.additionLines.reduce((total, line) => total + line.length, 0);
       return Math.max(deletionLength, additionLength) > LARGE_CONTENT_BYTES;
     }
 
     return Math.max(original.length, modified.length) > LARGE_CONTENT_BYTES;
-  }, [fileDiff, modified.length, original.length]);
+  }, [incomingFileDiff, modified.length, original.length]);
 
   const diffRootRef = useRef<HTMLDivElement | null>(null);
   const diffContainerRef = useRef<HTMLDivElement | null>(null);
@@ -936,6 +1107,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
   const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
   const workerPool = useWorkerPool(isLargeContent ? 'unified' : (renderSideBySide ? 'split' : 'unified'));
+  const fileDiff = useDiffSwapAfterHighlight(incomingFileDiff, workerPool);
 
   const lightResolvedTheme = useMemo(() => getResolvedShikiTheme(lightTheme), [lightTheme]);
   const darkResolvedTheme = useMemo(() => getResolvedShikiTheme(darkTheme), [darkTheme]);
@@ -1339,6 +1511,62 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       observer?.disconnect();
     };
   }, [diffThemeKey, fileName]);
+
+  // Partial diff + an owner that can load the file: the separators become
+  // expand buttons (see the on-demand CSS) and report the gap on click.
+  const expandOnDemand = Boolean(onExpandContextRequest) && fileDiff?.isPartial === true;
+  // Loading covers the owner's fetch and the highlight-first swap above.
+  const expandLoading = expandOnDemand && (contextLoading || incomingFileDiff !== fileDiff);
+  useEffect(() => {
+    const container = diffContainerRef.current;
+    if (!container) return;
+    return waitForDiffReady(container, () => {
+      const host = container.querySelector('diffs-container');
+      if (!(host instanceof HTMLElement)) return;
+      host.toggleAttribute('data-oc-expand-on-demand', expandOnDemand);
+      host.toggleAttribute('data-oc-expand-loading', expandLoading);
+    });
+  }, [expandLoading, expandOnDemand, fileDiff]);
+
+  useEffect(() => {
+    const container = diffContainerRef.current;
+    if (!container || !expandOnDemand || expandLoading || !fileDiff || !onExpandContextRequest) return;
+
+    const onClick = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      const request = resolveContextExpansionRequest(event.composedPath(), fileDiff);
+      if (!request) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onExpandContextRequest(request);
+    };
+
+    container.addEventListener('click', onClick);
+    return () => container.removeEventListener('click', onClick);
+  }, [expandLoading, expandOnDemand, fileDiff, onExpandContextRequest]);
+
+  // Replay the expansion the user asked for on the partial diff once the full
+  // diff is rendered. Hunks may merge differently after the reload, so the
+  // gap is located through the hunk that now contains the requested line.
+  const appliedContextExpansionRef = useRef<ContextExpansionRequest | null>(null);
+  useEffect(() => {
+    if (!pendingContextExpansion || !fileDiff || fileDiff.isPartial) return;
+    if (appliedContextExpansionRef.current === pendingContextExpansion) return;
+    const container = diffContainerRef.current;
+    if (!container) return;
+
+    return waitForDiffReady(container, () => {
+      const instance = diffInstanceRef.current;
+      if (!instance || instance.fileDiff !== fileDiff) return;
+      if (appliedContextExpansionRef.current === pendingContextExpansion) return;
+      appliedContextExpansionRef.current = pendingContextExpansion;
+      const hunkIndex = fileDiff.hunks.findIndex((hunk) =>
+        hunk.additionStart <= pendingContextExpansion.additionStart
+        && pendingContextExpansion.additionStart < hunk.additionStart + Math.max(hunk.additionCount, 1));
+      if (hunkIndex < 0) return;
+      instance.expandHunk(hunkIndex, pendingContextExpansion.direction);
+    });
+  }, [fileDiff, pendingContextExpansion]);
 
   if (typeof window === 'undefined') {
     return null;

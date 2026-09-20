@@ -14,8 +14,10 @@ export type InstalledGuest = {
   id: string;
   name: string;
   icon: string;
-  /** Panel page. Absent for a page-less (tools-only) extension, which never mounts a frame. */
+  /** Visible panel page. Absent for background-only and tools-only extensions. */
   entry?: string;
+  /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
+  backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
   version?: string;
   attach?: AttachContribution;

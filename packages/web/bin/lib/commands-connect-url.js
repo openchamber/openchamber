@@ -308,14 +308,9 @@ function createConnectUrlCommand({ serveCommand }) {
     } else if (resolvedServerUrl.source === 'loopback-fallback') {
       clackLog.warn('OpenChamber is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
     } else if (isLoopbackServerUrl(serverUrl)) {
-      // The direct candidate points at this machine only — other devices cannot
-      // use it. Say so instead of letting a "LAN" link silently not work (or a
-      // --relay link silently go relay-only).
-      if (options.relay) {
-        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
-      } else {
-        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
-      }
+      // The advertised address does not establish how the server is bound.
+      // Localhost can also be intentional, including Windows-to-WSL forwarding.
+      logStatus('info', '[LOOPBACK_URL]', 'This link uses localhost for direct connections. For another device, use --server with a reachable address or include --relay.');
     }
     clackLog.info('Scan or paste this link into another OpenChamber client. It is single-use and expires.');
     if (options.qr === true) {

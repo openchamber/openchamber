@@ -22,6 +22,9 @@ Optional intro paragraph shown above the groups.
 ### Fixes
 - Something was broken; name the symptom.
 
+### SDK
+- Capabilities and API changes for extension authors.
+
 ### Misc
 - Bundled tool versions, packaging, platform support, retirements.
 
@@ -31,7 +34,7 @@ Optional intro paragraph shown above the groups.
 - Only what the extension actually mounts. Written separately, on purpose.
 ```
 
-Groups may appear in any order in a source file; the generator emits them as New, Improvements, Fixes, Misc and drops empty ones. A release without a `## VS Code` section is absent from the extension changelog. Every release needs a `title`; `unreleased.md` carries only the `title` line in its front matter and gets `version` and `date` at release time.
+Groups may appear in any order in a source file; the generator emits them as New, Improvements, Fixes, SDK, Misc and drops empty ones. The JSON index includes `sdk` only when it has entries, preserving the shape of older releases. A release without a `## VS Code` section is absent from the extension changelog. Every release needs a `title`; `unreleased.md` carries only the `title` line in its front matter and gets `version` and `date` at release time.
 
 `bun run changelog:check` validates every source file and fails when a generated file is behind the released sources; CI runs it. It writes nothing.
 

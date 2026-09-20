@@ -333,6 +333,7 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname === '/api/dev-tunnel'
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/.test(pathname)
     || pathname.startsWith('/api/preview/proxy/');
 };
 

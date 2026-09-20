@@ -220,7 +220,11 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
 
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
 const CONTEXT_PANEL_MIN_WIDTH = 320;
-const CONTEXT_PANEL_MAX_WIDTH = 1400;
+/** Persistence sanity bound only: the real ceiling is responsive
+ * (widthFractionByMode, capped by available area minus a minimum chat
+ * width in ContextPanel), so a wide monitor may legitimately store a
+ * width far beyond any fixed pixel value. */
+const CONTEXT_PANEL_MAX_PERSISTED_WIDTH = 10000;
 /** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
@@ -255,7 +259,7 @@ const clampContextPanelWidth = (width: number): number => {
     return CONTEXT_PANEL_DEFAULT_WIDTH;
   }
 
-  return Math.min(CONTEXT_PANEL_MAX_WIDTH, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
+  return Math.min(CONTEXT_PANEL_MAX_PERSISTED_WIDTH, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
 };
 
 const normalizeContextTargetPath = (value: string | null | undefined): string | null => {
@@ -797,6 +801,12 @@ interface UIStore {
   notesPanelHeight: number;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
+  /**
+   * Whether the queued-messages panel above the composer shows its list. One
+   * preference for every session: the user opens or closes it once and it
+   * stays that way across session switches and reloads.
+   */
+  messageQueueExpanded: boolean;
   /** Scroll offset of that panel, so it survives being unmounted. */
   workStatusScrollTop: number;
   /** Whether the in-chat work-status panel may render at all. */
@@ -964,12 +974,19 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentWebToolEnabled: boolean;
+  /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
+  browserProvider: string;
   agentMemoryToolEnabled: boolean;
   /**
    * Whether this build has agent memory at all. Server-owned and not
    * persisted: an unreleased feature must not come back from a stale cache.
    */
   agentMemoryFeatureAvailable: boolean;
+  /**
+   * Whether this build has Jev model routing. Server-owned and not persisted,
+   * for the same reason as the memory flag.
+   */
+  routingFeatureAvailable: boolean;
   /**
    * When the user last looked at each memory scope, keyed by scope. Drives the
    * new/changed badges; there is no stored review state.
@@ -1032,6 +1049,7 @@ interface UIStore {
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number, availableWidth?: number) => void;
   setNotesPanelHeight: (height: number) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
+  setMessageQueueExpanded: (expanded: boolean) => void;
   setWorkStatusScrollTop: (scrollTop: number) => void;
   setWorkStatusPanelEnabled: (enabled: boolean) => void;
   setWorkStatusPanelVisible: (visible: boolean) => void;
@@ -1166,8 +1184,10 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
+  setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
+  setRoutingFeatureAvailable: (value: boolean) => void;
   markAgentMemoryViewed: (key: string, viewedAt: number) => void;
   setProjectContextSidebarWidth: (width: number) => void;
   setProjectContextTab: (value: string) => void;
@@ -1224,6 +1244,7 @@ export const useUIStore = create<UIStore>()(
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
         workStatusExpandedSections: {},
+        messageQueueExpanded: true,
         workStatusScrollTop: 0,
         workStatusPanelEnabled: true,
         workStatusPanelVisible: false,
@@ -1343,8 +1364,10 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
         agentWebToolEnabled: true,
+        browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
         agentMemoryFeatureAvailable: false,
+        routingFeatureAvailable: false,
         agentMemoryViewedAt: {},
         projectContextSidebarWidth: 168,
         projectContextTab: 'notes',
@@ -1835,6 +1858,10 @@ export const useUIStore = create<UIStore>()(
                 },
               }
           ));
+        },
+
+        setMessageQueueExpanded: (expanded) => {
+          set((state) => (state.messageQueueExpanded === expanded ? state : { messageQueueExpanded: expanded }));
         },
 
         setWorkStatusScrollTop: (scrollTop) => {
@@ -2661,11 +2688,17 @@ export const useUIStore = create<UIStore>()(
         setAgentWebToolEnabled: (value) => {
           set({ agentWebToolEnabled: value });
         },
+        setBrowserProvider: (value) => {
+          set({ browserProvider: value });
+        },
         setAgentMemoryToolEnabled: (value) => {
           set({ agentMemoryToolEnabled: value });
         },
         setAgentMemoryFeatureAvailable: (value) => {
           set({ agentMemoryFeatureAvailable: value });
+        },
+        setRoutingFeatureAvailable: (value) => {
+          set({ routingFeatureAvailable: value });
         },
         setProjectContextSidebarWidth: (width) => {
           set({ projectContextSidebarWidth: width });
@@ -3052,6 +3085,7 @@ export const useUIStore = create<UIStore>()(
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,
           workStatusExpandedSections: state.workStatusExpandedSections,
+          messageQueueExpanded: state.messageQueueExpanded,
           workStatusScrollTop: state.workStatusScrollTop,
           workStatusPanelEnabled: state.workStatusPanelEnabled,
           workStatusHiddenSections: state.workStatusHiddenSections,
@@ -3129,6 +3163,7 @@ export const useUIStore = create<UIStore>()(
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
           agentWebToolEnabled: state.agentWebToolEnabled,
+          browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentMemoryViewedAt: state.agentMemoryViewedAt,
           projectContextSidebarWidth: state.projectContextSidebarWidth,

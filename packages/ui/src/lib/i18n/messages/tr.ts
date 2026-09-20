@@ -1,7 +1,9 @@
 import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
 
 export const dict = {
   'sessions.aiRename.action': 'Yapay zekâ ile yeniden adlandır',
@@ -30,7 +32,9 @@ export const dict = {
   ...settingsDict,
   ...linearIssuePickerI18n.tr,
   ...linearPanelI18n.tr,
+  ...routingI18n.tr,
   ...pluginPanelI18n.tr,
+  ...surfacePanelI18n.tr,
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
   'terminalView.toast.selectionCopied': 'Çıktı kopyalandı',
@@ -411,6 +415,7 @@ export const dict = {
   'multirun.launcher.models.info': '2 veya daha fazla model seçin. Aynı model birden çok kez eklenebilir.',
   'multirun.launcher.toast.fileTooLarge': '"{fileName}" dosyası çok büyük (en fazla 10MB)',
   'multirun.launcher.toast.attachFailed': '"{fileName}" eklenemedi',
+  'multirun.launcher.toast.partialFailure': 'Bazı oturumlar oluşturulamadı. Başarısız olan: {failed}.',
   'multirun.launcher.toast.attachedSingle': '{count} dosya eklendi',
   'multirun.launcher.toast.attachedPlural': '{count} dosya eklendi',
   'multirun.modelMultiSelect.actions.addModel': 'Model ekle',
@@ -608,6 +613,7 @@ export const dict = {
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
   'sessions.sidebar.session.status.questionPendingSingle': '1 bekleyen soru',
   'sessions.sidebar.session.status.questionPendingMany': '{count} bekleyen soru',
+  'sessions.sidebar.session.status.questionPending': 'Bekleyen soru',
   'sessions.sidebar.session.status.activeFor': '{duration} süredir aktif',
   'sessions.sidebar.session.status.lastTurnDuration': 'Son tur {duration} sürdü',
   'sessions.sidebar.session.subsessions.collapse': 'Alt session\'ları daralt',
@@ -1602,6 +1608,8 @@ export const dict = {
   'diffView.unavailable.missingDescription': 'Değişiklik listesi yüklendikten sonra kaldırıldı. Liste yenileniyor.',
   'diffView.unavailable.nestedRepositoryTitle': 'Ayrı Git deposu',
   'diffView.unavailable.nestedRepositoryDescription': 'Bu klasörün kendi Git geçmişi var. Değişikliklerini görmek için proje olarak açın.',
+  'diffView.unavailable.untrackedDirectoryTitle': 'Yeni dosyalar klasörü',
+  'diffView.unavailable.untrackedDirectoryDescription': 'Bu klasörde tek tek listelenemeyecek kadar çok yeni dosya var. Klasörü hazırlama alanına ekleyin ya da depoya ait değilse .gitignore dosyasına yazın.',
   'diffView.submodule.title': 'Alt modül',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Hâlâ {commit} commit\'inde',
@@ -1625,8 +1633,6 @@ export const dict = {
   'diffView.actions.renderAnyway': 'Yine de render et',
   'diffView.actions.expandAll': 'Tümünü genişlet',
   'diffView.actions.collapseAll': 'Tümünü daralt',
-  'diffView.actions.loadFullFiles': 'Dosyaların tamamını yükle',
-  'diffView.actions.disableFullFiles': 'Tam dosya yüklemeyi durdur',
   'diffView.actions.disableLineWrap': 'Satır kaydırmayı devre dışı bırak',
   'diffView.actions.enableLineWrap': 'Satır kaydırmayı etkinleştir',
   'diffView.actions.openFileInEditorAtChange': 'Bu dosyayı değişiklik konumunda editörde aç',
@@ -2381,6 +2387,7 @@ export const dict = {
   'chat.chatInput.toast.someFilesSkipped': 'Bazı dosyalar atlandı:\\n{summary}',
   'chat.chatInput.toast.vscodePickFailed': 'VS Code\'da dosya seçilemedi',
   'chat.chatInput.toast.openSessionFirst': 'Önce bir session açın',
+  'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dikte, başlattığınız oturumda taslak olarak kaydedildi',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': 'İzin otomatik kabulü değiştirilemedi',
   'chat.chatInput.reviewComments': 'İnceleme yorumları:',
   'chat.chatInput.reviewCommentsRemove': 'İnceleme yorumlarını kaldır',
@@ -2855,6 +2862,9 @@ export const dict = {
   'desktopHostSwitcher.error.failedToSave': 'Kaydedilemedi',
   'desktopHostSwitcher.error.failedToLoad': 'Yüklenemedi',
   'desktopHostSwitcher.error.invalidUrl': 'Geçersiz URL (http/https olmalı)',
+  'desktopHostSwitcher.error.pairingRejected': 'Eşleştirme bağlantısı geçersiz veya süresi dolmuş. Yeni bir bağlantı oluşturun.',
+  'desktopHostSwitcher.error.pairingFailed': 'Eşleştirme başarısız oldu (HTTP {status}).',
+  'desktopHostSwitcher.error.pairingInvalidResponse': 'Sunucu geçersiz bir eşleştirme yanıtı döndürdü.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Yeni pencere açılamadı',
   'desktopHostSwitcher.instance.local': 'Yerel',
   'desktopHostSwitcher.instance.fallback': 'Instance',
@@ -3010,6 +3020,9 @@ export const dict = {
   'onboarding.desktopRecovery.actions.retrying': 'Yeniden deneniyor…',
   'onboarding.desktopRecovery.actions.retryConnection': 'Bağlantıyı Yeniden Dene',
   'startup.initRecovery.title': 'Başlatma başarısız oldu',
+  'startup.initRecovery.openCodeUnavailable': 'OpenChamber erişilebilir, ancak OpenCode hazır değil. Sunucudaki OpenCode’u kontrol edip yeniden deneyin.',
+  'startup.initRecovery.binary': 'OpenCode çalıştırılabilir dosyası',
+  'startup.initRecovery.error': 'OpenCode hatası',
   'startup.initRecovery.description': 'OpenChamber başlatmayı tamamlayamadı. Sunucunun çalıştığından emin olun, ardından yeniden deneyin.',
   'startup.initRecovery.retry': 'Yeniden dene',
   'startup.initRecovery.retrying': 'Yeniden deneniyor…',
@@ -3366,6 +3379,7 @@ export const dict = {
   'chat.textSelection.title.commentOnSelection': 'Seçime yorum yap',
   'chat.textSelection.comment.placeholder': 'İsteğe bağlı bir yorum ekleyin...',
   'chat.textSelection.comment.attach': 'Ekle',
+  'chat.textSelection.comment.attachFailed': 'Yorum eklenemedi. Yorumu kısaltın veya ekli diğer bağlamı kaldırıp tekrar deneyin.',
   'commandPalette.item.cycleTheme': 'Temayı değiştir',
   'commandPalette.item.showOpenCodeStatus': 'OpenCode durumunu göster',
   'commandPalette.item.toggleMemoryDebug': 'Memory debug panelini aç/kapat',

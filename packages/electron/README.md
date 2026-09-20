@@ -21,9 +21,14 @@ Confirmed quit cancels an in-flight probe and waits for its process to exit.
 Quit, relaunch, and update installation await the in-process server's `stop()`
 before exiting Electron. This lets the backend release its terminals, managed
 OpenCode process, and guest services. `server-shutdown.mjs` bounds the server
-wait to ten seconds and uses the detached OpenCode killer only if normal
+wait to 35 seconds, allowing the terminal runtime's 20-second grace plus the
+remaining backend cleanup. It uses the detached OpenCode killer only if normal
 shutdown fails or times out. An external OpenCode server remains externally
 owned. Closing to the tray does not stop the backend.
+
+Update installation bounds the full background-service shutdown, including SSH,
+to 40 seconds. This outer deadline leaves the backend's 35-second wait intact;
+its timer is cleared when shutdown finishes.
 
 See [process ownership and the #3589 investigation](./process-lifecycle.md)
 for the launch paths, controlled reproductions, and Windows validation limits.
@@ -144,7 +149,7 @@ Desktop clears AppImage `ARGV0` from `process.env` before probing the login shel
 
 Linux updates are supported only when the packaged app is running from a writable AppImage. Update checks, downloads, and installation report an actionable error when `APPIMAGE` is missing, invalid, or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. Authenticated Web clients connected to the embedded Desktop Host use this same `electron-updater` check, download, and restart flow rather than a package-manager command. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate and validate each manifest against its AppImage before upload. Linux AppImages download full updates (no `.blockmap` differential channel yet).
 
-`desktop_restart` does not answer the renderer before the install is decided. On the apply-update path it calls `quitAndInstall()` and keeps the IPC call open until the app quits or `autoUpdater` emits `error`, which the platform installers do asynchronously (a rejected code signature, or a Squirrel session disabled by an earlier failure). A failed install rejects the IPC call so the update dialog can show it, and the quit/install flags are rolled back because the app is staying up. A still-running app after the grace period resolves the call.
+`desktop_restart` does not answer the renderer before the install is decided. On the apply-update path it calls `quitAndInstall()` and keeps the IPC call open until the app quits or `autoUpdater` emits `error`, which the platform installers do asynchronously (a rejected code signature, or a Squirrel session disabled by an earlier failure). A failed install rejects the IPC call so the update dialog can show it, and the quit/install flags are rolled back because the app is staying up. A still-running app after the grace period resolves the call. The installer grace period starts after backend cleanup, so a slow terminal shutdown cannot remove the error listener before installation begins.
 
 ### Updater End-to-End Fixture
 
@@ -208,6 +213,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - Local and remote instance handling.
 - SSH host import, connections, logs, and port forwarding.
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
+- A managed SSH instance runs one server per remote host. The server outlives the SSH session by default (`keepRunning`), so every connect first asks the remote CLI (`openchamber status --json`) what is already running and reuses a server that fits the instance's password. `/api/system/info` is public, so an answer proves nothing about the password: the server has to accept it on `/auth/session`, or have none when the instance has none. Among the servers that fit, a CLI-started daemon of another app version, or one whose bind address no longer matches the instance's network setting, is stopped and replaced. A registered server that is passed over gets a line in the connect log saying why. Foreground servers and servers with another password are neither reused nor stopped. With `keepRunning` off, disconnecting stops an adopted daemon the same way it stops one this session started. The server is shared by every client that fits it, so that stop also ends it for any other client still connected. Starting a server without this lookup leaks one server plus its opencode per reconnect.
 - Tunnel lifecycle integration through the web server runtime.
 - Remote dev-server previews use a direct WebSocket tunnel when the instance has an HTTP address. Relay-only instances keep the encrypted relay transport in the renderer and bridge its raw bytes to the browser panel through a local Electron listener.
 - Auto-update checks, downloads, and restart/apply flow.

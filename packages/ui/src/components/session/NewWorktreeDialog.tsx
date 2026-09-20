@@ -47,6 +47,7 @@ import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
+import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
@@ -1267,6 +1268,13 @@ export function NewWorktreeDialog({
 
   const canCreate = isFormValid && !isCreating;
 
+  const handleCreateKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    handleWorktreeCreateKeyDown(event, () => {
+      if (!canCreate) return;
+      void handleCreate();
+    });
+  };
+
   const handleClearLinkedItem = () => {
     setNewBranchState(prev => ({
       ...prev,
@@ -1571,6 +1579,7 @@ export function NewWorktreeDialog({
                     }));
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                  onKeyDown={handleCreateKeyDown}
                   placeholder={t('session.newWorktree.branchNamePlaceholder')}
                   disabled={!!newBranchState.linkedPr}
                   className={cn(
@@ -1667,6 +1676,7 @@ export function NewWorktreeDialog({
                   }
                 }}
                 onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                onKeyDown={handleCreateKeyDown}
                 placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
                 className={cn(
                   'h-8',
@@ -2093,6 +2103,7 @@ export function NewWorktreeDialog({
                       }));
                     }}
                     onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                    onKeyDown={handleCreateKeyDown}
                     placeholder={t('session.newWorktree.branchNamePlaceholder')}
                     disabled={!!newBranchState.linkedPr}
                     className={cn(
@@ -2189,6 +2200,7 @@ export function NewWorktreeDialog({
                     }
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
+                  onKeyDown={handleCreateKeyDown}
                   placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
                   className={cn(
                     'h-8',

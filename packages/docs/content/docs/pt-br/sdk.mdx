@@ -97,7 +97,7 @@ Para um quadro, use `host.storage` e as listas de projetos, worktrees e sessões
 
 `contributes.integration` é opcional. Ele adiciona um card em Configurações → Integrações onde o usuário conecta uma conta. Veja [Contas e rede](#contas-e-rede).
 
-`contributes.service` é opcional. Ele declara um serviço local (um processo que o OpenChamber inicia junto com a extensão) para coisas que uma página web não alcança, como um socket do Docker. Esse processo roda com o acesso completo do usuário e sem sandbox, por isso o diálogo de aprovação avisa sobre ele; declare um serviço desses só quando a página não conseguir fazer o trabalho. Veja o arquivo `GUEST_SERVICES.md` do pacote.
+`contributes.service` é opcional. Ele declara um serviço local (um processo que o OpenChamber inicia junto com a extensão) para coisas que uma página web não alcança, como um socket do Docker. Esse processo roda com o acesso completo do usuário e sem sandbox, por isso o diálogo de aprovação avisa sobre ele; declare um serviço desses só quando a página não conseguir fazer o trabalho. Veja o arquivo `GUEST_SERVICES.md` do pacote. Um serviço com `provides: ["browser"]` também pode substituir o navegador do agente: ele responde às ações `browser.*` no servidor, então os agentes navegam sem nenhum aplicativo de desktop aberto, e o usuário o escolhe em Configurações → Ferramentas do OpenChamber. Um serviço assim não precisa de painel.
 
 ## Capacidades
 

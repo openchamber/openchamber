@@ -10,6 +10,8 @@ import {
   guestSessionActions,
 } from './actions.ts';
 import type { InstalledGuest } from './types.ts';
+import { enabledGuestSurfaces } from './surfaces.ts';
+import { parseGuestCatalogJson } from './parse.ts';
 
 // SAFETY: the builders under test read only id, role, time.created, and the
 // text parts; the rest of an OpenCode message record never enters the item.
@@ -30,6 +32,19 @@ const guest = (id: string, overrides: Partial<InstalledGuest> = {}): InstalledGu
 });
 
 describe('guestActionEntries', () => {
+  test('background-only guests keep actions through catalog parsing without a rail surface', () => {
+    const background = guest('background', { entry: undefined, backgroundEntry: 'background/index.html', actions: [
+      { id: 'count', label: 'Count', where: 'message', mode: 'background' },
+    ] });
+    const catalog = parseGuestCatalogJson(JSON.stringify({ guests: [background] }));
+    if (!catalog) throw new Error('Expected a valid catalog');
+    expect(catalog[0].backgroundEntry).toBe('background/index.html');
+    expect(guestActionEntries(catalog, (path) => path).map((entry) => entry.action.id)).toEqual(['count']);
+    expect(enabledGuestSurfaces(catalog, (path) => path)).toEqual([]);
+    expect(guestActionEntries([{ ...background, enabled: false }], (path) => path)).toEqual([]);
+    expect(guestActionEntries([{ ...background, actions: [{ id: 'open', label: 'Open', where: 'message' }] }], (path) => path)).toEqual([]);
+  });
+
   test('lists actions of active guests only and filters by where and role', () => {
     const entries = guestActionEntries([
       guest('a', {
