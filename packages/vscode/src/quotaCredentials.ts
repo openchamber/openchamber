@@ -35,7 +35,10 @@ export const credentialStatus = (provider: ManagedProvider) => {
 };
 export const writeCredential = (provider: ManagedProvider, value: ManagedCredential) => {
   const dir = directory(); const file = target(provider); const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700);
+  // Restrictive mode on creation only: re-chmodding an existing directory
+  // would clobber granted group access (chmod replaces the POSIX ACL mask).
+  const createdDirectory = fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (createdDirectory !== undefined) fs.chmodSync(dir, 0o700);
   try { fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temp, file); fs.chmodSync(file, 0o600); }
   finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
   return credentialStatus(provider);
