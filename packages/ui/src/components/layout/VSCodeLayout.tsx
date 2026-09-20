@@ -8,15 +8,18 @@ import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
+import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tokenUtils';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { toContextUsageReading } from '@/components/ui/contextUsageReading';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { ArchiveAllDropdown } from '@/components/session/ArchiveAllDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -98,6 +101,10 @@ export const VSCodeLayout: React.FC = () => {
       return configured.trim();
     }
     return null;
+  }, []);
+
+  const bootstrapWorkspaceFolder = React.useMemo<string | null>(() => {
+    return getVSCodeBootstrapWorkspaceFolder();
   }, []);
 
   const hasAppliedInitialSession = React.useRef(false);
@@ -449,7 +456,7 @@ export const VSCodeLayout: React.FC = () => {
     // No initialSessionId means open a new session draft
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
-      openNewSessionDraft({ automatic: true });
+      openNewSessionDraft({ automatic: true, directoryOverride: bootstrapWorkspaceFolder });
       return;
     }
 
@@ -459,7 +466,7 @@ export const VSCodeLayout: React.FC = () => {
 
     hasAppliedInitialSession.current = true;
     void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for responsive settings layout
   React.useEffect(() => {
@@ -670,8 +677,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const providers = useConfigStore((state) => state.providers);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   // Same rollup the work-status panel reports, so the header and the panel
@@ -695,68 +700,11 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     void loadQuotaSettings();
   }, [loadQuotaSettings]);
 
-  const currentModel = getCurrentModel();
-  const headerMessageSummary = React.useMemo(() => {
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-    let latestAssistantModel: ReturnType<typeof getCurrentModel> | undefined;
-    let lastTokens: AssistantTokens | undefined;
-    let lastMessageId: string | undefined;
+  const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
-    for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i] as { role?: unknown; providerID?: unknown; modelID?: unknown; tokens?: AssistantTokens };
-      if (message.role !== 'assistant') {
-        continue;
-      }
-
-      if (!latestAssistantModel && typeof message.providerID === 'string' && typeof message.modelID === 'string') {
-        const provider = providers.find((entry) => entry.id === message.providerID);
-        latestAssistantModel = provider?.models.find((entry) => entry.id === message.modelID);
-      }
-
-      if (!lastTokens && message.tokens) {
-        const total = contextTokensFromBreakdown(message.tokens);
-        if (total > 0) {
-          lastTokens = message.tokens;
-          lastMessageId = (currentSessionMessages[i] as { id?: string }).id;
-        }
-      }
-
-      if (latestAssistantModel && lastTokens) {
-        break;
-      }
-    }
-
-    return { latestAssistantModel, lastTokens, lastMessageId };
-  }, [currentSessionMessages, providers]);
-  const latestAssistantModel = headerMessageSummary.latestAssistantModel;
-  const modelForLimits = currentModel?.limit ? currentModel : latestAssistantModel;
-  const limit = modelForLimits && typeof modelForLimits.limit === 'object' && modelForLimits.limit !== null
-    ? (modelForLimits.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = limit && typeof limit.context === 'number' ? limit.context : 0;
-  const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
-
-  const contextUsage = React.useMemo<SessionContextUsage | null>(() => {
-    if (!currentSessionId || !headerMessageSummary.lastTokens) {
-      return null;
-    }
-
-    const lastTokens = headerMessageSummary.lastTokens;
-    const totalTokens = contextTokensFromBreakdown(lastTokens);
-    const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
-    const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
-    const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
-
-    return {
-      totalTokens,
-      percentage,
-      contextLimit: contextLimit || 0,
-      outputLimit: outputLimit || undefined,
-      normalizedOutput,
-      thresholdLimit,
-      lastMessageId: headerMessageSummary.lastMessageId,
-    };
-  }, [contextLimit, currentSessionId, headerMessageSummary.lastMessageId, headerMessageSummary.lastTokens, outputLimit]);
+  const contextUsage = React.useMemo<SessionContextUsage | null>(() => (
+    currentSessionId ? buildSessionContextUsage(currentSessionMessages, contextLimit, outputLimit) : null
+  ), [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
 
@@ -766,22 +714,8 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       return;
     }
 
-    if (contextUsage && contextUsage.totalTokens > 0) {
-      setStableContextUsage((prev) => {
-        if (
-          prev
-          && prev.totalTokens === contextUsage.totalTokens
-          && prev.percentage === contextUsage.percentage
-          && prev.contextLimit === contextUsage.contextLimit
-          && (prev.outputLimit ?? 0) === (contextUsage.outputLimit ?? 0)
-          && (prev.normalizedOutput ?? 0) === (contextUsage.normalizedOutput ?? 0)
-          && prev.thresholdLimit === contextUsage.thresholdLimit
-          && prev.lastMessageId === contextUsage.lastMessageId
-        ) {
-          return prev;
-        }
-        return contextUsage;
-      });
+    if (contextUsage) {
+      setStableContextUsage((prev) => (isSameContextUsage(prev, contextUsage) ? prev : contextUsage));
       return;
     }
 
@@ -829,7 +763,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       {showBack && onBack && (
         <button
           onClick={onBack}
-          className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('vscodeLayout.actions.backToSessionsAria')}
         >
           <Icon name="arrow-left" className="h-5 w-5" />
@@ -854,7 +788,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           type="button"
           onClick={toggleArchivedSessions}
           className={cn(
-            'inline-flex h-8 w-8 items-center justify-center p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            'inline-flex h-8 w-8 items-center justify-center p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             showArchivedSessions ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
           )}
           aria-label={t('sessions.sidebar.header.displayMode.showArchived')}
@@ -868,7 +802,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       {onNewSession && (
         <button
           onClick={onNewSession}
-          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('vscodeLayout.actions.newSessionAria')}
         >
           <Icon name="add" className="h-5 w-5" />
@@ -877,7 +811,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       {onAgentManager && (
         <button
           onClick={onAgentManager}
-          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('vscodeLayout.actions.openAgentManagerAria')}
         >
           <Icon name="robot-2" className="h-5 w-5" />
@@ -885,7 +819,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       )}
       {showMcp && (
         <McpDropdown
-          headerIconButtonClass="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          headerIconButtonClass="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       )}
       {showRateLimits && (
@@ -900,7 +834,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
             <button
               type="button"
               aria-label={t('vscodeLayout.quota.actions.rateLimitsAria')}
-              className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               disabled={isQuotaLoading}
             >
               <Icon name="timer" className="h-5 w-5" />
@@ -946,7 +880,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                   </div>
                   <button
                     type="button"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => fetchAllQuotas()}
                     disabled={isQuotaLoading}
                     aria-label={t('vscodeLayout.quota.actions.refreshAria')}
@@ -1021,16 +955,15 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       {onSettings && (
         <button
           onClick={onSettings}
-          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('vscodeLayout.actions.settingsAria')}
         >
           <Icon name="settings-3" className="h-5 w-5" />
         </button>
       )}
-      {showContextUsage && stableContextUsage && stableContextUsage.totalTokens > 0 && (
+      {showContextUsage && stableContextUsage && (
         <ContextUsageDisplay
-          totalTokens={stableContextUsage.totalTokens}
-          percentage={stableContextUsage.percentage}
+          reading={toContextUsageReading(stableContextUsage)}
           contextLimit={stableContextUsage.contextLimit}
           outputLimit={stableContextUsage.outputLimit ?? 0}
           cost={(sessionTotalCost ?? 0) > 0 ? sessionTotalCost : null}

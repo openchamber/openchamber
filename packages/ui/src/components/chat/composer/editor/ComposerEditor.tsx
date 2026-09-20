@@ -115,6 +115,13 @@ export interface ComposerEditorProps {
     className?: string;
     contentClassName?: string;
     /**
+     * Value of the host's `data-chat-input` attribute. The default `"true"`
+     * marks the composer's prompt editor for global helpers (`focusChatInput`,
+     * shortcut guards); a second editor in the same column — the mobile
+     * comment editor — passes its own marker so those helpers skip it.
+     */
+    dataChatInput?: string;
+    /**
      * Keeps the underlying view alive across unmounts. Supply one from a parent
      * that outlives the swap; without it the view is built and destroyed with
      * the component, which is correct but expensive on an interaction path.
@@ -553,7 +560,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             <div
                 ref={hostRef}
                 data-testid={props['data-testid']}
-                data-chat-input="true"
+                data-chat-input={props.dataChatInput ?? 'true'}
                 onMouseDown={handleHostMouseDown}
                 className={cn(
                     'composer-editor w-full',

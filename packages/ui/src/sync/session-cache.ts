@@ -43,6 +43,7 @@ export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
     const lastMessage = messages?.[messages.length - 1]
     if (
       lastMessage?.role === "assistant"
+      && store.session_status[sessionID]?.type !== "idle"
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
     ) {
       protectedIds.add(sessionID)
@@ -86,14 +87,17 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
 
 export function pickSessionCacheEvictions(input: {
   seen: Set<string>
-  keep: string
+  keep?: string
   limit: number
   preserve?: Iterable<string>
 }) {
   const stale: string[] = []
-  const keep = new Set([input.keep, ...Array.from(input.preserve ?? [])])
-  if (input.seen.has(input.keep)) input.seen.delete(input.keep)
-  input.seen.add(input.keep)
+  const keep = new Set(input.preserve)
+  if (input.keep) {
+    keep.add(input.keep)
+    input.seen.delete(input.keep)
+    input.seen.add(input.keep)
+  }
   for (const id of input.seen) {
     if (input.seen.size - stale.length <= input.limit) break
     if (keep.has(id)) continue

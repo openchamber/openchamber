@@ -483,6 +483,38 @@ describe('callSmallModel — custom provider config', () => {
   });
 
   describe('catalog-based base URL (no config override)', () => {
+    it('identifies standalone OpenCode Go generations without an active session', async () => {
+      readConfig.mockReturnValue({});
+      const message = JSON.stringify({ subject: 'fix: handle missing session', highlights: [] });
+      fetchMock.mockResolvedValue(ok(message));
+      const request = {
+        auth: { 'opencode-go': { type: 'api', key: 'go-key' } },
+        catalog: {
+          'opencode-go': {
+            id: 'opencode-go',
+            api: 'https://opencode.ai/zen/go/v1',
+            models: { utility: { id: 'utility' } },
+          },
+        },
+        workingDirectory: '/proj',
+        providerID: 'opencode-go',
+        modelID: 'utility',
+        prompt: 'Generate a commit message for the selected changes',
+      };
+
+      expect(await callSmallModel(request)).toBe(message);
+      const first = lastCall(fetchMock);
+      expect(first.url).toBe('https://opencode.ai/zen/go/v1/chat/completions');
+      expect(first.init.headers['x-opencode-session']).toEqual(expect.any(String));
+      expect(first.init.headers['x-opencode-session'].trim()).not.toBe('');
+
+      await callSmallModel(request);
+      const second = lastCall(fetchMock);
+      expect(second.init.headers['x-opencode-session']).toEqual(expect.any(String));
+      expect(second.init.headers['x-opencode-session'].trim()).not.toBe('');
+      expect(second.init.headers['x-opencode-session']).not.toBe(first.init.headers['x-opencode-session']);
+    });
+
     it('identifies OpenCode Go requests with the owning conversation', async () => {
       readConfig.mockReturnValue({});
       fetchMock.mockResolvedValue(ok('ok'));
@@ -769,6 +801,188 @@ describe('callSmallModel — Google thinking configuration', () => {
 
     const body = JSON.parse(lastCall(fetchMock).init.body);
     expect(body.generationConfig.thinkingConfig).toBeUndefined();
+  });
+});
+
+describe('callSmallModel — OpenAI-compatible thinking toggle', () => {
+  let fetchMock;
+  let originalFetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+    readConfigLayers.mockReset();
+    readConfigLayers.mockReturnValue({ mergedConfig: {} });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const requestBody = async ({ providerID, modelID }) => {
+    fetchMock.mockResolvedValue(ok('done'));
+    await callSmallModel({
+      auth: { [providerID]: { type: 'api', key: 'sk-test' } },
+      catalog: { [providerID]: { id: providerID, api: 'https://provider.test/v1', models: {} } },
+      workingDirectory: '/proj',
+      providerID,
+      modelID,
+      prompt: 'summarize',
+    });
+    return JSON.parse(lastCall(fetchMock).init.body);
+  };
+
+  it('does not send the thinking field for a GLM model served by OpenCode Go', async () => {
+    const body = await requestBody({ providerID: 'opencode-go', modelID: 'glm-5.3-flash' });
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it('disables thinking on the Z.ai and Zhipu endpoints', async () => {
+    const zai = await requestBody({ providerID: 'zai-coding-plan', modelID: 'glm-5.3-flash' });
+    expect(zai.thinking).toEqual({ type: 'disabled' });
+    const zhipu = await requestBody({ providerID: 'zhipuai', modelID: 'glm-5.3-flash' });
+    expect(zhipu.thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('keeps the GLM switch for a custom-named provider pointed at a Z.ai endpoint', async () => {
+    fetchMock.mockResolvedValue(ok('done'));
+    await callSmallModel({
+      auth: { 'my-glm': { type: 'api', key: 'sk-test' } },
+      catalog: { 'my-glm': { id: 'my-glm', api: 'https://api.z.ai/api/coding/paas/v4', models: {} } },
+      workingDirectory: '/proj',
+      providerID: 'my-glm',
+      modelID: 'glm-5.3-flash',
+      prompt: 'summarize',
+    });
+    expect(JSON.parse(lastCall(fetchMock).init.body).thinking).toEqual({ type: 'disabled' });
+  });
+
+  const minimaxBody = async (providerEntry) => {
+    fetchMock.mockResolvedValue(ok('done'));
+    await callSmallModel({
+      auth: { host: { type: 'api', key: 'sk-test' } },
+      catalog: { host: { id: 'host', api: 'https://provider.test/v1', ...providerEntry } },
+      workingDirectory: '/proj',
+      providerID: 'host',
+      modelID: 'minimax-m3',
+      prompt: 'summarize',
+    });
+    return JSON.parse(lastCall(fetchMock).init.body);
+  };
+
+  it('disables MiniMax M3 thinking behind an OpenAI-compatible adapter', async () => {
+    const body = await minimaxBody({ npm: '@ai-sdk/openai-compatible', models: {} });
+    expect(body.thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('honors a model-level adapter over the provider one for MiniMax M3', async () => {
+    const body = await minimaxBody({
+      npm: '@ai-sdk/deepinfra',
+      models: { 'minimax-m3': { provider: { npm: '@ai-sdk/anthropic' } } },
+    });
+    expect(body.thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('does not send the MiniMax M3 switch through an adapter that has none', async () => {
+    const body = await minimaxBody({ npm: '@ai-sdk/deepinfra', models: {} });
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it('treats a provider with no reported adapter as OpenAI-compatible for MiniMax M3', async () => {
+    const body = await minimaxBody({ models: {} });
+    expect(body.thinking).toEqual({ type: 'disabled' });
+  });
+});
+
+describe('callSmallModel — providers with an SDK-owned endpoint', () => {
+  let fetchMock;
+  let originalFetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+    readConfigLayers.mockReset();
+    readConfigLayers.mockReturnValue({ mergedConfig: {} });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it.each([
+    ['groq', 'https://api.groq.com/openai/v1'],
+    ['xai', 'https://api.x.ai/v1'],
+    ['mistral', 'https://api.mistral.ai/v1'],
+    ['cerebras', 'https://api.cerebras.ai/v1'],
+    ['togetherai', 'https://api.together.xyz/v1'],
+    ['deepinfra', 'https://api.deepinfra.com/v1/openai'],
+    ['perplexity', 'https://api.perplexity.ai'],
+    ['cohere', 'https://api.cohere.ai/compatibility/v1'],
+  ])('calls %s at its default endpoint when the catalog has no api URL', async (providerID, baseURL) => {
+    fetchMock.mockResolvedValue(ok('done'));
+
+    const text = await callSmallModel({
+      auth: { [providerID]: { type: 'api', key: 'key-test' } },
+      catalog: { [providerID]: { id: providerID, api: null, models: {} } },
+      workingDirectory: '/proj',
+      providerID,
+      modelID: 'some-model',
+      prompt: 'summarize',
+    });
+
+    expect(text).toBe('done');
+    expect(lastCall(fetchMock).url).toBe(`${baseURL}/chat/completions`);
+  });
+
+  it('prefers a catalog api URL over the default endpoint', async () => {
+    fetchMock.mockResolvedValue(ok('done'));
+
+    await callSmallModel({
+      auth: { groq: { type: 'api', key: 'key-test' } },
+      catalog: { groq: { id: 'groq', api: 'https://catalog.test/v1', models: {} } },
+      workingDirectory: '/proj',
+      providerID: 'groq',
+      modelID: 'some-model',
+      prompt: 'summarize',
+    });
+
+    expect(lastCall(fetchMock).url).toBe('https://catalog.test/v1/chat/completions');
+  });
+
+  it('prefers a configured baseURL over the default endpoint', async () => {
+    readConfig.mockReturnValue({
+      provider: { groq: { options: { baseURL: 'https://proxy.test/v1' } } },
+    });
+    fetchMock.mockResolvedValue(ok('done'));
+
+    await callSmallModel({
+      auth: { groq: { type: 'api', key: 'key-test' } },
+      catalog: { groq: { id: 'groq', api: null, models: {} } },
+      workingDirectory: '/proj',
+      providerID: 'groq',
+      modelID: 'some-model',
+      prompt: 'summarize',
+    });
+
+    expect(lastCall(fetchMock).url).toBe('https://proxy.test/v1/chat/completions');
+  });
+
+  it('still fails clearly for a provider with no endpoint anywhere', async () => {
+    await expect(callSmallModel({
+      auth: { mystery: { type: 'api', key: 'sk-test' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'mystery',
+      modelID: 'some-model',
+      prompt: 'summarize',
+    })).rejects.toThrow('has no known API base URL');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -101,6 +101,12 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
     }
     const pendingComposerRestore = useInputStore((state) => state.pendingComposerRestore);
 
+    // Follow the rendered composer, not the sidebar's deferred selection.
+    // Layout timing prevents the incoming composer painting outgoing files.
+    React.useLayoutEffect(() => {
+        useInputStore.getState().selectAttachmentDraft(identity);
+    }, [identity]);
+
     // Callbacks reach the effects through a ref so a caller passing inline
     // functions does not re-run the persistence effects on every render.
     const callbacksRef = React.useRef({ onIdentityChange, onDraftRestored });

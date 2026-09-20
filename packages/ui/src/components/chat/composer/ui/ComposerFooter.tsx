@@ -16,6 +16,7 @@ import React from 'react';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Icon } from '@/components/icon/Icon';
+import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ModelControls } from '../../ModelControls';
@@ -58,6 +59,8 @@ export interface ComposerFooterProps {
     onOpenPrPicker: () => void;
     showLinearPicker?: boolean;
     onOpenLinearPicker?: () => void;
+    attachGuests?: readonly GuestAttachItem[];
+    onOpenGuestAttach?: (guestId: string) => void;
     onOpenAttachSheet: () => void;
     onToggleExpandedInput: () => void;
     onTogglePermissionAutoAccept: () => void;
@@ -67,6 +70,7 @@ export interface ComposerFooterProps {
     onStartDictation: () => void;
     onDictationInsert: (text: string) => void;
     onDictationInsertAndSend: (text: string) => void;
+    onDictationStart: () => void;
     onDictationContentHeightChange: (height: number | null) => void;
     isBtw?: boolean;
     modelSessionId?: string | null;
@@ -102,6 +106,8 @@ export function ComposerFooter(props: ComposerFooterProps) {
         onOpenPrPicker,
         showLinearPicker,
         onOpenLinearPicker,
+        attachGuests,
+        onOpenGuestAttach,
         onOpenAttachSheet,
         onToggleExpandedInput,
         onTogglePermissionAutoAccept,
@@ -111,6 +117,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         onStartDictation,
         onDictationInsert,
         onDictationInsertAndSend,
+        onDictationStart,
         onDictationContentHeightChange,
         isBtw = false,
         modelSessionId,
@@ -134,7 +141,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                 <>
                     <div className="flex w-full items-center justify-between gap-x-1.5">
                         <div className="composer-mobile-actions flex items-center gap-x-2 pl-1">
-                            {!isBtw ? <ComposerAttachmentControls
+                            <ComposerAttachmentControls
                                 isVSCode={isVSCode}
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
@@ -143,9 +150,12 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                 openPrPicker={onOpenPrPicker}
                                 showLinearPicker={showLinearPicker}
                                 openLinearPicker={onOpenLinearPicker}
-                                onOpenSettings={onOpenSettings}
+                                onOpenSettings={isBtw ? undefined : onOpenSettings}
                                 onOpenMobileSheet={onOpenAttachSheet}
-                            /> : null}
+                                attachGuests={attachGuests}
+                                onOpenGuestAttach={onOpenGuestAttach}
+                                filesOnly={isBtw}
+                            />
                             <PermissionAutoAcceptButton
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
@@ -205,7 +215,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
             ) : (
                 <>
                     <div className={cn("flex items-center flex-shrink-0", footerGapClass)}>
-                        {!isBtw ? <ComposerAttachmentControls
+                        <ComposerAttachmentControls
                             isVSCode={isVSCode}
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
@@ -214,8 +224,11 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             openPrPicker={onOpenPrPicker}
                             showLinearPicker={showLinearPicker}
                             openLinearPicker={onOpenLinearPicker}
-                            onOpenSettings={onOpenSettings}
-                        /> : null}
+                            onOpenSettings={isBtw ? undefined : onOpenSettings}
+                            attachGuests={attachGuests}
+                            onOpenGuestAttach={onOpenGuestAttach}
+                            filesOnly={isBtw}
+                        />
                         {!isBtw ? <FocusModeButton
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
@@ -251,6 +264,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             sendIconSizeClass={sendIconSizeClass}
                             onInsert={onDictationInsert}
                             onInsertAndSend={onDictationInsertAndSend}
+                            onStart={onDictationStart}
                             onContentHeightChange={onDictationContentHeightChange}
                         /> : null}
                         <ComposerActionButtons

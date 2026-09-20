@@ -57,7 +57,7 @@ const TrafficLightButton: React.FC<TrafficLightButtonProps> = ({ action, isMaxim
       // 24px-wide button wrapping a 14px circle centers it at a 24px interval
       // between neighbors, giving a 10px edge-to-edge gap. The 32px height
       // keeps the titlebar's vertical hit band.
-      className="app-region-no-drag flex h-8 w-[24px] items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="app-region-no-drag flex h-8 w-[24px] items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span
         className="flex size-3.5 items-center justify-center rounded-full shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.28)] transition-[filter] duration-75 active:brightness-90"
@@ -161,7 +161,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   // otherwise the project-actions chevron overlaps the session title. Right
   // side keeps a taller h-12 Windows-style hit target.
   const buttonClassName = cn(
-    'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+    'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     isLeft ? 'h-8 w-8 rounded-md' : 'h-12 w-11',
   );
   const containerClassName = isLeft

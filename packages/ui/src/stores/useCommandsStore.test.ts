@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Command } from './useCommandsStore';
+import { runSessionListNetworkTask } from '../lib/background-network';
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => { throw new Error('Promise not initialized'); };
@@ -76,6 +77,80 @@ describe('useCommandsStore', () => {
       isLoading: false,
       commandDraft: null,
     });
+  });
+
+  test('command scope enrichment stays bounded and leaves room for session lists', async () => {
+    const release = deferred<void>();
+    const started = deferred<void>();
+    let active = 0;
+    let peak = 0;
+    listCommandsWithDetailsImpl = async () => Array.from({ length: 24 }, (_, index) => ({ name: `command-${index}` }));
+    runtimeFetchImpl = async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      if (active === 2) started.resolve();
+      await release.promise;
+      active -= 1;
+      return Response.json({ scope: 'project' });
+    };
+    const load = useCommandsStore.getState().loadCommands();
+    try {
+      await started.promise;
+      expect(peak).toBe(2);
+      expect(await runSessionListNetworkTask(async () => 'sessions ready')).toBe('sessions ready');
+    } finally {
+      release.resolve();
+      expect(await load).toBe(true);
+    }
+    expect(peak).toBe(2);
+  });
+
+  test('runtime reset rejects old discovery without deleting a new in-flight request or user draft', async () => {
+    const old = deferred<Command[]>();
+    const fresh = deferred<Command[]>();
+    const draft = { name: 'unsaved', scope: 'project' as const, template: 'keep this draft' };
+    useCommandsStore.getState().setCommandDraft(draft);
+    listCommandsWithDetailsImpl = () => old.promise;
+    const oldLoad = useCommandsStore.getState().loadCommands();
+    await Promise.resolve();
+    await Promise.resolve();
+    useCommandsStore.getState().resetForRuntimeSwitch();
+    listCommandsWithDetailsImpl = () => fresh.promise;
+    const newLoad = useCommandsStore.getState().loadCommands();
+    await Promise.resolve();
+    await Promise.resolve();
+    old.resolve([{ name: 'old-command' }]);
+    expect(await oldLoad).toBe(false);
+    expect(useCommandsStore.getState().isLoading).toBe(true);
+    const joined = useCommandsStore.getState().loadCommands();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(listCommandsWithDetailsCalls).toBe(2);
+    fresh.resolve([{ name: 'new-command' }]);
+    expect(await newLoad).toBe(true);
+    expect(await joined).toBe(true);
+    expect(useCommandsStore.getState().commands.map((command) => command.name)).toEqual(['new-command']);
+    expect(useCommandsStore.getState().commandDraft).toBe(draft);
+    useCommandsStore.getState().setCommandDraft(null);
+  });
+
+  test('responses from old-runtime command mutations cannot alter the new runtime cache', async () => {
+    const actions = [
+      () => useCommandsStore.getState().createCommand({ name: 'same', template: 'old template' }),
+      () => useCommandsStore.getState().updateCommand('same', { template: 'old template' }),
+      () => useCommandsStore.getState().deleteCommand('same'),
+    ];
+    for (const action of actions) {
+      const response = deferred<Response>();
+      runtimeFetchImpl = () => response.promise;
+      const pending = action();
+      useCommandsStore.getState().resetForRuntimeSwitch();
+      const current = [{ name: 'same', template: 'new runtime template' }];
+      useCommandsStore.setState({ commands: current, commandsByDirectory: { [activeProjectPath]: current } });
+      response.resolve(Response.json({ requiresManualRestart: true }));
+      expect(await pending).toBe(false);
+      expect(useCommandsStore.getState().commands).toBe(current);
+    }
   });
 
   test('loading another project leaves the active project\'s commands alone', async () => {

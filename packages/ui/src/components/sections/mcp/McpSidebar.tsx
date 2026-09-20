@@ -189,7 +189,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
           <h2 className={SETTINGS_PANEL_TITLE_CLASS}>{t('settings.mcp.sidebar.title')}</h2>
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             disabled={isRefreshingStatus}
             onClick={handleRefresh}
             aria-label={t('settings.mcp.sidebar.actions.refreshStatusAria')}
@@ -245,7 +245,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                           setMcpDraft(null);
                           onItemSelect?.();
                         }}
-                        className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <div className="flex items-center gap-2">
                           <StatusDot tone={tone} enabled={server.enabled} />
@@ -308,7 +308,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                           setMcpDraft(null);
                           onItemSelect?.();
                         }}
-                        className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <div className="flex items-center gap-2">
                           <StatusDot tone={tone} enabled={server.enabled} />

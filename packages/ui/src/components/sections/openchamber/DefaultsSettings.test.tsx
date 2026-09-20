@@ -21,6 +21,9 @@ type ConfigState = {
   setSettingsDefaultVariant: () => void;
   setSettingsDefaultAgent: () => void;
   selectionSource: 'auto';
+  agentSelectionSource: 'auto';
+  agents: Array<{ name: string; model?: { providerID: string; modelID: string } }>;
+  currentAgentName: string | undefined;
 };
 
 const configState: ConfigState = {
@@ -35,6 +38,9 @@ const configState: ConfigState = {
   setSettingsDefaultVariant: () => undefined,
   setSettingsDefaultAgent: () => undefined,
   selectionSource: 'auto',
+  agentSelectionSource: 'auto',
+  agents: [],
+  currentAgentName: undefined,
 };
 
 const settingsState = {

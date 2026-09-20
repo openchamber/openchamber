@@ -19,6 +19,7 @@ import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
 import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
 import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
+import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -382,6 +383,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Preview proxy');
   }
 
+  if (normalizedPathname === '/api/config/themes' || normalizedPathname.startsWith('/api/config/themes/')) {
+    return unsupportedWebRouteResponse('Theme import and management');
+  }
+
   if (normalizedPathname.startsWith('/api/openchamber/tunnel/')) {
     return unsupportedWebRouteResponse('Remote tunnel settings');
   }
@@ -494,10 +499,25 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (normalizedPathname === '/api/sessions/status' && method === 'GET') {
+    // Parity with the web server's cross-project status map, served from the
+    // extension host's activity watcher. Its phases collapse busy and retry
+    // into `busy` and it settles sessions itself through `cooldown`, so every
+    // busy entry is current as of now.
+    type ActivitySnapshot = Record<string, { type: 'idle' | 'busy' | 'cooldown' }>;
+    const activity = await sendBridgeMessage<ActivitySnapshot>('api:session-activity:get')
+      .catch((): ActivitySnapshot => ({}));
+    const now = Date.now();
+    const sessions: Record<string, { status: 'busy'; lastUpdateAt: number }> = {};
+    for (const [sessionId, entry] of Object.entries(activity || {})) {
+      if (entry?.type === 'busy') sessions[sessionId] = { status: 'busy', lastUpdateAt: now };
+    }
+    // The extension host keeps no pending-request map; directory stores and
+    // its own auto-accept path cover requests in VS Code.
     return new Response(
       JSON.stringify({
-        sessions: {},
-        serverTime: Date.now(),
+        sessions,
+        pending: {},
+        serverTime: now,
       }),
       {
         status: 200,
@@ -1740,10 +1760,12 @@ onCommand('showNotification', (payload) => {
   showOpenChamberNotification(payload as { title?: unknown; body?: unknown; sessionId?: unknown; requireHidden?: unknown } | undefined);
 });
 
-onCommand('windowFocusChanged', (payload) => {
-  if (typeof payload === 'object' && payload && typeof (payload as { focused?: unknown }).focused === 'boolean') {
-    window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = (payload as { focused: boolean }).focused;
-  }
+onCommand('viewerStateChanged', (payload) => {
+  const parsed = hostViewerStateSchema.safeParse(payload);
+  if (!parsed.success) return;
+  window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = parsed.data.windowFocused;
+  // The webview document's own focus is not whether the user sees the chat.
+  reportHostViewerState(parsed.data);
 });
 
 const readyNotificationCooldowns = new Map<string, number>();

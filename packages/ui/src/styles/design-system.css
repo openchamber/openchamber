@@ -1,6 +1,7 @@
 @layer base {
   :root {
     color-scheme: light;
+    -webkit-font-smoothing: antialiased;
     --oc-safe-area-top: 0px;
     --oc-safe-area-right: 0px;
     --oc-safe-area-bottom: 0px;
@@ -27,13 +28,13 @@
     --text-markdown: 0.875rem;
     --text-code: 0.75rem;
     --text-ui-header: 0.875rem;
-    --text-ui-label: 0.8125rem;
+    --text-ui-label: 0.84375rem;
     --text-meta: 0.8125rem;
     --text-micro: 0.8125rem;
     --text-settings-page-title: 1.0625rem;
 
     /* Text selection colour shared by native ::selection and the comment overlay */
-    --oc-text-selection: color-mix(in srgb, var(--primary) 30%, transparent);
+    --oc-text-selection: var(--interactive-selection);
 
     /* Default Light Theme */
     --background: oklch(0.97 0.02 85); /* Warm sand background */
@@ -254,26 +255,53 @@
     vertical-align: middle;
   }
 
-  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
-  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
-    outline: none !important;
-    box-shadow: none !important;
-  }
-
-  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
-    outline: none !important;
-    box-shadow: none !important;
-  }
-
   .focus-ring-accent:focus-visible,
   [data-focus-ring="accent"]:focus-visible {
-    outline: 2px solid var(--primary-base) !important;
+    outline: 2px solid var(--interactive-focus-ring) !important;
     outline-offset: 2px !important;
     box-shadow: none !important;
   }
 }
 
 @layer components {
+  /* A painted surface owns its text context too. Neutral children using
+     text-foreground inherit the surface's foreground, not the canvas color. */
+  .oc-surface-elevated,
+  .bg-surface-elevated,
+  [class~="bg-[var(--surface-elevated)]"],
+  .bg-card,
+  .bg-popover,
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-composer {
+    --foreground: var(--surface-elevated-foreground);
+    color: var(--foreground);
+  }
+
+  .oc-surface-canvas,
+  .bg-background,
+  .bg-surface-background,
+  [class~="bg-[var(--surface-background)]"],
+  .bg-muted,
+  .bg-surface-muted,
+  [class~="bg-[var(--surface-muted)]"],
+  .bg-sidebar,
+  .oc-glass-panel {
+    --foreground: var(--surface-foreground);
+    color: var(--foreground);
+  }
+
+  .oc-surface-code,
+  [class~="bg-[var(--syntax-background)]"] {
+    --foreground: var(--syntax-foreground);
+    color: var(--foreground);
+  }
+
+  .bg-interactive-selection {
+    --foreground: var(--interactive-selection-foreground);
+    color: var(--foreground);
+  }
+
   /* Shared translucent surfaces. Each variant only chooses its semantic tint;
      blur, accessibility fallbacks, and floating-surface elevation stay common.
      Utilities remain able to opt an individual consumer out. */
@@ -302,7 +330,7 @@
 
 /* The chat composer floating over the transcript. */
 .oc-glass-composer {
-  --oc-glass-color: var(--surface-subtle);
+  --oc-glass-color: var(--surface-elevated);
   --oc-glass-opacity: var(--oc-glass-popover-opacity);
 }
 
@@ -519,10 +547,6 @@
   --markdown-code-block-line-height: var(--markdown-code-block-line-height);
 
   /* Markdown color variables */
-  --markdown-heading1: var(--markdown-heading1);
-  --markdown-heading2: var(--markdown-heading2);
-  --markdown-heading3: var(--markdown-heading3);
-  --markdown-heading4: var(--markdown-heading4);
   --markdown-link: var(--markdown-link);
   --markdown-link-hover: var(--markdown-link-hover);
   --markdown-list-marker: var(--markdown-list-marker);
@@ -545,7 +569,7 @@
   --markdown-heading4-size: var(--text-markdown);
   --markdown-heading5-size: var(--text-markdown);
   --markdown-heading6-size: var(--text-markdown);
-  --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace;
   --font-family-sans: var(--font-sans);
@@ -598,6 +622,16 @@
   .agent-variable {
     --agent-color: var(--syntax-variable);
     --agent-color-bg: var(--syntax-variable);
+  }
+
+  .agent-string {
+    --agent-color: var(--syntax-string);
+    --agent-color-bg: var(--syntax-string);
+  }
+
+  .agent-operator {
+    --agent-color: var(--syntax-operator);
+    --agent-color-bg: var(--syntax-operator);
   }
 
   /* Apply colors with opacity for badges */

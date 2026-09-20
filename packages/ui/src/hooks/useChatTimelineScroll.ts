@@ -2,6 +2,8 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
+import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
+import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useUIStore } from '@/stores/useUIStore';
 import type { TimelineRevealGate } from '@/components/chat/timelineRevealGate';
@@ -152,6 +154,11 @@ export const useChatTimelineScroll = ({
 
     const composerOverlayHeightRef = React.useRef(composerOverlayHeight);
     composerOverlayHeightRef.current = composerOverlayHeight;
+    // Mobile keyboard / composer transitions drive scrollTop themselves for
+    // their duration (keyboardFollowGlide); every automatic end write below
+    // yields while the glide holds the viewport.
+    const followGlideRef = React.useRef<KeyboardFollowGlide | null>(null);
+    const followGlideHeld = () => followGlideRef.current?.isHeld() === true;
     // Size of the list footer, reported by the list as it is measured; the
     // real content end sits below the last row by this much.
     const listFooterSizeRef = React.useRef(0);
@@ -327,10 +334,14 @@ export const useChatTimelineScroll = ({
 
     // ── list callbacks ──────────────────────────────────────────────────────
     const registerList = React.useCallback((list: TimelineListHandle | null) => {
+        const previousNode = scrollRef.current;
         listRef.current = list;
         const node = (list?.getScrollableNode() as HTMLDivElement | null) ?? null;
         scrollRef.current = node;
         setScrollNode(node);
+        if (previousNode && previousNode !== node) {
+            retireScrollContent(previousNode, () => scrollRef.current === previousNode);
+        }
     }, []);
 
     const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {
@@ -342,6 +353,9 @@ export const useChatTimelineScroll = ({
             hideScrollButton();
             return;
         }
+        // Mid-glide the viewport trails the end by design; the glide lands on
+        // it, so a "left the end" report here is not a reader leaving.
+        if (!isAtEnd && followGlideHeld()) return;
         if (isAtEndRef.current === isAtEnd) return;
         isAtEndRef.current = isAtEnd;
         setIsPinned(isAtEnd);
@@ -447,6 +461,7 @@ export const useChatTimelineScroll = ({
     const followEnd = React.useCallback(() => {
         const node = scrollRef.current;
         if (!node) return;
+        if (followGlideHeld()) return;
         const end = node.scrollHeight - node.clientHeight;
         const distance = end - node.scrollTop;
         if (distance <= 1) return;
@@ -620,6 +635,8 @@ export const useChatTimelineScroll = ({
         };
         const handleScroll = () => {
             queueSave();
+            // Mid-glide the viewport is legitimately short of the end.
+            if (followGlideHeld()) return;
             const distance = scrollNode.scrollHeight - scrollNode.clientHeight - scrollNode.scrollTop;
             setViewportAtEnd(distance <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX);
         };
@@ -669,6 +686,24 @@ export const useChatTimelineScroll = ({
         };
     }, [currentSessionKey, revealGate, scrollNode]);
 
+    // ── keyboard follow glide ───────────────────────────────────────────────
+    // On mobile the keyboard and the composer morph change the transcript's
+    // geometry in single steps; the glide drives scrollTop across them on the
+    // keyboard's curve so a pinned reader sees one motion, not snaps. It only
+    // engages for a reader on the end with follow active.
+    React.useEffect(() => {
+        if (!scrollNode) return;
+        const glide = createKeyboardFollowGlide({
+            scrollNode,
+            canFollow: () => !userOwnsScrollRef.current && isAtEndRef.current && modeRef.current === 'following-end',
+        });
+        followGlideRef.current = glide;
+        return () => {
+            glide.dispose();
+            if (followGlideRef.current === glide) followGlideRef.current = null;
+        };
+    }, [scrollNode]);
+
     // ── pinned end ──────────────────────────────────────────────────────────
     // "At the end" is an invariant, not a one-time scroll: while the reader
     // sits on the end of a session that is not producing output, any growth
@@ -682,6 +717,7 @@ export const useChatTimelineScroll = ({
         if (!content) return;
         const pin = () => {
             if (userOwnsScrollRef.current || !isAtEndRef.current || modeRef.current !== 'following-end') return;
+            if (followGlideHeld()) return;
             if (widthResizingRef.current) {
                 // Re-wrapping rows: the scroll node's scrollHeight carries the
                 // list's stale total, so the end is the measured bottom of the

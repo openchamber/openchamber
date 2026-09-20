@@ -9,6 +9,8 @@ description: Use when changing session synchronization, bootstrap or reconnect s
 
 Read `packages/ui/src/sync/DOCUMENTATION.md` and the nearest owning module documentation before editing. Context gathering is complete when every changed state has an identified owner, authority, scope, and lifecycle.
 
+Before editing behavior a user can reach, write the surface list from `ui-api-decoupling`, *Name The Surfaces Before Editing*: one line per runtime, including the ones this change appears to leave alone. State that reconciles differently per runtime is a parity decision, not an implementation detail.
+
 ## Sources Of Truth
 
 Classify every input before deriving state:

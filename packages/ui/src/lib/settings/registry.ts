@@ -246,6 +246,8 @@ export const SETTINGS_REGISTRY = {
   }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
+  // `builtin` or an installed extension id; the server falls back to `builtin` when that extension cannot serve.
+  browserProvider: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('browserProvider', (v) => useUIStore.getState().setBrowserProvider(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
   // Server-owned: it says whether this build has the feature at all.
   agentMemoryFeatureAvailable: field({
@@ -253,6 +255,12 @@ export const SETTINGS_REGISTRY = {
     computed: true,
     parse: parseBoolean,
     ui: uiStore('agentMemoryFeatureAvailable', (v) => useUIStore.getState().setAgentMemoryFeatureAvailable(v), { autoSave: false }),
+  }),
+  routingFeatureAvailable: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
   }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
@@ -531,9 +539,11 @@ export const LOCAL_DEVICE_KEYS = [
   'contextRailOrder',
   'contextRailHiddenSurfaces',
   'contextEditorTreeVisible',
+  'contextEditorVisible',
   'contextEditorTreeWidth',
   'notesPanelHeight',
   'workStatusExpandedSections',
+  'messageQueueExpanded',
   'workStatusScrollTop',
   'isSessionSwitcherOpen',
   'sidebarSection',

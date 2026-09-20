@@ -1,10 +1,14 @@
+const WINDOWS_DRIVE_ROOT = /^(?:\/\/\?\/)?[A-Za-z]:\/+$/u;
+const WINDOWS_DRIVE_PREFIX = /^(?:\/\/\?\/)?[A-Za-z]:$/u;
+const UNC_SHARE_ROOT = /^\/\/(?:[^/?][^/]*\/[^/]+|\?\/UNC\/[^/]+\/[^/]+)$/iu;
+
 /**
  * Normalize a directory path for consistent comparison.
  *
  * Handles Windows-specific path quirks:
  * - Converts backslashes to forward slashes
  * - Uppercases lowercase Windows drive letters (e.g., "c:\\" → "C:\\")
- * - Trims trailing slashes (except for the root "/")
+ * - Trims trailing slashes, preserving Unix and Windows drive roots
  *
  * Returns null for non-string inputs, null/undefined, empty strings,
  * whitespace-only strings, and paths that consist only of slashes
@@ -24,8 +28,21 @@ export const normalizePath = (value?: string | null): string | null => {
     .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ":");
 
   if (replaced === "/") return "/";
+  // A Windows drive root is absolute; removing its slash turns it into a
+  // drive-relative path whose meaning depends on that drive's current folder.
+  if (WINDOWS_DRIVE_ROOT.test(replaced)) return replaced.replace(/\/+$/u, "/");
   const stripped = replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
   return stripped || null;
+};
+
+/** Lexical parent of an already-normalized directory; filesystem roots have none. */
+export const getNormalizedParentDirectory = (directory: string): string | null => {
+  if (directory === '/' || WINDOWS_DRIVE_ROOT.test(directory) || WINDOWS_DRIVE_PREFIX.test(directory) || UNC_SHARE_ROOT.test(directory)) return null;
+  const separator = directory.lastIndexOf('/');
+  if (separator < 0) return null;
+  if (separator === 0) return '/';
+  const parent = directory.slice(0, separator);
+  return WINDOWS_DRIVE_PREFIX.test(parent) ? `${parent}/` : parent;
 };
 
 /**

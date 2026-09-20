@@ -57,13 +57,67 @@ type AgentMemoryChangedEvent = {
   projectId?: string;
 };
 
+/**
+ * The extension chosen as browser provider can no longer serve (paused,
+ * removed, or approval withdrawn), so the server put the in-app browser back.
+ * The setting is already written; listeners update the store and tell the user.
+ */
+const browserProviderResetSchema = z.object({
+  guestId: z.string().min(1),
+  guestName: z.string().min(1),
+});
+type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
+
+/** Jev routing events; each carries what the routing store needs and nothing the UI must re-derive. */
+const routingUpdatedSchema = z.object({
+  available: z.boolean(),
+  autoReady: z.boolean(),
+  tokenPresent: z.boolean(),
+});
+
+const routingDecisionSchema = z.object({
+  sessionId: z.string().min(1),
+  at: z.number(),
+  category: z.string().nullable(),
+  confidence: z.number(),
+  reason: z.enum(['routed', 'low-confidence', 'unknown-category', 'error', 'not-ready']),
+  providerID: z.string().optional(),
+  modelID: z.string().optional(),
+  variant: z.string().nullable().optional(),
+  agent: z.string().nullable().optional(),
+  error: z.string().optional(),
+});
+
+const routingPermissionHeldSchema = z.object({
+  permissionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  score: z.number(),
+  kind: z.string().nullable(),
+});
+
+const routingSafetySkippedSchema = z.object({
+  permissionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  error: z.string(),
+});
+
+type RoutingUpdatedEvent = { type: 'routing-updated' } & z.infer<typeof routingUpdatedSchema>;
+type RoutingDecisionEvent = { type: 'routing-decision'; decision: z.infer<typeof routingDecisionSchema> };
+type RoutingPermissionHeldEvent = { type: 'routing-permission-held' } & z.infer<typeof routingPermissionHeldSchema>;
+type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<typeof routingSafetySkippedSchema>;
+
 type OpenChamberEvent =
   | { type: 'event-stream-ready' }
+  | RoutingUpdatedEvent
+  | RoutingDecisionEvent
+  | RoutingPermissionHeldEvent
+  | RoutingSafetySkippedEvent
   | MessageQueueUpdatedEvent
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
   | BrowserControlRequestEvent
+  | BrowserProviderResetEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
@@ -162,6 +216,36 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 
   if (envelope.type === 'openchamber:heartbeat') {
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.updated') {
+    const parsed = routingUpdatedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-updated', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.decision') {
+    const parsed = routingDecisionSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-decision', decision: parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.permission-held') {
+    const parsed = routingPermissionHeldSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-permission-held', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.safety-skipped') {
+    const parsed = routingSafetySkippedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-safety-skipped', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-provider-reset') {
+    const parsed = browserProviderResetSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
     return;
   }
 

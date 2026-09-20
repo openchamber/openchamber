@@ -22,6 +22,17 @@ import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('project paths retain absolute Windows roots across parsing and serialization', () => {
+    const parsed = parseSettingsDocument({ projects: [
+      { path: 'c:\\', label: 'Drive' },
+      { path: 'c:\\Users\\Developer\\Project\\' },
+      { path: 'C:/Users/Developer/Project' },
+      { path: '\\\\Server\\Share\\' },
+    ] });
+    expect(parsed?.projects?.map((project) => project.path)).toEqual(['C:/', 'C:/Users/Developer/Project', '//Server/Share']);
+    expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
   test('round-trips section order without coupling it to visibility or partial snapshots', () => {
     const initial = useUIStore.getState().workStatusSectionOrder;
     const hidden = useUIStore.getState().workStatusHiddenSections;

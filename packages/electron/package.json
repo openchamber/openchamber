@@ -1,11 +1,11 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.23.1",
+  "version": "1.24.2",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
   "type": "module",
-  "main": "./dist-bundle/main.mjs",
+  "main": "./dist-bundle/entry.mjs",
   "dependencies": {
     "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
@@ -30,7 +30,7 @@
     "Linux: native x64 or arm64 host (no cross-arch packaging); FUSE/libfuse2 to run AppImages, or APPIMAGE_EXTRACT_AND_RUN=1"
   ],
   "scripts": {
-    "dev": "node ./scripts/electron-dev.mjs",
+    "dev": "bun ../../scripts/build-builtin-extensions.mjs && node ./scripts/electron-dev.mjs",
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
     "ensure:electron": "node ./scripts/ensure-electron.mjs",
@@ -49,14 +49,19 @@
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
+    "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
     "appId": "dev.openchamber.desktop",
     "productName": "OpenChamber",
+    "asarUnpack": [
+      "node_modules/@openchamber/web/server/built-in-extensions/**/*"
+    ],
     "files": [
+      "dist-bundle/entry.mjs",
       "dist-bundle/main.mjs",
+      "dist-bundle/early-startup.mjs",
       "preload.mjs"
     ],
     "extraResources": [
@@ -118,7 +123,7 @@
         "AppImage"
       ],
       "category": "Development",
-      "icon": "resources/icons/icon.png",
+      "icon": "resources/icons/app-icon.svg",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {

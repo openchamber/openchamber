@@ -229,7 +229,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
-      <DialogContent className="max-w-4xl p-5 bg-background border-[var(--interactive-border)]" showCloseButton={true}>
+      <DialogContent className="max-w-4xl p-5 border-[var(--interactive-border)]" showCloseButton={true}>
         
         {/* Header Section */}
         <div className="flex items-center mb-1">
@@ -263,7 +263,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
-            <div className="rounded-lg bg-[var(--surface-elevated)]/30 p-5 border border-[var(--surface-subtle)]">
+            <div className="rounded-lg bg-surface-elevated/30 p-5 border border-border">
               <div className="flex items-center gap-3">
                 <Icon name="loader" className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
                 <div className="typography-ui-label text-foreground">
@@ -280,7 +280,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           {/* Changelog Rendering */}
           {changelog && !isWebUpdating && (
-            <div className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/20 overflow-hidden">
+              <div className="rounded-lg border border-border bg-surface-elevated/20 overflow-hidden">
               <ScrollableOverlay
                 className="max-h-[400px] p-0"
                 fillContainer={false}
@@ -301,7 +301,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                     <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} enableFileReferences={false} />
                   </div>
                 ) : (
-                  <div className="divide-y divide-[var(--surface-subtle)]">
+                  <div className="divide-y divide-border">
                     {changelog.sections.map((section) => (
                       <div key={section.version} className="p-4">
                         <div className="flex items-center gap-3 mb-3">
@@ -341,7 +341,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 <Icon name="terminal" className="h-4 w-4" />
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
-              <div className="flex items-center gap-2 p-1 pl-3 bg-[var(--surface-elevated)]/50 rounded-md border border-[var(--surface-subtle)]">
+              <div className="flex items-center gap-2 p-1 pl-3 bg-surface-elevated/50 rounded-md border border-border">
                 <code className="flex-1 font-mono text-sm text-foreground overflow-x-auto whitespace-nowrap">
                   {updateCommand}
                 </code>

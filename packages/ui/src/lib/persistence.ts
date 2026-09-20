@@ -237,6 +237,7 @@ export const subscribeToSettingsSaveState = (listener: () => void): (() => void)
  * their own APIs instead of updateDesktopSettings. 'error' resets to idle.
  */
 export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  ensureSettingsRuntimeLifecycle();
   dispatchSettingsSaveState(state);
 };
 
@@ -497,6 +498,7 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _settingsCache = null;
     _settingsInflight = null;
     _serverKnownSettings = {};
+    dispatchSettingsSaveState('saved');
   });
 
   // Mirror the deferred safe-storage lifecycle: without these listeners, a
@@ -702,8 +704,11 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     const webSettings = await fetchWebSettings(context);
     if (webSettings && isSettingsRuntimeContextCurrent(context)) {
       await applySettings(webSettings);
+    } else if (isSettingsRuntimeContextCurrent(context)) {
+      window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     }
   } catch (error) {
+    if (isSettingsRuntimeContextCurrent(context)) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     console.warn('Failed to synchronise settings:', error);
   } finally {
     _settingsMutationTracker.finish(operation);

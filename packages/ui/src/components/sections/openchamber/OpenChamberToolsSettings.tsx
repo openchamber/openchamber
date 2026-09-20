@@ -3,8 +3,21 @@ import * as React from 'react';
 import {
   SettingsSection,
   SettingsCheckboxRow,
+  SettingsFieldRow,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
+  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
+import { loadGuestCatalog } from '@/lib/guests/load-catalog';
+import { useGuestsStore } from '@/lib/guests/store';
 import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
@@ -28,6 +41,9 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
   const agentWebToolEnabled = useUIStore((state) => state.agentWebToolEnabled);
   const setAgentWebToolEnabled = useUIStore((state) => state.setAgentWebToolEnabled);
+  const browserProvider = useUIStore((state) => state.browserProvider);
+  const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
+  const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
   // Absent, not merely off: the feature is finished but unreleased, and a
   // visible switch invites turning on something that was never announced.
@@ -45,6 +61,24 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentWebToolEnabled: enabled });
     recordDeferredOpenCodeRestart('cli', { id: 'agent-web-tool' });
   }, [setAgentWebToolEnabled]);
+
+  // The dropdown lists installed extensions, so the catalog has to be loaded
+  // here too: this page can be the first thing opened after a fresh start.
+  React.useEffect(() => {
+    void loadGuestCatalog();
+  }, []);
+  const providerGuests = React.useMemo(() => browserProviderGuests(guests), [guests]);
+  // A selection whose extension is gone shows as the built-in: the server
+  // already routes to it and resets the setting on the next action.
+  const providerValue = providerGuests.some((guest) => guest.id === browserProvider)
+    ? browserProvider
+    : BUILTIN_BROWSER_PROVIDER;
+
+  // Read by the server on the next browser action; no OpenCode restart involved.
+  const handleBrowserProviderChange = React.useCallback((value: string) => {
+    setBrowserProvider(value);
+    void updateDesktopSettings({ browserProvider: value });
+  }, [setBrowserProvider]);
 
   // Turning memory off removes the whole feature, not just the tool: the panel
   // tab goes with it and sessions stop being given the index. Showing the user
@@ -84,6 +118,40 @@ export const OpenChamberToolsSettings: React.FC = () => {
           ariaLabel={t('settings.openchamber.tools.field.agentWebToolAria')}
           info={t('settings.openchamber.tools.field.agentWebToolInfo')}
         />
+
+        <SettingsFieldRow
+          settingsItem="sessions.browser-provider"
+          label={t('settings.openchamber.tools.browserProvider.label')}
+          info={t('settings.openchamber.tools.browserProvider.info')}
+        >
+          <Select<string>
+            value={providerValue}
+            onValueChange={handleBrowserProviderChange}
+            disabled={!agentWebToolEnabled || providerGuests.length === 0}
+          >
+            <SelectTrigger
+              size={SETTINGS_SELECT_SIZE}
+              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+              aria-label={t('settings.openchamber.tools.browserProvider.aria')}
+            >
+              <SelectValue>
+                {(value) => (
+                  value === BUILTIN_BROWSER_PROVIDER
+                    ? t('settings.openchamber.tools.browserProvider.option.builtin')
+                    : providerGuests.find((guest) => guest.id === value)?.name ?? null
+                )}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={BUILTIN_BROWSER_PROVIDER}>
+                {t('settings.openchamber.tools.browserProvider.option.builtin')}
+              </SelectItem>
+              {providerGuests.map((guest) => (
+                <SelectItem key={guest.id} value={guest.id}>{guest.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
 
         {agentMemoryAvailable ? (
         <SettingsCheckboxRow

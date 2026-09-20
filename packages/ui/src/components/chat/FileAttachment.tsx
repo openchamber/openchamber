@@ -217,7 +217,7 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
           handleOpenPreview();
         }
       }}
-      className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={displayName}
     >
       <img
@@ -331,7 +331,7 @@ const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
         }
       }}
       className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm border border-solid bg-transparent text-foreground not-italic hover:opacity-90 transition-colors text-left"
-      style={{ borderColor: 'var(--syntax-punctuation)' }}
+      style={{ borderColor: 'var(--interactive-border)' }}
       title={file.vscodePath}
     >
       <span
@@ -503,7 +503,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       {showSelectionPin && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
-          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          style={{ borderColor: 'var(--interactive-border)' }}
           title={relativePath}
         >
           <button
@@ -522,7 +522,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       {showFileAdd && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
-          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          style={{ borderColor: 'var(--interactive-border)' }}
           title={relativePath}
         >
           <button
@@ -556,8 +556,10 @@ interface FilePart {
 const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
 const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
 const LINEAR_ISSUE_LINK_MIME = 'application/vnd.openchamber.linear-issue-link';
+const GUEST_ISSUE_LINK_MIME = 'application/vnd.openchamber.guest-issue-link';
+const GUEST_PR_LINK_MIME = 'application/vnd.openchamber.guest-pr-link';
 
-type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue';
+type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue' | 'guest-issue' | 'guest-pr';
 
 const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === GITHUB_ISSUE_LINK_MIME) {
@@ -569,12 +571,19 @@ const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === LINEAR_ISSUE_LINK_MIME) {
     return 'linear-issue';
   }
+  if (file.mime === GUEST_ISSUE_LINK_MIME) {
+    return 'guest-issue';
+  }
+  if (file.mime === GUEST_PR_LINK_MIME) {
+    return 'guest-pr';
+  }
   return null;
 };
 
-const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' => {
-  if (kind === 'github-pr') return 'git-pull-request';
+const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' | 'attachment-2' => {
+  if (kind === 'github-pr' || kind === 'guest-pr') return 'git-pull-request';
   if (kind === 'linear-issue') return 'linear';
+  if (kind === 'guest-issue') return 'attachment-2';
   return 'github';
 };
 
@@ -725,7 +734,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                       <button
                         type="button"
                         onClick={() => handleImageClick(index)}
-                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
                         aria-label={filename}
                       >
                         {file.url ? (

@@ -12,6 +12,20 @@ import {
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 
 describe('scheduled-tasks runtime helpers', () => {
+  it.each([
+    ['*/15 * * * *', 'UTC', '2026-09-18T08:07:00Z', '2026-09-18T08:15:00Z'],
+    ['30 */5 * * * *', 'UTC', '2026-09-18T08:07:00Z', '2026-09-18T08:10:30Z'],
+    ['0 9 * * MON-FRI', 'Europe/Kyiv', '2026-09-18T07:00:00Z', '2026-09-21T06:00:00Z'],
+    ['0 9 * * *', 'Europe/Kyiv', '2026-03-28T08:00:00Z', '2026-03-29T06:00:00Z'],
+    ['0 9 * * *', 'Europe/Kyiv', '2026-10-24T08:00:00Z', '2026-10-25T07:00:00Z'],
+    ['0 0 L * *', 'UTC', '2026-02-01T00:00:00Z', '2026-02-28T00:00:00Z'],
+  ])('computes cron %s in %s from %s', (cron, timezone, now, expected) => {
+    expect(computeNextRunAt({
+      enabled: true,
+      schedule: { kind: 'cron', cron, timezone },
+    }, Date.parse(now))).toBe(Date.parse(expected));
+  });
+
   it('computes next daily run in timezone', () => {
     const nowUtc = Date.UTC(2025, 0, 1, 8, 0, 0);
     const next = computeNextRunAt({

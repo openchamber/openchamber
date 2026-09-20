@@ -104,7 +104,7 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
-| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle |
+| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
 | Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
@@ -132,6 +132,11 @@ Waiting for each model response remains included. Invalid or missing inputs
 omit the dependent metric rather than becoming zero; reported zeros remain
 valid. TTFT averages the earliest text/reasoning start delay from every step,
 only when all steps have a valid sample.
+
+Either rate above 5,000 tok/s is reported as unknown. No provider streams that
+fast, so such a value means the measured window is broken: a tool that runs
+for nearly the whole step leaves a residual of a millisecond, and a text
+interval can be equally short. The row is omitted rather than shown wrong.
 
 Metric labels stay short. Every row is a single hover and keyboard-focus target
 for a shared tooltip, with a 750ms hover delay and a portal outside the panel's
@@ -165,6 +170,15 @@ has already subscribed to for a known session and directory, and the panel
 subscribes to `currentProviderId` / `currentModelId` for the limits.
 `contextUsage.test.ts` pins the arithmetic — notably that the *latest*
 reporting assistant turn is the answer, not a sum across turns.
+
+Which message is "latest" is decided by `findLatestContextFill` in
+`stores/utils/tokenUtils.ts`, shared with the header, VS Code header, mini chat,
+mobile metadata and context sidebar. A finished compaction's own record
+(`summary: true`) is not a reading: its tokens describe the summarizing request,
+whose input is the pre-compaction history. Until a later response reports
+tokens, the fill is `compacted` and every surface shows a dash, never the older
+pre-compaction number. A compaction still running, or one that failed, has not
+changed the window, so the previous reading stays.
 
 Two further rules on this readout:
 
@@ -439,6 +453,12 @@ once-per-instance bookkeeping, so every caller can ask on each connection
 change.
 
 ### These readouts belong to the connected instance
+
+Same-origin web pages and Electron's Vite proxy initialize a runtime identity
+even when the API base is empty. Requests stay relative to the page origin.
+Electron dev uses `local`; hosted pages use their HTTP origin. Without this,
+the quota loader treats a working proxy as a transient disconnected runtime
+and skips the initial load.
 
 Quotas, MCP status, skills, agent memory and the Linear/GitHub logins are all
 served by whichever OpenChamber instance is connected, and each was cached

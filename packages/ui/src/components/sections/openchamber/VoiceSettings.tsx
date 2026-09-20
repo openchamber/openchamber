@@ -34,6 +34,8 @@ import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
 
+const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated w-full h-7 rounded-lg border border-input bg-surface-elevated px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-interactive-border-focus';
+
 const LOCAL_STT_MODELS = [
     {
         id: 'parakeet-tdt-0.6b-v2-int8',
@@ -179,7 +181,7 @@ const LocalModelPicker = ({
                         key={entry.id}
                         className={cn(
                             'rounded-lg border border-[var(--interactive-border)] p-3',
-                            selected && 'border-[var(--primary-base)] bg-[var(--primary-base)]/5',
+                            selected && 'border-border bg-interactive-selection text-interactive-selection-foreground',
                         )}
                     >
                         <div className="flex items-start justify-between gap-2">
@@ -919,7 +921,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={openaiApiKey}
                                             onChange={(e) => setOpenaiApiKey(e.target.value)}
                                             placeholder="sk-..."
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {openaiApiKey && (
                                             <button
@@ -950,7 +952,7 @@ export const VoiceSettings: React.FC = () => {
                                                 value={openaiCompatibleUrl}
                                                 onChange={(e) => setOpenaiCompatibleUrl(e.target.value)}
                                                 placeholder="http://localhost:8880/v1"
-                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                className={VOICE_TEXT_INPUT_CLASS}
                                             />
                                             {openaiCompatibleUrl && (
                                                 <button
@@ -974,7 +976,7 @@ export const VoiceSettings: React.FC = () => {
                                                 value={openaiCompatibleApiKey}
                                                 onChange={(e) => setOpenaiCompatibleApiKey(e.target.value)}
                                                 placeholder="sk-..."
-                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                className={VOICE_TEXT_INPUT_CLASS}
                                             />
                                             {openaiCompatibleApiKey && (
                                                 <button
@@ -995,7 +997,7 @@ export const VoiceSettings: React.FC = () => {
                                                 value={openaiCompatibleTtsModel}
                                                 onChange={(e) => setOpenaiCompatibleTtsModel(e.target.value)}
                                                 placeholder="speaches-ai/Kokoro-82M-v1.0-ONNX"
-                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                className={VOICE_TEXT_INPUT_CLASS}
                                             />
                                         </div>
                                     </div>
@@ -1011,7 +1013,7 @@ export const VoiceSettings: React.FC = () => {
                                                     value={openaiCompatibleVoice}
                                                     onChange={(e) => setOpenaiCompatibleVoice(e.target.value)}
                                                     placeholder="af_sky"
-                                                    className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                    className={VOICE_TEXT_INPUT_CLASS}
                                                 />
                                             </div>
                                             <Button size="xs" variant="ghost" onClick={previewCompatibleVoice} title={t('settings.voice.page.actions.preview')} disabled={!openaiCompatibleUrl.trim()}>
@@ -1226,7 +1228,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttServerUrl}
                                             onChange={(e) => setSttServerUrl(e.target.value)}
                                             placeholder="http://localhost:8001/v1"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {sttServerUrl && (
                                             <button
@@ -1250,7 +1252,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttApiKey}
                                             onChange={(e) => setSttApiKey(e.target.value)}
                                             placeholder="sk-..."
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {sttApiKey && (
                                             <button
@@ -1271,7 +1273,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttModel}
                                             onChange={(e) => setSttModel(e.target.value)}
                                             placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                     </div>
                                 </div>
@@ -1286,7 +1288,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttLanguage}
                                             onChange={(e) => setSttLanguage(e.target.value)}
                                             placeholder="auto"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                     </div>
                                 </div>

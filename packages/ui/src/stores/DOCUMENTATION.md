@@ -21,6 +21,8 @@ There are multiple store categories in this directory.
 
 ### Feature cache / query stores
 
+PR status reads share the aggregate background-network budget as well as their PR-specific cap. Command discovery gates each scope/config read, including body decoding, rather than only gating the initial SDK list. Command reads have a bounded deadline and abort on runtime reset. Reset clears server-derived command caches and invalidates late reads and mutation responses while preserving unsaved command drafts.
+
 These are the most performance-sensitive.
 
 - `useGitStore.ts`
@@ -96,6 +98,15 @@ so a delayed or lost handshake cannot hide an already-materialized transcript
 
 ### Session / project coordination stores
 
+`useMultiRunStore` creates ID-bound multi-run members. `useAgentGroupsStore`
+projects those identities for selection and group deletion, retaining failed
+directory scopes and resetting on runtime changes. Membership, fork handling,
+fusion and legacy compatibility are owned by `lib/multirun/DOCUMENTATION.md`.
+
+`useProjectsStore.hasServerSnapshot` distinguishes a server-confirmed project list from persisted startup hints; `serverSnapshotFailed` records a failed settings sync without clearing the last confirmed list. Successful settings adoption clears that failure even for an unchanged list. Runtime switching clears both flags. Extension project subscriptions consume these flags and project records without changing active selection.
+
+Project parsing, project selection, directory navigation, mobile session paths, and the SDK adapter share `lib/pathNormalization.ts` for request paths. Tilde expansion happens before normalization. Windows drive roots retain their slash, and parent navigation stops at drive and UNC share roots. Selecting a spelling variant of the current directory preserves history and its forward entries. Bare drive-relative paths such as `C:` stay distinct from `C:/`; normalization does not guess their filesystem target.
+
 Examples:
 
 - `useProjectsStore.ts`
@@ -103,10 +114,17 @@ Examples:
 - `useSessionFoldersStore.ts`
 - `useProjectContextStore.ts`
 - `messageQueueStore.ts`
+- `useRoutingStore.ts`
 
 These stores coordinate persistent project/session metadata across multiple views.
 
 `useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
+
+`useRoutingStore.ts` projects the server's Jev routing state (whether the Auto
+model may be offered, the config Settings → Routing edits, the last decision
+per session, permissions the safety net is holding). Nothing is persisted; a
+failed read keeps what was known and records `loadError` instead of reading as
+"routing is off". See `packages/web/server/lib/routing/DOCUMENTATION.md`.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
 On web, desktop, and mobile the server delivers the queue independently of the
@@ -164,6 +182,32 @@ Settings fields are declared once in the settings registry (`packages/ui/src/lib
 Session defaults belong to the active runtime. Switching instances clears the in-memory defaults and directory config snapshots; persisted config hydrates only when its recorded runtime matches. Legacy snapshots without an owner are refetched. Initialization, health checks, directory activation, and prewarming reject obsolete continuations, including A to B to A switches.
 
 Configured project and global model identifiers remain selected through provider discovery gaps. A draft can display its configured identifier before model metadata arrives. Catalog absence never selects Big Pickle in its place. An unknown settings document defers fallback selection; a successful document with no configured model permits the normal OpenCode fallback. Saved thinking preferences stay in settings, while a discovered model's supported variants determine the effective thinking level.
+
+Project defaults include `defaultAgent`, `defaultModel`, and `defaultVariant`.
+The project agent precedes the global agent, then OpenCode's default and the
+primary-agent fallback. Settings parsers retain all three fields on every read
+and save echo. The project editor loads agents, models, and effort options for
+the edited project without changing the active chat's configuration.
+Manual model and effort selections survive catalog gaps too. A missing catalog
+entry is not a request to replace a user's choice. Directory snapshots retain
+the effort override separately from its inherited value, including explicit
+`Default`. Fresh drafts inherit their project's effort before the global one.
+
+The agent and the model carry separate provenance. `setAgent` records the agent
+as picked (`agentSelectionSource: 'manual'`) and leaves `selectionSource` to
+describe the model alone, so an agent's pinned model stays inherited and is
+never saved as a per-agent session override. Every path that re-resolves
+defaults (`loadAgents`, the config-defaults reconcile, `loadSessionDefaults`,
+the draft re-apply after activation, the Defaults settings page) keeps a picked
+agent together with the model `setAgent` resolved for it. Only
+`applyDefaultModelAgentSelection` and activating a directory with no snapshot
+clear the pick. An effort picked in a draft is a choice of its own: those same
+paths leave the draft alone while `currentVariantSelection.override` is set.
+
+Project-default editing is available in desktop web and Electron. Hosted mobile
+and Capacitor consume those defaults through the shared composer but have no
+project-default editor. VS Code retains its workspace-project behavior and does
+not adopt or edit these project settings.
 
 `loadSessionDefaults` publishes preferences independently of OpenCode health and catalog requests. Cold directory activation starts providers and agents concurrently. Agent selection uses the latest committed preferences without waiting for providers or issuing a second settings read. Explicit preference edits update a draft immediately, and late settings responses preserve newer edits. Agent-pinned and OpenCode-config model identifiers can be selected before their catalog entries arrive.
 

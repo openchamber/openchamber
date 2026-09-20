@@ -3,12 +3,13 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
-/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
-   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
-   first markdown render of a session; that late injection triggered a style
-   recalc during which the layered `.chat-message-column` width clamp briefly
-   lost, flashing message text to full width before it snapped back. */
-@import "katex/dist/katex.min.css";
+/* KaTeX styles are loaded eagerly through `styles/katex-css` (a JS import) at
+   every app entry point. Keeping them eager avoids a late stylesheet injection
+   on the first markdown render, whose style recalc briefly lost the layered
+   `.chat-message-column` width clamp and flashed message text to full width.
+   A JS import is required because Lightning CSS inlines a CSS `@import`
+   without resolving the relative `url(fonts/...)` references, leaving the
+   KaTeX font files unbundled (openchamber/openchamber#1880). */
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -75,38 +76,31 @@ button,
   line-height: round(1.625em, 1px);
 }
 
-/* Text selection in chat and file previews: the theme accent at 30%, the same
-   in every theme. The themes' own selection token is tuned for selected rows
-   and in several light themes is nearly the page background; a translucent
-   accent stays visible over every background and never hides the text. */
+/* Native selection uses the theme's selection pair. */
 .message-content-text::selection,
 .message-content-text ::selection,
 .oc-file-preview::selection,
 .oc-file-preview ::selection {
   background: var(--oc-text-selection);
-  color: var(--surface-foreground);
+  color: var(--interactive-selection-foreground);
 }
 
 .oc-cm-selected-line {
-  background: color-mix(in srgb, var(--primary-base) 22%, transparent);
+  background: var(--interactive-selection);
+  color: var(--interactive-selection-foreground);
 }
 
-/* Quoted chat fragment kept visibly highlighted while its comment input is
-   open (the native selection collapses once the input takes focus). The
-   rectangles come from the selection's own client rects and paint in the
-   selection colour, so shape and shade both match the native selection that
-   was just showing; the colour is translucent because these rectangles sit
-   above the text. */
+/* These rectangles sit above glyphs, so the fill must remain translucent. */
 .oc-chat-comment-rect {
-  background-color: var(--oc-text-selection);
+  background-color: color-mix(in srgb, var(--interactive-selection) 35%, transparent);
 }
 
 .pierre-diff-wrapper {
-  --diffs-bg-selection-override: color-mix(in srgb, var(--primary-base) 22%, transparent);
-  --diffs-bg-selection-background-override: color-mix(in srgb, var(--primary-base) 14%, transparent);
-  --diffs-bg-selection-number-override: color-mix(in srgb, var(--primary-base) 28%, transparent);
-  --diffs-bg-selection-number-background-override: color-mix(in srgb, var(--primary-base) 18%, transparent);
-  --diffs-selection-color-override: var(--primary-base);
+  --diffs-bg-selection-override: var(--interactive-selection);
+  --diffs-bg-selection-background-override: var(--interactive-selection);
+  --diffs-bg-selection-number-override: var(--interactive-selection);
+  --diffs-bg-selection-number-background-override: var(--interactive-selection);
+  --diffs-selection-color-override: var(--interactive-selection-foreground);
 }
 
 /* Codemirror syntax fallback for classHighlighter tokens */
@@ -247,7 +241,7 @@ button,
 }
 
 :root.vscode-runtime [data-chat-input="true"] .cm-placeholder {
-  color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
 }
 
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
@@ -276,7 +270,8 @@ div[data-chat-input-footer="true"] {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -295,7 +290,7 @@ div[data-chat-input-footer="true"] {
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -327,7 +322,8 @@ div[data-chat-input-footer="true"] {
   opacity: 1;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"]:not([data-top-scroll="true"]):not([data-top-bottom-scroll="true"]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
@@ -419,11 +415,21 @@ button svg,
   shape-rendering: geometricPrecision;
 }
 
-/* GPU acceleration for non-spinning SVGs */
-button svg:not(.animate-spin),
-[role="button"] svg:not(.animate-spin) {
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
+/*
+ * WebKit only. A 3D transform gives every matched icon a compositor layer of
+ * its own, and the compositor walks every layer on every frame. Measured in
+ * Chromium with 60 icons on screen: 66 layers per frame instead of 9, three
+ * times the layerization time, and four points of renderer CPU while a
+ * response streams. The cost grows with the number of buttons on screen, so
+ * Chromium runtimes no longer get the hint. `font: -apple-system-body` is a
+ * value only WebKit parses, which keeps the rule where it was written for.
+ */
+@supports (font: -apple-system-body) {
+  button svg:not(.animate-spin),
+  [role="button"] svg:not(.animate-spin) {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
@@ -627,6 +633,12 @@ html:not(.dark) .chat-scroll {
 
 .overlay-scrollbar-target--no-gutter {
   scrollbar-gutter: unset !important;
+}
+
+/* Extensions can cross the overflow threshold as cards expand or the catalog loads. */
+.overlay-scrollbar-target:has(> .extensions-settings-page),
+.extensions-settings-page > .overlay-scrollbar-target {
+  scrollbar-gutter: stable !important;
 }
 
 .overlay-scrollbar-target::-webkit-scrollbar {
@@ -1092,10 +1104,6 @@ html:not(.dark) .chat-scroll {
 .markdown-content.markdown-reasoning {
   font-size: var(--text-markdown);
   color: var(--surface-muted-foreground);
-  --markdown-heading1: inherit;
-  --markdown-heading2: inherit;
-  --markdown-heading3: inherit;
-  --markdown-heading4: inherit;
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);
   --markdown-blockquote: inherit;
@@ -1302,6 +1310,8 @@ html:not(.dark) .chat-scroll {
 
 /* Reduce code block header height */
 [data-markdown="code-block-header"] {
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
   margin: 0;
   padding: 0.375rem 0.75rem;
   display: flex;
@@ -1328,7 +1338,9 @@ html:not(.dark) .chat-scroll {
   max-inline-size: 100%;
   min-inline-size: 0;
   overflow: hidden;
-  background: var(--surface-background);
+  --foreground: var(--syntax-foreground);
+  color: var(--foreground);
+  background: var(--syntax-background);
   border: 1px solid var(--interactive-border);
   border-radius: 0.75rem;
 }
@@ -1767,6 +1779,32 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
 }
 
+/*
+ * The staggered dots of a busy indicator that stays on screen for as long as
+ * the agent works. A smooth opacity pulse is composited, yet it still makes
+ * the compositor and the GPU process draw sixty frames a second: about ten
+ * percent of a core on an otherwise still page. Three steps per half cycle
+ * last 200ms each, the same as the stagger between dots, so every dot changes
+ * on the same five frames a second, which halves that cost. Keep the stagger
+ * a multiple of one step or the dots stop sharing frames.
+ */
+.animate-busy-wave {
+  animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite;
+}
+
+@keyframes oc-status-logo {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-status-logo {
+  animation: oc-status-logo 4s steps(10, jump-none) infinite;
+}
+
 @keyframes navrail-dot-wave {
   0%, 100% {
     transform: scale(0.72);
@@ -1887,7 +1925,9 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
     display: none;
   }
 
-  .animate-busy-pulse {
+  .animate-busy-pulse,
+  .animate-busy-wave,
+  .animate-status-logo {
     animation: none;
   }
 

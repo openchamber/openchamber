@@ -20,14 +20,14 @@ Icons use kebab-case names based on Remixicon. To find an icon name:
 3. Convert to kebab-case → `arrow-down-s`
 
 Common suffixes:
-- `Line` / `Fill` are dropped from the sprite name
+- `Line` is dropped; `Fill` becomes `-fill`
 - Numbers are preserved: `RiChat4Line` → `chat-4`
 
 ## Adding a New Icon
 
-1. Import and use it in your code: `<Icon name="new-icon-name" />`
-2. Run `bun run icons:sprite` to regenerate the sprite with the new icon
-3. The script scans `packages/ui/src` for all `RiX` usages and extracts SVG paths
+1. Use `<Icon name="new-icon-name" />` or declare a shared literal as `const icon: IconName = "new-icon-name"`.
+2. Run `bun run icons:generate` to regenerate the sprite.
+3. The script scans JSX names, typed icon constants and records, and existing `RiX` references under `packages/ui/src`.
 
 If the icon doesn't exist in the sprite, the script will warn you.
 
@@ -53,7 +53,7 @@ const icon: IconName = "arrow-down-s"; // type-checked
 
 ## Architecture
 
-- `sprite.ts` — Auto-generated SVG path data (run `bun run generate-icon-sprite` to regenerate)
+- `sprite.ts` — Auto-generated SVG path data, regenerated with `bun run icons:generate`
 - `Icon.tsx` — The `<Icon>` component, injects sprite on first mount
 - `icons.ts` — TypeScript type `IconName`
 

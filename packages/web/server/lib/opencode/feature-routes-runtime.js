@@ -5,6 +5,9 @@ import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
+import { registerGuestRoutes } from '../guests/routes.js';
+import { registerBuiltInGuests } from '../guests/catalog.js';
+import { extensionsPersistPath } from '../guests/persist.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
@@ -15,6 +18,7 @@ import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
+import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -98,6 +102,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitBinaryForSpawn,
       createFsSearchRuntime,
       openchamberDataDir,
+      onGuestDeactivated,
       openchamberUserConfigRoot,
       managedChatsRoot,
       normalizeDirectoryPath,
@@ -105,6 +110,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveOptionalProjectDirectory,
       validateDirectoryPath,
       readCustomThemesFromDisk,
+      saveImportedTheme,
+      deleteImportedTheme,
       refreshOpenCodeAfterConfigChange,
       getOpenCodeResolutionSnapshot,
       getOpenCodeUpgradeCapability,
@@ -136,16 +143,23 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
       messageQueueRuntime,
+      routingRuntime,
+      openchamberVersion,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
+      saveImportedTheme,
+      deleteImportedTheme,
       refreshOpenCodeAfterConfigChange,
       clientReloadDelayMs,
     });
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
+    registerRoutingRoutes(app, routingRuntime);
+    // Before the generic OpenCode proxy: turns `openchamber/auto` into a real model.
+    registerRoutingPromptRewrite(app, routingRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,
@@ -307,6 +321,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
+    await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated });
     registerGitRoutes(app, {
       emitWorktreeChanged: ({ directories, at }) => {
         const clients = getOpenChamberEventClients();

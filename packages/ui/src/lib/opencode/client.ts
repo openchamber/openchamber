@@ -32,6 +32,8 @@ export type FetchPermissionResult =
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
+import { normalizePath } from "@/lib/pathNormalization";
+import { hostSessionStatusSnapshotSchema, sessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -227,7 +229,9 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
         return runtimeFetch(input, init);
       }
       const timeout = createTimeoutSignal(requestTimeoutMs);
-      const callerSignal = init?.signal;
+      const callerSignal = init?.signal !== undefined
+        ? init.signal
+        : input instanceof Request ? input.signal : undefined;
       const supportsAny = typeof AbortSignal !== 'undefined'
         && typeof (AbortSignal as { any?: unknown }).any === 'function';
       let signal: AbortSignal;
@@ -258,16 +262,27 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       } else {
         signal = timeout.signal;
       }
+      const cleanup = () => {
+        detachFallback?.();
+        timeout.cleanup();
+      };
+      let responseHasBody = false;
       try {
-        return await runtimeFetch(input, { ...init, signal });
+        const response = await runtimeFetch(input, { ...init, signal });
+        responseHasBody = response.body !== null;
+        return response;
       } catch (error) {
         if (timeout.signal.aborted && !callerSignal?.aborted) {
           throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`);
         }
         throw error;
       } finally {
-        detachFallback?.();
-        timeout.cleanup();
+        // The SDK consumes JSON after fetch resolves. Keep cancellation and the
+        // deadline alive through body delivery, including on older WebViews
+        // using the manual signal composition. Retention is bounded by the
+        // request deadline, just like native AbortSignal.timeout.
+        if (!responseHasBody || signal.aborted) cleanup();
+        else signal.addEventListener('abort', cleanup, { once: true });
       }
     },
   });
@@ -334,7 +349,12 @@ const getDesktopFilesApi = (): FilesAPI | null => {
 // /api/fs/home parsing boundary. Older servers answer without chatsRoot;
 // only a valid home response may use the legacy chats-root fallback.
 const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/);
-const fsHomeResponseSchema = z.object({ home: fsAbsolutePathSchema, chatsRoot: fsAbsolutePathSchema.optional() });
+const fsHomeResponseSchema = z.object({
+  home: fsAbsolutePathSchema,
+  chatsRoot: fsAbsolutePathSchema.optional(),
+  canonicalChatsRoot: fsAbsolutePathSchema.optional(),
+  canonicalLegacyChatsRoot: fsAbsolutePathSchema.optional(),
+});
 
 class OpencodeService {
   private client: OpencodeClient;
@@ -409,23 +429,7 @@ class OpencodeService {
   }
 
   private normalizeCandidatePath(path?: string | null): string | null {
-    if (typeof path !== 'string') {
-      return null;
-    }
-
-    const trimmed = path.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    // Normalize backslashes and uppercase the Windows drive letter so that
-    // d:\MyProject and D:\MyProject resolve to the same canonical form.
-    const normalized = trimmed
-      .replace(/\\/g, '/')
-      .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
-    const withoutTrailingSlash = normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
-
-    return withoutTrailingSlash || null;
+    return normalizePath(path);
   }
 
   private deriveHomeDirectory(path: string): { homeDirectory: string; username?: string } {
@@ -445,7 +449,7 @@ class OpencodeService {
         return { homeDirectory, username: segments[0] };
       }
 
-      return { homeDirectory: drive, username: undefined };
+      return { homeDirectory: `${drive}/`, username: undefined };
     }
 
     const absolute = path.startsWith('/');
@@ -1166,15 +1170,13 @@ class OpencodeService {
     directory: string | null | undefined
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
-      const trimmedDirectory = typeof directory === "string" ? directory.trim() : "";
+      const trimmedDirectory = this.normalizeCandidatePath(directory);
       const result = await this.client.session.status(trimmedDirectory ? { directory: trimmedDirectory } : undefined);
-      if (result.error || !result.data || typeof result.data !== "object") {
+      if (result.error) {
         return null;
       }
-      return result.data as Record<
-        string,
-        { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
-      >;
+      const parsed = sessionStatusSnapshotSchema.safeParse(result.data);
+      return parsed.success ? parsed.data : null;
     } catch {
       return null;
     }
@@ -1184,6 +1186,28 @@ class OpencodeService {
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
     return (await this.getSessionStatusForDirectory(null)) ?? {};
+  }
+
+  /**
+   * Cross-project busy/retry/idle map kept by the OpenChamber host from the
+   * single upstream event stream. One request that creates no OpenCode
+   * instance, unlike `/session/status?directory=`. `null` means the fetch
+   * failed; callers must preserve their current state.
+   */
+  async getHostSessionStatusSnapshot(): Promise<HostSessionStatusSnapshot | null> {
+    try {
+      const response = await runtimeFetch('/api/sessions/status', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const parsed = hostSessionStatusSnapshotSchema.safeParse(await response.json().catch(() => null));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1662,10 +1686,11 @@ class OpencodeService {
   // all SSE event ingestion via the SDK's global.event() async iterator.
 
   // Command Management
-  async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+  async listCommandsWithDetails(directory?: string | null, signal?: AbortSignal): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
     const response = await this.client.command.list(
-      requestDirectory ? { directory: requestDirectory } : undefined
+      requestDirectory ? { directory: requestDirectory } : undefined,
+      { signal },
     );
     const commands = unwrapSdkData(response, 'command.list');
     // Return full command details including template

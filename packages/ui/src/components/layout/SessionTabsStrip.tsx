@@ -169,7 +169,7 @@ const SessionTabItem: React.FC<{
                     // after the click.
                     'session-tab group/session-tab relative flex h-7 w-full min-w-0 select-none items-center rounded-md px-2',
                     isActive
-                      ? 'bg-interactive-selection'
+                      ? 'bg-interactive-selection text-interactive-selection-foreground'
                       : cn(
                         'cursor-pointer text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                         overlayVisible && 'bg-interactive-hover text-foreground',

@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatView } from '@/components/views/ChatView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
@@ -7,7 +8,7 @@ import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
-import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
+import { setStreamPerfMemoryDebugEnabled } from '@/stores/utils/streamDebug';
 import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFlight';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
@@ -19,6 +20,8 @@ import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
+import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
@@ -69,6 +72,7 @@ import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
+import { fetchStartupDiagnostics, type StartupDiagnostics } from '@/lib/startupDiagnostics';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -91,14 +95,48 @@ const StartupInitializationRecovery: React.FC<{
   isRetrying: boolean;
 }> = ({ onRetry, isRetrying }) => {
   const { t } = useI18n();
+  const [diagnostics, setDiagnostics] = React.useState<StartupDiagnostics | null>(null);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const runtimeKey = getRuntimeKey();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    void fetchStartupDiagnostics(controller.signal).then((result) => {
+      if (!controller.signal.aborted && getRuntimeKey() === runtimeKey) {
+        setDiagnostics(result);
+      }
+    }).catch(() => {
+      // Keep generic recovery when the server cannot supply current diagnostics.
+    }).finally(() => clearTimeout(timeout));
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, []);
 
   return (
-    <div className="flex h-full items-center justify-center bg-background px-6 text-foreground">
-      <div className="flex max-w-md flex-col items-center gap-4 text-center">
+    <div className="flex h-full flex-col items-center overflow-y-auto bg-background px-6 py-6 text-foreground">
+      <div className="my-auto flex w-full max-w-xl shrink-0 flex-col items-center gap-4 text-center">
         <div className="flex flex-col gap-2">
           <h1 className="typography-title text-foreground">{t('startup.initRecovery.title')}</h1>
-          <p className="typography-body text-muted-foreground">{t('startup.initRecovery.description')}</p>
+          <p className="typography-body text-muted-foreground">{t(diagnostics ? 'startup.initRecovery.openCodeUnavailable' : 'startup.initRecovery.description')}</p>
         </div>
+        {diagnostics && (
+          <dl className="w-full min-w-0 space-y-3 text-left" aria-live="polite">
+            {diagnostics.binary && (
+              <div>
+                <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.binary')}</dt>
+                <dd className="break-all font-mono typography-meta">{diagnostics.binary}</dd>
+              </div>
+            )}
+            {diagnostics.error && (
+              <div>
+                <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.error')}</dt>
+                <dd className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words font-mono typography-meta text-[var(--status-error)]">{diagnostics.error}</dd>
+              </div>
+            )}
+          </dl>
+        )}
         <Button type="button" onClick={onRetry} disabled={isRetrying}>
           {isRetrying ? t('startup.initRecovery.retrying') : t('startup.initRecovery.retry')}
         </Button>
@@ -278,15 +316,10 @@ function App({ apis }: AppProps) {
   const isMcpOAuthCallback = React.useMemo(() => isMcpOAuthCallbackPath(), []);
 
   React.useEffect(() => {
-    setStreamPerfEnabled(showMemoryDebug);
-    return () => {
-      setStreamPerfEnabled(false);
-    };
-  }, [showMemoryDebug]);
-
-  React.useEffect(() => {
+    setStreamPerfMemoryDebugEnabled(showMemoryDebug);
     setRequestsInFlightTrackingEnabled(showMemoryDebug);
     return () => {
+      setStreamPerfMemoryDebugEnabled(false);
       setRequestsInFlightTrackingEnabled(false);
     };
   }, [showMemoryDebug]);
@@ -723,6 +756,8 @@ function App({ apis }: AppProps) {
   // this snapshot, so leaving it to the panel meant a user who never opened
   // Project notes sent every message with no memory index at all.
   useAgentMemorySync(currentDirectory || null);
+  useBrowserProviderSync();
+  useRoutingSync();
   usePwaInstallPrompt();
 
   useWindowTitle();
@@ -935,6 +970,7 @@ function App({ apis }: AppProps) {
     return (
       <ErrorBoundary>
         <StartupInitializationRecovery
+          key={runtimeEndpointEpoch}
           onRetry={() => { void handleManualInitRetry(); }}
           isRetrying={manualInitRetrying}
         />
@@ -957,6 +993,7 @@ function App({ apis }: AppProps) {
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
                   <OpenCodeUpdateToast />
                   <MainLayout />
+                  <AppStartupOverlay ready={isInitialized && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))} />
                   <Toaster />
                   <AppLinkConfirmDialog />
                   <SharedTrustConfirmDialog />

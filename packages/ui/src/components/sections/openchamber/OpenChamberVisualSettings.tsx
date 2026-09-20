@@ -1,4 +1,6 @@
 import React from 'react';
+import { ThemeImportButton } from './ThemeImportButton';
+import { ThemeSelectItem } from './ThemeSelectItem';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
@@ -673,6 +675,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, []);
 
     const shouldShow = (setting: VisibleSetting): boolean => {
+        if (setting === 'enterToSend' && isMobile) return false;
         if (!visibleSettings) return true;
         return visibleSettings.includes(setting);
     };
@@ -947,9 +950,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {lightThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'light')}
-                                                        </SelectItem>
+                                                        <ThemeSelectItem key={theme.metadata.id} id={theme.metadata.id} label={formatThemeLabel(theme.metadata.name, 'light')} />
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -968,9 +969,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {darkThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                        </SelectItem>
+                                                        <ThemeSelectItem key={theme.metadata.id} id={theme.metadata.id} label={formatThemeLabel(theme.metadata.name, 'dark')} />
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -1003,6 +1002,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
                                             </SettingsInfoHint>
                                         </div>
+                                        <ThemeImportButton />
                                     </div>
                                 </SettingsTwoColumn>
 
@@ -1617,11 +1617,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         className={cn(
                                                             'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
                                                             selected
-                                                                ? 'border-primary bg-primary/5'
-                                                                : 'border-border hover:border-border/80 hover:bg-muted/50'
+                                                                ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
+                                                                : 'border-border hover:border-border/80 hover:bg-interactive-hover'
                                                         )}
                                                     >
-                                                        <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
+                                                        <span className={cn('typography-ui-label', selected ? 'text-inherit' : 'text-muted-foreground')}>
                                                             {tUnsafe(option.labelKey)}
                                                         </span>
                                                         <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">

@@ -220,7 +220,7 @@ async function main() {
     });
   }
 
-  const electron = spawnProcess('bun', ['x', 'electron', './main.mjs'], {
+  const electron = spawnProcess('bun', ['x', 'electron', './entry.mjs'], {
     cwd: electronDir,
     env: {
       ...process.env,

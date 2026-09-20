@@ -103,7 +103,14 @@ const getMarkdownImageCandidates = (markdown: string): MarkdownImageCandidate[] 
     return cached.candidates;
   }
 
-  const candidates = scanMarkdownImageCandidates(markdown);
+  let candidates: MarkdownImageCandidate[];
+  try {
+    candidates = scanMarkdownImageCandidates(markdown);
+  } catch {
+    // Image discovery is optional; a malformed message must not hide the chat
+    // or prevent discovery in the other messages.
+    return [];
+  }
   const bytes = estimateMarkdownImageCandidateCacheEntryBytes(markdown, candidates);
   if (bytes > MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_ENTRY_BYTES) return candidates;
 
@@ -283,9 +290,9 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
 // backslash escapes and strips the slash before any HTML post-process can see
 // them. Registering them as tokenizers also makes them code-safe for free
 // (marked tokenizes code spans/fences first, so these never fire inside code).
-// Single-dollar `$...$` is intentionally NOT supported — it collides with
-// currency text ($50, US$ 680); only `$$...$$` survives as display math (see
-// renderMathExpressions). This mirrors KaTeX auto-render's default delimiters.
+// Dollar math (`$...$` inline, `$$...$$` display) survives marked untouched
+// (no backslash) and is rendered later from the parsed HTML, with currency
+// guards — see renderMathExpressions.
 type MathToken = { type: string; raw: string; text: string };
 
 const renderKatex = (math: string, raw: string, displayMode: boolean): string => {
@@ -450,20 +457,62 @@ const imageLabelParser = createParser('label');
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
 // ---------------------------------------------------------------------------
 
-// Only `$$...$$` (display) is handled here. Single-dollar `$...$` inline math is
-// deliberately omitted: it parses currency text ($50, US$ 680, "$50M to $72M")
-// as math and corrupts it. Inline math is supported via `\(...\)` (see the
-// marked extensions above). `$$` survives marked untouched (no backslash), so
-// post-processing the parsed HTML — skipping code via renderMathExpressions —
-// stays correct and code-safe.
+// Dollar delimiters have no backslash, so marked passes them through and
+// math is post-processed from the rendered HTML below.
+//
+// marked renders text with HTML entities (`'` → `&#39;`, `&` → `&amp;`, `<` →
+// `&lt;`), so the captured LaTeX must be unescaped again before KaTeX sees
+// it. Without this, a transpose `(y-X\beta)'` or an alignment `&` parse-fails
+// and KaTeX paints the raw source red (`katex-error`, via index.css).
+const unescapeHtml = (value: string): string =>
+  value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+
+// Both dollar forms are matched by one alternation so KaTeX output is never
+// rescanned by the same pass:
+//
+//   `$$...$$`  display math, content may span lines but never markup.
+//   `$...$`    inline math, guarded so currency prose stays text —
+//                `$5 and $10`, `US$ 680`, `$50M to $72M` survive as literal:
+//                - the opening `$` must be followed by a non-space, non-`$`
+//                - the closing `$` must be preceded by a non-space and not
+//                  followed by a digit
+//                - content never contains `$`/`<`/`>`/`"`, so a pair cannot
+//                  reach across markup or into an attribute
+//                - purely numeric content (`$100$`) stays text
+//
+// `\$` escapes cannot be honored post-parse: marked has already consumed the
+// backslash by the time this pass runs.
+const MATH_DOLLAR_RE =
+  /\$\$([\s\S]*?)\$\$|\$(?![\s$])([^\s$<>"](?:[^$<>"]*?[^\s$<>"])?)\$(?!\d)/g;
+
+const DOLLAR_AMOUNT_RE = /^[\d.,\s]+$/;
+
 const renderMathInText = (text: string): string =>
-  text.replace(/\$\$([\s\S]*?)\$\$/g, (_match, math: string) => {
-    try {
-      return katex.renderToString(math, { displayMode: true, throwOnError: false });
-    } catch {
-      return `$$${math}$$`;
+  text.replace(MATH_DOLLAR_RE, (match, display: string | undefined, inline: string | undefined) => {
+    if (display !== undefined) {
+      return renderKatex(unescapeHtml(display), match, true);
     }
+    if (inline !== undefined && !DOLLAR_AMOUNT_RE.test(inline)) {
+      return renderKatex(unescapeHtml(inline), match, false);
+    }
+    return match;
   });
+
+// Math runs per text run, mirroring how KaTeX auto-render walks DOM text
+// nodes: markup boundaries are excluded, so a `$...$` pair never stretches
+// across elements or into an attribute (an href may legitimately hold `$`).
+const TAG_RE = /(<[^>]*>)/;
+
+const renderMathInTextRun = (part: string): string =>
+  part
+    .split(TAG_RE)
+    .map((segment, index) => (index % 2 === 1 ? segment : renderMathInText(segment)))
+    .join('');
 
 const renderMathExpressions = (html: string): string => {
   // No `$` anywhere means no math to render — skip the split + regex passes on
@@ -473,7 +522,7 @@ const renderMathExpressions = (html: string): string => {
   const codeBlockPattern = /(<(?:pre|code|kbd)[^>]*>[\s\S]*?<\/(?:pre|code|kbd)>)/gi;
   return html
     .split(codeBlockPattern)
-    .map((part, index) => (index % 2 === 1 ? part : renderMathInText(part)))
+    .map((part, index) => (index % 2 === 1 ? part : renderMathInTextRun(part)))
     .join('');
 };
 
@@ -495,14 +544,6 @@ const exceedsLineLimit = (value: string, limit: number): boolean => {
   }
   return false;
 };
-
-const unescapeHtml = (value: string): string =>
-  value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
 
 const highlightCodeBlocks = async (html: string): Promise<string> => {
   const matches = [...html.matchAll(CODE_BLOCK_RE)];
@@ -664,9 +705,18 @@ export const getCachedMarkdownBlocks = (
   return rendered;
 };
 
+const renderPlainText = (text: string): string =>
+  `<div class="whitespace-pre-wrap break-words">${escapeRawMarkdownHtml(text)}</div>`;
+
 const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
-  const parsed = await Promise.resolve(parser.parse(block.src));
+  let parsed: string;
+  try {
+    parsed = await parser.parse(block.src);
+  } catch {
+    // Preserve the original source, not the syntax repaired for streaming.
+    return renderPlainText(block.raw);
+  }
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
   return sanitize(highlighted);
@@ -687,7 +737,12 @@ export const renderMarkdownSync = (
 ): string => {
   if (!text) return '';
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
-  const parsed = parser.parse(text) as string;
+  let parsed: string;
+  try {
+    parsed = parser.parse(text, { async: false });
+  } catch {
+    return renderPlainText(text);
+  }
   const withMath = renderMathExpressions(parsed);
   return sanitize(withMath);
 };

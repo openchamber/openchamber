@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import path from 'path';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -1586,6 +1587,40 @@ describe('fs managed chats root', () => {
     expect(res.body.chatsRoot).toBe('/srv/openchamber-chats');
   });
 
+  it('fails home lookup on permission errors and retries the next request', async () => {
+    const failure = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    let inaccessible = true;
+    const { home } = registerWithChatsRoot({ fsPromises: {
+      realpath: async directory => { if (inaccessible) throw failure; return directory; },
+    } });
+    const failed = createMockResponse();
+    await home(undefined, failed);
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).toEqual({ error: 'permission denied' });
+    inaccessible = false;
+    const recovered = createMockResponse();
+    await home(undefined, recovered);
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.body.chatsRoot).toBe('/home/user/.config/openchamber/chats');
+  });
+
+  it('keeps an accessible relocated root available when legacy alias lookup fails', async () => {
+    const { home } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/chat-alias',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/chat-alias') return '/storage/chats';
+          throw Object.assign(new Error('legacy root is inaccessible'), { code: 'EACCES' });
+        },
+      },
+    });
+    const response = createMockResponse();
+    await home(undefined, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.canonicalChatsRoot).toBe('/storage/chats');
+    expect(response.body.canonicalLegacyChatsRoot).toBeUndefined();
+  });
+
   it('allows mkdir inside the relocated chats root outside the active workspace', async () => {
     const mkdirCalls = [];
     const { mkdir } = registerWithChatsRoot({
@@ -1605,6 +1640,22 @@ describe('fs managed chats root', () => {
     expect(mkdirCalls).toEqual(['/srv/openchamber-chats/2026-08-25/session-a']);
   });
 
+  it('accepts a canonical relocated root even when the config root cannot be resolved', async () => {
+    const { mkdir } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/chat-alias',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/chat-alias') return '/storage/chats';
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        },
+      },
+    });
+    const response = createMockResponse();
+    await mkdir({ body: { path: '/storage/chats/day/session-a' } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.path).toBe('/storage/chats/day/session-a');
+  });
+
   it('still rejects mkdir outside the workspace and all managed roots', async () => {
     const { mkdir } = registerWithChatsRoot({ managedChatsRoot: '/srv/openchamber-chats' });
 
@@ -1613,5 +1664,70 @@ describe('fs managed chats root', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+  });
+});
+
+describe('canonical managed roots with real filesystem aliases', () => {
+  const setup = async (context, { relocated = false, caseAlias = false } = {}) => {
+    const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-canonical-chats-'));
+    context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+    const home = path.join(root, 'Home');
+    await nativeFs.mkdir(home);
+    const reportedHome = path.join(root, caseAlias ? 'home' : 'home-alias');
+    if (!caseAlias) await nativeFs.symlink(home, reportedHome, 'junction');
+    const config = path.join(reportedHome, '.config/openchamber');
+    const rawChats = relocated ? path.join(reportedHome, 'scratch/chats') : path.join(config, 'chats');
+    const canonicalHome = await nativeFs.realpath(home);
+    if (caseAlias && await nativeFs.realpath(reportedHome).catch(() => null) !== canonicalHome) {
+      context.skip('This volume distinguishes Home from home');
+    }
+    const canonicalChats = path.join(canonicalHome, relocated ? 'scratch/chats' : '.config/openchamber/chats');
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => reportedHome }, path, fsPromises: nativeFs,
+      normalizeDirectoryPath: value => value,
+      resolveProjectDirectory: async () => ({ directory: path.join(root, 'unrelated-project') }),
+      openchamberUserConfigRoot: config, managedChatsRoot: rawChats,
+    });
+    return { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome };
+  };
+
+  for (const relocated of [false, true]) {
+    it(`returns canonical paths before the ${relocated ? 'relocated' : 'default'} root exists and permits its lifecycle`, async context => {
+      const { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome } = await setup(context, { relocated });
+      const home = createMockResponse();
+      await getRoute('GET', '/api/fs/home')({}, home);
+      expect(home.body).toEqual({
+        home: reportedHome, chatsRoot: rawChats,
+        canonicalChatsRoot: canonicalChats,
+        canonicalLegacyChatsRoot: path.join(canonicalHome, '.config/openchamber/chats'),
+      });
+      await expect(nativeFs.stat(canonicalChats)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const directory = path.join(home.body.canonicalChatsRoot, 'day/session-a');
+      const created = createMockResponse();
+      await getRoute('POST', '/api/fs/mkdir')({ body: { path: directory } }, created);
+      expect(created.statusCode).toBe(200);
+      expect(await nativeFs.realpath(directory)).toBe(directory);
+      const deleted = createMockResponse();
+      await getRoute('POST', '/api/fs/delete')({ body: { path: directory } }, deleted);
+      expect(deleted.statusCode).toBe(200);
+      await expect(nativeFs.stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const legacy = createMockResponse();
+      await getRoute('POST', '/api/fs/mkdir')({ body: { path: path.join(rawChats, 'legacy-session') } }, legacy);
+      expect(legacy.statusCode).toBe(200);
+      expect((await nativeFs.stat(path.join(canonicalChats, 'legacy-session'))).isDirectory()).toBe(true);
+    });
+  }
+
+  it('reports on-disk home casing on a case-insensitive macOS volume', { skip: process.platform !== 'darwin' }, async context => {
+    const { getRoute, canonicalChats, rawChats, reportedHome } = await setup(context, { caseAlias: true });
+    const response = createMockResponse();
+    await getRoute('GET', '/api/fs/home')({}, response);
+    expect(response.body).toEqual({
+      home: reportedHome, chatsRoot: rawChats,
+      canonicalChatsRoot: canonicalChats, canonicalLegacyChatsRoot: canonicalChats,
+    });
   });
 });

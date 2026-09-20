@@ -1,0 +1,122 @@
+name: Publish SDK preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_number:
+        description: 'Preview number N for 1.23.2-preview.N'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and validate the package without publishing'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-preview-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Resolve preview version
+        env:
+          PREVIEW_NUMBER: ${{ inputs.preview_number }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const number = process.env.PREVIEW_NUMBER;
+          if (!/^[1-9][0-9]*$/.test(number ?? '')) {
+            throw new Error('Preview number must be a positive integer without leading zeros.');
+          }
+          appendFileSync(process.env.GITHUB_ENV, `SDK_VERSION=1.23.2-preview.${number}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate SDK
+        run: |
+          bun run --cwd packages/sdk type-check
+          bun run --cwd packages/sdk lint
+          bun run --cwd packages/sdk test
+
+      - name: Set preview version and build
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'packages/sdk/package.json';
+          const manifest = JSON.parse(readFileSync(path, 'utf8'));
+          manifest.version = process.env.SDK_VERSION;
+          writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+          NODE
+          bun run --cwd packages/sdk clean
+          bun run --cwd packages/sdk build
+          bun pm pack --cwd packages/sdk --destination "$RUNNER_TEMP"
+
+      - name: Test packed SDK in an isolated consumer
+        run: |
+          consumer=$(mktemp -d "$RUNNER_TEMP/sdk-consumer.XXXXXX")
+          export SDK_TARBALL="$RUNNER_TEMP/openchamber-sdk-$SDK_VERSION.tgz"
+          cd "$consumer"
+          npm init -y
+          npm install --ignore-scripts --no-audit --no-fund "$SDK_TARBALL"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { connectHost } from '@openchamber/sdk';
+          import { mountButton } from '@openchamber/sdk/ui';
+          import { parseManifestJson } from '@openchamber/sdk/schemas';
+          assert.equal(typeof connectHost, 'function');
+          assert.equal(typeof mountButton, 'function');
+          assert.equal(typeof parseManifestJson, 'function');
+          const manifest = JSON.parse(readFileSync('node_modules/@openchamber/sdk/package.json', 'utf8'));
+          assert.equal(manifest.version, process.env.SDK_VERSION);
+          NODE
+          cat > panel.ts <<'TS'
+          import { connectHost } from '@openchamber/sdk';
+          import { mountButton } from '@openchamber/sdk/ui';
+          const host = connectHost();
+          void host.listProjects();
+          void host.storage.get('notes');
+          console.log(mountButton);
+          TS
+          "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM panel.ts
+          ./node_modules/.bin/openchamber-guest-bundle panel.ts panel.js
+          test -s panel.js
+          node --check panel.js
+
+      - name: Publish preview to npm
+        if: ${{ !inputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "$RUNNER_TEMP/openchamber-sdk-$SDK_VERSION.tgz" --access public --tag preview
+
+      - name: Write run summary
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "SDK: \`@openchamber/sdk@$SDK_VERSION\`"
+            echo "Source: \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
+            echo "Dry run: $DRY_RUN"
+            echo 'Documentation: https://docs.openchamber.dev/sdk/'
+            if [ "$DRY_RUN" = false ]; then
+              echo "Install this version: \`npm install @openchamber/sdk@$SDK_VERSION\`"
+              echo 'Install the current preview: `npm install @openchamber/sdk@preview`'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

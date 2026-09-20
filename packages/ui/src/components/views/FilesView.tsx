@@ -3749,7 +3749,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               type="button"
               onClick={() => setShowMobilePageContent(false)}
               aria-label={t('filesView.editor.back')}
-              className="inline-flex size-7 flex-shrink-0 items-center justify-center mr-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex size-7 flex-shrink-0 items-center justify-center mr-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Icon name="arrow-left-s" className="size-5" />
             </button>

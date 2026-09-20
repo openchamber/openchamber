@@ -393,6 +393,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
       const result = await createMultiRun(params);
       if (result) {
+        if (result.failedCount > 0) toast.error(t('multirun.launcher.toast.partialFailure', { failed: result.failedCount }));
         if (result.firstSessionId) {
           useSessionUIStore.getState().setCurrentSession(result.firstSessionId);
         }
@@ -435,7 +436,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                     type="button"
                     onClick={onCancel}
                     aria-label={t('multirun.launcher.actions.closeEsc')}
-                    className="inline-flex h-9 w-9 items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary app-region-no-drag"
+                    className="inline-flex h-9 w-9 items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring app-region-no-drag"
                   >
                     <Icon name="close" className="h-5 w-5" />
                   </button>
@@ -565,7 +566,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                           <button
                             type="button"
                             onClick={() => setSetupCommands(setupCommands.filter((_, i) => i !== index))}
-                            className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                            className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             aria-label={t('multirun.launcher.setupCommands.removeCommandAria')}
                           >
                             <Icon name="close" className="h-3.5 w-3.5" />

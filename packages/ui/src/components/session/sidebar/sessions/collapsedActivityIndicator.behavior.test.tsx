@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useCollapsedSessionActivityState } from './collapsedActivityState';
 import type { SessionNode } from '../types';
@@ -44,9 +45,32 @@ describe('collapsed activity scalar selector', () => {
       await act(async () => replaceGlobalSessionStatusById(new Map([['relevant', { status: { type: 'busy' }, directory: '/workspace' }]])));
       expect(capture.state).toBe('active');
       expect(capture.renders).toBe(unreadRenders + 1);
+
+      // A pending request outranks a running turn, and a request elsewhere is ignored.
+      const activeRenders = capture.renders;
+      await act(async () => applyGlobalBlockingRequestEvents('/other', [{
+        id: 'e1', type: 'question.asked', properties: { id: 'q-other', sessionID: 'unrelated', questions: [] },
+      }]));
+      expect(capture.state).toBe('active');
+      expect(capture.renders).toBe(activeRenders);
+      await act(async () => applyGlobalBlockingRequestEvents('/workspace', [{
+        id: 'e2', type: 'question.asked', properties: { id: 'q1', sessionID: 'relevant', questions: [] },
+      }]));
+      expect(capture.state).toBe('question');
+      await act(async () => applyGlobalBlockingRequestEvents('/workspace', [{
+        id: 'e3', type: 'permission.asked',
+        properties: { id: 'p1', sessionID: 'relevant', permission: 'bash', patterns: [], metadata: {}, always: [] },
+      }]));
+      expect(capture.state).toBe('permission');
+      await act(async () => applyGlobalBlockingRequestEvents('/workspace', [
+        { id: 'e4', type: 'permission.replied', properties: { sessionID: 'relevant', requestID: 'p1', reply: 'once' } },
+        { id: 'e5', type: 'question.replied', properties: { sessionID: 'relevant', requestID: 'q1', answers: [] } },
+      ]));
+      expect(capture.state).toBe('active');
     } finally {
       await act(async () => root.unmount());
       replaceGlobalSessionStatusById(new Map());
+      resetGlobalBlockingRequests();
       useNotificationStore.setState({
         list: [],
         index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },

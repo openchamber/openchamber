@@ -117,6 +117,32 @@ test('same-URL reconnect isolates provider requests and old completion cannot de
   expect((await joinedRequest).default.default).toBe('new');
 });
 
+test('Windows drive roots remain absolute in directory selection and SDK client identity', () => {
+  const previous = opencodeClient.getDirectory();
+  try {
+    opencodeClient.setDirectory('c:\\');
+    expect(opencodeClient.getDirectory()).toBe('C:/');
+    expect(opencodeClient.getScopedSdkClient('c:\\')).toBe(opencodeClient.getScopedSdkClient('C:/'));
+    expect(opencodeClient.getScopedSdkClient('C:/')).not.toBe(opencodeClient.getScopedSdkClient('C:'));
+  } finally {
+    opencodeClient.setDirectory(previous);
+  }
+});
+
+test('Windows separators and UNC representations share SDK clients without lowercasing directory names', () => {
+  expect(opencodeClient.getScopedSdkClient('c:\\Users\\Developer\\Project\\'))
+    .toBe(opencodeClient.getScopedSdkClient('C:/Users/Developer/Project'));
+  expect(opencodeClient.getScopedSdkClient('\\\\Server\\Share\\Project\\'))
+    .toBe(opencodeClient.getScopedSdkClient('//Server/Share/Project'));
+  expect(opencodeClient.getScopedSdkClient('/repo/Project'))
+    .not.toBe(opencodeClient.getScopedSdkClient('/repo/project'));
+});
+
+test('a drive-root system-info fallback stays absolute', async () => {
+  pathGetResults.push({ data: { directory: 'C:/' } });
+  expect((await opencodeClient.getSystemInfo()).homeDirectory).toBe('C:/');
+});
+
 describe('opencodeClient directory availability', () => {
   type ProbeBody = { error: string; reason?: string } | { isDirectory: boolean } | { isFile: boolean; size: number };
   const json = (status: number, body: ProbeBody): Response => new Response(JSON.stringify(body), {
