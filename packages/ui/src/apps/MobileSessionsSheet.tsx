@@ -44,6 +44,11 @@ import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectorie
 import { getDescendantIds, partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { collectSessionSubtreeIds, runSessionSubtreeAction, type SessionSubtreeAction } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
+import {
+  collectQuestionBadgeScopes,
+  type QuestionBadgeScopeEntry,
+  type QuestionBadgeSessionScope,
+} from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
@@ -55,7 +60,7 @@ import {
   partitionWorktreesByRegisteredProject,
 } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -68,7 +73,7 @@ import {
   useSessionOrderingStore,
 } from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
+import { useAllLiveSessions, useGlobalSessionStatus, useSessionPermissions, useSessionQuestionCount } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -165,6 +170,33 @@ const getSessionDirectory = (session: Session): string => {
     project?: { worktree?: string | null } | null;
   };
   return normalizePath(sessionWithDirectory.directory ?? sessionWithDirectory.project?.worktree ?? null);
+};
+
+const EMPTY_QUESTION_BADGE_SCOPES: QuestionBadgeSessionScope[] = [];
+
+/**
+ * Pending-question scopes for a mobile row: the row's own session plus, while it
+ * is collapsed, the hidden descendants of its subtree — grouped by the directory
+ * store each session belongs to. Mirrors the desktop sidebar row, so a question
+ * waiting on a hidden subagent still surfaces on its parent row.
+ */
+const collectSessionQuestionBadgeScopes = (
+  session: Session,
+  childrenBySessionId: ReadonlyMap<string, Session[]>,
+  isExpanded: boolean,
+): QuestionBadgeSessionScope[] => {
+  const fallbackDirectory = resolveGlobalSessionDirectory(session);
+  const entries = new Map<string, QuestionBadgeScopeEntry>();
+  const build = (current: Session): void => {
+    const children = childrenBySessionId.get(current.id) ?? [];
+    entries.set(current.id, {
+      directory: resolveGlobalSessionDirectory(current) ?? fallbackDirectory,
+      childIds: children.map((child) => child.id),
+    });
+    for (const child of children) build(child);
+  };
+  build(session);
+  return collectQuestionBadgeScopes(entries, session.id, isExpanded);
 };
 
 const getSessionTimestamp = (session: Session): number => {
@@ -500,6 +532,8 @@ const SessionRow: React.FC<{
   onRequestRename?: () => void;
   onSubmitRename?: (title: string) => void;
   onCancelRename?: () => void;
+  /** Pending-question scopes rolled up for this row (own session + hidden descendants). */
+  questionBadgeSessionScopes?: QuestionBadgeSessionScope[];
 }> = ({
   session,
   active,
@@ -519,6 +553,7 @@ const SessionRow: React.FC<{
   onRequestRename,
   onSubmitRename,
   onCancelRename,
+  questionBadgeSessionScopes = EMPTY_QUESTION_BADGE_SCOPES,
 }) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
@@ -534,6 +569,15 @@ const SessionRow: React.FC<{
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
+  // Pending question / permission badges, same convention and colors as the
+  // desktop sidebar row: a blocked session must not look like a working one.
+  const sessionDirectory = resolveGlobalSessionDirectory(session);
+  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
+  const pendingPermissionCount = sessionPermissions.length;
+  const pendingQuestionCount = useSessionQuestionCount(questionBadgeSessionScopes);
+  const pendingQuestionLabel = pendingQuestionCount === 1
+    ? t('sessions.sidebar.session.status.questionPendingSingle')
+    : t('sessions.sidebar.session.status.questionPendingMany', { count: pendingQuestionCount });
 
   const contentRef = React.useRef<HTMLDivElement>(null);
   const startRef = React.useRef<{ x: number; y: number } | null>(null);
@@ -746,6 +790,26 @@ const SessionRow: React.FC<{
               >
                 {title}
               </span>
+              {pendingPermissionCount > 0 ? (
+                <span
+                  className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive"
+                  title={t('sessions.sidebar.session.status.permissionRequired')}
+                  aria-label={t('sessions.sidebar.session.status.permissionRequired')}
+                >
+                  <Icon name="shield" className="h-3 w-3" />
+                  <span className="leading-none">{pendingPermissionCount}</span>
+                </span>
+              ) : null}
+              {pendingQuestionCount > 0 ? (
+                <span
+                  className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info"
+                  title={pendingQuestionLabel}
+                  aria-label={pendingQuestionLabel}
+                >
+                  <Icon name="question" className="h-3 w-3" />
+                  <span className="leading-none">{pendingQuestionCount}</span>
+                </span>
+              ) : null}
               {/* The elapsed turn takes the time slot while it matters, then
                   hands it back to the relative timestamp. */}
               {showActivityDuration ? (
@@ -1125,6 +1189,21 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return children;
   }, [sessions]);
 
+  // Pending-question scopes per row, computed once per session-list/expansion
+  // change so SessionRow's question hooks receive stable array identities: a
+  // collapsed row rolls up its hidden descendants, an expanded row counts
+  // itself only.
+  const questionBadgeScopesBySessionId = React.useMemo(() => {
+    const scopes = new Map<string, QuestionBadgeSessionScope[]>();
+    for (const session of sessions) {
+      scopes.set(
+        session.id,
+        collectSessionQuestionBadgeScopes(session, childrenBySessionId, Boolean(expandedParents[session.id])),
+      );
+    }
+    return scopes;
+  }, [childrenBySessionId, expandedParents, sessions]);
+
   // Managed Chats (sessions under ~/.config/openchamber/chats) are not owned
   // by any registered project; they get their own section above the project
   // tree, the same split the desktop sidebar makes. Temporary /btw forks are
@@ -1321,6 +1400,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onRequestRename={() => handleRequestRename(session.id)}
             onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
             onCancelRename={() => setRenamingSessionId(null)}
+            questionBadgeSessionScopes={questionBadgeScopesBySessionId.get(session.id) ?? EMPTY_QUESTION_BADGE_SCOPES}
           />
           {hasChildren && expanded
             ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
@@ -1668,6 +1748,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           indent={12}
                           contextLabel={buildSessionContextLabel(session)}
                           onSelect={() => handleSelectSession(session)}
+                          questionBadgeSessionScopes={questionBadgeScopesBySessionId.get(session.id) ?? EMPTY_QUESTION_BADGE_SCOPES}
                         />
                       </div>
                     ))}

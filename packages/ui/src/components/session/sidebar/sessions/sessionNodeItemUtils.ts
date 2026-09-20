@@ -85,6 +85,43 @@ export type QuestionBadgeSessionScope = {
   sessionIDs: string[];
 };
 
+export type QuestionBadgeScopeEntry = {
+  /** Directory store the session belongs to, already resolved (null when unknown). */
+  directory: string | null;
+  /** Child session ids inside the same subtree. */
+  childIds: readonly string[];
+};
+
+/**
+ * Bucket a row's subtree into the (directory, sessionIDs) scopes its
+ * pending-question badge counts. Shared by the desktop sidebar rows and the
+ * mobile sessions sheet: an expanded row counts only its own session, while a
+ * collapsed row also rolls up the hidden descendants, grouped by the directory
+ * store each session actually lives in. Callers resolve each session's
+ * directory first, so a worktree/subtask session is counted in its own store
+ * without bootstrapping a different one.
+ */
+export const collectQuestionBadgeScopes = (
+  entries: ReadonlyMap<string, QuestionBadgeScopeEntry>,
+  rootId: string,
+  isExpanded: boolean,
+): QuestionBadgeSessionScope[] => {
+  const sessionIDsByDirectory = new Map<string, string[]>();
+  const visit = (id: string, isRoot: boolean): void => {
+    const entry = entries.get(id);
+    if (!entry) return;
+    if (entry.directory) {
+      const sessionIDs = sessionIDsByDirectory.get(entry.directory) ?? [];
+      sessionIDs.push(id);
+      sessionIDsByDirectory.set(entry.directory, sessionIDs);
+    }
+    if (isRoot && isExpanded) return;
+    for (const childId of entry.childIds) visit(childId, false);
+  };
+  visit(rootId, true);
+  return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
+};
+
 export const canShowSessionWorktreeMenu = ({
   isSubtaskSession,
   archivedBucket,
@@ -123,21 +160,18 @@ export const selectQuestionBadgeSessionScopes = (
   isExpanded: boolean,
   fallbackDirectory: string | null,
 ): QuestionBadgeSessionScope[] => {
-  const sessionIDsByDirectory = new Map<string, string[]>();
-  const visit = (current: SessionNode): void => {
-    const directory = resolveGlobalSessionDirectory(current.session)
-      ?? normalizePath(current.worktree?.path)
-      ?? fallbackDirectory;
-    if (directory) {
-      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
-      sessionIDs.push(current.session.id);
-      sessionIDsByDirectory.set(directory, sessionIDs);
-    }
-    if (current === node && isExpanded) return;
-    for (const child of current.children) visit(child);
+  const entries = new Map<string, QuestionBadgeScopeEntry>();
+  const build = (current: SessionNode): void => {
+    entries.set(current.session.id, {
+      directory: resolveGlobalSessionDirectory(current.session)
+        ?? normalizePath(current.worktree?.path)
+        ?? fallbackDirectory,
+      childIds: current.children.map((child) => child.session.id),
+    });
+    for (const child of current.children) build(child);
   };
-  visit(node);
-  return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
+  build(node);
+  return collectQuestionBadgeScopes(entries, node.session.id, isExpanded);
 };
 
 export const selectFolderRootNodes = (

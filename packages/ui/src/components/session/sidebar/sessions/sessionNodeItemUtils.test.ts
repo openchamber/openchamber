@@ -5,6 +5,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import {
+  collectQuestionBadgeScopes,
   computeNodeStructureKey,
   canShowSessionWorktreeMenu,
   getSessionWorktreeMenuDisabled,
@@ -12,6 +13,7 @@ import {
   selectFolderRootNodes,
   selectQuestionBadgeSessionScopes,
   selectRowBadgeVisibilityClass,
+  type QuestionBadgeScopeEntry,
 } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
 
@@ -73,6 +75,53 @@ describe('selectQuestionBadgeSessionScopes', () => {
 
     expect(selectQuestionBadgeSessionScopes(root, false, '/fallback')).toEqual([
       { directory: '/fallback', sessionIDs: ['root'] },
+    ]);
+  });
+});
+
+describe('collectQuestionBadgeScopes', () => {
+  const entries = (...items: Array<[string, string | null, string[]]>): Map<string, QuestionBadgeScopeEntry> =>
+    new Map(items.map(([id, directory, childIds]) => [id, { directory, childIds }]));
+
+  const tree = () => entries(
+    ['root', '/repo', ['child']],
+    ['child', '/worktrees/feature', ['grandchild']],
+    ['grandchild', '/worktrees/feature', []],
+  );
+
+  test('rolls up a collapsed subtree grouped by owning directory', () => {
+    expect(collectQuestionBadgeScopes(tree(), 'root', false)).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+      { directory: '/worktrees/feature', sessionIDs: ['child', 'grandchild'] },
+    ]);
+  });
+
+  test('counts only the row itself when expanded', () => {
+    expect(collectQuestionBadgeScopes(tree(), 'root', true)).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+    ]);
+  });
+
+  test('starts at the given subtree root, not the whole map', () => {
+    expect(collectQuestionBadgeScopes(tree(), 'child', false)).toEqual([
+      { directory: '/worktrees/feature', sessionIDs: ['child', 'grandchild'] },
+    ]);
+  });
+
+  test('skips sessions without an owning directory', () => {
+    const map = entries(
+      ['root', null, ['child']],
+      ['child', null, []],
+    );
+
+    expect(collectQuestionBadgeScopes(map, 'root', false)).toEqual([]);
+  });
+
+  test('ignores child ids that are missing from the map', () => {
+    const map = entries(['root', '/repo', ['ghost']]);
+
+    expect(collectQuestionBadgeScopes(map, 'root', false)).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
     ]);
   });
 });
