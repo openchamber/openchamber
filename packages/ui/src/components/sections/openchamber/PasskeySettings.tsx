@@ -219,7 +219,7 @@ export const PasskeySettings: React.FC = () => {
             {passkeys.map((passkey) => (
               <SettingsFieldRow
                 key={passkey.id}
-                label={<span className="truncate">{passkey.label}</span>}
+                label={<span title={passkey.label}>{passkey.label}</span>}
                 alignEnd={false}
                 controlClassName="justify-between sm:flex-1"
               >

@@ -88,6 +88,10 @@ export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; di
         const capturedGeneration = generation;
         if (options?.allowOutsideWorkspace) return files.readFile!(path, options);
         const key = cacheKey(path, options);
+        if (options?.fresh) {
+          removeEntry(key);
+          return files.readFile!(path, options);
+        }
         const hit = cache.get(key);
         if (!hit) return readFresh(key, path, options, capturedGeneration);
         const latest = await files.statFile?.(path, options).catch(() => null);

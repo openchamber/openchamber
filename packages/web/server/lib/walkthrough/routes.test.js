@@ -15,14 +15,21 @@ describe('walkthrough routes', () => {
   let job;
 
   let lastArgs;
+  let generateCalls = 0;
 
   const service = {
+    async getPullRequestDiff(directory, number, sourceRepo, options) {
+      lastArgs = { directory, number, sourceRepo, options };
+      if (number === 99) throw Object.assign(new Error('GitHub unavailable'), { statusCode: 503 });
+      return { patch: number === 1 ? '' : 'diff --git a/a.ts b/a.ts\n' };
+    },
     async getWalkthrough(args) {
       lastArgs = args;
       return { walkthrough: null, hunks: [], hunkCount: 0, generating: Boolean(job) };
     },
     async generateWalkthrough(args) {
       lastArgs = args;
+      generateCalls += 1;
       if (job) return job;
       job = new Promise((resolve) => {
         releaseJob = () => resolve({ walkthrough: { title: 'DONE' }, hunks: [], hunkCount: 1 });
@@ -54,12 +61,27 @@ describe('walkthrough routes', () => {
   });
 
   afterEach(async () => {
+    // A response a failed test never received keeps its keep-alive socket
+    // open, and server.close() would wait on it until the hook timeout.
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
 
+  // Resolves once the route has asked the service to generate one more time
+  // than `seen`. A fixed sleep assumed the request had arrived by then; on a
+  // loaded runner it had not, and the step that followed acted on a request
+  // the server had not seen yet.
+  const untilGenerateCalled = async (seen) => {
+    for (let attempt = 0; attempt < 300 && generateCalls <= seen; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    if (generateCalls <= seen) throw new Error('the route never asked the service to generate');
+  };
+
   it('answers a generation request that nobody interrupted', async () => {
+    const seen = generateCalls;
     const pending = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
     releaseJob();
 
     const body = await (await pending).json();
@@ -67,10 +89,32 @@ describe('walkthrough routes', () => {
     expect(body.walkthrough).toEqual({ title: 'DONE' });
   });
 
+  it('serves the published PR snapshot with its repository, without generating', async () => {
+    const source = { kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } };
+    const before = generateCalls;
+    const response = await fetch(`${base}/api/walkthrough/pr-diff?directory=/repo&source=${encodeURIComponent(JSON.stringify(source))}`);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(await response.text()).toBe('diff --git a/a.ts b/a.ts\n');
+    expect(lastArgs).toEqual({ directory: '/repo', number: 42, sourceRepo: source.sourceRepo, options: { allowEmpty: true } });
+    expect(generateCalls).toBe(before);
+  });
+
+  it('distinguishes empty PRs, upstream failure, and invalid sources', async () => {
+    const request = (source) => fetch(`${base}/api/walkthrough/pr-diff?directory=/repo&source=${encodeURIComponent(JSON.stringify(source))}`);
+    const empty = await request({ kind: 'pr', number: 1 });
+    expect(empty.status).toBe(200);
+    expect(await empty.text()).toBe('');
+    expect((await request({ kind: 'pr', number: 99 })).status).toBe(503);
+    for (const source of [{ kind: 'pr', number: -1 }, { kind: 'branch', baseRef: 'main', headRef: 'feature' }, { kind: 'pr', number: 1, sourceRepo: { owner: '../bad', repo: 'repo' } }]) {
+      expect((await request(source)).status).toBe(400);
+    }
+  });
+
   it('delivers the result to a client that reconnected after a refresh', async () => {
     const controller = new AbortController();
+    const seen = generateCalls;
     generate(controller.signal).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
     controller.abort();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -80,8 +124,9 @@ describe('walkthrough routes', () => {
     )).json();
     expect(read.generating).toBe(true);
 
+    const seenBeforeReattach = generateCalls;
     const reattached = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seenBeforeReattach);
     releaseJob();
 
     const body = await (await reattached).json();
@@ -108,12 +153,13 @@ describe('walkthrough routes', () => {
     );
     expect(lastArgs.language).toBe('uk');
 
+    const seen = generateCalls;
     const pending = fetch(`${base}/api/walkthrough/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory: '/repo', source: SOURCE, language: 'ja' }),
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
     releaseJob();
     await pending;
 
@@ -129,8 +175,9 @@ describe('walkthrough routes', () => {
   });
 
   it('cancels through its own endpoint rather than a dropped connection', async () => {
+    const seen = generateCalls;
     generate().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
 
     const response = await fetch(`${base}/api/walkthrough/cancel`, {
       method: 'POST',

@@ -117,12 +117,10 @@ const EMPTY_TODOS: TodoItem[] = [];
 
 interface ComposerStatusBarProps {
   showTodos?: boolean;
-  leftAccessory?: React.ReactNode;
 }
 
 export const ComposerStatusBar: React.FC<ComposerStatusBarProps> = ({
   showTodos = true,
-  leftAccessory,
 }) => {
   const { t } = useI18n();
   const [isExpanded, setIsExpanded] = React.useState(false);
@@ -183,8 +181,7 @@ export const ComposerStatusBar: React.FC<ComposerStatusBarProps> = ({
   }, [visibleTodos]);
 
   const hasTodoContent = showTodos && statusSummary.left > 0;
-  const hasLeftAccessory = Boolean(leftAccessory);
-  const hasContent = hasTodoContent || hasLeftAccessory;
+  const hasContent = hasTodoContent;
 
   const popoverRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -247,14 +244,9 @@ export const ComposerStatusBar: React.FC<ComposerStatusBarProps> = ({
 
   return (
     <div className="mb-2" style={COMPOSER_STATUS_BAR_CONTAINER_STYLE}>
-      <div className={cn("flex items-center justify-between gap-2 h-8", hasLeftAccessory && "px-0.5")}>
-        {/* Left: abort status | pending-changes accessory */}
-        <div className={cn("flex-1 flex items-center min-w-0 gap-2", hasLeftAccessory ? "pl-1.5" : "overflow-x-hidden")}>
-          {leftAccessory ?? null}
-        </div>
-
+      <div className="flex items-center justify-end gap-2 h-8">
         {/* Right: todos dropdown */}
-        <div className={cn("relative flex items-center gap-2 flex-shrink-0", hasLeftAccessory && "pr-1.5")} ref={popoverRef}>
+        <div className="relative flex items-center gap-2 flex-shrink-0" ref={popoverRef}>
           {todoTrigger}
 
           {isExpanded && hasTodoContent && (

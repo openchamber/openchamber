@@ -13,7 +13,7 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { Icon } from "@/components/icon/Icon";
 import { isIMECompositionEvent } from '@/lib/ime';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectRef } from '@/lib/openchamberConfig';
@@ -113,7 +113,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     
     (async () => {
       try {
-        const commands = await getWorktreeSetupCommands(projectRef);
+        // This screen prepares a run: the shared commands ask for trust here, before they are shown as the defaults.
+        const commands = await resolveWorktreeSetupCommands(projectRef);
         if (!cancelled) {
           setSetupCommands(commands);
         }
@@ -477,7 +478,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                           const newCommands = setupCommands.filter((_, i) => i !== index);
                           setSetupCommands(newCommands);
                         }}
-                        className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={t('agentManager.empty.setupCommands.removeCommandAria')}
                       >
                         <Icon name="close" className="h-4 w-4" />
@@ -534,7 +535,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           </label>
           <div className="relative">
             <div
-              className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-primary/50"
+              className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-ring"
               style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
             >
               {/* Text Area */}

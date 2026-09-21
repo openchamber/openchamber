@@ -1,0 +1,100 @@
+---
+title: Depo yapılandırması
+description: Proje eylemlerini, worktree kurulum komutlarını, başlatıcıları ve planları depoda tutun; depoyu çeken herkes aynısını alsın.
+---
+
+# Depo yapılandırması
+
+Proje eylemleri, worktree kurulum komutları ve taslak başlatıcıları varsayılan olarak kendi OpenChamber ayarlarında yaşar. Başka kimse görmez. Depoyu klonlayan bir ekip arkadaşının aynı geliştirme sunucusu eylemini ve her yeni worktree'de aynı `bun install` komutunu almasını istiyorsan, bu öğeleri depoya taşı.
+
+OpenChamber bunları deponun kökündeki `.openchamber/project.json` dosyasında saklar. Dosya, ilk öğeyi oraya taşıdığında ortaya çıkar ve son öğeyi geri aldığında kaybolur. Diğer dosyalar gibi commit'le.
+
+## Ne nereye gider
+
+| Ayarlarında kalır | Depoya taşınabilir |
+|---|---|
+| Notlar ve yapılacaklar | Proje eylemleri |
+| Zamanlanmış görevler | Worktree kurulum komutları |
+| Kendin için gizlediğin depo eylemleri | Taslak başlatıcıları (sabitlenmiş komutlar ve skill'ler) |
+| Depo komutları için güven yanıtın | Planlar |
+
+Notlar, yapılacaklar ve zamanlanmış görevler senindir. Asla depoya girmez.
+
+## Bir öğeyi taşıma
+
+**Settings → Projects** bölümünü aç ve projeyi seç. Her eylemin ve her kurulum komutunun bir **Move to repository** düğmesi, depodan gelen her öğenin de **Move to my settings** düğmesi vardır. Yeni oturum ekranındaki başlatıcılar üzerine gelince aynı ikiliyi gösterir. Planlarda bu, Planlar sekmesindeki her satırda bulunur.
+
+Taşımak tam olarak taşımaktır. Öğe bir yerden çıkar, diğerine gider; hiçbir şey çoğaltılmaz.
+
+Depodan gelen öğeler **In repo** rozeti taşır. Depo eylemleri **Hide for me** ile menünden gizlenebilir. Bu yalnızca senin menünü değiştirir, dosyayı değil.
+
+## Dosya
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Yalnızca `version` zorunludur. Diğer tüm anahtarlar isteğe bağlıdır ve OpenChamber yalnızca içinde bir şey olanları yazar.
+
+`setupWorktree`, OpenChamber'ın yeni bir worktree oluşturduktan hemen sonra içinde sırayla çalıştırdığı kabuk komutlarının listesidir. Ana checkout yolu için `$ROOT_PROJECT_PATH` kullan. `setupWorktreeWait: true`, OpenChamber'ın worktree'de oturum başlatmadan önce bu komutları beklemesini sağlar.
+
+`projectActions`, başlık menüsündeki eylemlerin listesidir. `id`, `name` ve `command` zorunludur. `icon` isteğe bağlıdır ve verilmezse play simgesi kullanılır; OpenChamber'ın bildiği adlar `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` ve `file`. `autoOpenUrl: true`, komutun yazdırdığı adresi açar; bkz. [Önizleme ve geliştirme sunucuları](/preview/). `platforms`, eylemi `macos`, `linux` veya `windows` ile sınırlar. `runIn: "parent"`, eylemi geçerli worktree yerine ana checkout'ta çalıştırır.
+
+`draftStarters`, komutları ve skill'leri yeni oturum ekranına sabitler. Her giriş `{ "type": "command" | "skill", "name": "..." }` biçimindedir ve komutun ya da skill'in kendisi deponun OpenCode yapılandırmasında bulunmalıdır.
+
+`plansDir`, depo planlarının bulunduğu yerdir. `.openchamber/plans` kullanmak için atla. Aşağıya bak.
+
+Bu dosyayı elle yazabilirsin. Yanlış biçimli bir anahtar tüm dosyayı geçersiz kılar ve Projects sayfası sessizce yok saymak yerine nedenini söyler.
+
+## Depo öğeleriyle kendi öğelerin nasıl birleşir
+
+Önce depodaki kurulum komutları, sonra seninkiler çalışır. Depodakileri tamamen atlamak için Worktree bölümünde **Use only my setup commands** kutusunu işaretle.
+
+Eylemler `id` ile birleştirilir. Ayarlarında depo eylemiyle aynı id'ye sahip bir eylem varsa onun yerine geçer. Başlatıcılar ada göre birleştirilir.
+
+Bekleme bayrağı, ayarladıysan senin ayarlarından, yoksa depodan gelir.
+
+## Güven
+
+Depodaki kurulum komutları ve eylemler senin makinende çalışır ve bir `git pull` bunları değiştirebilir. Bu yüzden biri ilk kez çalışmak üzereyken OpenChamber komutları olduğu gibi gösterir ve sorar. **Trust and run**, yanıtını bu örnekte hatırlar. **Not this time** yalnızca senin komutlarını çalıştırır.
+
+Yanıt komutların kendisine bağlıdır. Bir pull depodaki bir komutu değiştirdiğinde soru yeni metin için geri gelir. Proje ayarlarının Worktree bölümündeki **reset trust** ile yanıtı unutturabilirsin.
+
+Kendi komutunu depoya taşımak ona güvenmek sayılır; onu az önce gördün.
+
+## Depodaki planlar
+
+Planlar sekmesindeki planlar da Markdown dosyaları olarak depoda yaşayabilir. Varsayılan klasör `.openchamber/plans`'tır. Ekibin planları zaten `docs/plans` gibi bir yerde tutuyorsa, proje ayarlarındaki **Plans folder** ile depo içinde başka bir klasör belirle. Özel bir klasör varsayılanı tamamen değiştirir: OpenChamber yalnızca o klasörü okur ve yazar, bu yüzden değiştirdiğinde mevcut dosyaları kendin taşı.
+
+O klasördeki her `.md` dosyası Planlar sekmesinde görünür; başka araçlarla yazılanlar da dahil. OpenChamber'da düzenlemek dosyayı yazdığın gibi kaydeder. Depoya taşıdığın bir plan kimliğini korur, böylece onu eklemiş oturumlar onu bulmaya devam eder.
+
+## İlgili
+
+- [Proje işlemleri](/project-actions/)
+- [Worktree'ler](/worktrees/)
+- [Proje notları, yapılacaklar ve planlar](/notes-todos-plans/)

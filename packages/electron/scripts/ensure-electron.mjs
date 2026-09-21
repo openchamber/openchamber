@@ -29,6 +29,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { resolveBunExecutable } from '../../../scripts/lib/bun-executable.mjs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoElectronDir = path.resolve(__dirname, '..');
@@ -225,7 +227,11 @@ export function isComplete(electronDir, expected = expectedArch()) {
   return true;
 }
 
-function resolveInstallCommands(env) {
+function resolveInstallCommands(env, bunResolver = resolveBunExecutable) {
+  const normalize = (commands) => commands.map(([bin, args]) => [
+    bin === 'bun' ? bunResolver({ env }) : bin,
+    args,
+  ]);
   if (env.OPENCHAMBER_ELECTRON_INSTALL_COMMANDS) {
     try {
       const parsed = JSON.parse(env.OPENCHAMBER_ELECTRON_INSTALL_COMMANDS);
@@ -233,22 +239,22 @@ function resolveInstallCommands(env) {
         Array.isArray(parsed) &&
         parsed.every((command) => Array.isArray(command) && typeof command[0] === 'string')
       ) {
-        return parsed;
+        return normalize(parsed);
       }
     } catch {
       // Fall through to the default commands.
     }
   }
-  return [
+  return normalize([
     ['bun', ['install.js']],
     ['node', ['install.js']],
-  ];
+  ]);
 }
 
 export function repair(electronDir, options = {}) {
   const env = options.env ?? process.env;
   const runner = options.runner ?? spawnSync;
-  const commands = options.commands ?? resolveInstallCommands(env);
+  const commands = options.commands ?? resolveInstallCommands(env, options.bunResolver);
 
   // A partial extraction can leave stale entries (and a stale path.txt) that
   // a re-run would merge with. Start clean so the repair is deterministic.
@@ -265,6 +271,7 @@ export function repair(electronDir, options = {}) {
       cwd: electronDir,
       stdio: options.stdio ?? 'inherit',
       env: { ...env, ELECTRON_SKIP_BINARY_DOWNLOAD: undefined },
+      windowsHide: true,
     });
     if (result.error) {
       console.warn(`[electron:ensure] could not run \`${label}\`: ${result.error.message}`);

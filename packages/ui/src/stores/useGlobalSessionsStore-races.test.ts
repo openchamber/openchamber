@@ -1,3 +1,4 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2"
 
@@ -154,3 +155,127 @@ describe("global session mutation reconciliation", () => {
     expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([])
   })
 })
+
+describe("paginated global session load", () => {
+  const PAGE_SIZE = 500
+  let secondPage: Deferred<Session[]>
+  let listCalls: number
+
+  const firstPage = Array.from({ length: PAGE_SIZE }, (_, index) => ({
+    ...session(`page1-${index}`),
+    time: { created: 1, updated: 1000 - index },
+  }) as Session)
+
+  const pagedSdk = {
+    experimental: {
+      session: {
+        list: async (options: { cursor?: number }) => {
+          listCalls += 1
+          return {
+            data: options.cursor === undefined ? firstPage : await secondPage.promise,
+            response: { headers: new Headers() },
+          }
+        },
+      },
+    },
+  } as unknown as OpencodeClient
+
+  const until = async (predicate: () => boolean): Promise<void> => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (predicate()) return
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw new Error("condition never became true")
+  }
+
+  beforeEach(() => {
+    secondPage = deferred<Session[]>()
+    listCalls = 0
+    opencodeClient.getSdkClient = () => pagedSdk
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch()
+  })
+
+  afterEach(() => {
+    opencodeClient.getSdkClient = originalGetSdkClient
+  })
+
+  test("shows the first page before pagination finishes", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    const partial = useGlobalSessionsStore.getState()
+    expect(partial.activeSessions).toHaveLength(PAGE_SIZE)
+    expect(partial.status).toBe("loading")
+    expect(partial.hasLoaded).toBe(false)
+    expect(listCalls).toBe(2)
+
+    secondPage.resolve([{ ...session("page2-0"), time: { created: 1, updated: 400 } } as Session])
+    await loading
+
+    const complete = useGlobalSessionsStore.getState()
+    expect(complete.activeSessions).toHaveLength(PAGE_SIZE + 1)
+    expect(complete.activeSessions.some((item) => item.id === "page2-0")).toBe(true)
+    expect(complete.status).toBe("ready")
+    expect(complete.hasLoaded).toBe(true)
+  })
+
+  test("keeps the persisted seed visible while pagination continues", async () => {
+    const seeded = session("seeded")
+    useGlobalSessionsStore.getState().upsertSession(seeded)
+
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 1)
+
+    expect(useGlobalSessionsStore.getState().activeSessions.some((item) => item.id === "seeded")).toBe(true)
+
+    secondPage.resolve([])
+    await loading
+  })
+
+  test("keeps an archive made between the first page and completion", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    useGlobalSessionsStore.getState().archiveSessions(["page1-0"], 42)
+
+    secondPage.resolve([])
+    await loading
+
+    const state = useGlobalSessionsStore.getState()
+    expect(state.activeSessions.some((item) => item.id === "page1-0")).toBe(false)
+    expect(state.archivedSessions.map((item) => item.id)).toEqual(["page1-0"])
+    expect(state.status).toBe("ready")
+  })
+
+  test("keeps the first page when a later page fails", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    secondPage.reject(new Error("unavailable"))
+    await loading
+
+    const state = useGlobalSessionsStore.getState()
+    expect(state.activeSessions).toHaveLength(PAGE_SIZE)
+    expect(state.status).toBe("error")
+  })
+
+  test("drops the pages when the runtime switches mid-load", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch()
+    secondPage.resolve([{ ...session("page2-0"), time: { created: 1, updated: 400 } } as Session])
+    await loading
+
+    const state = useGlobalSessionsStore.getState()
+    expect(state.activeSessions).toEqual([])
+    expect(state.archivedSessions).toEqual([])
+    expect(state.hasLoaded).toBe(false)
+    expect(state.status).toBe("idle")
+  })
+})
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

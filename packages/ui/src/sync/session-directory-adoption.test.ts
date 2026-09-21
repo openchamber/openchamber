@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { ChildStoreManager } from "./child-store"
 import { setSyncRefs } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 
 /**
  * Selecting a session whose directory this client has not indexed yet routes it
@@ -39,6 +40,27 @@ beforeEach(() => {
 })
 
 describe("adoptAuthoritativeSessionDirectory", () => {
+  test("opens a globally indexed Windows worktree session before its child store bootstraps", () => {
+    const sessionId = "ses_windows_global_directory"
+    useGlobalSessionsStore.getState().upsertSession({
+      id: sessionId,
+      slug: "windows-worktree",
+      projectID: "windows-project",
+      directory: "c:\\repo\\.worktrees\\feature",
+      title: "Worktree session",
+      version: "1",
+      time: { created: 1, updated: 1 },
+    })
+    try {
+      useSessionUIStore.getState().setCurrentSession(sessionId)
+
+      expect(useSessionUIStore.getState().currentSessionDirectory).toBe("C:/repo/.worktrees/feature")
+      expect(useSessionUIStore.getState().getDirectoryForSession(sessionId)).toBe("C:/repo/.worktrees/feature")
+    } finally {
+      useGlobalSessionsStore.getState().removeSessions([sessionId])
+    }
+  })
+
   test("promotes a guessed selection once the owning directory is indexed", () => {
     useSessionUIStore.getState().setCurrentSession(SESSION_ID)
     expect(useSessionUIStore.getState().currentSessionDirectory).not.toBe(WORKTREE)

@@ -6,6 +6,8 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
+import { describeSessionActionError } from './sessionActionError';
 
 export type DeleteSessionSource = {
   archivedBucket?: boolean;
@@ -25,15 +27,15 @@ type Args = {
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  isSessionSearchOpen: boolean;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (value: string) => void;
-  setIsSessionSearchOpen: (open: boolean) => void;
+  resetSessionSearch: () => void;
   descendantIds: readonly string[];
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   deleteSessionConfirm: DeleteSessionConfirmState;
   setEditingId: (id: string | null) => void;
+  setEditingRowKey: (key: string | null) => void;
+  editingSessionId: string;
+  editingOccurrenceKey: string;
   setEditTitle: (value: string) => void;
   editingId: string | null;
   editTitle: string;
@@ -66,14 +68,14 @@ export const useSessionActions = (args: Args) => {
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    isSessionSearchOpen,
-    sessionSearchQuery,
-    setSessionSearchQuery,
-    setIsSessionSearchOpen,
+    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
     setEditingId,
+    setEditingRowKey,
+    editingSessionId,
+    editingOccurrenceKey,
     setEditTitle,
     setCopiedSessionId,
   } = args;
@@ -92,14 +94,6 @@ export const useSessionActions = (args: Args) => {
       // Selecting a session always leaves any full-page surface, even when
       // the session is already the current one (no store transition fires).
       useUIStore.getState().closeMainSurfaces();
-      const resetSessionSearch = () => {
-        if (!isSessionSearchOpen && sessionSearchQuery.length === 0) {
-          return;
-        }
-        setSessionSearchQuery('');
-        setIsSessionSearchOpen(false);
-      };
-
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
       }
@@ -116,29 +110,42 @@ export const useSessionActions = (args: Args) => {
       onSessionSelected?.(sessionId);
       resetSessionSearch();
     },
-    [allowReselect, isSessionSearchOpen, mobileVariant, onSessionSelected, sessionSearchQuery, setCurrentSession, setIsSessionSearchOpen, setSessionSearchQuery, setSessionSwitcherOpen],
+    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
     setEditingId(sessionId);
+    setEditingRowKey(editingOccurrenceKey);
     setEditTitle(sessionTitle);
-  }, [setEditTitle, setEditingId]);
+  }, [editingOccurrenceKey, setEditTitle, setEditingId, setEditingRowKey]);
 
   const handleSaveEdit = React.useCallback(async (titleOverride?: string) => {
     const editingId = editingIdRef.current;
     if (!editingId) return;
     const trimmed = (titleOverride ?? editTitleRef.current).trim();
     if (trimmed) {
-      await updateSessionTitle(editingId, trimmed);
+      try {
+        await updateSessionTitle(editingSessionId, trimmed);
+      } catch (error) {
+        // The form closes either way: a rename that silently stays open
+        // reads as "Enter does nothing". The toast says what OpenCode
+        // answered, with its log ref, so the failure can be looked up.
+        console.error('[session-actions] rename failed', error);
+        toast.error(t('sessions.sidebar.session.rename.error', {
+          detail: describeSessionActionError(error instanceof Error ? error : new Error(String(error)), t),
+        }));
+      }
     }
     setEditingId(null);
+    setEditingRowKey(null);
     setEditTitle('');
-  }, [setEditTitle, setEditingId, updateSessionTitle]);
+  }, [editingSessionId, setEditTitle, setEditingId, setEditingRowKey, t, updateSessionTitle]);
 
   const handleCancelEdit = React.useCallback(() => {
     setEditingId(null);
+    setEditingRowKey(null);
     setEditTitle('');
-  }, [setEditTitle, setEditingId]);
+  }, [setEditTitle, setEditingId, setEditingRowKey]);
 
   const copyShareUrl = React.useCallback(async (url: string, sessionId: string): Promise<boolean> => {
     try {
@@ -209,50 +216,13 @@ export const useSessionActions = (args: Args) => {
       // collection for direct-execute (no-dialog) callers.
       const effectiveDescendantIds = precomputed?.descendantIds
         ?? descendantIds;
-      if (effectiveDescendantIds.length === 0) {
-        const success = shouldHardDelete
-          ? await deleteSession(session.id)
-          : await archiveSession(session.id);
-        if (success) {
-          toast.success(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.success')
-            : t('sessions.sidebar.session.archive.success'));
-        } else {
-          toast.error(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.error')
-            : t('sessions.sidebar.session.archive.error'));
-        }
-        return;
-      }
-
-      const ids = [session.id, ...effectiveDescendantIds];
-      if (shouldHardDelete) {
-        // Delete root + all descendants individually. If the server
-        // cascade-deletes some children before we get to them, 404 is
-        // treated as success by deleteSession and no rollback occurs.
-        const { deletedIds, failedIds } = await deleteSessions(ids);
-        if (failedIds.length === 0) {
-          const totalDeleted = deletedIds.length;
-          toast.success(totalDeleted === 1
-            ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
-            : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));
-        } else {
-          toast.error(t('sessions.sidebar.session.delete.error'));
-        }
-        return;
-      }
-
-      const { archivedIds, failedIds } = await archiveSessions(ids);
-      if (archivedIds.length > 0) {
-        toast.success(archivedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
-          : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
-      }
-      if (failedIds.length > 0) {
-        toast.error(failedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
-      }
+      await runSessionSubtreeAction(
+        shouldHardDelete ? 'delete' : 'archive',
+        session,
+        effectiveDescendantIds,
+        { archiveSession, archiveSessions, deleteSession, deleteSessions },
+        t,
+      );
     },
     [archiveSession, archiveSessions, deleteSession, deleteSessions, descendantIds, t],
   );
@@ -260,7 +230,7 @@ export const useSessionActions = (args: Args) => {
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: DeleteSessionSource) => {
       const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
-      const effectiveDescendantIds = [...descendantIds];
+      const effectiveDescendantIds = collectSessionSubtreeIds(session.id, descendantIds, shouldHardDelete);
       if (!showDeletionDialog || source?.skipConfirm === true) {
         void executeDeleteSession(session, source, { descendantIds: effectiveDescendantIds });
         return;

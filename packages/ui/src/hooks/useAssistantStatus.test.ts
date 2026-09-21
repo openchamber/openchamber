@@ -57,4 +57,38 @@ describe('getActiveAssistantContext', () => {
             model: null,
         });
     });
+
+    test('shows no model while an Auto-routed message waits for its answer', () => {
+        const previousUser = userMessage('user_1', 'anthropic', 'claude-opus-4-1');
+        const previousAssistant = assistantMessage('assistant_1', previousUser.id);
+        const autoUser = userMessage('user_2', 'openchamber', 'auto');
+
+        expect(getActiveAssistantContext([previousUser, previousAssistant, autoUser])).toEqual({
+            assistantId: previousAssistant.id,
+            model: null,
+        });
+
+        // The optimistic copy names the model with top-level ids instead of a `model` object.
+        const optimisticAuto = { ...autoUser, model: 'openchamber/auto', providerID: 'openchamber', modelID: 'auto' } as unknown as Message;
+        expect(getActiveAssistantContext([previousUser, previousAssistant, optimisticAuto]).model).toBeNull();
+
+        // Once OpenCode has answered, the user message carries the real model again.
+        const routedUser = userMessage('user_2', 'openai', 'gpt-6-astra');
+        const answer = assistantMessage('assistant_2', routedUser.id);
+        expect(getActiveAssistantContext([previousUser, previousAssistant, routedUser, answer]).model).toEqual({
+            providerId: 'openai',
+            modelId: 'gpt-6-astra',
+        });
+    });
+
+    test('shows the new turn model right away once the previous turn has completed', () => {
+        const firstUser = userMessage('user_1', 'anthropic', 'claude-opus-4-1');
+        const completedAssistant = { ...assistantMessage('assistant_1', firstUser.id), time: { created: 2, completed: 3 } } as Message;
+        const nextUser = userMessage('user_2', 'openai', 'gpt-6-astra');
+
+        expect(getActiveAssistantContext([firstUser, completedAssistant, nextUser]).model).toEqual({
+            providerId: 'openai',
+            modelId: 'gpt-6-astra',
+        });
+    });
 });

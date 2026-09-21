@@ -43,6 +43,12 @@ const promoteSessions = (sessionIds: Iterable<string>, useSharedRank = false): v
   });
 };
 
+/** Promote a confirmed restore without deriving or changing session activity. */
+export const promoteRestoredSessionOrdering = (sessionId: string): void => {
+  if (!sessionId) return;
+  promoteSessions([sessionId]);
+};
+
 export const observeSessionActivityEvent = (
   sessionId: string,
   phase: SessionActivityPhase,

@@ -1,0 +1,40 @@
+---
+title: Agent Control Tool
+description: Bir agent'ın OpenChamber oturumlarını, worktree'leri ve zamanlanmış görevleri sohbet içinden yönetmesine izin verin.
+---
+
+# Agent Control Tool
+
+`openchamber` agent aracını kullanarak uygulamadaki işleri doğrudan sohbetten yönetin. OpenChamber kendi yerel OpenCode sunucusunu çalıştırdığında bu araç varsayılan olarak etkindir; kurmanız gereken ayrı bir araç ya da çalıştırmanız gereken bir shell komutu yoktur.
+
+## Neler isteyebilirsiniz
+
+Agent'a düz dille söyleyin. Örneğin:
+
+- "Bu projede yeni bir OpenChamber oturumu oluştur, `openai/gpt-5.6-sol` modelini kullan ve bu istemi gönder: kimlik doğrulama akışını gözden geçir."
+- "Bu görev için ayrı bir worktree içinde yeni bir OpenChamber oturumu oluştur ve giriş akışı için test eklemesini iste."
+- "OpenChamber ile en son 10 oturumumu listele ve mevcut durumlarını da ekle."
+- "Weekday review adlı bir OpenChamber zamanlanmış görevi oluştur, bunu her iş günü 09:00'da şu istemle gönder: son çalıştırmadan beri yapılan değişiklikleri gözden geçir."
+- "Weekday review adlı OpenChamber zamanlanmış görevini şimdi çalıştır."
+- "Authentication review adlı OpenChamber oturumunu kontrol et ve son agent yanıtını göster."
+
+Araç projeleri ve model tercihlerini listeleyebilir, oturum oluşturup takip edebilir, bir oturumu fork'layabilir, izole worktree oturumları açabilir ve zamanlanmış görevleri yönetebilir. Bu şekilde başlatılan oturumlar OpenChamber'da diğer oturumlar gibi görünür; açıp işi kendiniz sürdürebilirsiniz.
+
+## Akılda tutun
+
+- Yeni oturum istemleri varsayılan olarak hemen döner. Oturumu OpenChamber'da takip edin ya da agent'tan sonra kontrol etmesini isteyin.
+- Ayrı bir worktree yalnızca siz özellikle istediğinizde oluşturulur. Mevcut worktree'nizdeki kaydedilmemiş değişiklikler buna kopyalanmaz.
+- Araç oturumları ya da worktree'leri silemez, proje yolları kaydedemez, keyfi shell komutları çalıştıramaz ya da keyfi URL'leri çağırmaz.
+
+## Aracı açma ve kapatma
+
+**Settings → General → OpenChamber Tools** bölümünü açın ve **Agent control tool** ayarını değiştirin. Yönetilen OpenCode sunucusu yeniden başladığında ayar geçerli olur. OpenChamber bunu **Apply & Restart** olarak sunar.
+
+OpenChamber `OPENCODE_HOST` ya da skip-start ile harici bir OpenCode sunucusuna bağlandığında, ya da VS Code eklentisi içinde bu araç kullanılmaz. OpenChamber'ın yönetilen OpenCode sunucusunu kullanan masaüstü ve web kurulumlarında ise otomatik olarak desteklenir.
+
+## İlgili
+
+- [Scheduled Tasks](/scheduled-tasks/)
+- [Worktree Sessions](/worktrees/)
+- [Session Goals](/session-goals/)
+- [Browser Panel](/desktop-browser/) — OpenChamber Web aracı, bir sayfaya bakmak ve onu kontrol etmek için

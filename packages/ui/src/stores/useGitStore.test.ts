@@ -1,7 +1,23 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
+import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
+
+// The real transport has no server in tests and fails as a generic error.
+// Tests that exercise other failure modes swap this implementation; the
+// default keeps every pre-existing expectation (generic failure → null).
+const listGitDirectoriesControl: { impl: (root: string) => Promise<string[]> } = {
+  impl: async () => {
+    throw new Error('network unavailable');
+  },
+};
+class TestGitDirectoriesUnsupportedError extends Error {}
+mock.module('@/lib/gitApiHttp', () => ({
+  GitDirectoriesUnsupportedError: TestGitDirectoriesUnsupportedError,
+  listGitDirectories: (root: string) => listGitDirectoriesControl.impl(root),
+}));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -66,12 +82,121 @@ const createGitApi = (getGitStatus: GitAPI['getGitStatus']): GitAPI => ({
   getGitBranches: async () => ({ all: [], current: 'main', branches: {} }),
   getGitLog: async () => ({ all: [], latest: null, total: 0 }),
   getCurrentGitIdentity: async () => null,
-  getGitFileDiff: async (_directory, options) => ({ original: '', modified: '', path: options.path }),
+  getGitFileDiff: async (_directory, options) => ({ original: '', modified: '', path: options.path, submodule: null }),
 });
 
 describe('useGitStore', () => {
   beforeEach(() => {
+    clearWorktreeBootstrapState('/repo');
     useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+  });
+
+  test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {
+    const paths = ['one.ts', 'two.ts', 'three.ts', 'four.ts'];
+    setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));
+    const pending: Array<{ path: string; request: Deferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>> }> = [];
+    const git = createGitApi(async () => createStatus());
+    git.getGitFileDiff = (_directory, { path }) => {
+      const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+      pending.push({ path, request });
+      return request.promise;
+    };
+
+    const prefetch = useGitStore.getState().prefetchDiffs('/repo', git, paths);
+    try {
+      expect(pending.length).toBe(2);
+      // Exercise the real 15-second prefetch deadline. Expiring the UI wait
+      // does not settle the injected transport or stop its server-side work.
+      await new Promise((resolve) => setTimeout(resolve, 15_100));
+      expect(pending.length).toBe(2);
+      await useGitStore.getState().prefetchDiffs('/repo', git, paths);
+      expect(pending.length).toBe(2);
+      expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(0);
+    } finally {
+      for (const { path, request } of pending) request.resolve({ path, original: 'before', modified: 'after', submodule: null });
+      await prefetch;
+    }
+    // Late responses were discarded, but their real completion frees capacity.
+    expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(0);
+    git.getGitFileDiff = async (_directory, { path }) => ({ path, original: 'fresh', modified: 'fresh', submodule: null });
+    await useGitStore.getState().prefetchDiffs('/repo', git, paths);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(4);
+  }, 40_000);
+
+  test('limits overlapping diff batches per directory and retains capacity across a cache reset', async () => {
+    const paths = ['one.ts', 'two.ts', 'three.ts'];
+    const status = createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' })));
+    const directories = ['/repo-a', '/repo-b', '/repo-c'];
+    const populate = () => useGitStore.setState({
+      directories: new Map(directories.map((directory) => [directory, createDirectoryState(status)])),
+    });
+    populate();
+    const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+    const calls: string[] = [];
+    const git = createGitApi(async () => status);
+    git.getGitFileDiff = (directory) => {
+      calls.push(directory);
+      return request.promise;
+    };
+    const batches = directories.flatMap((directory) => paths.map((path) => (
+      useGitStore.getState().prefetchDiffs(directory, git, [path])
+    )));
+    try {
+      expect(calls.length).toBe(6);
+      for (const directory of directories) expect(calls.filter((value) => value === directory).length).toBe(2);
+      useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+      populate();
+      await Promise.all(directories.map((directory) => useGitStore.getState().prefetchDiffs(directory, git, paths)));
+      expect(calls.length).toBe(6);
+    } finally {
+      request.resolve({ path: 'one.ts', original: '', modified: '', submodule: null });
+      await Promise.all(batches);
+    }
+    for (const directory of directories) expect(useGitStore.getState().getDirectoryState(directory)?.diffCache.size).toBe(0);
+  });
+
+  test('repeated status refreshes for three directories share their outstanding requests', async () => {
+    const status = createStatus();
+    const directories = ['/status-a', '/status-b', '/status-c'];
+    useGitStore.setState({ directories: new Map(directories.map((directory) => [directory, createDirectoryState(status)])) });
+    const request = createDeferred<GitStatus>();
+    let calls = 0;
+    const git = createGitApi(async () => {
+      calls += 1;
+      return request.promise;
+    });
+    const refreshes = Array.from({ length: 20 }, () => directories.map((directory) => (
+      useGitStore.getState().fetchStatus(directory, git, { silent: true })
+    ))).flat();
+    try {
+      expect(calls).toBe(3);
+    } finally {
+      request.resolve(status);
+      await Promise.all(refreshes);
+    }
+  });
+
+  test('a duplicate diff demand does not discard the first batch or leave failure slots occupied', async () => {
+    const paths = ['one.ts', 'two.ts', 'three.ts'];
+    setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));
+    const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+    const git = createGitApi(async () => createStatus());
+    let calls = 0;
+    git.getGitFileDiff = async (_directory, { path }) => {
+      calls += 1;
+      if (path === 'one.ts') return request.promise;
+      if (path === 'two.ts') throw new Error('failed read');
+      return { path, original: '', modified: 'fresh', submodule: null };
+    };
+    const first = useGitStore.getState().prefetchDiffs('/repo', git, paths);
+    await useGitStore.getState().prefetchDiffs('/repo', git, paths);
+    request.resolve({ path: 'one.ts', original: '', modified: 'fresh', submodule: null });
+    await first;
+    expect(calls).toBe(3);
+    const cache = useGitStore.getState().getDirectoryState('/repo')?.diffCache;
+    expect(cache?.has('one.ts')).toBe(true);
+    expect(cache?.has('two.ts')).toBe(false);
+    expect(cache?.has('three.ts')).toBe(true);
   });
 
   test('does not reuse an in-flight light status request for full status', async () => {
@@ -94,13 +219,14 @@ describe('useGitStore', () => {
       { directory: '/repo', options: undefined },
     ]);
 
-    requests[1].resolve(createStatus({ 'src/index.ts': { insertions: 1, deletions: 0 } }));
+    requests[1].resolve(createStatus({ staged: {}, working: { 'src/index.ts': { insertions: 1, deletions: 0 } } }));
     await fullPromise;
     requests[0].resolve(createStatus());
     await lightPromise;
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.status?.diffStats).toEqual({
-      'src/index.ts': { insertions: 1, deletions: 0 },
+      staged: {},
+      working: { 'src/index.ts': { insertions: 1, deletions: 0 } },
     });
   });
 
@@ -121,9 +247,141 @@ describe('useGitStore', () => {
 
     expect(statusCalls).toEqual([{ directory: '/repo', options: undefined }]);
 
-    requests[0].resolve(createStatus({ 'src/index.ts': { insertions: 1, deletions: 0 } }));
+    requests[0].resolve(createStatus({ staged: {}, working: { 'src/index.ts': { insertions: 1, deletions: 0 } } }));
     const [fullResult, lightResult] = await Promise.all([fullPromise, lightPromise]);
     expect(lightResult).toBe(fullResult);
+  });
+
+  test('deduplicates concurrent status requests when no mutation occurs', async () => {
+    setDirectoryStatus(createStatus());
+    let statusCalls = 0;
+    const request = createDeferred<GitStatus>();
+    const git = createGitApi(() => {
+      statusCalls += 1;
+      return request.promise;
+    });
+
+    const first = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    const second = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+
+    expect(statusCalls).toBe(1);
+
+    request.resolve(createStatus());
+    await Promise.all([first, second]);
+    expect(statusCalls).toBe(1);
+  });
+
+  test('a refresh after a mutation does not join the pre-mutation in-flight status request', async () => {
+    setDirectoryStatus(createStatus());
+    const requests: Deferred<GitStatus>[] = [];
+    let statusCalls = 0;
+    const git = createGitApi(() => {
+      statusCalls += 1;
+      const request = createDeferred<GitStatus>();
+      requests.push(request);
+      return request.promise;
+    });
+
+    const preMutation = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(1);
+
+    // A successful git mutation invalidates the adapter status cache, which
+    // notifies the store that the in-flight request predates the mutation.
+    notifyGitStatusInvalidated('/repo');
+
+    const postMutation = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(2);
+
+    requests[1].resolve({ ...createStatus(), current: 'feature' });
+    await postMutation;
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
+
+    // The late pre-mutation response cannot overwrite the newer authoritative one.
+    requests[0].resolve(createStatus());
+    await preMutation;
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
+  });
+
+  test('fetchAll({ force: true }) forces a fresh status fetch past the in-flight dedup', async () => {
+    setDirectoryStatus(createStatus());
+    const requests: Deferred<GitStatus>[] = [];
+    let statusCalls = 0;
+    const statusOptions: Array<{ mode?: 'light'; fresh?: boolean } | undefined> = [];
+    const git = createGitApi((_directory, options) => {
+      statusCalls += 1;
+      statusOptions.push(options);
+      const request = createDeferred<GitStatus>();
+      requests.push(request);
+      return request.promise;
+    });
+
+    const inFlight = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(1);
+
+    const all = useGitStore.getState().fetchAll('/repo', git, { force: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(2);
+    expect(statusOptions).toEqual([undefined, { fresh: true }]);
+
+    requests[1].resolve({ ...createStatus(), current: 'feature' });
+    requests[0].resolve(createStatus());
+    await Promise.allSettled([inFlight, all]);
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
+  });
+
+  test('does not request status while worktree bootstrap is pending', async () => {
+    setDirectoryStatus(createStatus());
+    let statusCalls = 0;
+    const git = createGitApi(async () => {
+      statusCalls += 1;
+      return createStatus(undefined, [{ path: 'bootstrap.ts', index: 'D', working_dir: ' ' }]);
+    });
+
+    markWorktreeBootstrapPending('/repo');
+    const changed = await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+
+    expect(changed).toBe(false);
+    expect(statusCalls).toBe(0);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
+  });
+
+  test('does not publish a status response after bootstrap becomes pending', async () => {
+    setDirectoryStatus(createStatus());
+    const request = createDeferred<GitStatus>();
+    const git = createGitApi(() => request.promise);
+
+    const loading = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    markWorktreeBootstrapPending('/repo');
+    request.resolve(createStatus(undefined, [{ path: 'bootstrap.ts', index: 'D', working_dir: ' ' }]));
+
+    expect(await loading).toBe(false);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
+  });
+
+  test('can propagate a forced status failure to a reconciliation owner', async () => {
+    setDirectoryStatus(createStatus());
+    const git = createGitApi(async () => {
+      throw new Error('offline');
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+
+    try {
+      await expect(useGitStore.getState().fetchStatus('/repo', git, {
+        force: true,
+        silent: true,
+        throwOnError: true,
+      })).rejects.toThrow('offline');
+      expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   test('does not let an older status fetch undo an optimistic mutation', async () => {
@@ -157,16 +415,16 @@ describe('useGitStore', () => {
   });
 
   test('rejects direct diff commits captured for another runtime', () => {
-    useGitStore.getState().setDiff('/repo', 'stale.ts', { original: 'a', modified: 'b' }, 'runtime-a');
+    useGitStore.getState().setDiff('/repo', 'stale.ts', { original: 'a', modified: 'b', submodule: null }, 'runtime-a');
     expect(useGitStore.getState().getDiff('/repo', 'stale.ts')).toBe(null);
   });
 
   test('clears cached file contents when a git refresh hint invalidates diffs', () => {
     setDirectoryStatus(createStatus(
-      { 'src/index.ts': { insertions: 1, deletions: 1 } },
+      { staged: {}, working: { 'src/index.ts': { insertions: 1, deletions: 1 } } },
       [{ path: 'src/index.ts', index: ' ', working_dir: 'M' }],
     ));
-    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale' });
+    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale', submodule: null });
 
     useGitStore.getState().clearDiffCache('/repo');
 
@@ -178,8 +436,8 @@ describe('useGitStore', () => {
       { path: 'src/first.ts', index: ' ', working_dir: 'M' },
       { path: 'src/second.ts', index: ' ', working_dir: 'M' },
     ]));
-    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b' });
-    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd' });
+    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b', submodule: null });
+    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd', submodule: null });
 
     useGitStore.getState().clearDiffCache('/repo', ['src/first.ts']);
 
@@ -274,10 +532,77 @@ describe('useGitStore', () => {
     expect(status?.files[0]).toBe(conflicted);
   });
 
-  test('preserves diff stats during optimistic moves', () => {
-    const diffStats = { 'src/index.ts': { insertions: 2, deletions: 1 } };
+  test('moves diff stats into the staged scope during optimistic staging', () => {
+    setDirectoryStatus(createStatus(
+      { staged: {}, working: { 'src/index.ts': { insertions: 2, deletions: 1 } } },
+      [{ path: 'src/index.ts', index: ' ', working_dir: 'M' }],
+    ));
+
+    useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'stage');
+    const status = useGitStore.getState().getDirectoryState('/repo')?.status;
+
+    expect(status?.diffStats).toEqual({
+      staged: { 'src/index.ts': { insertions: 2, deletions: 1 } },
+      working: {},
+    });
+  });
+
+  test('moves diff stats into the working scope during optimistic unstaging', () => {
+    setDirectoryStatus(createStatus(
+      { staged: { 'src/index.ts': { insertions: 2, deletions: 1 } }, working: {} },
+      [{ path: 'src/index.ts', index: 'M', working_dir: ' ' }],
+    ));
+
+    useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'unstage');
+    const status = useGitStore.getState().getDirectoryState('/repo')?.status;
+
+    expect(status?.diffStats).toEqual({
+      staged: {},
+      working: { 'src/index.ts': { insertions: 2, deletions: 1 } },
+    });
+  });
+
+  test('merges both scopes when optimistically staging a partially staged file', () => {
+    setDirectoryStatus(createStatus(
+      {
+        staged: { 'src/index.ts': { insertions: 2, deletions: 1 } },
+        working: { 'src/index.ts': { insertions: 3, deletions: 2 } },
+      },
+      [{ path: 'src/index.ts', index: 'M', working_dir: 'M' }],
+    ));
+
+    useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'stage');
+    const status = useGitStore.getState().getDirectoryState('/repo')?.status;
+
+    expect(status?.diffStats).toEqual({
+      staged: { 'src/index.ts': { insertions: 5, deletions: 3 } },
+      working: {},
+    });
+  });
+
+  test('merges both scopes when optimistically unstaging a partially staged file', () => {
+    setDirectoryStatus(createStatus(
+      {
+        staged: { 'src/index.ts': { insertions: 2, deletions: 1 } },
+        working: { 'src/index.ts': { insertions: 3, deletions: 2 } },
+      },
+      [{ path: 'src/index.ts', index: 'M', working_dir: 'M' }],
+    ));
+
+    useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'unstage');
+    const status = useGitStore.getState().getDirectoryState('/repo')?.status;
+
+    expect(status?.diffStats).toEqual({
+      staged: {},
+      working: { 'src/index.ts': { insertions: 5, deletions: 3 } },
+    });
+  });
+
+  test('preserves the diff stats reference when a moved path has no stats', () => {
+    const diffStats = { staged: {}, working: { 'other.ts': { insertions: 1, deletions: 1 } } };
     setDirectoryStatus(createStatus(diffStats, [
       { path: 'src/index.ts', index: ' ', working_dir: 'M' },
+      { path: 'other.ts', index: ' ', working_dir: 'M' },
     ]));
 
     useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'stage');
@@ -333,5 +658,125 @@ describe('useGitStore', () => {
     useGitStore.getState().restoreStatus('/repo', previousStatus);
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.status).toBe(initialStatus);
+  });
+});
+
+describe('useGitStore nested repository discovery', () => {
+  beforeEach(() => {
+    listGitDirectoriesControl.impl = async () => {
+      throw new Error('network unavailable');
+    };
+    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+  });
+
+  test('selects a nested repo per root and persists the selection', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/repo-one');
+
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
+
+    // Re-seeding from storage (as a page refresh would) restores the pick.
+    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
+  });
+
+  test('keeps selections isolated per root', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
+
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/one');
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-b')).toBe('/root-b/two');
+  });
+
+  test('clears only the given root selection', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
+
+    useGitStore.getState().clearNestedRepoSelection('/root-a');
+
+    expect(useGitStore.getState().nestedRepoSelection.has('/root-a')).toBe(false);
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-b')).toBe('/root-b/two');
+  });
+
+  test('remembers a stale-cleared repository so auto-select can skip it', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
+
+    useGitStore.getState().clearNestedRepoSelection('/root-a');
+    useGitStore.getState().clearNestedRepoSelection('/root-b');
+    useGitStore.getState().clearNestedRepoSelection('/root-b');
+
+    const clearedA = useGitStore.getState().staleClearedSelections.get('/root-a');
+    const clearedB = useGitStore.getState().staleClearedSelections.get('/root-b');
+    expect(clearedA).toEqual(new Set(['/root-a/one']));
+    // Repeated clears of the same path stay a set, not an ever-growing list.
+    expect(clearedB).toEqual(new Set(['/root-b/two']));
+  });
+
+  test('runtime switch clears stale-cleared memory with the rest', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.getState().clearNestedRepoSelection('/root-a');
+
+    useGitStore.getState().resetForRuntimeSwitch('runtime-b');
+
+    expect(useGitStore.getState().staleClearedSelections.size).toBe(0);
+  });
+
+  test('runtime switch does not leak selections or discovery across runtimes', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.setState({ nestedReposByRoot: new Map([['/root-a', ['/root-a/one']]]) });
+
+    useGitStore.getState().resetForRuntimeSwitch('runtime-b');
+
+    expect(useGitStore.getState().nestedRepoSelection.size).toBe(0);
+    expect(useGitStore.getState().nestedReposByRoot.size).toBe(0);
+  });
+
+  test('discards an in-flight discovery result when the runtime switches', async () => {
+    const stale = useGitStore.getState().ensureNestedRepos('/root-a');
+    useGitStore.getState().resetForRuntimeSwitch('runtime-b');
+    await stale;
+
+    // The old runtime's late completion must not repopulate the cleared map.
+    expect(useGitStore.getState().nestedReposByRoot.has('/root-a')).toBe(false);
+
+    // Discovery started under the new runtime still commits normally.
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBeNull();
+  });
+
+  test('marks discovery failure as a failed marker, not an empty success', async () => {
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBeNull();
+  });
+
+  test('marks a 501 runtime as unsupported instead of failed', async () => {
+    listGitDirectoriesControl.impl = async () => {
+      throw new TestGitDirectoriesUnsupportedError();
+    };
+
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBe('unsupported');
+  });
+
+  test('unsupported does not clobber a previous successful discovery', async () => {
+    listGitDirectoriesControl.impl = async () => ['/root-a/one'];
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+
+    listGitDirectoriesControl.impl = async () => {
+      throw new TestGitDirectoriesUnsupportedError();
+    };
+    await useGitStore.getState().ensureNestedRepos('/root-a', { force: true });
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toEqual(['/root-a/one']);
+  });
+
+  test('dedupes concurrent discovery runs for the same root', async () => {
+    const first = useGitStore.getState().ensureNestedRepos('/root-a');
+    const second = useGitStore.getState().ensureNestedRepos('/root-a');
+    await Promise.all([first, second]);
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBeNull();
   });
 });

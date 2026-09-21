@@ -61,6 +61,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const speechVolume = useConfigStore((state) => state.speechVolume);
     const sayVoice = useConfigStore((state) => state.sayVoice);
     const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
+    const localTtsModelId = useConfigStore((state) => state.localTtsModelId);
+    const ttsFollowTextLanguage = useConfigStore((state) => state.ttsFollowTextLanguage);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
@@ -135,8 +137,10 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 });
             } else if (voiceProvider === 'local') {
                 await speakLocalTTS(sanitizedText, {
+                    model: localTtsModelId,
                     speakerId: localTtsVoiceId,
                     speed: speechRate,
+                    language: ttsFollowTextLanguage ? 'auto' : undefined,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
@@ -145,6 +149,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 await speakSayTTS(sanitizedText, {
                     voice: sayVoice,
                     rate: wordsPerMinute,
+                    language: ttsFollowTextLanguage ? 'auto' : undefined,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
@@ -187,6 +192,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
         speakSayTTS,
         speakLocalTTS,
         localTtsVoiceId,
+        localTtsModelId,
+        ttsFollowTextLanguage,
         stop,
     ]);
     

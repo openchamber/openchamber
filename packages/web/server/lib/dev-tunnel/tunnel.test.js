@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import http from 'node:http';
 import net from 'node:net';
+import WebSocket from 'ws';
 
 import { createDevTunnelClient } from './client.js';
 import { createDevTunnelRuntime, isDevTunnelPath } from './runtime.js';
@@ -228,6 +229,12 @@ describe('dev tunnel authentication', () => {
     enabled: true,
     resolveAuthContext: async () => ({ type: 'session' }),
   };
+  const urlTokenAuth = {
+    enabled: true,
+    resolveAuthContext: async (req, _res, options) => (
+      options?.allowUrlToken === true && req.url.includes('oc_url_token=good') ? { type: 'client', token: 'url:authenticated' } : null
+    ),
+  };
 
   test('accepts a bearer-authenticated client that sends no origin', async () => {
     const devPort = await startDevServer((_req, res) => res.end('ok'));
@@ -241,6 +248,19 @@ describe('dev tunnel authentication', () => {
       headers: { Authorization: 'Bearer good' },
     });
     expect((await httpGet(localPort, '/')).body).toBe('ok');
+  });
+
+  test('accepts a URL-token client carried by the E2EE relay', async () => {
+    const devPort = await startDevServer((_req, res) => res.end('relay-ok'));
+    const host = await startHost({ allowedPorts: [devPort], auth: urlTokenAuth });
+
+    const body = await new Promise((resolve, reject) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}&oc_url_token=good`);
+      socket.on('open', () => socket.send('GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'));
+      socket.on('message', (data) => resolve(Buffer.from(data).toString()));
+      socket.on('error', reject);
+    });
+    expect(body).toContain('relay-ok');
   });
 
   test('rejects a client with no credentials', async () => {

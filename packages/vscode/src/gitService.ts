@@ -8,8 +8,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { execGit as executeGit } from './bridge-git-process-runtime';
+import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
@@ -308,39 +310,7 @@ function cleanBranchName(branch: string): string {
  * Execute a raw git command and return the output
  */
 async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve) => {
-    const normalizedCwd = normalizePath(cwd);
-    const gitPath = gitApi?.git.path || 'git';
-
-    buildGitEnv().then((env) => {
-      const proc = spawn(gitPath, args, {
-        cwd: normalizedCwd,
-        env,
-        windowsHide: true,
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout?.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      proc.stderr?.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      proc.on('close', (exitCode) => {
-        resolve({ stdout, stderr, exitCode: exitCode ?? 0 });
-      });
-
-      proc.on('error', (error) => {
-        resolve({ stdout: '', stderr: error.message, exitCode: 1 });
-      });
-    }).catch((error) => {
-      resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
-    });
-  });
+  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git' });
 }
 
 function isValidCommitHash(hash: string): boolean {
@@ -424,7 +394,10 @@ export interface GitStatusResult {
   behind: number;
   files: GitStatusFile[];
   isClean: boolean;
-  diffStats?: Record<string, { insertions: number; deletions: number }>;
+  diffStats?: {
+    staged: Record<string, { insertions: number; deletions: number }>;
+    working: Record<string, { insertions: number; deletions: number }>;
+  };
   /** Present when a merge is in progress with conflicts */
   mergeInProgress?: GitMergeInProgress | null;
   /** Present when a rebase is in progress */
@@ -593,6 +566,9 @@ async function checkInProgressOperations(directory: string): Promise<{
  * Fallback: Get git status using raw git commands
  */
 async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
+  // Deliberately `-uall`: the web server lists a large untracked directory as
+  // one `dir/` entry (readStatus in web/server/lib/git/service.js) and the
+  // shared UI explains such an entry; this runtime has not adopted that bound.
   const statusResult = await execGit(['status', '--porcelain=v1', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {
@@ -669,6 +645,23 @@ export interface GitBranchResult {
   all: string[];
   current: string;
   branches: Record<string, GitBranchDetails>;
+}
+
+export async function getGitUnpushedBranchCounts(directory: string, requestedBranches: string[]): Promise<{ counts: Record<string, number> }> {
+  const requested = [...new Set(requestedBranches)].filter(Boolean).slice(0, 5);
+  if (requested.length === 0) return { counts: {} };
+  const local = new Set((await getGitBranchesRaw(directory)).all.filter((branch) => !branch.startsWith('remotes/')));
+  const counts: Record<string, number> = {};
+  await Promise.all(requested.map(async (branch) => {
+    if (!local.has(branch)) return;
+    const upstreamResult = await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`], directory);
+    const upstream = upstreamResult.exitCode === 0 ? upstreamResult.stdout.trim() : '';
+    if (!upstream) return;
+    const countResult = await execGit(['rev-list', '--count', `${upstream}..${branch}`], directory);
+    const count = countResult.exitCode === 0 ? Number.parseInt(countResult.stdout.trim(), 10) : 0;
+    if (Number.isFinite(count) && count > 0) counts[branch] = count;
+  }));
+  return { counts };
 }
 
 /**
@@ -768,7 +761,7 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
  */
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
   const repo = await getRepository(directory);
-  
+
   if (repo) {
     try {
       await repo.checkout(branch);
@@ -843,6 +836,7 @@ export interface GitWorktreeInfo {
   path: string;
   directoryCreated?: true;
   bootstrapStatus?: WorktreeBootstrapStatus;
+  sourceFetchFailed?: true;
 }
 
 type WorktreeListEntry = {
@@ -1970,6 +1964,7 @@ async function attachGitWorktreeToCandidate(
 
     const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
     if (parsedRemoteStartRef) {
+      worktreeAddArgs.splice(2, 0, '--no-track');
       inferredUpstream = {
         remote: parsedRemoteStartRef.remote,
         branch: parsedRemoteStartRef.branch,
@@ -1977,15 +1972,8 @@ async function attachGitWorktreeToCandidate(
     }
   }
 
-  if (ensureRemoteName && ensureRemoteUrl) {
+  if (mode === 'existing' && ensureRemoteName && ensureRemoteUrl) {
     await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
-  }
-
-  if (mode === 'new') {
-    const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
-    if (parsedRemoteStartRef) {
-      await fetchRemoteBranchRef(context.primaryWorktree, parsedRemoteStartRef.remote, parsedRemoteStartRef.branch);
-    }
   }
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
@@ -2031,6 +2019,59 @@ async function attachGitWorktreeToCandidate(
   };
 }
 
+const prepareWorktreeCreateSource = async (
+  context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
+  input: CreateGitWorktreePayload,
+): Promise<{ input: CreateGitWorktreePayload; sourceFetchFailed: boolean }> => {
+  if (input.mode === 'existing') {
+    return { input, sourceFetchFailed: false };
+  }
+
+  const ensureRemoteName = String(input.ensureRemoteName || '').trim();
+  const ensureRemoteUrl = String(input.ensureRemoteUrl || '').trim();
+  if (ensureRemoteName && ensureRemoteUrl) {
+    await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
+  }
+
+  const startRef = normalizeStartRef(input.startRef);
+  const remoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
+  if (!remoteStartRef) {
+    return { input, sourceFetchFailed: false };
+  }
+
+  const status = await getGitStatus(context.primaryWorktree, { mode: 'light' }).catch(() => null);
+  const trackingRef = status?.tracking
+    ? await resolveRemoteBranchRef(context.primaryWorktree, status.tracking)
+    : null;
+  const canFallbackToLocal = Boolean(
+    status?.current
+    && status.ahead === 0
+    && trackingRef?.fullRef === remoteStartRef.fullRef
+  );
+
+  try {
+    await fetchRemoteBranchRef(context.primaryWorktree, remoteStartRef.remote, remoteStartRef.branch);
+    return { input, sourceFetchFailed: false };
+  } catch (error) {
+    if (canFallbackToLocal && status?.current) {
+      return {
+        input: { ...input, startRef: status.current },
+        sourceFetchFailed: true,
+      };
+    }
+
+    const refExists = await runGitCommand(
+      context.primaryWorktree,
+      ['show-ref', '--verify', '--quiet', remoteStartRef.fullRef],
+    );
+    if (!refExists.success) {
+      throw error;
+    }
+    console.warn(`[GitService] failed to refresh ${remoteStartRef.remote}/${remoteStartRef.branch}, proceeding with the existing remote-tracking ref`);
+    return { input, sourceFetchFailed: false };
+  }
+};
+
 export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -2038,11 +2079,13 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   if (input?.returnAfterDirectoryCreated === true) {
     await assertWorktreeCreatePreflight(directory, input);
   }
+  const prepared = await prepareWorktreeCreateSource(context, input);
+  const preparedInput = prepared.input;
 
   await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
 
-  const preferredName = String(input?.worktreeName || input?.name || '').trim();
-  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
+  const preferredName = String(preparedInput.worktreeName || preparedInput.name || '').trim();
+  const preferredBranchName = cleanBranchName(String(preparedInput.branchName || '').trim());
 
   const candidate = await resolveCandidateDirectory(
     context.worktreeRoot,
@@ -2051,7 +2094,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     context.primaryWorktree
   );
 
-  if (input?.returnAfterDirectoryCreated === true) {
+  if (preparedInput.returnAfterDirectoryCreated === true) {
     await fs.promises.mkdir(candidate.directory, { recursive: false });
 
     const bootstrapStatus = setWorktreeBootstrapState(
@@ -2065,17 +2108,17 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
       updatedAt: Date.now(),
     };
     const localBranch = mode === 'existing'
-      ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
+      ? cleanBranchName(String(preparedInput.branchName || preparedInput.existingBranch || candidate.branch || '').trim())
       : candidate.branch;
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
+    const task = attachGitWorktreeToCandidate(context, candidate, preparedInput).catch(async (error) => {
       setWorktreeBootstrapFailure(candidate.directory, error);
       await cleanupFailedFastWorktreeCreate(context, candidate);
       console.warn('[GitService] Background worktree creation failed:', error instanceof Error ? error.message : String(error));
     });
     trackWorktreeBootstrapTask(candidate.directory, task);
 
-    return {
+    const result: GitWorktreeInfo = {
       head: '',
       name: candidate.name,
       branch: localBranch,
@@ -2083,9 +2126,14 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
       directoryCreated: true,
       bootstrapStatus,
     };
+    if (prepared.sourceFetchFailed) {
+      result.sourceFetchFailed = true;
+    }
+    return result;
   }
 
-  return attachGitWorktreeToCandidate(context, candidate, input);
+  const result = await attachGitWorktreeToCandidate(context, candidate, preparedInput);
+  return prepared.sourceFetchFailed ? { ...result, sourceFetchFailed: true } : result;
 }
 
 export async function getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapStatus> {
@@ -2174,21 +2222,29 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
 // ============== Diff Operations ==============
 
 /**
- * Get diff for a file
+ * Get diff for a status path. A path that no longer resolves, or a nested
+ * repository, is reported as unavailable rather than as an empty diff.
  */
 export async function getGitDiff(
   directory: string, 
   filePath: string, 
   staged = false,
   contextLines?: number
-): Promise<{ diff: string }> {
+): Promise<{ kind: 'diff'; diff: string; submodule: GitSubmoduleState | null } | GitPathUnavailable> {
+  const target = await resolveGitPathTarget(execGit, directory, filePath);
+  if (target.kind === 'unavailable') return target;
+
   const args = ['diff'];
   if (staged) args.push('--cached');
   if (typeof contextLines === 'number') args.push(`-U${contextLines}`);
-  args.push('--', filePath);
+  args.push('--', target.repoPath);
 
   const result = await execGit(args, directory);
-  return { diff: result.stdout };
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Failed to get Git diff');
+  }
+  const submodule = target.kind === 'submodule' ? await readSubmoduleState(execGit, directory, target) : null;
+  return { kind: 'diff', diff: result.stdout, submodule };
 }
 
 /**
@@ -2262,7 +2318,22 @@ export async function getGitFileDiff(
   directory: string, 
   filePath: string, 
   staged = false
-): Promise<{ original: string; modified: string; path: string }> {
+): Promise<{ kind: 'file-diff'; original: string; modified: string; path: string; submodule: GitSubmoduleState | null } | GitPathUnavailable> {
+  const target = await resolveGitPathTarget(execGit, directory, filePath);
+  if (target.kind === 'unavailable') return target;
+  if (target.kind === 'submodule') {
+    // Git's own text form of a gitlink; `submodule` carries what text cannot.
+    const submodule = await readSubmoduleState(execGit, directory, target);
+    const describeCommit = (commit: string | null) => (commit ? `Subproject commit ${commit}\n` : '');
+    return {
+      kind: 'file-diff',
+      original: describeCommit(submodule.headCommit),
+      modified: describeCommit(staged ? submodule.indexCommit : submodule.worktreeCommit),
+      path: filePath,
+      submodule,
+    };
+  }
+
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -2292,14 +2363,14 @@ export async function getGitFileDiff(
         modified = Buffer.from(modifiedBytes).toString('utf8');
       }
       
-      return { original, modified, path: filePath };
+      return { kind: 'file-diff', original, modified, path: filePath, submodule: null };
     } catch (error) {
       console.error('[GitService] Failed to get file diff:', error);
     }
   }
 
   // Fallback: return empty content
-  return { original: '', modified: '', path: filePath };
+  return { kind: 'file-diff', original: '', modified: '', path: filePath, submodule: null };
 }
 
 /**

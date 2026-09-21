@@ -16,6 +16,7 @@ export type BtwPanelState = {
   boundaryMessageID: string | null;
   collapsed: boolean;
   creating: boolean;
+  pending: boolean;
 };
 
 /**
@@ -53,5 +54,6 @@ export function useBtwPanelState(
     boundaryMessageID: btwSessionId ? getBtwBoundaryMessageID(btwSession) : null,
     collapsed: Boolean(uiState?.collapsed),
     creating: Boolean(uiState?.creating),
+    pending: Boolean(uiState?.pending),
   };
 }

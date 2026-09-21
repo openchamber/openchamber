@@ -89,7 +89,7 @@ describe('NeuralWatt quota provider', () => {
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$32.68');
   });
 
-  it('surfaces subscription and allowance windows (allowance keyed by period, key name in valueLabel)', async () => {
+  it('surfaces subscription and allowance windows (allowance keyed by period, percent value)', async () => {
     const payload = {
       ...DOCUMENTED_SUBSCRIPTION_PAYLOAD,
       balance: { credits_remaining_usd: 200 },
@@ -107,11 +107,11 @@ describe('NeuralWatt quota provider', () => {
     expect(subWindow.usedPercent).toBeCloseTo((13.9023 / 20.0) * 100, 4);
 
     // Allowance window is keyed by the localized period label ("monthly");
-    // key name flows through valueLabel for identification.
+    // the usage value stays a percent — no key-name valueLabel.
     const allowWindow = result.usage.windows.monthly;
     expect(allowWindow).toBeDefined();
     expect(allowWindow.usedPercent).toBe(25);
-    expect(allowWindow.valueLabel).toBe('Prod');
+    expect(allowWindow.valueLabel).toBeUndefined();
     expect(allowWindow.resetAt).toBe(Date.parse('2026-08-01T00:00:00Z'));
 
     // credits_balance suppressed because allowance is present
@@ -137,7 +137,7 @@ describe('NeuralWatt quota provider', () => {
     expect(window.usedPercent).toBeCloseTo((25 / 55) * 100, 4);
     expect(window.windowSeconds).toBe(30 * 86400);
     expect(window.resetAt).toBe(Date.parse('2026-08-01T00:00:00Z'));
-    expect(window.valueLabel).toBe('prod-key');
+    expect(window.valueLabel).toBeUndefined();
     expect(result.usage.windows.credits_balance).toBeUndefined();
   });
 
@@ -176,7 +176,7 @@ describe('NeuralWatt quota provider', () => {
     expect(window).toBeDefined();
     expect(window.windowSeconds).toBe(604800);
     expect(window.resetAt).toBe(Date.parse('2026-07-04T00:00:00Z'));
-    expect(window.valueLabel).toBe('Prod');
+    expect(window.valueLabel).toBeUndefined();
   });
 
   it('uses daily as the allowance key when period is daily', async () => {
@@ -216,7 +216,7 @@ describe('NeuralWatt quota provider', () => {
     expect(window.usedPercent).toBe(25);
   });
 
-  it('marks blocked allowance as 100% with valueLabel set', async () => {
+  it('marks blocked allowance as 100% with percent value', async () => {
     const payload = {
       balance: { credits_remaining_usd: 30 },
       subscription: null,
@@ -231,7 +231,7 @@ describe('NeuralWatt quota provider', () => {
 
     const window = result.usage.windows.monthly;
     expect(window.usedPercent).toBe(100);
-    expect(window.valueLabel).toBe('sample');
+    expect(window.valueLabel).toBeUndefined();
   });
 
   it('falls back to credits_balance when neither subscription nor allowance exists', async () => {

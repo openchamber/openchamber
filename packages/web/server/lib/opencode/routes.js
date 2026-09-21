@@ -1,12 +1,13 @@
 import express from 'express';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import {
   buildDeferredRestartResponse,
 } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { settingsSurfaceOf } from './settings-files.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -164,6 +165,41 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     return versions.sort((left, right) => compareVersions(right, left))[0];
   };
 
+  // OpenCode's `/global/upgrade` requires an explicit semver target and rejects
+  // a bodyless call, so "update to the latest" has to name the version. The
+  // release lookup is the same one the upgrade-status check already uses to
+  // decide there is anything to offer.
+  const resolveOpenCodeUpgradeTarget = async (requestedTarget) => {
+    if (typeof requestedTarget === 'string' && requestedTarget.trim().length > 0) {
+      return { resolved: true, target: requestedTarget.trim() };
+    }
+    try {
+      const latest = await fetchLatestOpenCodeVersion();
+      if (!latest) {
+        return { resolved: false, reason: 'The latest OpenCode version could not be determined.' };
+      }
+      return { resolved: true, target: latest };
+    } catch (error) {
+      return {
+        resolved: false,
+        reason: error instanceof Error ? error.message : 'The latest OpenCode version could not be determined.',
+      };
+    }
+  };
+
+  // OpenCode reports a rejected upgrade as `{ name, data: { message, kind } }`,
+  // which carries no `error` field. Reading only `error` left the user with the
+  // bare HTTP status text ("Bad Request") and nothing to act on.
+  const readOpenCodeUpgradeErrorMessage = (payload, response) => {
+    const candidates = [payload?.error, payload?.data?.message, payload?.message];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+    return response.statusText || 'Failed to upgrade OpenCode';
+  };
+
   const pruneExpiredPendingMcpAuthContexts = () => {
     const now = Date.now();
     for (const [state, entry] of pendingMcpAuthContextByState.entries()) {
@@ -173,9 +209,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     }
   };
 
-  app.get('/api/config/settings', async (_req, res) => {
+  app.get('/api/config/settings', async (req, res) => {
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      // The surface kind resolves the per-surface profile keys; absent means base.
+      const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
       res.json(formatSettingsResponse(settings));
     } catch (error) {
       console.error('Failed to read settings:', error);
@@ -218,10 +255,23 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         });
       }
 
-      const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
-        ? req.body.target.trim()
-        : undefined;
+      const requestedTarget = req.body?.target;
+      // The target lookup reaches the network, so it runs inside the operation:
+      // the in-flight lock is taken synchronously above, and a second click
+      // cannot slip past while the release version is being resolved.
       const upgradeOperation = (async () => {
+        const targetResolution = await resolveOpenCodeUpgradeTarget(requestedTarget);
+        if (!targetResolution.resolved) {
+          return {
+            status: 502,
+            body: {
+              success: false,
+              code: 'OPENCODE_UPGRADE_TARGET_UNRESOLVED',
+              error: `Could not determine which OpenCode version to install: ${targetResolution.reason}`,
+            },
+          };
+        }
+
         const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
           method: 'POST',
           headers: {
@@ -229,7 +279,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
             Accept: 'application/json',
             ...getOpenCodeAuthHeaders(),
           },
-          body: JSON.stringify(target ? { target } : {}),
+          body: JSON.stringify({ target: targetResolution.target }),
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
@@ -237,7 +287,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
             status: response.status,
             body: {
               success: false,
-              error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
+              error: readOpenCodeUpgradeErrorMessage(payload, response),
             },
           };
         }
@@ -374,7 +424,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
   app.put('/api/config/settings', async (req, res) => {
     try {
-      const updated = await persistSettings(req.body ?? {});
+      const updated = await persistSettings(req.body ?? {}, { surface: settingsSurfaceOf(req) });
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
@@ -759,7 +809,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   });
 
   // Behavior / Global AGENTS.md endpoints
-  const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+  const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
   const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024; // 1 MB
 
   app.get('/api/behavior/agents-md', async (_req, res) => {
@@ -767,10 +817,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       try {
         await fs.promises.access(AGENTS_MD_PATH);
       } catch {
-        return res.json({ content: '', exists: false });
+        return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
       }
       const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-      return res.json({ content, exists: true });
+      return res.json({ content, exists: true, path: AGENTS_MD_PATH });
     } catch (error) {
       console.error('Failed to read AGENTS.md:', error);
       return res.status(500).json({ error: 'Failed to read AGENTS.md' });

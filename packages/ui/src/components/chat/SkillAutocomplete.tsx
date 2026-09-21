@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn, fuzzyMatch } from '@/lib/utils';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
@@ -38,13 +39,16 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   const keyboardNavigationRef = React.useRef(false);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const skills = useSkillsStore((s) => s.skills);
+  // Skills of the directory the composer sends to (session directory, or the
+  // Chats root for a chat draft), not of the project the app was on last.
+  const effectiveDirectory = useEffectiveDirectory();
+  const skills = useSkillsStore((s) => selectSkillsForDirectory(s, effectiveDirectory));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    // Always trigger loadSkills when autocomplete opens to ensure project context is fresh
-    void loadSkills();
-  }, [loadSkills]);
+    // Always trigger loadSkills when autocomplete opens to ensure the directory's skills are fresh
+    void loadSkills(effectiveDirectory);
+  }, [effectiveDirectory, loadSkills]);
 
   React.useEffect(() => {
     const normalizedQuery = searchQuery.trim();
@@ -168,7 +172,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 oc-glass-popover border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
       <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">

@@ -4,6 +4,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { opencodeClient } from './opencode/client';
 import { runtimeFetch } from './runtime-fetch';
+import { getRecentSendFailures } from '@/sync/send-failure-log';
+import { getRecentSessionErrors } from '@/sync/session-error-log';
 
 declare const __APP_VERSION__: string | undefined;
 
@@ -21,6 +23,8 @@ type OpenChamberHealthSnapshot = {
   openCodeAuthSource?: unknown;
   isOpenCodeReady?: unknown;
   lastOpenCodeError?: unknown;
+  lastOpenCodeHealthFailure?: unknown;
+  lastManagedOpenCodeProcess?: unknown;
   lastOpenCodeLaunchDiagnostics?: unknown;
   opencodeBinaryResolved?: unknown;
   opencodeBinarySource?: unknown;
@@ -128,6 +132,15 @@ const normalizePort = (value: unknown): number | null => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
+const STDERR_TAIL_LINES = 12;
+const RECENT_RECORD_LINES = 8;
+
+const joinPath = (base: string, relative: string, windows: boolean): string => {
+  const separator = windows ? '\\' : '/';
+  const trimmed = base.replace(/[\\/]+$/, '');
+  return `${trimmed}${separator}${windows ? relative.replace(/\//g, '\\') : relative}`;
+};
+
 const formatUnknown = (value: unknown, fallback = '(n/a)'): string => {
   if (typeof value === 'string') return value.trim() || fallback;
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
@@ -148,7 +161,7 @@ const formatLaunchRuntime = (wrapperType: string, node: string, bun: string): st
   return 'direct executable';
 };
 
-const buildOpenCodeStatusReport = async (): Promise<string> => {
+export const buildOpenCodeStatusReport = async (): Promise<string> => {
   const now = new Date();
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '(unknown)';
   const platform = typeof navigator !== 'undefined' ? navigator.userAgent : '(no navigator)';
@@ -158,6 +171,7 @@ const buildOpenCodeStatusReport = async (): Promise<string> => {
   const urls = getRuntimeUrlResolver();
   const healthUrl = urls.health();
   const apiBase = urls.api('/api/');
+
 
   const openChamberHealth: OpenChamberHealthSnapshot | null = await (async () => {
     if (!healthUrl) return null;
@@ -227,15 +241,36 @@ const buildOpenCodeStatusReport = async (): Promise<string> => {
 
   const buildProbeUrl = (pathname: string, includeDirectory = true): string | null => {
     if (!apiBase) return null;
-    const url = new URL(pathname.replace(/^\/+/, ''), apiBase);
+    // A web runtime resolves its API base relative to the page; a relative
+    // base is not a valid URL base on its own.
+    const absoluteBase = /^[a-z][a-z0-9+.-]*:/i.test(apiBase) || !origin ? apiBase : new URL(apiBase, origin).toString();
+    const url = new URL(pathname.replace(/^\/+/, ''), absoluteBase);
     if (includeDirectory && directory) {
       url.searchParams.set('directory', directory);
     }
     return url.toString();
   };
 
+  // OpenCode's own view of its directories; `home` anchors the log path below.
+  const pathInfo: { home?: unknown } | null = await (async () => {
+    const url = buildProbeUrl('/path', true);
+    if (!url) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const resp = await runtimeFetch(url, { signal: controller.signal, cache: 'no-store' });
+      if (!resp.ok) return null;
+      const json = (await resp.json().catch(() => null)) as unknown;
+      return isRecord(json) ? json : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+
   const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-    { label: 'health', path: '/health', includeDirectory: false },
+    { label: 'health', path: '/global/health', includeDirectory: false },
     { label: 'config', path: '/config', includeDirectory: true },
     { label: 'providers', path: '/config/providers', includeDirectory: true },
     { label: 'agents', path: '/agent', includeDirectory: true, timeoutMs: 12000 },
@@ -276,6 +311,64 @@ const buildOpenCodeStatusReport = async (): Promise<string> => {
   }
   if (typeof openChamberHealth?.openCodeAuthSource === 'string' && openChamberHealth.openCodeAuthSource.trim()) {
     lines.push(`OpenCode auth source: ${openChamberHealth.openCodeAuthSource}`);
+  }
+
+  // What the managed OpenCode process last said for itself. A turn that stops
+  // with nothing on screen usually left its reason here or in the session
+  // errors below, not in the UI.
+  const lastOpenCodeError = formatUnknown(openChamberHealth?.lastOpenCodeError, '');
+  const managedProcess = isRecord(openChamberHealth?.lastManagedOpenCodeProcess)
+    ? openChamberHealth.lastManagedOpenCodeProcess
+    : null;
+  const stderrTail = managedProcess && typeof managedProcess.stderrTail === 'string'
+    ? managedProcess.stderrTail.trim()
+    : '';
+  if (lastOpenCodeError || managedProcess) {
+    lines.push('');
+    lines.push('OpenCode process:');
+    if (lastOpenCodeError) lines.push(`- last error: ${lastOpenCodeError}`);
+    if (managedProcess) {
+      lines.push(`- pid: ${formatUnknown(managedProcess.pid, '(none)')} exit=${formatUnknown(managedProcess.exitCode, '(running)')} signal=${formatUnknown(managedProcess.signalCode, '(none)')}`);
+    }
+    if (stderrTail) {
+      const tailLines = stderrTail.split(/\r?\n/).filter((line) => line.trim().length > 0).slice(-STDERR_TAIL_LINES);
+      lines.push(`- stderr (last ${tailLines.length} lines):`);
+      for (const line of tailLines) lines.push(`    ${line.slice(0, 300)}`);
+    }
+  }
+
+  const sessionErrors = getRecentSessionErrors();
+  lines.push('');
+  lines.push(`Recent OpenCode session errors: ${sessionErrors.length === 0 ? '(none this app session)' : ''}`.trimEnd());
+  for (const record of sessionErrors.slice(0, RECENT_RECORD_LINES)) {
+    const detail = record.message ?? '(no message)';
+    lines.push(`- ${formatIso(record.at)} session=${record.sessionId.slice(0, 16)} ${record.name ? `${record.name}: ` : ''}${detail}`);
+  }
+
+  const sendFailures = getRecentSendFailures();
+  lines.push('');
+  lines.push(`Recent rejected sends: ${sendFailures.length === 0 ? '(none this app session)' : ''}`.trimEnd());
+  for (const record of sendFailures.slice(0, RECENT_RECORD_LINES)) {
+    lines.push(`- ${formatIso(record.at)} session=${record.sessionId.slice(0, 16)} status=${record.status ?? 'transport'}${record.ambiguous ? ' ambiguous' : ''} ${record.reason}`);
+  }
+
+  // Where to look next. OpenCode keeps its own log under the XDG data
+  // directory (the same default on every platform, which is why Windows users
+  // do not find it under AppData); the desktop app writes the server console,
+  // including OpenCode lifecycle lines, through electron-log.
+  const opencodeHome = typeof pathInfo?.home === 'string' ? pathInfo.home : '';
+  const isWindows = /Windows NT/.test(platform);
+  const isDesktop = origin.startsWith('openchamber-ui://');
+  lines.push('');
+  lines.push('Log files:');
+  lines.push(`- OpenCode: ${opencodeHome ? joinPath(opencodeHome, '.local/share/opencode/log', isWindows) : '<home>/.local/share/opencode/log'} (or $XDG_DATA_HOME/opencode/log when set)`);
+  if (isDesktop) {
+    const isMacDesktop = /Mac OS X|Macintosh/.test(platform);
+    lines.push(`- OpenChamber desktop: ${isWindows
+      ? '%APPDATA%\\OpenChamber\\logs\\main.log'
+      : isMacDesktop
+        ? '~/Library/Logs/OpenChamber/main.log'
+        : '~/.config/OpenChamber/logs/main.log'}`);
   }
 
   if (typeof window !== 'undefined') {

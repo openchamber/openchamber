@@ -1,3 +1,5 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -9,6 +11,7 @@ import {
   nodeHasPinnedMembershipChange,
   selectFolderRootNodes,
   selectQuestionBadgeSessionScopes,
+  selectRowBadgeVisibilityClass,
 } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
 
@@ -166,6 +169,44 @@ describe('selectFolderRootNodes', () => {
   });
 });
 
+describe('selectRowBadgeVisibilityClass', () => {
+  const hideOnHoverClass = 'group-hover:opacity-0 group-focus-within:opacity-0';
+
+  test('defers to the caller hover rule so the badge fades with the date label (#2284)', () => {
+    const className = selectRowBadgeVisibilityClass({
+      actionsAlwaysVisible: false,
+      menuOpen: false,
+      hideOnHoverClass,
+    });
+
+    expect(className).toContain(hideOnHoverClass);
+  });
+
+  test('hides the badge unconditionally while the row menu keeps the actions visible without hover', () => {
+    const className = selectRowBadgeVisibilityClass({
+      actionsAlwaysVisible: false,
+      menuOpen: true,
+      hideOnHoverClass,
+    });
+
+    expect(className).not.toBe('');
+    expect(className).not.toContain(hideOnHoverClass);
+  });
+
+  test('keeps the badge always visible when actions have reserved permanent padding', () => {
+    expect(selectRowBadgeVisibilityClass({
+      actionsAlwaysVisible: true,
+      menuOpen: false,
+      hideOnHoverClass,
+    })).toBe('');
+    expect(selectRowBadgeVisibilityClass({
+      actionsAlwaysVisible: true,
+      menuOpen: true,
+      hideOnHoverClass,
+    })).toBe('');
+  });
+});
+
 describe('getSessionWorktreeMenuDisabled', () => {
   test('shares the parent trigger disabled contract with the new worktree action', () => {
     expect(getSessionWorktreeMenuDisabled({
@@ -211,3 +252,8 @@ describe('canShowSessionWorktreeMenu', () => {
     })).toBe(true);
   });
 });
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

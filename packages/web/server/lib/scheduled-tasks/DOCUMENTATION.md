@@ -25,6 +25,19 @@ in shared project config under the project write lock:
   from the winner's persisted `nextRunAt`.
 - Project config writes also take a cross-process `.json.lock` file so the
   read-modify-write is serialized across processes, not only within one process.
+- `syncAllProjects` (startup and every full resync) syncs each registered
+  project on its own: a project whose config cannot be read or written (a
+  broken file, a lock timeout) is logged with its id and skipped, and every
+  other project's tasks are still scheduled. Only `listProjects` failing
+  aborts the sync as a whole. `syncProject` for one project still throws, so
+  a route for that project reports the failure.
+- The sharing processes may run different OpenChamber versions. Normalization
+  keeps only the fields a build knows, so every writer persists tasks it did
+  not change verbatim from disk and swaps only `state` onto a task whose state
+  it updated; a task goes out normalized only when it was deliberately
+  replaced (upsert, loop adoption). An older server touching the file after a
+  run therefore cannot strip fields a newer build added, such as a task's goal
+  or auto-accept settings.
 - Lock timeout / filesystem errors on claim, manual-start, or completion state
   writes always release the in-process running slot (via `finally`) and best-effort
   re-arm the **next future** occurrence; they must not leave the task permanently
@@ -56,7 +69,9 @@ in shared project config under the project write lock:
 - Claiming always writes `nextRunAt` (including `undefined`) so a past once-slot
   is cleared when there is no following occurrence.
 
-Manual `runNow` does not claim a schedule occurrence.
+Manual `runNow` does not claim a schedule occurrence. It also runs paused
+(`enabled: false`) tasks — that is the point of the button — while scheduled
+dispatches still skip disabled tasks, and completion never re-arms a paused task.
 
 ## Files
 

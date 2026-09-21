@@ -2,6 +2,7 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
+import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
@@ -48,7 +49,6 @@ export function useRouter(): void {
   const isApplyingRouteRef = React.useRef(false);
 
   // Get store actions (stable references)
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
@@ -67,11 +67,7 @@ export function useRouter(): void {
       try {
         // 1. Apply session first (may trigger async operations)
         if (route.sessionId) {
-          const currentSessionId = useSessionUIStore.getState().currentSessionId;
-          if (route.sessionId !== currentSessionId) {
-            const directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
-            setCurrentSession(route.sessionId, directoryHint);
-          }
+          await openSessionFromRoute(route.sessionId);
         }
 
         // 2. Handle settings first because it is a full-screen overlay.
@@ -107,7 +103,7 @@ export function useRouter(): void {
         isApplyingRouteRef.current = false;
       }
     },
-    [setCurrentSession, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
+    [setSettingsDialogOpen, setSettingsPage, navigateToDiff]
   );
 
   /**

@@ -61,7 +61,7 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
           'flex w-full items-center gap-1 rounded-md px-2 py-1 text-left',
           'text-xs font-semibold uppercase tracking-wide text-muted-foreground',
           'hover:bg-[var(--interactive-hover)] transition-colors duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         )}
       >
         <Icon name="arrow-down-s"

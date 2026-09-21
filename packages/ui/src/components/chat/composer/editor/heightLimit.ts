@@ -1,4 +1,4 @@
-export interface ComposerHeightLimitOptions {
+interface ComposerHeightLimitOptions {
     maxLinesHeight: number;
     boundHeight?: number;
     surroundingHeight?: number;
@@ -20,7 +20,7 @@ export function getComposerHeightLimit(options: ComposerHeightLimitOptions): num
     return limit;
 }
 
-export interface ComposerHostHeightLimitOptions {
+interface ComposerHostHeightLimitOptions {
     maxLinesHeight: number;
     editorHeight: number;
     renderedScrollHeight: number;

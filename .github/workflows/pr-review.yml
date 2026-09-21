@@ -291,14 +291,14 @@ jobs:
           COMMAND_FOCUS: ${{ steps.command.outputs.focus }}
         run: |
           review_started_epoch="$(date +%s)"
-          review_model="$(awk -F': ' '$1 == "model" { print $2; exit }' .opencode/agent/pr-review.md)"
+          review_model="$(awk -F': ' '$1 == "model" { print $2; exit }' .opencode/agent/pr-review-bot.md)"
           echo "OpenCode version: $(opencode --version)"
           echo "Review agent: pr-review"
           echo "Review model: ${review_model:-unknown}"
           echo "Review timeout: $REVIEW_TIMEOUT"
 
           set +e
-          timeout --signal=TERM --kill-after=30s "$REVIEW_TIMEOUT" opencode run --agent pr-review "A pull request in the OpenChamber repository needs one unified correctness, repository-guidance, contribution-quality, and evidence review.
+          timeout --signal=TERM --kill-after=30s "$REVIEW_TIMEOUT" opencode run --agent pr-review-bot "A pull request in the OpenChamber repository needs one unified correctness, repository-guidance, contribution-quality, and evidence review.
 
           This may be a repeated review request. Before writing a new review, inspect prior PR comments, bot comments, reviews, inline comments, and the commit timeline via GitHub. Compare prior findings against commits pushed after those comments, then only repeat findings that still exist in the current diff/current file state.
 

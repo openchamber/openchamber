@@ -44,6 +44,12 @@ other.
 - Send and fork dispatches without an explicit model/agent/variant reuse the
   target session's last user-message selection before falling back to the
   configured defaults; only session creation resolves defaults directly.
+- Default agents resolve from the owning project before global settings and
+  OpenCode defaults. Directory-based requests identify the project before
+  creating a worktree; existing linked worktrees resolve through Git's primary
+  worktree root. Send/fork fallback uses that same owner. Configured model IDs
+  and effort preferences survive missing catalog entries rather than silently
+  dispatching with a different model.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed

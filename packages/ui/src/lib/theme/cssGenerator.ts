@@ -1,9 +1,12 @@
 import type { Theme } from '@/types/theme';
 import { SEMANTIC_TYPOGRAPHY, VSCODE_TYPOGRAPHY } from '@/lib/typography';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { resolveSyntaxTokens } from './syntax';
+import { withOpacity } from './color';
+import { getReadableThemeColors } from './readableColors';
 
 const hexToRgb = (value: string | undefined | null): string | null => {
-  if (!value || typeof value !== 'string') {
+  if (!value) {
     return null;
   }
   const normalized = value.trim();
@@ -34,12 +37,6 @@ const hexToRgb = (value: string | undefined | null): string | null => {
 };
 
 export class CSSVariableGenerator {
-  private inheritanceMap: Map<string, string> = new Map();
-
-  constructor() {
-    this.initializeInheritanceMap();
-  }
-
   generate(theme: Theme): string {
     const cssVars: string[] = [];
 
@@ -54,6 +51,7 @@ export class CSSVariableGenerator {
     cssVars.push(...this.generateSyntaxColors(theme.colors.syntax));
 
     cssVars.push(...this.generateComponentColors(theme.colors, theme));
+    cssVars.push(...this.generateReadableColors(theme));
 
     cssVars.push(...this.generateTypographyVariables());
 
@@ -86,7 +84,7 @@ export class CSSVariableGenerator {
     vars.push(`  --primary-foreground: ${theme.colors.primary.foreground} !important;`);
 
     vars.push(`  --secondary: ${theme.colors.surface.muted} !important;`);
-    vars.push(`  --secondary-foreground: ${theme.colors.surface.mutedForeground} !important;`);
+    vars.push(`  --secondary-foreground: ${theme.colors.surface.foreground} !important;`);
 
     vars.push(`  --accent: ${theme.colors.surface.subtle} !important;`);
     vars.push(`  --accent-foreground: ${theme.colors.surface.foreground} !important;`);
@@ -141,19 +139,8 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       );
     }
 
-    if (theme.colors.charts?.series && Array.isArray(theme.colors.charts.series)) {
-      theme.colors.charts.series.forEach((color: string, i: number) => {
-        vars.push(`  --chart-${i + 1}: ${color};`);
-      });
-    }
-
-    if (theme.colors.loading) {
-      vars.push(`  --loading-spinner: ${theme.colors.loading.spinner || theme.colors.primary.base};`);
-      vars.push(`  --loading-spinner-track: ${theme.colors.loading.spinnerTrack || theme.colors.surface.muted};`);
-    } else {
-      vars.push(`  --loading-spinner: ${theme.colors.primary.base};`);
-      vars.push(`  --loading-spinner-track: ${theme.colors.surface.muted};`);
-    }
+    vars.push(`  --loading-spinner: ${theme.colors.primary.base};`);
+    vars.push(`  --loading-spinner-track: ${theme.colors.surface.muted};`);
 
     return vars;
   }
@@ -196,7 +183,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --primary-active: ${primary.active || this.darken(primary.base, 20)};`);
     vars.push(`  --primary-foreground: ${primary.foreground || '#ffffff'};`);
     vars.push(`  --primary-muted: ${primary.muted || this.opacity(primary.base, 0.5)};`);
-    vars.push(`  --primary-emphasis: ${primary.emphasis || this.lighten(primary.base, 10)};`);
     return vars;
   }
 
@@ -278,8 +264,9 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --syntax-variable: ${syntax.base.variable};`);
     vars.push(`  --syntax-type: ${syntax.base.type};`);
     vars.push(`  --syntax-operator: ${syntax.base.operator};`);
+    vars.push(`  --syntax-line-number: ${syntax.highlights?.lineNumber ?? syntax.base.comment};`);
 
-    const tokens = this.generateSyntaxTokens(syntax);
+    const tokens = resolveSyntaxTokens(syntax);
     for (const [key, value] of Object.entries(tokens)) {
       vars.push(`  --syntax-${this.kebabCase(key)}: ${value};`);
     }
@@ -287,84 +274,22 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     return vars;
   }
 
-  private generateSyntaxTokens(syntax: Theme['colors']['syntax']): Record<string, string> {
-    const base = syntax.base;
-    const tokens = syntax.tokens || {};
-
-    return {
-
-      commentDoc: tokens.commentDoc || this.lighten(base.comment, 10),
-
-      stringEscape: tokens.stringEscape || this.darken(base.string, 20),
-      stringInterpolation: tokens.stringInterpolation || base.variable,
-      stringRegex: tokens.stringRegex || this.adjustHue(base.string, 15),
-
-      keywordControl: tokens.keywordControl || base.keyword,
-      keywordOperator: tokens.keywordOperator || base.operator,
-      keywordImport: tokens.keywordImport || this.lighten(base.keyword, 10),
-      keywordReturn: tokens.keywordReturn || this.emphasize(base.keyword),
-
-      functionCall: tokens.functionCall || this.lighten(base.function, 5),
-      functionBuiltin: tokens.functionBuiltin || this.darken(base.function, 10),
-      method: tokens.method || base.function,
-      methodCall: tokens.methodCall || this.lighten(base.function, 5),
-
-      variableBuiltin: tokens.variableBuiltin || this.emphasize(base.variable),
-      variableProperty: tokens.variableProperty || this.lighten(base.variable, 10),
-      variableReadonly: tokens.variableReadonly || base.number,
-      parameter: tokens.parameter || base.variable,
-
-      typePrimitive: tokens.typePrimitive || this.darken(base.type, 10),
-      typeInterface: tokens.typeInterface || base.type,
-      className: tokens.className || this.emphasize(base.type),
-      enum: tokens.enum || base.type,
-
-      boolean: tokens.boolean || base.number,
-      null: tokens.null || this.opacity(base.number, 0.7),
-      constant: tokens.constant || base.number,
-
-      punctuation: tokens.punctuation || this.opacity(base.foreground, 0.7),
-      delimiter: tokens.delimiter || this.opacity(base.foreground, 0.8),
-      bracket: tokens.bracket || base.foreground,
-
-      tag: tokens.tag || base.keyword,
-      tagAttribute: tokens.tagAttribute || base.variable,
-      tagAttributeValue: tokens.tagAttributeValue || base.string,
-      tagBracket: tokens.tagBracket || this.opacity(base.foreground, 0.8),
-
-      decorator: tokens.decorator || base.function,
-      annotation: tokens.annotation || base.function,
-
-      namespace: tokens.namespace || this.opacity(base.type, 0.8),
-      module: tokens.module || this.opacity(base.type, 0.8),
-
-      ...tokens
-    };
+  private generateReadableColors(theme: Theme): string[] {
+    const colors = getReadableThemeColors(theme);
+    return [
+      ...Object.entries(colors.tinted).map(([name, value]) => `  --${name}-text: ${value};`),
+      ...Object.entries(colors.status).map(([name, value]) => `  --status-${name}-text: ${value};`),
+      `  --interactive-selection-foreground: ${colors.selectionForeground};`,
+    ];
   }
 
   private generateComponentColors(colors: Theme['colors'], theme: Theme): string[] {
-    const vars: string[] = [];
-
-    if (colors.markdown) {
-      vars.push(...this.generateMarkdownColors(colors.markdown, theme));
-    } else {
-
-      vars.push(...this.generateDefaultMarkdownColors(theme));
-    }
-
-    if (colors.chat) {
-      vars.push(...this.generateChatColors(colors.chat, theme));
-    } else {
-      vars.push(...this.generateDefaultChatColors(theme));
-    }
-
-    if (colors.tools) {
-      vars.push(...this.generateToolColors(colors.tools, theme));
-    } else {
-      vars.push(...this.generateDefaultToolColors(theme));
-    }
-
-    return vars;
+    return [
+      ...this.generateMarkdownColors(colors.markdown ?? {}, theme),
+      `  --chat-user-message-bg: ${colors.chat?.userMessageBackground ?? colors.surface.elevated};`,
+      `  --chat-divider: ${colors.chat?.divider ?? colors.interactive.border};`,
+      ...this.generateToolColors(colors.tools, theme),
+    ];
   }
 
   private generateMarkdownColors(markdown: Record<string, string>, theme: Theme): string[] {
@@ -372,10 +297,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     const primary = theme.colors.primary.base;
     const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
 
-    vars.push(`  --markdown-heading1: ${markdown.heading1 || primary};`);
-    vars.push(`  --markdown-heading2: ${markdown.heading2 || this.opacity(primary, 0.9)};`);
-    vars.push(`  --markdown-heading3: ${markdown.heading3 || this.opacity(primary, 0.8)};`);
-    vars.push(`  --markdown-heading4: ${markdown.heading4 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-link: ${markdown.link || primary};`);
     vars.push(`  --markdown-link-hover: ${markdown.linkHover || theme.colors.primary.hover || this.darken(primary, 10)};`);
     vars.push(`  --markdown-inline-code: ${markdown.inlineCode || theme.colors.syntax.base.string};`);
@@ -391,109 +312,25 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     return vars;
   }
 
-  private generateDefaultMarkdownColors(theme: Theme): string[] {
-    const vars: string[] = [];
-    const primary = theme.colors.primary.base;
-    const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
-
-    vars.push(`  --markdown-heading1: ${primary};`);
-    vars.push(`  --markdown-heading2: ${this.opacity(primary, 0.9)};`);
-    vars.push(`  --markdown-heading3: ${this.opacity(primary, 0.8)};`);
-    vars.push(`  --markdown-heading4: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-link: ${primary};`);
-    vars.push(`  --markdown-link-hover: ${theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${theme.colors.syntax.base.string};`);
-    vars.push(`  --markdown-inline-code-bg: ${chatBackground};`);
-    vars.push(`  --markdown-blockquote: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-blockquote-border: ${theme.colors.interactive.border};`);
-    vars.push(`  --markdown-list-marker: ${this.opacity(primary, 0.6)};`);
-    vars.push(`  --markdown-bold: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-italic: ${this.opacity(theme.colors.surface.foreground, 0.9)};`);
-    vars.push(`  --markdown-strikethrough: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-hr: ${theme.colors.interactive.border};`);
-
-    return vars;
-  }
-
-  private generateChatColors(chat: Record<string, string>, theme: Theme): string[] {
-    const vars: string[] = [];
-    const chatBackground = chat.background || theme.colors.surface.background;
-
-    vars.push(`  --chat-background: ${chatBackground};`);
-    vars.push(`  --chat-user-message: ${chat.userMessage || theme.colors.surface.foreground};`);
-    vars.push(`  --chat-user-message-bg: ${chat.userMessageBackground || theme.colors.surface.elevated};`);
-    vars.push(`  --chat-assistant-message: ${chat.assistantMessage || theme.colors.surface.foreground};`);
-    vars.push(`  --chat-assistant-message-bg: ${chat.assistantMessageBackground || theme.colors.surface.muted};`);
-    vars.push(`  --chat-timestamp: ${chat.timestamp || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --chat-divider: ${chat.divider || theme.colors.interactive.border};`);
-    vars.push(`  --chat-typing: ${chat.typing || theme.colors.surface.mutedForeground};`);
-
-    return vars;
-  }
-
-  private generateDefaultChatColors(theme: Theme): string[] {
-    const vars: string[] = [];
-
-    vars.push(`  --chat-background: ${theme.colors.surface.background};`);
-    vars.push(`  --chat-user-message: ${theme.colors.surface.foreground};`);
-    vars.push(`  --chat-user-message-bg: ${theme.colors.surface.elevated};`);
-    vars.push(`  --chat-assistant-message: ${theme.colors.surface.foreground};`);
-    vars.push(`  --chat-assistant-message-bg: ${theme.colors.surface.muted};`);
-    vars.push(`  --chat-timestamp: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --chat-divider: ${theme.colors.interactive.border};`);
-    vars.push(`  --chat-typing: ${theme.colors.surface.mutedForeground};`);
-
-    return vars;
-  }
-
   private generateToolColors(tools: Theme['colors']['tools'], theme: Theme): string[] {
     const vars: string[] = [];
 
-    vars.push(`  --tools-background: ${tools?.background || this.opacity(theme.colors.surface.muted, 0.2)};`);
     vars.push(`  --tools-border: ${tools?.border || this.opacity(theme.colors.interactive.border, 0.3)};`);
-    vars.push(`  --tools-header-hover: ${tools?.headerHover || this.opacity(theme.colors.surface.muted, 0.3)};`);
     vars.push(`  --tools-icon: ${tools?.icon || theme.colors.surface.mutedForeground};`);
     vars.push(`  --tools-title: ${tools?.title || theme.colors.surface.foreground};`);
     vars.push(`  --tools-description: ${tools?.description || this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
 
     if (tools?.edit) {
-      vars.push(`  --tools-edit-added: ${tools.edit.added || theme.colors.status.success};`);
       vars.push(`  --tools-edit-added-bg: ${tools.edit.addedBackground || theme.colors.status.successBackground};`);
-      vars.push(`  --tools-edit-removed: ${tools.edit.removed || theme.colors.status.error};`);
       vars.push(`  --tools-edit-removed-bg: ${tools.edit.removedBackground || theme.colors.status.errorBackground};`);
-      vars.push(`  --tools-edit-modified: ${tools.edit.modified || theme.colors.status.info};`);
       vars.push(`  --tools-edit-modified-bg: ${tools.edit.modifiedBackground || theme.colors.status.infoBackground};`);
       vars.push(`  --tools-edit-line-number: ${tools.edit.lineNumber || this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
     } else {
-      vars.push(`  --tools-edit-added: ${theme.colors.status.success};`);
       vars.push(`  --tools-edit-added-bg: ${theme.colors.status.successBackground};`);
-      vars.push(`  --tools-edit-removed: ${theme.colors.status.error};`);
       vars.push(`  --tools-edit-removed-bg: ${theme.colors.status.errorBackground};`);
-      vars.push(`  --tools-edit-modified: ${theme.colors.status.info};`);
       vars.push(`  --tools-edit-modified-bg: ${theme.colors.status.infoBackground};`);
       vars.push(`  --tools-edit-line-number: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
     }
-
-    return vars;
-  }
-
-  private generateDefaultToolColors(theme: Theme): string[] {
-    const vars: string[] = [];
-
-    vars.push(`  --tools-background: ${this.opacity(theme.colors.surface.muted, 0.2)};`);
-    vars.push(`  --tools-border: ${this.opacity(theme.colors.interactive.border, 0.3)};`);
-    vars.push(`  --tools-header-hover: ${this.opacity(theme.colors.surface.muted, 0.3)};`);
-    vars.push(`  --tools-icon: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --tools-title: ${theme.colors.surface.foreground};`);
-    vars.push(`  --tools-description: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
-
-    vars.push(`  --tools-edit-added: ${theme.colors.status.success};`);
-    vars.push(`  --tools-edit-added-bg: ${this.addTransparency(this.removeTransparency(theme.colors.status.successBackground), 0.15)};`);
-    vars.push(`  --tools-edit-removed: ${theme.colors.status.error};`);
-    vars.push(`  --tools-edit-removed-bg: ${this.addTransparency(this.removeTransparency(theme.colors.status.errorBackground), 0.15)};`);
-    vars.push(`  --tools-edit-modified: ${theme.colors.status.info};`);
-    vars.push(`  --tools-edit-modified-bg: ${this.addTransparency(this.removeTransparency(theme.colors.status.infoBackground), 0.15)};`);
-    vars.push(`  --tools-edit-line-number: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
 
     return vars;
   }
@@ -649,73 +486,8 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     return vars;
   }
 
-  private initializeInheritanceMap(): void {
-
-    this.inheritanceMap.set('header.background', 'surface.background');
-    this.inheritanceMap.set('header.foreground', 'surface.foreground');
-    this.inheritanceMap.set('header.logoTint', 'primary.base');
-    this.inheritanceMap.set('header.divider', 'interactive.border');
-
-    this.inheritanceMap.set('sidebar.background', 'surface.muted');
-    this.inheritanceMap.set('sidebar.foreground', 'surface.mutedForeground');
-    this.inheritanceMap.set('sidebar.hover', 'interactive.hover');
-    this.inheritanceMap.set('sidebar.active', 'primary.base');
-    this.inheritanceMap.set('sidebar.activeForeground', 'primary.foreground');
-
-  }
-
   private opacity(color: string, alpha: number): string {
-    if (color.startsWith('#')) {
-      return `${color}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`;
-    }
-    if (color.startsWith('rgb')) {
-      return color.replace('rgb', 'rgba').replace(')', `, ${alpha})`);
-    }
-    return color;
-  }
-
-  private removeTransparency(color: string): string {
-    if (color.startsWith('#')) {
-
-      if (color.length === 9) {
-        return color.slice(0, 7);
-      }
-
-      if (color.length === 5) {
-        return color.slice(0, 4);
-      }
-      return color;
-    }
-    if (color.startsWith('rgba')) {
-
-      return color.replace('rgba', 'rgb').replace(/,\s*[\d.]+\)$/, ')');
-    }
-    return color;
-  }
-
-  private addTransparency(color: string, opacity: number): string {
-    if (color.startsWith('#')) {
-
-      const hex = color.slice(1);
-      if (hex.length === 3) {
-
-        const r = parseInt(hex[0] + hex[0], 16);
-        const g = parseInt(hex[1] + hex[1], 16);
-        const b = parseInt(hex[2] + hex[2], 16);
-        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-      } else if (hex.length === 6) {
-
-        const r = parseInt(hex.slice(0, 2), 16);
-        const g = parseInt(hex.slice(2, 4), 16);
-        const b = parseInt(hex.slice(4, 6), 16);
-        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-      }
-    }
-    if (color.startsWith('rgb')) {
-
-      return color.replace('rgb', 'rgba').replace(')', `, ${opacity})`);
-    }
-    return color;
+    return withOpacity(color, alpha);
   }
 
   private darken(color: string, percent: number): string {
@@ -731,31 +503,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
         (B < 255 ? B < 0 ? 0 : B : 255)).toString(16).slice(1);
     }
     return color;
-  }
-
-  private lighten(color: string, percent: number): string {
-
-    if (color.startsWith('#')) {
-      const num = parseInt(color.slice(1), 16);
-      const amt = Math.round(2.55 * percent);
-      const R = (num >> 16) + amt;
-      const G = (num >> 8 & 0x00FF) + amt;
-      const B = (num & 0x0000FF) + amt;
-      return '#' + (0x1000000 + (R < 255 ? R < 0 ? 0 : R : 255) * 0x10000 +
-        (G < 255 ? G < 0 ? 0 : G : 255) * 0x100 +
-        (B < 255 ? B < 0 ? 0 : B : 255)).toString(16).slice(1);
-    }
-    return color;
-  }
-
-  private adjustHue(color: string, degrees: number): string {
-
-    return this.lighten(color, degrees / 10);
-  }
-
-  private emphasize(color: string): string {
-
-    return this.lighten(color, 15);
   }
 
   private kebabCase(str: string): string {

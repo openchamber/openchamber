@@ -13,7 +13,7 @@ import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -111,85 +111,6 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
-type InstallWebUpdateResult = {
-  success: boolean;
-  error?: string;
-  autoRestart?: boolean;
-};
-
-const WEB_UPDATE_POLL_INTERVAL_MS = 2000;
-const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
-
-async function installWebUpdate(): Promise<InstallWebUpdateResult> {
-  try {
-    const response = await runtimeFetch('/api/openchamber/update-install', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      return { success: false, error: data.error || `Server error: ${response.status}` };
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return {
-      success: true,
-      autoRestart: data.autoRestart !== false,
-    };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : undefined };
-  }
-}
-
-async function isServerReachable(): Promise<boolean> {
-  try {
-    const response = await runtimeFetch('/health', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForUpdateApplied(
-  previousVersion?: string,
-  maxAttempts = Math.ceil(WEB_UPDATE_MAX_WAIT_MS / WEB_UPDATE_POLL_INTERVAL_MS),
-  intervalMs = WEB_UPDATE_POLL_INTERVAL_MS,
-): Promise<boolean> {
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      // Status-only poll while waiting for the update to apply; not a usage report.
-      const response = await runtimeFetch('/api/openchamber/update-check?reportUsage=false', {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const data = await response.json().catch(() => null);
-        if (data && data.available === false) {
-          return true;
-        }
-        if (
-          data &&
-          typeof data.currentVersion === 'string' &&
-          typeof previousVersion === 'string' &&
-          data.currentVersion !== previousVersion
-        ) {
-          return true;
-        }
-      } else if ((response.status === 401 || response.status === 403) && await isServerReachable()) {
-        return true;
-      }
-    } catch {
-      // Server may be restarting
-    }
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
-  }
-  return false;
-}
-
 export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   open,
   onOpenChange,
@@ -258,13 +179,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
     setWebUpdateState('reconnecting');
 
-    const applied = await waitForUpdateApplied(info?.currentVersion);
+    const applied = await waitForUpdateApplied(result.target, info?.currentVersion);
 
-    if (applied) {
+    if (applied.status === 'applied') {
       window.location.reload();
     } else {
       setWebUpdateState('error');
-      setWebError(t('updateDialog.error.takingLonger'));
+      setWebError(applied.status === 'failed' ? applied.error : t('updateDialog.error.takingLonger'));
     }
   }, [info?.currentVersion, t]);
 
@@ -308,7 +229,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
-      <DialogContent className="max-w-4xl p-5 bg-background border-[var(--interactive-border)]" showCloseButton={true}>
+      <DialogContent className="max-w-4xl p-5 border-[var(--interactive-border)]" showCloseButton={true}>
         
         {/* Header Section */}
         <div className="flex items-center mb-1">
@@ -342,7 +263,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
-            <div className="rounded-lg bg-[var(--surface-elevated)]/30 p-5 border border-[var(--surface-subtle)]">
+            <div className="rounded-lg bg-surface-elevated/30 p-5 border border-border">
               <div className="flex items-center gap-3">
                 <Icon name="loader" className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
                 <div className="typography-ui-label text-foreground">
@@ -359,14 +280,14 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           {/* Changelog Rendering */}
           {changelog && !isWebUpdating && (
-            <div className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/20 overflow-hidden">
+              <div className="rounded-lg border border-border bg-surface-elevated/20 overflow-hidden">
               <ScrollableOverlay
                 className="max-h-[400px] p-0"
                 fillContainer={false}
               >
                 {changelog.kind === 'raw' ? (
                   <div
-                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
+                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline [&_h3]:!mt-4 [&_h3]:!mb-1.5 [&_h3]:!text-xs [&_h3]:!font-medium [&_h3]:!uppercase [&_h3]:!tracking-wide [&_h3]:!text-muted-foreground [&_h3:first-child]:!mt-0"
                     onClickCapture={(e) => {
                       const target = e.target as HTMLElement;
                       const a = target.closest('a');
@@ -380,7 +301,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                     <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} enableFileReferences={false} />
                   </div>
                 ) : (
-                  <div className="divide-y divide-[var(--surface-subtle)]">
+                  <div className="divide-y divide-border">
                     {changelog.sections.map((section) => (
                       <div key={section.version} className="p-4">
                         <div className="flex items-center gap-3 mb-3">
@@ -392,7 +313,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                           </span>
                         </div>
                         <div
-                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
+                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline [&_h3]:!mt-4 [&_h3]:!mb-1.5 [&_h3]:!text-xs [&_h3]:!font-medium [&_h3]:!uppercase [&_h3]:!tracking-wide [&_h3]:!text-muted-foreground [&_h3:first-child]:!mt-0"
                           onClickCapture={(e) => {
                             const target = e.target as HTMLElement;
                             const a = target.closest('a');
@@ -414,13 +335,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
 
           {/* Web runtime fallback command */}
-          {isWebRuntime && webUpdateState === 'error' && (
+          {isWebRuntime && info?.packageManager !== 'electron' && webUpdateState === 'error' && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center gap-2 typography-meta text-muted-foreground">
                 <Icon name="terminal" className="h-4 w-4" />
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
-              <div className="flex items-center gap-2 p-1 pl-3 bg-[var(--surface-elevated)]/50 rounded-md border border-[var(--surface-subtle)]">
+              <div className="flex items-center gap-2 p-1 pl-3 bg-surface-elevated/50 rounded-md border border-border">
                 <code className="flex-1 font-mono text-sm text-foreground overflow-x-auto whitespace-nowrap">
                   {updateCommand}
                 </code>

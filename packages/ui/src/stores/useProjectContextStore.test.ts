@@ -86,6 +86,8 @@ mock.module('@/lib/projectContextApi', () => ({
     calls.deleteNote += 1;
     return handlers.deleteNote();
   },
+  shareProjectPlan: async () => null,
+  unshareProjectPlan: async () => null,
   setProjectPlanPinned: () => {
     calls.pinPlan += 1;
     return handlers.pinPlan();
@@ -148,7 +150,7 @@ beforeEach(() => {
 
 describe('getEntry', () => {
   test('returns a stable empty entry for an unknown project', () => {
-    expect(entry()).toEqual({ notes: [], todos: [], plans: [], loaded: false, loading: false, error: null });
+    expect(entry()).toEqual({ notes: [], todos: [], plans: [], sharedPlansDir: null, loaded: false, loading: false, error: null });
   });
 
   test('returns the empty entry for a project without a path', () => {

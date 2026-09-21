@@ -17,6 +17,7 @@
     cannot handle recalculates style every frame.
   */
   @keyframes oc-transform-rotate { to { transform: rotate(360deg); } }
+  @keyframes oc-transform-stepped { to { transform: rotate(360deg); } }
   @keyframes oc-rotate-property { to { rotate: 360deg; } }
   @keyframes oc-opacity { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
   @keyframes oc-translate { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
@@ -31,6 +32,7 @@
   .v-transform-rotate svg { animation: oc-transform-rotate 1s linear infinite; }
   .v-transform-rotate-willchange svg { animation: oc-transform-rotate 1s linear infinite; will-change: transform; }
   .v-transform-rotate-steps svg { animation: oc-transform-rotate 1s steps(12) infinite; }
+  .v-transform-stepped svg { animation: oc-transform-stepped 1.5s steps(30) infinite; }
   .v-transform-rotate-wrapper .wrap { animation: oc-transform-rotate 1s linear infinite; }
   .v-rotate-property svg { animation: oc-rotate-property 1s linear infinite; }
   .v-opacity svg { animation: oc-opacity 1.2s ease-in-out infinite; }
@@ -91,6 +93,62 @@
     overflow: visible;
     display: block;
   }
+
+  /*
+    The chat status row's busy indicator, reproduced exactly: three text dots
+    as flex items of an inline-flex span, pulsing opacity with staggered
+    delays. It is on screen for the whole of every streamed response, so its
+    per-second cost is paid for as long as the model is working. The remaining
+    variants change one thing each to find which part makes it expensive.
+  */
+  @keyframes oc-busy-pulse { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+  .busy-dots { display: inline-flex; }
+  .v-busy-dots-static .busy-dots span { opacity: 0.6; }
+  .v-busy-dots .busy-dots span,
+  .v-busy-dots-willchange .busy-dots span,
+  .v-busy-dots-single .busy-dots { animation: oc-busy-pulse 1.2s ease-in-out infinite; }
+  .v-busy-dots-willchange .busy-dots span { will-change: opacity; }
+  .v-busy-dots-steps .busy-dots span { animation: oc-busy-pulse 1.2s steps(4, jump-none) infinite; }
+  /*
+    Three steps per half cycle make one step 200ms, the same as the stagger
+    between dots, so all three dots change on the same frames: five distinct
+    frames per second instead of one per dot per step.
+  */
+  .v-busy-dots-steps-aligned .busy-dots span { animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite; }
+  /* Compare the status pill's old dots with one filtered provider-logo image. */
+  .v-status-logo-dots .cell,
+  .v-status-logo-pulse .cell { width: auto; height: 32px; display: flex; align-items: center; padding: 0 12px; border-radius: 9999px; background: #19191980; }
+  .status-logo { width: 14px; height: 14px; margin-right: 6px; filter: brightness(0.9) contrast(1.1) invert(1); }
+  .v-status-logo-dots .busy-dots span { animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite; }
+  @keyframes oc-status-logo { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+  .v-status-logo-pulse .status-logo { animation: oc-status-logo 4s steps(10, jump-none) infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .v-status-logo-pulse .status-logo { animation: none; }
+  }
+  /*
+    The same stepped wave with no animation object at all: a 200ms timer moves
+    a phase attribute and plain rules map phase to opacity. Kept as a recorded
+    negative result: it measured no cheaper than the aligned stepped animation
+    (5.0-5.4% of a core against 4.7%), so five drawn frames a second cost the
+    same whoever asks for them, and the timer adds style and layout work.
+  */
+  .v-busy-dots-timer .busy-dots span { opacity: 0.2; }
+  .v-busy-dots-timer .busy-dots[data-phase="1"] span:nth-child(1),
+  .v-busy-dots-timer .busy-dots[data-phase="2"] span:nth-child(2),
+  .v-busy-dots-timer .busy-dots[data-phase="3"] span:nth-child(3),
+  .v-busy-dots-timer .busy-dots[data-phase="4"] span:nth-child(1),
+  .v-busy-dots-timer .busy-dots[data-phase="5"] span:nth-child(2),
+  .v-busy-dots-timer .busy-dots[data-phase="0"] span:nth-child(3) { opacity: 0.6; }
+  .v-busy-dots-timer .busy-dots[data-phase="2"] span:nth-child(1),
+  .v-busy-dots-timer .busy-dots[data-phase="3"] span:nth-child(1),
+  .v-busy-dots-timer .busy-dots[data-phase="3"] span:nth-child(2),
+  .v-busy-dots-timer .busy-dots[data-phase="4"] span:nth-child(2),
+  .v-busy-dots-timer .busy-dots[data-phase="4"] span:nth-child(3),
+  .v-busy-dots-timer .busy-dots[data-phase="5"] span:nth-child(3) { opacity: 1; }
+
+  .v-activity-static, .v-activity-collapse { display: block; }
+  .v-activity-static .cell, .v-activity-collapse .cell { width: 680px; height: auto; overflow: hidden; }
+  .activity-row { height: 18px; display: flex; gap: 12px; }
 </style>
 </head>
 <body>
@@ -108,14 +166,66 @@
   grid.className = 'grid v-' + variant;
   const usesWrapper = variant.endsWith('-wrapper');
   const usesButton = variant === 'ctx-button' || variant === 'ctx-sibling-translatez';
+  const usesActivity = variant === 'activity-static' || variant === 'activity-collapse';
+  const usesBusyDots = variant.startsWith('busy-dots');
+  const usesStatusLogo = variant.startsWith('status-logo-');
   for (let index = 0; index < count; index += 1) {
     const cell = document.createElement('div');
     cell.className = 'cell';
     const spinner = SPINNER.replace('<svg', '<svg class="spin"');
-    if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
+    if (usesActivity) {
+      cell.innerHTML = Array.from({ length: 80 }, (_, row) =>
+        '<div class="activity-row"><span>Read file</span><code>src/module-' + row + '.ts</code><span>Completed</span></div>'
+      ).join('');
+    }
+    else if (usesStatusLogo) {
+      const logo = document.createElement('img');
+      logo.className = 'status-logo';
+      logo.alt = '';
+      logo.src = 'data:image/svg+xml,' + encodeURIComponent(SPINNER.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"'));
+      cell.append(logo, 'GPT-6 Astra is working');
+      if (variant === 'status-logo-dots') {
+        const dots = document.createElement('span');
+        dots.className = 'busy-dots';
+        dots.innerHTML = [0, 200, 400].map((delay) => '<span style="animation-delay:' + delay + 'ms">.</span>').join('');
+        cell.append('\u00A0', dots);
+      }
+    }
+    else if (usesBusyDots) {
+      cell.style.width = 'auto';
+      cell.innerHTML = '<span>Working\u00A0<span class="busy-dots" aria-hidden="true">'
+        + [0, 200, 400].map((delay) => '<span style="animation-delay:' + delay + 'ms">.</span>').join('')
+        + '</span></span>';
+    }
+    else if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
     else if (usesButton) cell.innerHTML = '<button>' + spinner + '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="#456"/></svg></button>';
     else cell.innerHTML = SPINNER;
     grid.appendChild(cell);
+  }
+
+  // Two content regions per turn at most: prior messages and non-text parts
+  // of the final message. Exercise the same 180ms height transition, with no
+  // continuous animation between disclosure changes. The static variant has
+  // identical content for the baseline.
+  if (variant === 'activity-collapse') {
+    let expanded = true;
+    setInterval(() => {
+      for (const cell of grid.children) {
+        const height = cell.scrollHeight;
+        cell.animate({ height: expanded ? [height + 'px', '0px'] : ['0px', height + 'px'] }, {
+          duration: 180, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'forwards',
+        });
+      }
+      expanded = !expanded;
+    }, 2000);
+  }
+
+  if (variant === 'busy-dots-timer') {
+    let phase = 0;
+    setInterval(() => {
+      phase = (phase + 1) % 6;
+      for (const dots of grid.querySelectorAll('.busy-dots')) dots.dataset.phase = String(phase);
+    }, 200);
   }
 
   if (filler > 0) {

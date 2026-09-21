@@ -1,4 +1,7 @@
 import React from 'react';
+import { z } from 'zod';
+import { isAutoModel } from '@/lib/routing/autoModel';
+import { useChatColumnSession } from '@/components/chat/chatColumnSession';
 import type { Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
@@ -257,9 +260,33 @@ const getToolDisplayName = (part: ToolPart): string => {
     return typeof candidate.name === 'string' ? candidate.name : 'tool';
 };
 
+const modelRefSchema = z.object({ providerID: z.string().trim().min(1), modelID: z.string().trim().min(1) });
+/**
+ * A user message names its model either as the SDK's `model` object, or, on the
+ * optimistic copy the composer inserts before the server echoes it, as
+ * top-level `providerID`/`modelID`. Both are read; the Auto sentinel is flagged.
+ */
+const userMessageModelSchema = z.union([
+    z.object({ model: modelRefSchema }).transform(({ model }) => model),
+    modelRefSchema,
+]);
+
+const readUserMessageModel = (message: Message): { providerId: string; modelId: string; auto: boolean } | null => {
+    const parsed = userMessageModelSchema.safeParse(message);
+    if (!parsed.success) return null;
+    const providerId = parsed.data.providerID;
+    const modelId = parsed.data.modelID;
+    return { providerId, modelId, auto: isAutoModel(providerId, modelId) };
+};
+
+const completedTimeSchema = z.object({ time: z.object({ completed: z.number() }) });
+
 export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantContext => {
     let assistantId: string | null = null;
     let parentId: string | null = null;
+
+    const newest = messages[messages.length - 1];
+    const newestModel = newest?.role === 'user' ? readUserMessageModel(newest) : null;
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
@@ -271,6 +298,18 @@ export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantC
             ? candidate.parentID
             : null;
         break;
+    }
+
+    // The newest message is an unanswered user turn. While it was sent with
+    // Auto routing its model is not known yet, so no model is shown rather
+    // than the previous turn's. Once the previous turn has completed, the new
+    // turn's own model is the one about to run and is shown at once; a turn
+    // still running keeps its model, since the new message is only queued.
+    if (newest?.role === 'user' && newest.id !== parentId) {
+        if (newestModel?.auto) return { assistantId, model: null };
+        const previous = messages.find((message) => message.id === assistantId);
+        const previousCompleted = completedTimeSchema.safeParse(previous).success;
+        if (previousCompleted && newestModel) return { assistantId, model: { providerId: newestModel.providerId, modelId: newestModel.modelId } };
     }
 
     if (!assistantId || !parentId) {
@@ -301,8 +340,14 @@ export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantC
 };
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    // Inside the chat column, follow the session the timeline shows rather
+    // than the live selection, so the status chip changes together with the
+    // conversation instead of a commit ahead of it.
+    const chatColumnSession = useChatColumnSession();
+    const liveSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const liveSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
+    const currentSessionDirectory = chatColumnSession ? chatColumnSession.directory : liveSessionDirectory;
 
     const rawSessionMessages = useSessionMessages(
         currentSessionId ?? '',

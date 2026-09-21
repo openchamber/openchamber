@@ -7,16 +7,24 @@ type UserMessageHistoryRecord = {
   parts: Part[];
 };
 
+/** One prompt the user sent in a session, as the visible transcript shows it. */
+export type TranscriptPrompt = {
+  text: string;
+  /** `message.time.created`, milliseconds. */
+  createdAt: number;
+};
+
 export type UserMessageHistorySnapshot = {
   sessionID: string;
   revertMessageID?: string;
   records: UserMessageHistoryRecord[];
-  history: string[];
+  /** Oldest first. */
+  history: TranscriptPrompt[];
 };
 
 const EMPTY_PARTS: Part[] = [];
 const EMPTY_RECORDS: UserMessageHistoryRecord[] = [];
-const EMPTY_HISTORY: string[] = [];
+const EMPTY_HISTORY: TranscriptPrompt[] = [];
 
 export const EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT: UserMessageHistorySnapshot = {
   sessionID: '',
@@ -25,16 +33,9 @@ export const EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT: UserMessageHistorySnapshot = {
   history: EMPTY_HISTORY,
 };
 
-const getPartText = (part: Part): string => {
-  if (part?.type !== 'text') return '';
-  const text = (part as { text?: unknown }).text;
-  return typeof text === 'string' ? text : '';
-};
-
 const getFirstTextFromParts = (parts: Part[]): string => {
   for (const part of parts) {
-    const text = getPartText(part);
-    if (text.length > 0) return text;
+    if (part.type === 'text' && part.text.length > 0) return part.text;
   }
   return '';
 };
@@ -50,6 +51,12 @@ const areRecordsEqual = (left: UserMessageHistoryRecord[], right: UserMessageHis
   return true;
 };
 
+/**
+ * The user's prompts in a session, oldest first, limited to what the visible
+ * transcript shows: messages at or after a revert marker are excluded. Returns
+ * the previous snapshot when nothing relevant changed so subscribers can skip
+ * work on assistant-only updates.
+ */
 export const buildUserMessageHistorySnapshot = (
   state: Pick<State, 'session' | 'message' | 'part'>,
   sessionID: string,
@@ -61,11 +68,9 @@ export const buildUserMessageHistorySnapshot = (
 
   const messages = state.message[sessionID] ?? [];
   const session = state.session.find((candidate) => candidate.id === sessionID);
-  const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+  const revertMessageID = session?.revert?.messageID;
   const records: UserMessageHistoryRecord[] = [];
-  const visibleMessages = messagesBefore(messages, revertMessageID);
-  for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-    const message = visibleMessages[index];
+  for (const message of messagesBefore(messages, revertMessageID)) {
     if (message.role !== 'user') {
       continue;
     }
@@ -85,11 +90,11 @@ export const buildUserMessageHistorySnapshot = (
     return previous;
   }
 
-  const history: string[] = [];
+  const history: TranscriptPrompt[] = [];
   for (const record of records) {
     const text = getFirstTextFromParts(record.parts);
     if (text.length > 0) {
-      history.push(text);
+      history.push({ text, createdAt: record.message.time.created });
     }
   }
 

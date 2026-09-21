@@ -2,14 +2,16 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest, PermissionResponse } from '@/types/permission';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useRoutingStore } from '@/stores/useRoutingStore';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { DiffPreview, WritePreview } from './DiffPreview';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
+import { permissionFilePreviewsSchema } from './permissionFilePreviews';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 // Newest pending card owns the keyboard; older cards wait their turn.
@@ -100,6 +102,18 @@ const getToolDisplayName = (toolName: string): string => {
   return toolName;
 };
 
+const SAFETY_KIND_LABEL_KEYS = new Map<string, I18nKey>([
+  ['read_only', 'routing.safetyKind.readOnly'],
+  ['writes_project', 'routing.safetyKind.writesProject'],
+  ['git_history', 'routing.safetyKind.gitHistory'],
+  ['deletes_data', 'routing.safetyKind.deletesData'],
+  ['system_change', 'routing.safetyKind.systemChange'],
+  ['external_side_effect', 'routing.safetyKind.externalSideEffect'],
+  ['data_exfiltration', 'routing.safetyKind.dataExfiltration'],
+]);
+
+const safetyKindLabelKey = (kind: string): I18nKey => SAFETY_KIND_LABEL_KEYS.get(kind) ?? 'routing.safetyKind.unknown';
+
 export const PermissionCard: React.FC<PermissionCardProps> = ({
   permission,
   onResponse
@@ -110,6 +124,8 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
   const respondToPermission = sessionActions.respondToPermission;
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  // Set while the routing safety net stopped auto-accept for this request.
+  const held = useRoutingStore((state) => state.held[permission.id] ?? null);
   const isFromSubagent = React.useMemo(() => {
     if (!currentSessionId || permission.sessionID === currentSessionId) return false;
     const sourceSession = sessions.find((session) => session.id === permission.sessionID);
@@ -185,6 +201,19 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
 
   const renderToolContent = () => {
 
+    if (displayToolName === 'edit' || displayToolName === 'write') {
+      const files = permissionFilePreviewsSchema.parse(permission.metadata.files);
+      if (files.length > 0) {
+        return (
+          <ScrollableOverlay outerClassName="max-h-[60vh]" className="tool-output-surface p-1 rounded-xl border border-border/20 bg-transparent">
+            {files.map((file, index) => (
+              <DiffPreview key={`${file.file}:${index}`} diff={file.patch} filePath={file.file} />
+            ))}
+          </ScrollableOverlay>
+        );
+      }
+    }
+
     if (isBashTool) {
       const description = getMeta('description');
       const workingDir = getMeta('cwd') || getMeta('working_directory') || getMeta('directory') || getMeta('path');
@@ -222,7 +251,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
     }
 
     if (tool === 'edit' || tool === 'multiedit' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-      const filePath = getMeta('path') || getMeta('file_path') || getMeta('filename') || getMeta('filePath');
+      const filePath = getMeta('path') || getMeta('file_path') || getMeta('filename') || getMeta('filePath') || getMeta('filepath');
       const changes = getMeta('changes') || getMeta('diff');
       const replaceAll = getMetaBool('replace_all') || getMetaBool('replaceAll');
 
@@ -243,7 +272,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
     }
 
     if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-      const filePath = getMeta('path') || getMeta('file_path') || getMeta('filename') || getMeta('filePath');
+      const filePath = getMeta('path') || getMeta('file_path') || getMeta('filename') || getMeta('filePath') || getMeta('filepath');
       const content = getMeta('content') || getMeta('text') || getMeta('data');
 
       if (content) {
@@ -374,6 +403,16 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               </div>
             </div>
           </div>
+
+          {held ? (
+            <div className="flex items-start gap-2 px-2 py-1.5 border-b border-border/20 typography-meta text-[var(--status-warning)]">
+              <Icon name="shield-keyhole" className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+              <span>
+                {t('chat.permissionCard.heldBySafetyNet')}
+                {held.kind ? ` · ${t(safetyKindLabelKey(held.kind))}` : ''}
+              </span>
+            </div>
+          ) : null}
 
           {}
           <div className="px-2 py-2">

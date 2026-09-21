@@ -185,14 +185,14 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           ? { height: `${effectiveResizedHeight}px`, minHeight: 'fit-content' }
           : undefined}
         className={cn(
-          "group/textarea relative flex w-full flex-col rounded-[var(--radius-xl)] bg-[var(--surface-elevated)] pb-2.5",
+          "oc-surface-elevated group/textarea relative flex w-full flex-col rounded-[var(--radius-xl)] bg-surface-elevated pb-2.5",
           "ring-1 ring-inset ring-border/60 transition duration-200 ease-out",
-          "hover:[&:not(:focus-within)]:bg-[var(--surface-subtle)]",
+          "hover:[&:not(:focus-within)]:[background-image:linear-gradient(var(--interactive-hover),var(--interactive-hover))]",
           // Scoped to the textarea, not any disabled descendant: an endSlot
           // control that disables itself (an add button with an empty field)
           // would otherwise take pointer events away from the whole wrapper,
           // leaving the field unclickable and the button permanently disabled.
-          "has-[textarea:disabled]:pointer-events-none has-[textarea:disabled]:bg-[var(--surface-subtle)] has-[textarea:disabled]:ring-transparent",
+          "has-[textarea:disabled]:pointer-events-none has-[textarea:disabled]:opacity-50",
           !hasError && [
             "hover:[&:not(:focus-within)]:ring-transparent",
             "focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]",

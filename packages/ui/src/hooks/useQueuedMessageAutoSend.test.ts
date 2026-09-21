@@ -186,11 +186,13 @@ describe('buildQueuedAutoSendPayload', () => {
       {
         id: 'queued-1',
         content: 'first queued message',
+        text: 'first queued message',
         createdAt: 1,
       },
       {
         id: 'queued-2',
         content: 'second queued message',
+        text: 'second queued message',
         createdAt: 2,
       },
     ];
@@ -203,20 +205,18 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryAttachments).toEqual([]);
   });
 
-  test('uses the configured visible agents when parsing queued mentions', () => {
-    visibleAgents = [
-      {
-        name: 'Builder',
-        mode: 'subagent',
-        permission: [],
-        options: {},
-      } as Agent,
-    ];
-
+  test('delivers the captured mention and context instead of re-parsing the content', () => {
+    const metadata = { openchamberContext: { kind: 'github-issue' as const, number: 3, title: 'Bug', url: 'https://x/issues/3' } };
     const queue: QueuedMessage[] = [
       {
         id: 'queued-mention',
         content: '@Builder please take this',
+        text: 'please take this',
+        agentMention: 'Builder',
+        context: [
+          { kind: 'context', text: 'issue body', metadata },
+          { kind: 'instruction', text: 'use the skill' },
+        ],
         createdAt: 1,
       },
     ];
@@ -225,7 +225,11 @@ describe('buildQueuedAutoSendPayload', () => {
 
     expect(payload).not.toBeNull();
     expect(payload?.agentMentionName).toBe('Builder');
-    expect(payload?.primaryText).toBe('@Builder please take this');
+    expect(payload?.primaryText).toBe('please take this');
+    expect(payload?.additionalParts).toEqual([
+      { text: 'issue body', synthetic: true, metadata },
+      { text: 'use the skill', synthetic: true },
+    ]);
   });
 
   test('preserves attachment-only queued messages as sendable payloads', () => {
@@ -233,6 +237,7 @@ describe('buildQueuedAutoSendPayload', () => {
       {
         id: 'queued-attachments',
         content: '',
+        text: '',
         createdAt: 1,
         attachments: [
           {
@@ -249,6 +254,7 @@ describe('buildQueuedAutoSendPayload', () => {
       {
         id: 'queued-2',
         content: 'later queued message',
+        text: 'later queued message',
         createdAt: 2,
       },
     ];
@@ -262,11 +268,73 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryAttachments[0]?.filename).toBe('notes.txt');
   });
 
+  test('retains raw queued content and attachments for history submissions', async () => {
+    const attachment = {
+      id: 'file-1',
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      source: 'local' as const,
+      file: new File(['hello'], 'notes.txt', { type: 'text/plain' }),
+      dataUrl: 'data:text/plain;base64,aGVsbG8=',
+    };
+
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-raw',
+        text: '/plan feature from raw queue',
+        content: '/plan feature from raw queue',
+        createdAt: 1,
+        attachments: [attachment],
+      },
+    ]);
+
+    expect(payload).not.toBeNull();
+    expect(payload?.historySubmissions).toEqual([
+      {
+        text: '/plan feature from raw queue',
+        attachmentKeys: ['local|notes.txt|text/plain|5|data'],
+        restorableAttachments: [],
+      },
+    ]);
+
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, {
+      ...payload!,
+      primaryText: 'sanitized transport text',
+    }, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+      agent: 'agent-1',
+      variant: 'variant-1',
+    });
+
+    expect(sendMessageCalls[0]?.[0]).toBe('sanitized transport text');
+    expect(sendMessageCalls[0]?.[9]).toEqual({
+      target: {
+        runtimeKey: 'runtime-original',
+        sessionId: 'session-original',
+        directory: '/repo',
+      },
+        historySubmissions: [
+          {
+            text: '/plan feature from raw queue',
+            attachmentKeys: ['local|notes.txt|text/plain|5|data'],
+            restorableAttachments: [],
+          },
+        ],
+    });
+  });
+
   test('auto-send targets the queued session explicitly', async () => {
     const payload = buildQueuedAutoSendPayload([
       {
         id: 'queued-1',
         content: 'queued message',
+        text: 'queued message',
         createdAt: 1,
       },
     ]);
@@ -300,6 +368,13 @@ describe('buildQueuedAutoSendPayload', () => {
           sessionId: 'session-original',
           directory: '/repo',
         },
+        historySubmissions: [
+          {
+            text: 'queued message',
+            attachmentKeys: [],
+            restorableAttachments: [],
+          },
+        ],
       },
     ]);
   });

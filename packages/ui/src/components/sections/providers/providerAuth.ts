@@ -60,3 +60,78 @@ export const getOAuthAuthMethods = (methods: AuthMethod[]): OAuthAuthMethodEntry
 
 export const requiresOpenCodeRestartAfterOAuth = (providerId: string): boolean =>
   providerId !== 'claude-code';
+
+export interface ProviderCredentialInput {
+  /** Present when OpenCode reports an active credential (api/env/oauth). */
+  key?: string | null;
+  /** OpenChamber auth.json provenance for this provider. */
+  authSourceExists?: boolean | null;
+  /**
+   * Provider.options is shipped to the client for config-defined providers
+   * but never reaches `Provider.key` (upstream only sets `key` from a single
+   * resolved env var or an api-type auth.json entry). Treat a non-empty
+   * `options.apiKey` as a usable login, per
+   * `packages/web/server/lib/walkthrough/DOCUMENTATION.md:134`.
+   */
+  optionsApiKey?: string | null;
+  /**
+   * The provider declares environment variables it reads credentials from.
+   * Multi-variable providers (Bedrock, Azure, Vertex) never resolve a single
+   * `Provider.key` upstream, so without this signal they read as
+   * "Credentials missing" even when fully configured.
+   */
+  envDeclared?: boolean;
+}
+
+/**
+ * Prefer authoritative credential signals. Declared env vars are the weakest of
+ * them — the array holds variable *names*, not values — but for providers whose
+ * credentials span several env vars it is the only signal OpenCode exposes.
+ */
+export const providerHasCredentials = (input: ProviderCredentialInput): boolean => {
+  if (typeof input.key === 'string' && input.key.trim().length > 0) {
+    return true;
+  }
+  if (typeof input.optionsApiKey === 'string' && input.optionsApiKey.trim().length > 0) {
+    return true;
+  }
+  if (input.envDeclared === true) {
+    return true;
+  }
+  return input.authSourceExists === true;
+};
+
+export const shouldShowModelsSection = (input: {
+  modelCount: number;
+  sourcesLoaded: boolean;
+  hasCredentials: boolean;
+  /**
+   * Config-defined custom providers (providerSources.custom present and parsed
+   * via `isConfigDefinedCustomProvider`) are user-editable in place, so a
+   * stale `Credentials missing` signal must not hide their models section.
+   * Optional for back-compat; defaults to `false`, restoring the pre-rewrite
+   * exemption that `requiresProviderAuth` carried via `providerAvailability.ts`.
+   */
+  isEditableCustomProvider?: boolean;
+}): boolean =>
+  input.modelCount > 0 &&
+  (!input.sourcesLoaded || input.hasCredentials || Boolean(input.isEditableCustomProvider));
+
+export const shouldAutoOpenAuthPanel = (input: {
+  sourcesLoaded: boolean;
+  hasCredentials: boolean;
+  userDismissed: boolean;
+  /**
+   * Config-defined custom providers (providerSources.custom present and parsed
+   * via `isConfigDefinedCustomProvider`) do not auto-open the auth panel: the
+   * provider is editable directly in the form, and a stale `Credentials
+   * missing` summary would be misleading. Optional for back-compat; defaults to
+   * `false`, restoring the pre-rewrite exemption that `requiresProviderAuth`
+   * carried via `providerAvailability.ts`.
+   */
+  isEditableCustomProvider?: boolean;
+}): boolean =>
+  input.sourcesLoaded &&
+  !input.hasCredentials &&
+  !input.userDismissed &&
+  !input.isEditableCustomProvider;

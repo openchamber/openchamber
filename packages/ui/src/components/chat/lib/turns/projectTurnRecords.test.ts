@@ -221,4 +221,34 @@ describe('projectTurnRecords', () => {
         const finalActivity = turn?.activityParts.find((activity) => activity.messageId === 'a2');
         expect(finalActivity).toBe(undefined);
     });
+
+    test('keeps text inline (not justification) when a message is blocked on a pending question', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        user.parts = [{ id: 'p1', type: 'text', text: 'prompt' } as Part];
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        // The turn is blocked waiting for the user's answer: no finish and a
+        // pending question tool part, with context text before the question.
+        assistant.parts = [
+            { id: 'ap1', type: 'text', text: 'context before the question' } as Part,
+            {
+                id: 'ap2',
+                type: 'tool',
+                callID: 'c1',
+                tool: 'question',
+                state: { status: 'pending' },
+            } as Part,
+        ];
+
+        const projection = projectTurnRecords([user, assistant], {
+            showTextJustificationActivity: true,
+        });
+
+        const turn = projection.turns[0];
+        expect(turn).toBeDefined();
+        const textActivity = turn?.activityParts.find((activity) => activity.partIndex === 0);
+        expect(textActivity?.kind).not.toBe('justification');
+        // The question tool itself still participates in the activity group.
+        const questionActivity = turn?.activityParts.find((activity) => activity.partIndex === 1);
+        expect(questionActivity?.kind).toBe('tool');
+    });
 });

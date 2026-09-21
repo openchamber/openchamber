@@ -1,0 +1,230 @@
+---
+title: API hosta
+description: Każda metoda connectHost, którą rozszerzenie może wywołać, to, co OpenChamber do niego wysyła, limity i kody błędów.
+---
+
+# API hosta
+
+Użyj tej strony, gdy potrzebujesz dokładnych metod `connectHost`, limitów i kodów błędów. Układ folderu, manifest i instalację opisuje [Tworzenie rozszerzenia](/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` rzuca `HOST_UNAVAILABLE`, gdy nie ma `window`. Poza OpenChamber zwraca klienta, którego każde wywołanie jest odrzucane z `HOST_UNAVAILABLE`. Wywołaj `dispose()`, gdy zamykasz stronę; wywołania jeszcze w toku są odrzucane z tym samym kodem.
+
+## Co OpenChamber do Ciebie wysyła
+
+`onReady` odpala się z pierwszą migawką i ponownie za każdym razem, gdy OpenChamber ją odświeża.
+
+To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypcje raz, a potem aktualizuj motyw i kontekst bez zastępowania pól ani szkiców. Przykład z ochroną przed ponownym montowaniem znajdziesz w [UI kit](/sdk/ui/). Listenery takie jak `onConnection` od razu przekazują bieżącą wartość i mogą ją powtórzyć z nową migawką. Porównuj istotne pola przed nowym żądaniem i ignoruj odpowiedzi zastąpionych żądań.
+
+| Pole | Co to jest |
+| --- | --- |
+| `theme.mode` | `light` lub `dark` |
+| `theme.tokens` | kolory aplikacji (powierzchnie, tekst, stany interakcji, primary, success/warning/error/info), `font`, `mono` i `radius`. Przekaż to do `applyHostReady` przed zamontowaniem UI. |
+| `locale` | tag języka aplikacji |
+| `directory` | katalog bieżącego projektu albo `null` |
+| `session` | `{ id, title, busy }` albo `null`. Tytuł wraca do id sesji, gdy go brak. `busy` to status na żywo. `model` i `agent` (agent OpenCode) pojawiają się, gdy sesja je ma. |
+| `surface` | `panel` na pasku bocznym, `dialog` w oknie dołączania, `page` na pełnym ekranie |
+| `item` | to, dla czego otwarto tę powierzchnię, albo `null`: dołączony element, który użytkownik kliknął (te same pola, które przekazałeś do `attach`, łącznie z `data`), wiadomość (`kind: "message"`) albo sesja (`kind: "session"`) z jednej z zadeklarowanych przez Ciebie akcji. Zobacz [Akcje](/sdk/#akcje-polecenia-i-odznaka). |
+| `connection` | `{ connected, account }` dla Twojej integracji |
+| `settings` | wartości pól zadeklarowanych w `integration.settings` |
+
+Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` i `onItem` odtwarzają ostatnią wartość, gdy subskrybujesz późno, a potem odpalają się dalej przy każdej zmianie.
+
+`theme.tokens` zawiera `primaryText`, `successText`, `warningText`, `errorText` i `infoText`. Te wymagane pola zawierają kolory tekstu obliczone przez hosta dla neutralnych teł i delikatnie zabarwionych kontrolek zestawu UI, nie dla pełnych kolorowych wypełnień. `applyHostReady` stosuje je przy każdym nowym stanie. Zmienne CSS opisuje [zestaw UI](/sdk/ui/).
+
+## Metody
+
+| Wywołanie | Co robi |
+| --- | --- |
+| `toast({ kind, message })` | pokazuje toast w aplikacji. `kind` to `info`, `success` lub `error`. |
+| `openUrl(url)` | otwiera adres URL w przeglądarce użytkownika |
+| `openSurface(surfaceId)` | przełącza aplikację na ten ekran |
+| `writeClipboard(text)` | kopiuje tekst. Od 1 do 32000 znaków. |
+| `compose({ text, mode? })` | wstawia tekst do pola czatu bez wysyłania. `mode` to `append` (domyślnie) lub `replace`. Od 1 do 16000 znaków po przycięciu. |
+| `attach({ ... })` | umieszcza chip na polu czatu, w tym samym miejscu, gdzie trafiają elementy z GitHub i Linear. Tylko jeden chip naraz. |
+| `startSession({ ... })` | tworzy sesję z dołączonym elementem. Zwraca `{ sessionId, sent }`. Wymaga uprawnienia `sessions`. |
+| `prompt({ text, send? })` | wpisuje tekst do bieżącej sesji albo go w niej wysyła. Zwraca `{ sent }`. Wysyłanie wymaga uprawnienia `prompt`. |
+| `sessionLink({ ... })` | dołącza element do bieżącej sesji bez tworzenia nowej |
+| `close()` | zamyka okno dołączania. Na pasku bocznym nic nie robi. |
+| `oauthStart()` | otwiera stronę autoryzacji dostawcy albo stronę Linear dla integracji `host: { provider: "linear" }` |
+| `oauthDisconnect()` | zapomina zapisany token albo połączenie z Linear |
+| `request({ method, path, query?, body? })` | wywołuje `apiOrigin` Twojej integracji z dołączonym tokenem użytkownika |
+| `serviceRequest({ method, path, query?, body? })` | wywołuje usługę lokalną Twojego rozszerzenia (zobacz `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready` lub `failed` |
+| `readFile(path)` | czyta plik tekstowy. Zwraca `{ content }`. |
+| `writeFile(path, content)` | zapisuje plik tekstowy atomowo, tworząc foldery nadrzędne. Zwraca `{ written: true }`. |
+| `listDir(path)` | wypisuje zawartość folderu. Zwraca `{ entries: [{ name, kind }] }`, `kind` to `file`, `directory` lub `other`. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` to `file`, `directory`, `other` lub `missing`. |
+| `generate({ prompt, system?, maxOutputTokens? })` | jednorazowy tekst od Small Model użytkownika. Zwraca `{ text }`. Wymaga uprawnienia `model`. |
+| `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
+| `setBadge(count)` | pokazuje liczbę (0 do 999) na Twojej ikonie na pasku bocznym, albo `null`, żeby ją usunąć |
+
+## attach, startSession i sessionLink
+
+Wszystkie trzy przyjmują te same pola elementu:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` to id Twojego panelu; OpenChamber i tak nadpisuje je Twoim id. `id` to Twój własny identyfikator elementu. `kind` to `issue` (domyślnie) lub `pull`. `text` to opcjonalny kontekst dla modelu, od 1 do 16000 znaków po przycięciu. `data` to opcjonalny JSON na Twój użytek (status, komentarze, cokolwiek), do 16000 znaków po serializacji. OpenChamber zapisuje go razem z chipem i oddaje bez zmian w `ctx.item`, gdy użytkownik kliknie chip; nigdy nie trafia do modelu.
+
+`startSession` przyjmuje `projectId` bez przełączania bieżącego projektu. Pominięte `worktree` oznacza katalog docelowy, `true` tworzy worktree z wygenerowaną nazwą, `{ kind: "existing", directory }` wskazuje istniejące, a `{ kind: "new", name?, baseBranch? }` nowe. Nazwa dotyczy też gałęzi. `navigation` domyślnie wynosi `"preserve"`; `"open"` otwiera nowy czat. Model, agent i wariant pierwszej wiadomości są ustalane na początku.
+
+Wynik zawiera `sessionId`, `directory`, `sent`, `linked` i opcjonalne `worktree`. `sent` to `sent`, `no-model`, `skipped` lub `failed`; `linked: false` oznacza błąd zapisu elementu. Worktree pozostawione po błędzie przygotowania lub tworzenia sesji zwraca `sessionId: null` i `failure: "bootstrap-failed" | "session-create-failed"`. Sprawdź wynik przed ponowieniem. Limit oczekiwania wynosi 180 sekund; timeout nie potwierdza wycofania operacji.
+
+`sessionLink` dołącza element do sesji otwartej w tej chwili. Brak projektu lub brak sesji to błąd `NO_SESSION`.
+
+Limity, które klient stosuje, zanim cokolwiek wyśle:
+
+| Pole | Maks. znaków |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (po serializacji) | 16000 |
+| `author` | 80 |
+| każda nazwa gałęzi | 200 |
+
+## prompt i cykl życia sesji
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Bez `send` `prompt` zastępuje tekst w polu czatu. Z `send: true` wysyła wiadomość z modelem i agentem wybranymi przez użytkownika. Rozszerzenie nigdy ich nie wybiera. Brak otwartej sesji to `NO_SESSION`. Wysyłanie, gdy sesja jest zajęta, to `SESSION_BUSY`; wpisywanie do pola działa także wtedy. Wynik to `{ sent }` z tymi samymi wartościami co w `startSession`.
+
+`onSessionLifecycle` mówi, co robi sesja. `phase` to `started`, gdy model pracuje, `completed`, gdy sesja przechodzi w bezczynność, i `failure` przy nieoczekiwanym statusie. Późny nasłuchiwacz od razu dostaje bieżącą fazę.
+
+## Projekty, stany na żywo i pamięć
+
+`listProjects()`, `listWorktrees(projectId)` i `listSessions(projectId)` używają istniejącego uprawnienia `sessions` i wspólnych store. Nie wykonują skanu Git przy każdym wywołaniu ani nie udostępniają rozmów. Projekty zawierają ID, nazwę i katalog, worktree także gałąź i dostępność. Sesje zawierają daty, rodzica, worktree i tylko elementy dołączone przez to rozszerzenie. Znane sesje archiwalne są uwzględnione.
+
+`await onProjects(listener)`, `await onWorktrees(projectId, listener)` i `await onSessions(projectId, listener)` zwracają funkcję anulowania subskrypcji. Obsłuż błędy rejestracji. Najpierw dostajesz migawkę, potem zmiany. Maksymalnie 32 subskrypcje na ramkę; `dispose()`, zamknięcie, wstrzymanie, usunięcie i zmiana serwera zwalniają je. `state` to `loading`, `ready` lub `error`, a sesje mają `coverage` dla katalogów. Błąd zachowuje dane; tylko `ready` potwierdza pełną pustą listę.
+
+`activity` to `unknown`, `idle`, `running`, `retrying`, `waiting-permission` lub `waiting-question`. `outcome` to zaobserwowane `completed`, `failed` lub `null`, przechowywane wyłącznie w pamięci dla maksymalnie 2 000 sesji. Idle po błędzie zachowuje błąd do następnego uruchomienia. Nie oznacza to ukończenia zadania. `openSession(sessionId)` jawnie otwiera czat.
+
+`host.storage.get(key)`, `set(key, value)`, `delete(key)` i `keys()` zapisują własny JSON na połączonym serwerze bez dodatkowego uprawnienia. Brak klucza daje `undefined`, zapisane null pozostaje null. Klucze mają od 1 do 128 znaków, wartość do 64 KiB UTF-8, całość do 2 MiB i 2 000 kluczy. Dla danych projektu umieść jego ID w kluczu. Zapisy są serializowane i atomowe, a błędy zachowują poprzednie dane. Usunięcie rozszerzenia usuwa pamięć.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` zaczyna się od `/` i nie ma schematu ani hosta; OpenChamber łączy go z `apiOrigin` z Twojego manifestu i dodaje nagłówek `Authorization`. Integracje tokenowe wysyłają wklejony token bez zmian, jako `Bearer <token>`, gdy manifest ustawia `token.scheme: "bearer"`, albo jako `Basic base64(username:token)`, gdy ustawia `"basic"`. Integracje OAuth i Linear zawsze wysyłają `Bearer`. Wynik to `{ status, body }`. Treść jest tekstem; JSON parsujesz samodzielnie.
+
+Integracja Linear może też wywołać `GET /api/linear/issues/get`, na które OpenChamber odpowiada z własnej trasy Linear.
+
+Brak odpowiedzi w ciągu 20 sekund to `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Gdy manifest deklaruje `contributes.service`, OpenChamber uruchamia ten proces, a Twoja strona rozmawia z nim przez ten sam rodzaj wywołania. Strona nigdy sama nie otwiera socketu.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` podlega tym samym zasadom co w `request`. Zadeklarowanie usługi lokalnej dodaje `service` do uprawnień, które użytkownik zatwierdza przy instalacji; do tego czasu każde `serviceRequest` to `NO_SERVICE`. Pełny kontrakt: plik `GUEST_SERVICES.md` w pakiecie.
+
+## Pliki
+
+Ścieżka względna leży w otwartym projekcie i wymaga uprawnienia `files`. Ścieżka zaczynająca się od `/` lub `~/` musi pasować do zadeklarowanego wzorca `contributes.filesystem` i wymaga uprawnienia `filesystem`. Zasady opisuje [Tworzenie rozszerzenia](/sdk/#pliki).
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Limity: ścieżka do 1024 znaków, treść do 2 000 000 znaków, listing do 2000 wpisów. Przekroczenie limitu treści to `FILE_TOO_LARGE`.
+
+## generate
+
+```ts
+const { text } = await host.generate({ prompt: notes, system: "Summarize in one sentence." });
+```
+
+`prompt` ma od 1 do 64 000 znaków po przycięciu, `system` do 8000, `maxOutputTokens` od 1 do 4000. Nic nie trafia do sesji i historia nie jest zapisywana; rozszerzenie nigdy nie wybiera modelu. Wywołanie czeka maksymalnie 90 sekund. Brak dostępnego Small Model to `NO_MODEL`; błąd modelu to `MODEL_FAILED`. Zobacz [Generowanie tekstu](/sdk/#generowanie-tekstu).
+
+## Kody błędów
+
+Nieudane wywołania rzucają `HostRequestError`. `code` to jeden z poniższych; `message` mówi więcej.
+
+| Kod | Kiedy |
+| --- | --- |
+| `HOST_UNAVAILABLE` | brak window, poza OpenChamber albo po wywołaniu `dispose()` |
+| `HOST_TIMEOUT` | brak odpowiedzi przez 20 sekund |
+| `HOST_REJECTED` | OpenChamber odmówił albo odpowiedział kodem, którego to SDK nie zna |
+| `DISCONNECTED` | brak tokena lub połączenia z Linear dla Twojej integracji |
+| `BAD_PATH` | `path` był źle sformułowany albo próbował wyjść poza dozwolony origin |
+| `NO_INTEGRATION` | manifest nie ma `integration` |
+| `NO_SESSION` | `prompt` lub `sessionLink` bez otwartej sesji |
+| `SESSION_BUSY` | `prompt({ send: true })`, gdy sesja była zajęta |
+| `DISABLED` | użytkownik wstrzymał rozszerzenie w Ustawienia → Rozszerzenia |
+| `NO_SERVICE` | usługa lokalna niezadeklarowana, niezatwierdzona albo nieuruchomiona |
+| `NOT_GRANTED` | użytkownik nie zatwierdził uprawnienia, którego wymaga to wywołanie |
+| `SERVICE_FAILED` | usługa lokalna padła albo nigdy nie osiągnęła gotowości |
+| `NO_DIRECTORY` | względna ścieżka pliku użyta bez otwartego projektu |
+| `NOT_FOUND` | `readFile` na pliku, który nie istnieje |
+| `FILE_TOO_LARGE` | treść pliku ponad limit, przy odczycie lub zapisie |
+| `DENIED` | system operacyjny odmówił operacji na pliku |
+| `NO_MODEL` | `generate` bez dostępnego Small Model |
+| `MODEL_FAILED` | Small Model zwrócił błąd |
+
+## Zobacz też
+
+- [Tworzenie rozszerzenia](/sdk/) o folderze, manifeście, instalacji i uprawnieniach
+- [Zestaw UI](/sdk/ui/) o przyciskach, polach, listach i innych gotowych elementach

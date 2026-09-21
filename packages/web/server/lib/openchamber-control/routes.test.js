@@ -2,6 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { BrowserControlError } from '../browser-control/broker.js';
 import { OpenChamberControlError } from './error.js';
 import { registerOpenChamberControlRoutes } from './routes.js';
 
@@ -42,5 +43,16 @@ describe('OpenChamber control route', () => {
       sessionId: 'ses_fork',
       directory: '/repo',
     });
+  });
+
+  it('keeps the status of a browser refusal instead of reporting 500', async () => {
+    const execute = vi.fn(async () => {
+      throw new BrowserControlError('The user is interacting with this page in the panel right now.', 409);
+    });
+    const response = await request(createApp(execute))
+      .post('/api/openchamber/control')
+      .send({ action: 'browser.click', input: {} })
+      .expect(409);
+    expect(response.body).toEqual({ error: 'The user is interacting with this page in the panel right now.' });
   });
 });

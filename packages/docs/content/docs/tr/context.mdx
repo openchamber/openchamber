@@ -1,0 +1,38 @@
+---
+title: Context
+description: Bir oturumun model belleğinin ne kadarını kullandığını görün.
+---
+
+# Context
+
+Her model bir konuşmanın ancak belirli bir kısmını aynı anda tutabilir. Buna context denir. OpenChamber bunun ne kadar dolduğunu gösterir. Böylece bir oturum sınırına yaklaşırken bunu fark eder ve yanıtta eski ayrıntıların düşmeye başlayabileceğini anlarsınız.
+
+## Hızlı gösterge
+
+Sohbet ederken küçük bir gösterge, kullanılan context yüzdesini gösterir. Doluluk arttıkça renk değişir:
+
+- yeşil — bolca yer var
+- sarı — doluyor (yaklaşık dörtte üç)
+- kırmızı — neredeyse dolu
+
+Tam token sayısını görmek için üzerine gelin ya da mobilde dokunun.
+
+## Tam context paneli
+
+Geçerli oturumun daha geniş görünümü için sağ kenar çubuğundaki **Context** sekmesini açın:
+
+- kullanılan model ve oturumun ne zaman başladığı
+- model sınırına karşı toplam token sayısı
+- mesaj ve maliyet toplamları
+- son yanıtın token dökümü
+- context'i neyin kullandığına dair kabaca bir dağılım, sizin mesajlarınız, agent'ın mesajları, araç çıktısı
+
+Bu döküm bir tahmindir, kesin sayı değildir. Faturayı kontrol etmek için değil, pencereyi neyin doldurduğunu görmek için kullanın.
+
+## Dolu olduğunda ne yapmalı
+
+Bir oturumun sonsuza kadar büyümesine izin vermek yerine yeni bir görev için yeni bir oturum açın. Daha kısa context daha hızlıdır ve modelin odağını korur.
+
+## İlgili
+
+- [Projects](/projects/) — oturumlar proje bazında gruplanır

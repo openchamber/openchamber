@@ -1,0 +1,40 @@
+---
+title: Temalar
+description: OpenChamber'ı yerleşik ve kullanıcı tanımlı temalarla özelleştirin.
+---
+
+# Temalar
+
+OpenChamber yerleşik temaları ve özel tema JSON dosyalarını destekler.
+
+## VS Code teması içe aktarma
+
+Open VSX üzerinde arama yapmak için **Ayarlar → Görünüm → VS Code teması içe aktar** yolunu açın. Sonuçlar simge, ad ve yazarı gösterir. Bir paket seçin, renk önizlemelerini karşılaştırın ve istediğiniz varyantları içe aktarın. Toplu içe aktarma mevcut temayı korur. Yalnızca Microsoft Marketplace üzerinde yayımlanan temalar Open VSX üzerinde bulunmayabilir.
+
+En fazla 512 KiB boyutunda yerel bir `.json` veya `.jsonc` için **JSON dosyası seç** düğmesini kullanın. Masaüstünde varsa `~/.vscode/extensions` klasörü açılır. Dosya içe aktarma arayüz, sözdizimi ve diff renklerini dönüştürüp temayı etkinleştirir. İçe aktarılan temanın yanındaki çöp kutusu temayı bağlı sunucudan siler. Seçili tema silinirse o modun varsayılan temasına dönülür.
+
+Tema, masaüstü veya mobil uygulamadan içe aktarıldığında da bağlı OpenChamber sunucusuna kaydedilir. Aynı dosyayı yeniden içe aktarmak kopya oluşturmaz ve sunucuda düzenlenmiş bir temanın üzerine yazmaz. VS Code uzantısı ise VS Code'un kendi temasını kullanır.
+
+Dosya `include` kullanıyorsa veya ayrı bir token dosyasına başvuruyorsa VS Code komut paletinde **Developer: Generate Color Theme From Current Settings** komutunu çalıştırıp oluşturulan JSON dosyasını içe aktarın.
+
+## Özel tema ekleme
+
+1. Tema dizinini oluşturun:
+
+```bash
+mkdir -p ~/.config/openchamber/themes
+```
+
+2. JSON dosyanızı bu dizine ekleyin, örneğin `my-theme.json`.
+3. OpenChamber'ı açın, sonra **Settings -> Theme -> Reload themes** yoluna gidin.
+4. Temanızı açılır menüden seçin. Hemen uygulanır.
+
+## Tema konumu
+
+- macOS/Linux: `~/.config/openchamber/themes/`
+
+## Tam JSON biçimi başvurusu
+
+Ana depo dokümanlarındaki tam biçim kılavuzunu kullanın:
+
+- [`docs/CUSTOM_THEMES.md`](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md)

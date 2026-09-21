@@ -471,11 +471,15 @@
         --splash-logo-fill: var(--splash-stroke);
       }
 
+      /* Keep these fills in step with the desktop splash in
+         packages/electron/early-startup.mjs: the desktop shell shows that
+         document first and this one replaces it on navigation, so any
+         difference reads as the logo changing. */
       html[data-splash-variant='light'] {
         --splash-background: var(--splash-background-light);
         --splash-stroke: var(--splash-stroke-light);
         --splash-face-fill: rgba(0, 0, 0, 0.15);
-        --splash-cell-fill: rgba(0, 0, 0, 0.4);
+        --splash-cell-fill: rgba(0, 0, 0, 0.35);
         --splash-logo-fill: var(--splash-stroke);
       }
 
@@ -486,7 +490,9 @@
       }
 
       @supports (color: color-mix(in srgb, white 50%, transparent)) {
-        :root {
+        :root,
+        html[data-splash-variant='light'],
+        html[data-splash-variant='dark'] {
           --splash-face-fill: color-mix(in srgb, var(--splash-stroke) 15%, transparent);
           --splash-cell-fill: color-mix(in srgb, var(--splash-stroke) 35%, transparent);
         }
@@ -591,44 +597,6 @@
           }, 300);
         }
       }, 10000);
-    </script>
-
-    <!-- CSS Font Loading API for reliable Nerd Font loading. The ~2 MB of
-         Nerd Fonts are only used by the terminal viewport, so they are no
-         longer downloaded on every cold start: the terminal requests them on
-         first mount through this idempotent hook. -->
-    <script>
-      (function() {
-        let nerdFontsPromise = null;
-        window.__openchamberEnsureNerdFonts = function() {
-          if (nerdFontsPromise) {
-            return nerdFontsPromise;
-          }
-          const fonts = [
-            {
-              name: 'JetBrainsMono Nerd Font',
-              url: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/JetBrainsMonoNerdFont-Regular.woff2'
-            },
-            {
-              name: 'FiraCode Nerd Font',
-              url: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff2'
-            }
-          ];
-
-          const fontPromises = fonts.map(font => {
-            const fontFace = new FontFace(font.name, `url(${font.url}) format('woff2')`);
-            document.fonts.add(fontFace);
-            return fontFace.load().catch(err => {
-              console.warn(`Failed to load font: ${font.name}`, err);
-            });
-          });
-
-          nerdFontsPromise = Promise.allSettled(fontPromises).then(() => {
-            document.documentElement.classList.add('fonts-loaded');
-          });
-          return nerdFontsPromise;
-        };
-      })();
     </script>
 
     <!-- Polyfill for process before loading React -->

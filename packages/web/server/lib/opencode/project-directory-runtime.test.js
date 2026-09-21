@@ -26,7 +26,7 @@ describe('project directory runtime', () => {
       const runtime = createTestRuntime();
       const result = await runtime.validateDirectoryPath('/home/user/project');
 
-      expect(result).toEqual({ ok: true, directory: '/home/user/project' });
+      expect(result).toEqual({ ok: true, directory: '/home/user/project', requestedDirectory: '/home/user/project' });
     });
 
     it('resolves symlinks via fsPromises.realpath', async () => {
@@ -39,7 +39,7 @@ describe('project directory runtime', () => {
 
       const result = await runtime.validateDirectoryPath('/symlink/path/to/project');
 
-      expect(result).toEqual({ ok: true, directory: '/real/path/to/project' });
+      expect(result).toEqual({ ok: true, directory: '/real/path/to/project', requestedDirectory: '/symlink/path/to/project' });
     });
 
     it('returns error when candidate is empty', async () => {
@@ -125,7 +125,11 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveProjectDirectory(req);
 
-      expect(result).toEqual({ directory: '/real/workspace/project', error: null });
+      expect(result).toEqual({
+        directory: '/real/workspace/project',
+        requestedDirectory: '/home/user/workspace/project',
+        error: null,
+      });
     });
 
     it('decodes marked x-opencode-directory header values', async () => {
@@ -153,7 +157,7 @@ describe('project directory runtime', () => {
       const result = await runtime.resolveProjectDirectory(req);
 
       expect(validatedPath).toBe(pathWithUnicode);
-      expect(result).toEqual({ directory: pathWithUnicode, error: null });
+      expect(result).toEqual({ directory: pathWithUnicode, requestedDirectory: pathWithUnicode, error: null });
     });
 
     it('preserves raw percent sequences without directory encoding marker', async () => {
@@ -177,7 +181,7 @@ describe('project directory runtime', () => {
       const result = await runtime.resolveProjectDirectory(req);
 
       expect(validatedPath).toBe(rawPath);
-      expect(result).toEqual({ directory: rawPath, error: null });
+      expect(result).toEqual({ directory: rawPath, requestedDirectory: rawPath, error: null });
     });
 
     it('falls back to query directory when an unmarked encoded header is invalid', async () => {
@@ -199,7 +203,7 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveProjectDirectory(req);
 
-      expect(result).toEqual({ directory: validPath, error: null });
+      expect(result).toEqual({ directory: validPath, requestedDirectory: validPath, error: null });
     });
 
     it('resolves symlinks in query directory parameter', async () => {
@@ -217,7 +221,11 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveProjectDirectory(req);
 
-      expect(result).toEqual({ directory: '/real/workspace/project', error: null });
+      expect(result).toEqual({
+        directory: '/real/workspace/project',
+        requestedDirectory: '/home/user/workspace/project',
+        error: null,
+      });
     });
 
     it('resolves symlinks in lastDirectory from settings', async () => {
@@ -238,7 +246,11 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveProjectDirectory(req);
 
-      expect(result).toEqual({ directory: '/real/workspace/project', error: null });
+      expect(result).toEqual({
+        directory: '/real/workspace/project',
+        requestedDirectory: '/home/user/workspace/project',
+        error: null,
+      });
     });
 
     it('resolves symlinks in active project path from settings', async () => {
@@ -261,7 +273,11 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveProjectDirectory(req);
 
-      expect(result).toEqual({ directory: '/real/workspace/project', error: null });
+      expect(result).toEqual({
+        directory: '/real/workspace/project',
+        requestedDirectory: '/home/user/workspace/project',
+        error: null,
+      });
     });
   });
 
@@ -276,7 +292,7 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveOptionalProjectDirectory(req);
 
-      expect(result).toEqual({ directory: null, error: null });
+      expect(result).toEqual({ directory: null, requestedDirectory: null, error: null });
     });
 
     it('resolves symlinks when directory is provided', async () => {
@@ -294,7 +310,11 @@ describe('project directory runtime', () => {
 
       const result = await runtime.resolveOptionalProjectDirectory(req);
 
-      expect(result).toEqual({ directory: '/real/workspace/project', error: null });
+      expect(result).toEqual({
+        directory: '/real/workspace/project',
+        requestedDirectory: '/symlink/workspace/project',
+        error: null,
+      });
     });
 
     it('preserves raw percent sequences without directory encoding marker', async () => {
@@ -318,7 +338,7 @@ describe('project directory runtime', () => {
       const result = await runtime.resolveOptionalProjectDirectory(req);
 
       expect(validatedPath).toBe(rawPath);
-      expect(result).toEqual({ directory: rawPath, error: null });
+      expect(result).toEqual({ directory: rawPath, requestedDirectory: rawPath, error: null });
     });
   });
 });

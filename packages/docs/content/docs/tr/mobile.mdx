@@ -1,0 +1,43 @@
+---
+title: Mobil Uygulamalar ve PWA
+description: OpenChamber uygulamasını iOS veya Android'e kurun ve sunucunuza bağlayın.
+---
+
+# Mobil Uygulamalar ve PWA
+
+OpenChamber'ın iPhone ve Android için yerel uygulamaları var. Böylece oturumları izleyebilir, aracılara yanıt verebilir ve işleri telefonunuzdan yönetebilirsiniz. Evde Wi-Fi üzerinden de, [Private Relay](/private-relay/) ile her yerden de çalışır.
+
+## Uygulamayı yükleyin
+
+- **iPhone/iPad** — [TestFlight beta](https://testflight.apple.com/join/5ek6GU1E) sürümüne katılın
+- **Android** — APK'yı [son sürüm](https://github.com/openchamber/openchamber/releases/latest) sayfasından indirin
+
+## Sunucunuza bağlayın
+
+1. OpenChamber'ın çalıştığı bilgisayarda **Settings → Remote Instances → Connect to this server** yolunu açın ve **Add a device** düğmesine basın.
+2. **Anywhere** seçin veya telefonu sadece evde kullanacaksanız **Home network only** seçin ve **Create QR code** düğmesine basın.
+3. Mobil uygulamada **Scan QR code** seçeneğine dokunun ve kamerayı koda doğrultun.
+
+Uygulama bağlanır ve sunucuyu hatırlar. QR kod tek kullanımlıktır ve her cihazın kendine ait, iptal edilebilir bir belirteci olur. Eşlemenin nasıl güvenli kaldığını [Connect a Device](/connect-devices/) sayfasında görebilirsiniz.
+
+Birkaç sunucuyla eşleşebilir ve instance listesinden aralarında geçiş yapabilirsiniz. Uygulama, her biri için erişilebilir olup olmadığını ve yerel ağ üzerinden mi yoksa relay üzerinden mi bağlı olduğunuzu gösterir.
+
+## PWA (tarayıcı kurulumu)
+
+Hiç uygulama mağazası istemiyor musunuz? Web uygulaması doğrudan tarayıcıdan kurulabilir:
+
+- **desktop browser** — adres çubuğundaki **Install** seçeneğini kullanın
+- **iPhone/iPad (Safari)** — Share → **Add to Home Screen**
+- **Android (Chrome)** — menü → **Install app** / **Add to Home Screen**
+
+Ağınızın dışından PWA'ya erişmek için bir [tunnel](/tunnels/) ve güçlü bir [UI password](/security/) gerekir. Yerel uygulamalar bunu sizin için relay üzerinden halleder.
+
+## Mobil ayarlar
+
+**Settings → OpenChamber** altında, mobil ve kurulu deneyimi ayarlayan birkaç seçenek vardır. Uygulamanın kurulu adı, ekran yönü ve ekran klavyesinin davranışı bunlara dahildir.
+
+## İlgili
+
+- [Connect a Device](/connect-devices/) — eşleştirme, tek kullanımlık QR kodlar ve cihaz yönetimi
+- [Private Relay](/private-relay/) — "Anywhere" erişimi nasıl çalışır
+- [Security](/security/) — UI'yı açığa çıkarmadan önce koruyun

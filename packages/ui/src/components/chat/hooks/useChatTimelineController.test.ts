@@ -5,49 +5,11 @@ import type { Message } from '@opencode-ai/sdk/v2/client';
 
 import {
     isOlderHistoryPrependCommit,
-    shouldAutoLoadEarlierForUnderfilledPinnedViewport,
     useChatTimelineController,
     type UseChatTimelineControllerResult,
 } from './useChatTimelineController';
 import type { MessageListHandle } from '../MessageList';
-
-const baseInput = {
-    sessionId: 'ses_1',
-    isPinned: true,
-    canLoadEarlier: true,
-    isLoadingOlder: false,
-    pendingRevealWork: false,
-    scrollHeight: 799,
-    clientHeight: 800,
-};
-
-describe('shouldAutoLoadEarlierForUnderfilledPinnedViewport', () => {
-    test('loads when pinned content does not fill the viewport', () => {
-        expect(shouldAutoLoadEarlierForUnderfilledPinnedViewport(baseInput)).toBe(true);
-    });
-
-    test('does not load when content already overflows', () => {
-        expect(shouldAutoLoadEarlierForUnderfilledPinnedViewport({
-            ...baseInput,
-            scrollHeight: 802,
-        })).toBe(false);
-    });
-
-    test('does not load while user is away from bottom or history work is active', () => {
-        expect(shouldAutoLoadEarlierForUnderfilledPinnedViewport({
-            ...baseInput,
-            isPinned: false,
-        })).toBe(false);
-        expect(shouldAutoLoadEarlierForUnderfilledPinnedViewport({
-            ...baseInput,
-            isLoadingOlder: true,
-        })).toBe(false);
-        expect(shouldAutoLoadEarlierForUnderfilledPinnedViewport({
-            ...baseInput,
-            pendingRevealWork: true,
-        })).toBe(false);
-    });
-});
+import type { ChatMessageEntry } from '../lib/turns/types';
 
 describe('isOlderHistoryPrependCommit', () => {
     test('detects older messages inserted above the existing timeline', () => {
@@ -129,6 +91,56 @@ const installMinimalDom = () => {
 };
 
 describe('useChatTimelineController identity lifecycle', () => {
+    test('one history action delegates one batch even when rendering has no new user turn', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const pending = deferred();
+        const user: Message = {
+            id: 'user', sessionID: 'session', role: 'user', time: { created: 100 },
+            agent: 'build', model: { providerID: 'test', modelID: 'test' },
+        };
+        const older: Message = {
+            id: 'older-step', sessionID: 'session', role: 'assistant', parentID: 'unloaded-user',
+            time: { created: 99, completed: 100 }, providerID: 'test', modelID: 'test',
+            mode: 'build', agent: 'build', path: { cwd: '/repo', root: '/repo' }, cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        };
+        let messages: ChatMessageEntry[] = [{ info: user, parts: [] }];
+        let calls = 0;
+        let controller!: UseChatTimelineControllerResult;
+        const scrollRef = { current: null };
+        const messageListRef = { current: null };
+        const Harness = () => {
+            controller = useChatTimelineController({
+                sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
+                historyMeta: { limit: messages.length, complete: false, loading: false },
+                scrollRef, messageListRef, isPinned: false, showScrollButton: false,
+                loadMoreMessages: async () => { calls += 1; await pending.promise; },
+                goToBottom: () => undefined, releaseAutoFollow: () => undefined,
+            });
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            let first!: Promise<void>;
+            let duplicate!: Promise<void>;
+            act(() => {
+                first = controller.loadEarlier({ userInitiated: true });
+                duplicate = controller.loadEarlier({ userInitiated: true });
+            });
+            expect(calls).toBe(1);
+            await act(async () => { pending.resolve(); await Promise.resolve(); });
+            messages = [{ info: older, parts: [] }, ...messages];
+            act(() => root.render(React.createElement(Harness)));
+            await act(async () => { await Promise.all([first, duplicate]); });
+            expect(calls).toBe(1);
+            expect(controller.isLoadingOlder).toBe(false);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
     test('preserves the new identity while an old load is waiting for its render', async () => {
         const dom = installMinimalDom();
         const root: Root = createRoot(dom.container);

@@ -6,11 +6,10 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { formatMoney } from '@/lib/money';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import type { ContextUsageReading } from '@/components/ui/contextUsageReading';
 
 interface ContextUsageDisplayProps {
-  totalTokens: number;
-  percentage: number;
-  colorPercentage?: number;
+  reading: ContextUsageReading;
   contextLimit: number;
   outputLimit?: number;
   cost?: number | null;
@@ -25,10 +24,10 @@ interface ContextUsageDisplayProps {
   pressed?: boolean;
 }
 
+const UNKNOWN_VALUE = '\u2014';
+
 export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
-  totalTokens,
-  percentage,
-  colorPercentage,
+  reading,
   contextLimit,
   outputLimit,
   cost = null,
@@ -44,7 +43,9 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 }) => {
   const { t } = useI18n();
   const [mobileTooltipOpen, setMobileTooltipOpen] = React.useState(false);
-  const colorPct = typeof colorPercentage === 'number' ? colorPercentage : percentage;
+  const isMeasured = reading.state === 'measured';
+  const percentage = isMeasured ? reading.percentage : 0;
+  const colorPct = isMeasured ? reading.colorPercentage ?? percentage : 0;
   const progressPct = clampPercent(percentage) ?? 0;
   const progressTone = resolveUsageTone(colorPct);
   const progressColor = progressTone === 'critical'
@@ -78,8 +79,11 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
   const normalizedCost = cost ?? 0;
   const hasCost = normalizedCost > 0 && Number.isFinite(normalizedCost);
+  const percentLabel = isMeasured ? `${Math.min(percentage, 999).toFixed(1)}%` : UNKNOWN_VALUE;
   const tooltipLines = [
-    t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
+    isMeasured
+      ? t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(reading.totalTokens) })
+      : t('contextUsage.compacted.description'),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
     t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(safeOutputLimit) }),
     ...(hasCost ? [t('contextUsage.tooltip.cost', { cost: formatMoney(normalizedCost) })] : []),
@@ -97,7 +101,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               viewBox={`0 0 ${circularProgressSize} ${circularProgressSize}`}
               className={cn('h-3.5 w-3.5 -rotate-90', percentIconClassName)}
               role="progressbar"
-              aria-valuenow={Math.round(progressPct)}
+              aria-valuenow={isMeasured ? Math.round(progressPct) : undefined}
               aria-valuemin={0}
               aria-valuemax={100}
             >
@@ -109,24 +113,28 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 stroke="var(--interactive-border)"
                 strokeWidth={circularProgressStroke}
               />
-              <circle
-                cx={circularProgressSize / 2}
-                cy={circularProgressSize / 2}
-                r={circularProgressRadius}
-                fill="none"
-                stroke={progressColor}
-                strokeWidth={circularProgressStroke}
-                strokeLinecap="round"
-                strokeDasharray={circularProgressCircumference}
-                strokeDashoffset={circularProgressOffset}
-                className="transition-[stroke-dashoffset,stroke] duration-300"
-              />
+              {isMeasured ? (
+                <circle
+                  cx={circularProgressSize / 2}
+                  cy={circularProgressSize / 2}
+                  r={circularProgressRadius}
+                  fill="none"
+                  stroke={progressColor}
+                  strokeWidth={circularProgressStroke}
+                  strokeLinecap="round"
+                  strokeDasharray={circularProgressCircumference}
+                  strokeDashoffset={circularProgressOffset}
+                  className="transition-[stroke-dashoffset,stroke] duration-300"
+                />
+              ) : null}
             </svg>
-            <span className="text-foreground">{Math.min(percentage, 999).toFixed(1)}%</span>
+            <span className="text-foreground">{percentLabel}</span>
           </>
         ) : (
           <>
-            <span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%
+            {isMeasured
+              ? <><span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%</>
+              : <span>{UNKNOWN_VALUE}</span>}
           </>
         )}
       </span>
@@ -140,7 +148,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
       ? cn(
         'rounded-md px-2 py-1.5 text-foreground transition-colors',
         'hover:bg-interactive-hover',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
       )
       : 'text-muted-foreground/60',
     className,
@@ -179,7 +187,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
             <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usedTokens')}</span>
-                <span className="typography-meta text-foreground font-medium">{formatTokens(totalTokens)}</span>
+                <span className="typography-meta text-foreground font-medium">{isMeasured ? formatTokens(reading.totalTokens) : UNKNOWN_VALUE}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.contextLimit')}</span>
@@ -197,11 +205,14 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               ) : null}
               <div className="flex justify-between items-center pt-1 border-t border-border/40">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usage')}</span>
-                <span className={cn('typography-meta font-semibold', getPercentageColor(colorPct))}>
-                  {Math.min(percentage, 999).toFixed(1)}%
+                <span className={cn('typography-meta font-semibold', isMeasured ? getPercentageColor(colorPct) : 'text-muted-foreground')}>
+                  {percentLabel}
                 </span>
               </div>
             </div>
+            {isMeasured ? null : (
+              <p className="px-1 typography-meta text-muted-foreground">{t('contextUsage.compacted.description')}</p>
+            )}
           </div>
         </MobileOverlayPanel>
       </>

@@ -288,8 +288,8 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 const LoadingScreen: React.FC = () => (
-  <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-    <OpenChamberLogo width={120} height={120} />
+  <div className="flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground">
+    <OpenChamberLogo width={120} height={120} variant="splash" />
   </div>
 );
 
@@ -602,7 +602,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       hasBootstrapResyncedRef.current = true;
       void (async () => {
         await initializeAppearancePreferences();
-        await syncDesktopSettings({ adoptWorkspace: isBootstrapResync });
+        await syncDesktopSettings({ bootstrap: isBootstrapResync });
         if (isBootstrapResync) {
           await applyPersistedDirectoryPreferences();
         }

@@ -6,6 +6,7 @@ import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
 import { DEDICATED_WIRE_FORMAT_PROVIDERS, callSmallModel, resolveProviderLogin } from './call.js';
+import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { getRuntimeProviderSnapshot } from './runtime-providers.js';
 
 // Never a small model, whatever the transport looks like. A plugin can publish
@@ -26,16 +27,10 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
 // OpenChamber's own settings: when the user unchecks "use default small model"
 // their explicit override outranks every other resolution step.
 const readSmallModelSettingsOverride = () => {
-  try {
-    const raw = fs.readFileSync(OPENCHAMBER_SETTINGS_FILE, 'utf8');
-    const settings = JSON.parse(raw);
-    if (!settings || typeof settings !== 'object') return null;
-    if (settings.smallModelUseDefault !== false) return null;
-    const override = typeof settings.smallModelOverride === 'string' ? settings.smallModelOverride.trim() : '';
-    return override || null;
-  } catch {
-    return null;
-  }
+  const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
+  if (settings.smallModelUseDefault !== false) return null;
+  const override = typeof settings.smallModelOverride === 'string' ? settings.smallModelOverride.trim() : '';
+  return override || null;
 };
 
 // Rough safety clamp so a huge input never blows the model's context window.
@@ -102,7 +97,7 @@ const readConfiguredSmallModel = (workingDirectory) => {
  * Generates text with the user's small model, resolved and authenticated
  * entirely server-side from the OpenCode config and auth store.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, sessionID, preferredProviderID, preferredModelID, restrictToPreferredProvider = false, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -169,6 +164,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     auth,
     catalog,
     workingDirectory: directory,
+    sessionID,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
     prompt: clamped.prompt,

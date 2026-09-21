@@ -55,6 +55,8 @@ export interface SessionAssistState {
   visibleRecap: string | null;
   /** Suggestion text — fresh payload, session idle; caller still gates on input emptiness. */
   suggestion: string | null;
+  /** False until the session record is in memory; the recap cannot be decided before that. */
+  sessionKnown: boolean;
 }
 
 export function useSessionAssistState(sessionId: string, directory?: string): SessionAssistState {
@@ -93,5 +95,6 @@ export function useSessionAssistState(sessionId: string, directory?: string): Se
     assist,
     visibleRecap: sessionRecapEnabled && assist && assist.recap && quietElapsed ? assist.recap : null,
     suggestion: sessionSuggestionEnabled && assist && assist.suggestion ? assist.suggestion : null,
+    sessionKnown: session !== undefined && session !== null,
   };
 }

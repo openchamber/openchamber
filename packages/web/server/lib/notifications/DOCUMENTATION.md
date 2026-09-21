@@ -77,7 +77,7 @@ This module provides notification message preparation utilities for the web serv
 ### Emitter runtime API (emitter-runtime.js)
 - `createNotificationEmitterRuntime(dependencies)`: creates runtime for unified notification emission channels.
 - Returned API:
-  - `writeSseEvent(res, payload)`
+   - `writeSseEvent(res, payload, serializedPayload?)`, where broadcast callers may share one JSON encoding across recipients
   - `emitDesktopNotification(payload)`
   - `broadcastUiNotification(payload)`
 

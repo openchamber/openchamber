@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 
 interface DebugPanelProps {
@@ -20,6 +21,17 @@ interface DebugPanelProps {
 }
 
 type DebugTab = 'memory' | 'streaming' | 'requests';
+
+function getDebugTabIcon(tab: DebugTab): IconName {
+  switch (tab) {
+    case 'memory':
+      return 'database-2';
+    case 'streaming':
+      return 'bar-chart-box';
+    case 'requests':
+      return 'pulse';
+  }
+}
 
 const formatDuration = (durationMs: number): string => {
   if (durationMs < 1000) {
@@ -302,7 +314,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon
-            name={activeTab === 'memory' ? 'database-2' : activeTab === 'streaming' ? 'bar-chart-box' : 'pulse'}
+            name={getDebugTabIcon(activeTab)}
             className="h-4 w-4 text-[var(--surface-foreground)]"
           />
           <h3 className="typography-ui-label font-semibold text-[var(--surface-foreground)]">{t('memoryDebugPanel.title')}</h3>

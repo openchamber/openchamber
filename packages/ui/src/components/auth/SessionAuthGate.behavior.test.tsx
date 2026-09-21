@@ -303,6 +303,19 @@ mock.module('@/lib/passkeys', () => ({
   registerCurrentDevicePasskey: mock(() => Promise.resolve(null)),
 }));
 
+const authSessionStore = {
+  state: 'ok' as const,
+  markAuthenticated: mock(() => undefined),
+};
+
+mock.module('@/lib/runtime-auth-expiry', () => ({
+  installAuthSessionFocusWatch: mock(() => undefined),
+  useAuthSessionStore: Object.assign(
+    (selector: (store: typeof authSessionStore) => unknown) => selector(authSessionStore),
+    { getState: () => authSessionStore },
+  ),
+}));
+
 const { SessionAuthGate } = await import('./SessionAuthGate');
 
 const flushEffects = async () => {

@@ -10,17 +10,66 @@
  * Everywhere else — local runtime, web, mobile — the URL is already correct and
  * is returned untouched.
  */
-import { invokeDesktopCommand } from '@/lib/desktopNative';
-import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { invokeDesktopCommand, listenForDesktopRelayDevTunnels, postDesktopRelayDevTunnelMessage } from '@/lib/desktopNative';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
+import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
+import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { isLoopbackUrl } from './url';
 
-type TunnelResult = { localPort: number; reused: boolean; url: string };
+type TunnelResult = { localPort: number };
 
 /** Keyed by `${baseUrl}|${port}`; the shell owns the real lifetime. */
 const localPortByTarget = new Map<string, number>();
 /** Reverse map, so a tunnel port never leaks into the address bar or storage. */
 const originByLocalPort = new Map<number, string>();
+const relaySockets = new Map<string, RelayTunnelWebSocket>();
+const pendingRelayConnections = new Set<string>();
+
+const openRelayConnection = async (connectionId: string, remotePort: number): Promise<void> => {
+  if (!getActiveRelayTunnel()) {
+    pendingRelayConnections.delete(connectionId);
+    postDesktopRelayDevTunnelMessage(connectionId, { type: 'close' });
+    return;
+  }
+  await refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl());
+  if (!pendingRelayConnections.has(connectionId) || !getActiveRelayTunnel()) return;
+  const url = getRuntimeUrlResolver().websocket(`/api/dev-tunnel?port=${remotePort}`);
+  const socket = openRuntimeWebSocket(url);
+  relaySockets.set(connectionId, socket);
+  socket.binaryType = 'arraybuffer';
+  socket.onopen = () => postDesktopRelayDevTunnelMessage(connectionId, { type: 'ready' });
+  socket.onmessage = (event) => postDesktopRelayDevTunnelMessage(connectionId, { type: 'data', data: event.data instanceof ArrayBuffer ? event.data : new TextEncoder().encode(event.data) });
+  socket.onerror = () => postDesktopRelayDevTunnelMessage(connectionId, { type: 'close' });
+  socket.onclose = () => {
+    pendingRelayConnections.delete(connectionId);
+    relaySockets.delete(connectionId);
+    postDesktopRelayDevTunnelMessage(connectionId, { type: 'close' });
+  };
+};
+
+listenForDesktopRelayDevTunnels(({ connectionId, remotePort, message }) => {
+  switch (message.type) {
+    case 'data': {
+      const socket = relaySockets.get(connectionId);
+      if (socket && message.data) socket.send(message.data);
+      return;
+    }
+    case 'close':
+      pendingRelayConnections.delete(connectionId);
+      relaySockets.get(connectionId)?.close();
+      relaySockets.delete(connectionId);
+      return;
+    case 'connect':
+      pendingRelayConnections.add(connectionId);
+      void openRelayConnection(connectionId, remotePort).catch(() => {
+        pendingRelayConnections.delete(connectionId);
+        postDesktopRelayDevTunnelMessage(connectionId, { type: 'close' });
+      });
+  }
+});
 
 const isDesktopRuntime = (): boolean => (
   typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__)
@@ -69,6 +118,14 @@ const rewriteToLocalPort = (url: string, localPort: number): string => {
   }
 };
 
+const rememberOriginalOrigin = (url: string, localPort: number): void => {
+  try {
+    originByLocalPort.set(localPort, new URL(url).origin);
+  } catch {
+    // Unparseable input never reaches here; nothing to record.
+  }
+};
+
 /** Thrown when a remote dev server exists but could not be reached from here. */
 export class DevTunnelUnavailableError extends Error {
   constructor(message: string) {
@@ -100,11 +157,7 @@ export const resolveBrowsableUrl = async (url: string): Promise<string> => {
   const key = `${baseUrl}|${port}`;
   const cached = localPortByTarget.get(key);
   if (cached) {
-    try {
-      originByLocalPort.set(cached, new URL(url).origin);
-    } catch {
-      // Unparseable input never reaches here; nothing to record.
-    }
+    rememberOriginalOrigin(url, cached);
     return rewriteToLocalPort(url, cached);
   }
 
@@ -112,6 +165,8 @@ export const resolveBrowsableUrl = async (url: string): Promise<string> => {
     const result = await invokeDesktopCommand<TunnelResult>('desktop_dev_tunnel_open', {
       baseUrl,
       port,
+      relay: isRelayModeActive(),
+      targetKey: getRuntimeKey(),
       clientToken: getRuntimeBearerTokenSync(),
       requestHeaders: getRuntimeExtraHeadersSync(),
     });
@@ -119,11 +174,7 @@ export const resolveBrowsableUrl = async (url: string): Promise<string> => {
       throw new DevTunnelUnavailableError(url);
     }
     localPortByTarget.set(key, result.localPort);
-    try {
-      originByLocalPort.set(result.localPort, new URL(url).origin);
-    } catch {
-      // Unparseable input never reaches here; nothing to record.
-    }
+    rememberOriginalOrigin(url, result.localPort);
     return rewriteToLocalPort(url, result.localPort);
   } catch (error) {
     if (error instanceof DevTunnelUnavailableError) throw error;
@@ -180,6 +231,10 @@ export const toDisplayUrl = (url: string): string => {
 const resetDevTunnelCache = (): void => {
   localPortByTarget.clear();
   originByLocalPort.clear();
+  pendingRelayConnections.clear();
+  for (const socket of relaySockets.values()) socket.close();
+  relaySockets.clear();
+  void invokeDesktopCommand('desktop_relay_dev_tunnel_close_all').catch(() => {});
 };
 
 if (typeof window !== 'undefined') {

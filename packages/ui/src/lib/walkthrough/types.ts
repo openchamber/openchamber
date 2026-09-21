@@ -11,7 +11,8 @@ export type WalkthroughWorkingTreeScope = 'all' | 'staged' | 'working';
 export type WalkthroughSource =
   | { kind: 'working-tree'; scope: WalkthroughWorkingTreeScope }
   | { kind: 'branch'; baseRef: string; headRef: string }
-  | { kind: 'pr'; number: number };
+  | { kind: 'commit'; hash: string }
+  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string } };
 
 export type WalkthroughChapterIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'doc' | 'gear';
 export type WalkthroughStopImportance = 'critical' | 'normal' | 'context';

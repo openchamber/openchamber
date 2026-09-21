@@ -2,9 +2,9 @@
   "metadata": {
     "id": "solarized-dark",
     "name": "Solarized",
+    "variant": "dark",
     "description": "Solarized",
     "version": "1.0.0",
-    "variant": "dark",
     "tags": [
       "dark",
       "palette"
@@ -13,11 +13,10 @@
   "colors": {
     "primary": {
       "base": "#278BD2",
+      "foreground": "#001F27",
       "hover": "#5C65AC",
       "active": "#8285C9",
-      "foreground": "#001F27",
-      "muted": "#6C71C480",
-      "emphasis": "#5C65AC"
+      "muted": "#6C71C480"
     },
     "surface": {
       "background": "#001e25",
@@ -25,16 +24,15 @@
       "muted": "#02232e",
       "mutedForeground": "#6f7475",
       "elevated": "#052832",
-      "elevatedForeground": "#93A1A1",
       "overlay": "#FDF6E320",
       "subtle": "#062930"
     },
     "interactive": {
       "border": "#223a41",
-      "borderHover": "#243E47",
-      "borderFocus": "#3A5A6B",
       "selection": "#98afbd33",
       "selectionForeground": "#FDF6E3",
+      "borderHover": "#243E47",
+      "borderFocus": "#3A5A6B",
       "focus": "#6C71C4",
       "focusRing": "#6C71C440",
       "cursor": "#FDF6E3",
@@ -44,32 +42,16 @@
     "status": {
       "error": "#DC322F",
       "errorForeground": "#001F27",
-      "errorBackground": "#DC322F20",
-      "errorBorder": "#DC322F50",
       "warning": "#B58900",
       "warningForeground": "#001F27",
-      "warningBackground": "#B5890020",
-      "warningBorder": "#B5890050",
       "success": "#859900",
       "successForeground": "#001F27",
-      "successBackground": "#85990020",
-      "successBorder": "#85990050",
       "info": "#2AA198",
-      "infoForeground": "#001F27",
-      "infoBackground": "#2AA19820",
-      "infoBorder": "#2AA19850"
-    },
-    "pr": {
-      "open": "#859900",
-      "draft": "#6C7F80",
-      "blocked": "#B58900",
-      "merged": "#7f6cc4",
-      "closed": "#DC322F"
+      "infoForeground": "#001F27"
     },
     "syntax": {
       "base": {
-        "background": "#022733",
-        "foreground": "#93A1A1",
+        "background": "#022530",
         "comment": "#6C7F80",
         "keyword": "#6C71C4",
         "string": "#859900",
@@ -81,34 +63,17 @@
       },
       "tokens": {
         "boolean": "#B58900",
-        "class": "#6C71C4",
         "className": "#6C71C4",
         "commentDoc": "#5C7173",
         "constant": "#2AA198",
         "decorator": "#B58900",
-        "enum": "#6C71C4",
-        "exception": "#D33682",
-        "functionCall": "#6C71C4",
-        "interface": "#B58900",
-        "jsxTag": "#6C71C4",
         "key": "#6C71C4",
-        "keywordImport": "#D33682",
-        "label": "#D33682",
         "macro": "#2AA198",
         "method": "#859900",
-        "module": "#D33682",
-        "namespace": "#B58900",
         "parameter": "#93A1A1",
-        "preprocessor": "#D33682",
-        "punctuation": "#6C7F80",
-        "regex": "#859900",
         "storageModifier": "#2AA198",
         "stringEscape": "#FDF6E3",
-        "struct": "#6C71C4",
-        "tag": "#6C71C4",
         "tagAttribute": "#B58900",
-        "tagAttributeValue": "#859900",
-        "typeParameter": "#B58900",
         "url": "#2AA198",
         "variableGlobal": "#6C71C4",
         "variableLocal": "#01222B",
@@ -116,21 +81,22 @@
         "variableProperty": "#2AA198"
       },
       "highlights": {
-        "diffAdded": "#859900",
         "diffAddedBackground": "#0F2F29",
-        "diffModified": "#2AA198",
         "diffModifiedBackground": "#0F3844",
-        "diffRemoved": "#DC322F",
         "diffRemovedBackground": "#321C1C",
         "lineNumber": "#2D4958",
         "lineNumberActive": "#FDF6E3"
       }
     },
+    "pr": {
+      "draft": "#6C7F80",
+      "merged": "#7f6cc4"
+    },
+    "chat": {
+      "userMessageBackground": "#042B34",
+      "divider": "#20373F"
+    },
     "markdown": {
-      "heading1": "#93A1A1",
-      "heading2": "#93A1A1",
-      "heading3": "#93A1A1",
-      "heading4": "#93A1A1",
       "link": "#2AA198",
       "linkHover": "#6C71C4",
       "inlineCode": "#859900",
@@ -139,25 +105,13 @@
       "blockquoteBorder": "#20373F",
       "listMarker": "#6C71C499"
     },
-    "chat": {
-      "userMessage": "#93A1A1",
-      "userMessageBackground": "#042B34",
-      "assistantMessage": "#93A1A1",
-      "assistantMessageBackground": "#001F27",
-      "timestamp": "#6C7F80",
-      "divider": "#20373F"
-    },
     "tools": {
-      "background": "#02273380",
       "border": "#2b495380",
-      "headerHover": "#032830",
       "icon": "#6C7F80",
       "title": "#93A1A1",
       "description": "#6C7F80",
       "edit": {
-        "added": "#859900",
         "addedBackground": "#85990025",
-        "removed": "#DC322F",
         "removedBackground": "#DC322F25",
         "lineNumber": "#345567"
       }

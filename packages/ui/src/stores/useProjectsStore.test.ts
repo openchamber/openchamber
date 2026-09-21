@@ -2,8 +2,55 @@ import { describe, expect, test } from "bun:test"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { DesktopSettings } from "@/lib/desktop"
 import { useProjectsStore } from "./useProjectsStore"
+import { useDirectoryStore } from "./useDirectoryStore"
+import { opencodeClient } from "../lib/opencode/client"
 
 describe("useProjectsStore settings synchronization", () => {
+  test("preserves drive roots and deduplicates Windows drive/separator variants", () => {
+    const previous = useProjectsStore.getState()
+    const directoryState = useDirectoryStore.getState()
+    const sdkDirectory = opencodeClient.getDirectory()
+    try {
+      useProjectsStore.getState().synchronizeFromSettings({ projects: [
+        { id: "drive", path: "c:\\" },
+        { id: "lower", path: "c:\\Users\\Developer\\Project\\" },
+        { id: "upper", path: "C:/Users/Developer/Project" },
+      ] })
+      expect(useProjectsStore.getState().projects.map((project) => project.path)).toEqual(["C:/", "C:/Users/Developer/Project"])
+    } finally {
+      useProjectsStore.setState(previous, true)
+      useDirectoryStore.setState(directoryState, true)
+      opencodeClient.setDirectory(sdkDirectory)
+    }
+  })
+
+  test("directory navigation preserves roots and does not create history duplicates for Windows spelling variants", () => {
+    const previous = useDirectoryStore.getState()
+    const sdkDirectory = opencodeClient.getDirectory()
+    try {
+      useDirectoryStore.setState({ homeDirectory: "/home", currentDirectory: "/home", directoryHistory: ["/home"], historyIndex: 0 })
+      useDirectoryStore.getState().setDirectory("c:\\Project")
+      useDirectoryStore.getState().setDirectory("C:/Project/")
+      expect(useDirectoryStore.getState().directoryHistory).toEqual(["/home", "C:/Project"])
+      useDirectoryStore.setState({ directoryHistory: ["/home", "C:/Project", "C:/Other"], historyIndex: 1 })
+      useDirectoryStore.getState().setDirectory("c:\\Project\\")
+      expect(useDirectoryStore.getState().historyIndex).toBe(1)
+      expect(useDirectoryStore.getState().directoryHistory).toEqual(["/home", "C:/Project", "C:/Other"])
+      useDirectoryStore.getState().goToParent()
+      expect(useDirectoryStore.getState().currentDirectory).toBe("C:/")
+      expect(opencodeClient.getDirectory()).toBe("C:/")
+      useDirectoryStore.getState().goToParent()
+      expect(useDirectoryStore.getState().currentDirectory).toBe("C:/")
+      useDirectoryStore.getState().setDirectory("\\\\Server\\Share\\Folder")
+      useDirectoryStore.getState().goToParent()
+      useDirectoryStore.getState().goToParent()
+      expect(useDirectoryStore.getState().currentDirectory).toBe("//Server/Share")
+    } finally {
+      useDirectoryStore.setState(previous, true)
+      opencodeClient.setDirectory(sdkDirectory)
+    }
+  })
+
   test("treats a successful empty project snapshot as authoritative", () => {
     const project = { id: "project-a", path: "/repo", label: "Repo" } as ProjectEntry
     useProjectsStore.setState({
@@ -117,5 +164,73 @@ describe("useProjectsStore default model and thinking level", () => {
 
     const project = useProjectsStore.getState().projects[0]
     expect(project?.defaultVariant).toBe(undefined)
+  })
+
+  test("persists and clears a project default agent", () => {
+    seed({ id: "project-a", path: "/repo" })
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { defaultAgent: "plan" })
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { defaultAgent: "   " })
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe(undefined)
+  })
+
+  test("sanitizes a project default agent from settings", () => {
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [{ id: "project-a", path: "/repo", defaultAgent: "  plan  " }],
+    })
+
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
+  })
+})
+
+describe("useProjectsStore.addProjects", () => {
+  const resetProjects = () => {
+    useProjectsStore.setState({
+      projects: [],
+      activeProjectId: null,
+      manualProjectOrder: [],
+    })
+  }
+
+  test("adds multiple new projects in one update and activates the first", async () => {
+    resetProjects()
+
+    const added = await useProjectsStore.getState().addProjects(["/one", "/two", "/three"])
+
+    expect(added).toHaveLength(3)
+    expect(useProjectsStore.getState().projects.map((p) => p.path)).toEqual(["/one", "/two", "/three"])
+    expect(useProjectsStore.getState().activeProjectId).toBe(added[0].id)
+    expect(added[0].addedAt).toBe(added[1].addedAt)
+  })
+
+  test("skips already-added paths and duplicates within the batch", async () => {
+    resetProjects()
+    await useProjectsStore.getState().addProjects(["/one"])
+
+    const added = await useProjectsStore.getState().addProjects(["/one", "/two", "/two", "/one"])
+
+    expect(added).toHaveLength(1)
+    expect(added[0].path).toBe("/two")
+    expect(useProjectsStore.getState().projects.map((p) => p.path)).toEqual(["/one", "/two"])
+  })
+
+  test("skips invalid paths and returns an empty array when nothing is addable", async () => {
+    resetProjects()
+
+    const added = await useProjectsStore.getState().addProjects(["", "   ", 42 as unknown as string])
+
+    expect(added).toEqual([])
+    expect(useProjectsStore.getState().projects).toEqual([])
+  })
+
+  test("normalizes paths (trailing separators, backslashes, tilde expansion)", async () => {
+    resetProjects()
+
+    const added = await useProjectsStore.getState().addProjects(["/repo/", "C:\\repo", "~/project"])
+
+    const home = useDirectoryStore.getState().homeDirectory;
+    expect(added.map((p) => p.path)).toEqual(["/repo", "C:/repo", home ? `${home}/project` : "~/project"])
   })
 })

@@ -6,13 +6,15 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { copyTextToClipboard as copyPlainTextToClipboard } from '@/lib/clipboard';
-import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory } from '@/sync/sync-refs';
+import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory, getDirectoryState } from '@/sync/sync-refs';
 import {
   describeSessionDirectorySources,
   resolveSessionDirectoryFromSources,
 } from '@/sync/session-directory-resolution';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { getRecentSendFailures } from '@/sync/send-failure-log';
+import { getRecentSessionErrors } from '@/sync/session-error-log';
+import { buildOpenCodeStatusReport } from '@/lib/openCodeStatus';
 import { getAttachedSessionDirectory } from '@/sync/session-worktree-contract';
 import { useStreamingStore } from '@/sync/streaming';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -166,6 +168,12 @@ export const debugUtils = {
         return truncatedPart;
       }),
     }));
+  },
+
+  /** Cached message count per session in the current directory store; -1 when not cached. */
+  getCachedMessageCount(sessionId: string, directory?: string) {
+    const state = getDirectoryState(directory);
+    return state?.message[sessionId]?.length ?? -1;
   },
 
   getAllMessages(truncate: boolean = false) {
@@ -386,6 +394,9 @@ export const debugUtils = {
       // this session, so a "my message disappeared" report is not a rejected
       // send and needs a different explanation.
       recentSendFailures: getRecentSendFailures(),
+      // Same reasoning: empty means OpenCode reported no failed turn in this
+      // app session.
+      recentSessionErrors: getRecentSessionErrors(),
       currentSessionDirectoryResolution: sessionState.currentSessionId
         ? this.diagnoseSessionDirectory(sessionState.currentSessionId)
         : null,
@@ -393,6 +404,16 @@ export const debugUtils = {
 
     console.log('[DEBUG] App status snapshot:', report);
     return report;
+  },
+
+  /**
+   * The same text the status report dialog (Ctrl/Cmd+Shift+L) shows, for a
+   * console or remote session that cannot press the shortcut.
+   */
+  async statusReport() {
+    const text = await buildOpenCodeStatusReport();
+    console.log(text);
+    return text;
   },
 
   /**

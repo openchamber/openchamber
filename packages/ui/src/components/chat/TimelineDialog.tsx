@@ -301,7 +301,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                         </div>
                     ) : (
                         filteredMessages.map(({ message }, index) => {
-                            const preview = getMessagePreview(message.parts);
+                            const preview = getMessagePreview(message.parts, undefined, t);
                             const timestamp = message.info.time.created;
                             const dateGroup = formatDateGroup(timestamp);
                             const previous = filteredMessages[index - 1];
@@ -319,7 +319,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                             return (
                                 <React.Fragment key={message.info.id}>
                                     {showDateGroup && (
-                                        <div className="sticky top-0 z-10 flex items-center gap-3 bg-background/95 py-2 backdrop-blur-sm">
+                                        <div className="sticky top-0 z-10 flex items-center gap-3 bg-surface-elevated/95 py-2 backdrop-blur-sm">
                                             <div className="h-px flex-1 bg-border/60" />
                                             <span className="typography-meta text-muted-foreground">
                                                 {dateGroup}

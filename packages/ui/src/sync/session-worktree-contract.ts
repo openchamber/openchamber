@@ -138,11 +138,11 @@ export function resolveSessionWorktreeState(
 
 export function formatSessionWorktreeBadge(
   attachment: SessionWorktreeAttachment,
-  labels?: { pending?: string }
+  labels?: { pending?: string; missing?: string }
 ): string {
   if (attachment.legacy) return 'Legacy session';
   if (attachment.worktreeStatus === 'pending') return labels?.pending ?? 'Needs attention';
-  if (attachment.worktreeStatus === 'missing') return 'Worktree missing';
+  if (attachment.worktreeStatus === 'missing') return labels?.missing ?? 'Worktree missing';
   if (attachment.worktreeStatus === 'not-a-repo') return 'Not a repo';
   if (attachment.worktreeStatus === 'invalid') return 'Needs attention';
   if (attachment.attentionReason) return 'Needs attention';

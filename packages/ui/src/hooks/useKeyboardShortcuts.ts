@@ -1,4 +1,5 @@
 import React from 'react';
+import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
@@ -25,11 +26,16 @@ import {
   type ShortcutActionId,
 } from '@/lib/shortcuts';
 import { ShortcutRegistry } from '@/lib/shortcuts/registry';
+import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useGuestsStore } from '@/lib/guests/store';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -40,7 +46,7 @@ import {
   invokeActiveSelectionAddToChat,
 } from '@/lib/addSelectionToChat';
 import { isIMECompositionEvent } from '@/lib/ime';
-import { hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
+import { canUseDigitShortcut, hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
 
 const dropdownTargetSelector = [
   '[data-slot="dropdown-menu-content"]', '[data-slot="select-content"]', '[role="combobox"]',
@@ -225,6 +231,7 @@ export const useKeyboardShortcuts = () => {
       focusChatInput();
     },
     cycle_agent: (event) => {
+      if (hasActiveBtwComposer()) return false;
       const state = useUIStore.getState();
       const hasOverlay = state.isSettingsDialogOpen
         || state.isCommandPaletteOpen
@@ -256,6 +263,7 @@ export const useKeyboardShortcuts = () => {
       return toggleTerminalSurfaceExpanded();
     },
     open_model_selector: () => {
+      if (hasActiveBtwComposer()) return false;
       const state = useUIStore.getState();
       const hasOverlay = state.isCommandPaletteOpen
         || state.isHelpDialogOpen
@@ -265,6 +273,7 @@ export const useKeyboardShortcuts = () => {
       state.setModelSelectorOpen(!state.isModelSelectorOpen);
     },
     cycle_thinking_variant: () => {
+      if (hasActiveBtwComposer()) return false;
       const state = useUIStore.getState();
       const hasOverlay = state.isCommandPaletteOpen
         || state.isHelpDialogOpen
@@ -289,10 +298,12 @@ export const useKeyboardShortcuts = () => {
     cycle_favorite_model_forward: () => cycleFavoriteModel(1),
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
     expand_input: () => {
+      if (hasActiveBtwComposer()) return false;
       if (useUIStore.getState().isMobile) return false;
       useUIStore.getState().toggleExpandedInput();
     },
     toggle_dictation: () => {
+      if (hasActiveBtwComposer()) return false;
       const state = useUIStore.getState();
       if (
         state.isCommandPaletteOpen
@@ -311,6 +322,7 @@ export const useKeyboardShortcuts = () => {
   });
 
   function cycleFavoriteModel(delta: number): boolean | void {
+    if (hasActiveBtwComposer()) return false;
     const state = useUIStore.getState();
     const hasOverlay = state.isCommandPaletteOpen
       || state.isHelpDialogOpen
@@ -398,7 +410,9 @@ export const useKeyboardShortcuts = () => {
       }
       if (
         target?.closest('[role="dialog"]')
+        || target?.closest('[data-btw-composer="true"]')
         || isTerminalEventTarget(target)
+        || isVimEditorEventTarget(target)
         || dropdownOpen
       ) {
         resetAbortPriming();
@@ -493,6 +507,7 @@ export const useKeyboardShortcuts = () => {
         && !event.repeat
         && eventMatchesShortcutPrefix(event, switchSurfacePrefix, heldKeysRef.current)
       ) {
+        if (!canUseDigitShortcut(event)) return;
         const state = useUIStore.getState();
         if (!state.isMobile && effectiveDirectory) {
           const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
@@ -504,6 +519,9 @@ export const useKeyboardShortcuts = () => {
             isVSCode: isVSCodeRuntime(),
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
+            linearConnected: useLinearAuthStore.getState().status?.connected === true,
+            githubConnected: useGitHubAuthStore.getState().status?.connected === true,
+            extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];
           if (target) {
@@ -519,6 +537,7 @@ export const useKeyboardShortcuts = () => {
         sessionTabDigit !== null
         && !event.repeat
         && !isVSCodeRuntime()
+        && canUseDigitShortcut(event)
         && useUIStore.getState().sessionTabsEnabled
         && eventMatchesShortcutPrefix(
           event,

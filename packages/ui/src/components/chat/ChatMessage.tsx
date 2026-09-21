@@ -14,7 +14,11 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 
-import MessageBody from './message/MessageBody';
+import MessageBody, { type MessageExtraAction } from './message/MessageBody';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { buildGuestMessageItem, guestMessageActionsFor } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
@@ -399,8 +403,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
     }, [message.info.time]);
     const isPinnedIntoContext = useGlobalSessionsStore((state) => {
-        const session = state.activeSessions.find((candidate) => candidate.id === sessionId)
-            ?? state.archivedSessions.find((candidate) => candidate.id === sessionId);
+        const session = state.entityById.get(sessionId);
         return getContextObligatoryMessages(session).some((entry) => entry.id === message.info.id);
     });
     const [pinPending, setPinPending] = React.useState(false);
@@ -737,6 +740,28 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         useSessionUIStore.getState().revertToMessage(sessionId, message.info.id);
     }, [sessionId, message.info.id]);
 
+    // Extension actions for this role. The record is read at click time so a
+    // streaming message does not rebuild the list on every part update.
+    const guestActionEntries = useGuestActions();
+    const messageRecordRef = React.useRef(message);
+    messageRecordRef.current = message;
+    const guestMessageActions = React.useMemo<MessageExtraAction[] | undefined>(() => {
+        if (guestActionEntries.length === 0 || !sessionId) return undefined;
+        const entries = guestMessageActionsFor(guestActionEntries, isUser ? 'user' : 'assistant');
+        if (entries.length === 0) return undefined;
+        return entries.map((entry) => ({
+            id: `guest:${entry.guest.id}:${entry.action.id}`,
+            label: entry.action.label,
+            icon: <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-3.5" />,
+            onSelect: () => {
+                const sessionTitle = useGlobalSessionsStore.getState().entityById.get(sessionId)?.title ?? null;
+                const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+                const item = buildGuestMessageItem(entry.action.id, { sessionId, sessionTitle, directory }, messageRecordRef.current);
+                void runGuestAction(entry, item, t);
+            },
+        }));
+    }, [guestActionEntries, isUser, sessionId, t]);
+
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;
@@ -896,6 +921,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorMessage={assistantErrorText}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
+                                                extraActions={guestMessageActions}
                                             />
                                         </div>
                                         {useExternalUserActionsRow ? (
@@ -930,6 +956,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorMessage={assistantErrorText}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
+                                                extraActions={guestMessageActions}
                                             />
                                         ) : null}
                                     </div>
@@ -974,6 +1001,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
                                 isDarkTheme={isDarkTheme}
+                                extraActions={guestMessageActions}
                             />
 
                         </div>
