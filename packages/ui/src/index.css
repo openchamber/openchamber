@@ -1811,8 +1811,8 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   }
 }
 
-/* Running-session spinner (opt-in). steps() throttles to 20 value changes per
-   second; identical frames in between produce no new compositor output.
+/* Running-session spinner (opt-in). steps() limits rotation changes to 20 per
+   second. This still adds compositor work while a running indicator is visible.
    Technique from VS Code's codicon-modifier-spin. */
 .activity-spinner {
   animation: activity-spin 1.5s steps(30) infinite;
