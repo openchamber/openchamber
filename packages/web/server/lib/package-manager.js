@@ -134,7 +134,7 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       deviceClass: normalizeDeviceClass(options.deviceClass),
       platform,
       arch,
-      channel: 'stable',
+      channel: options.channel || (currentVersion.includes('-beta.') ? 'beta' : 'stable'),
       currentVersion,
       installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
       instanceMode: options.instanceMode || 'unknown',

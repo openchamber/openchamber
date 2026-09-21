@@ -110,8 +110,11 @@ describe('OpenChamber desktop host update route', () => {
       available: false, code: 'DESKTOP_UPDATER_UNAVAILABLE', error: 'The desktop updater is not available.',
     });
     expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
-    await request(app).get('/api/openchamber/update-check?appType=desktop-electron').expect(200);
-    expect(packageManager.checkForUpdates).toHaveBeenCalledOnce();
+    await request(app).get('/api/openchamber/update-check?appType=desktop-electron&channel=beta').expect(200);
+    expect(packageManager.checkForUpdates).toHaveBeenCalledWith(expect.objectContaining({
+      appType: 'desktop-electron',
+      channel: 'beta',
+    }));
   });
 
   it('uses electron-updater to check for Web client updates', async () => {

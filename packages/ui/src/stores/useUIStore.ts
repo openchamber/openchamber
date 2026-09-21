@@ -1019,10 +1019,12 @@ interface UIStore {
   allowPromptingSubagentSessions: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
+  updateChannel: 'stable' | 'beta';
   shortcutOverrides: Record<string, ShortcutCombo>;
   fileEditorKeymap: FileEditorKeymap;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setUpdateChannel: (channel: 'stable' | 'beta') => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
@@ -1395,6 +1397,7 @@ export const useUIStore = create<UIStore>()(
         draftStartersVisible: true,
         isExpandedInput: false,
         reportUsage: true,
+        updateChannel: 'stable',
         shortcutOverrides: {},
         fileEditorKeymap: 'default',
 
@@ -2782,6 +2785,9 @@ export const useUIStore = create<UIStore>()(
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
+        },
+        setUpdateChannel: (channel: 'stable' | 'beta') => {
+          set({ updateChannel: channel });
         },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {

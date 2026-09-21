@@ -93,6 +93,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
         platform: parseString(req.query.platform),
         arch: parseString(req.query.arch),
+        channel: parseString(req.query.channel),
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
         installId: parseString(req.query.installId),
