@@ -33,6 +33,27 @@ If you only need to change the port, set `OPENCODE_PORT` instead of `OPENCODE_HO
 
 If `OPENCODE_HOST` is missing its port or has a path, OpenChamber ignores it and falls back to starting its own server. Watch the startup logs for a `[config]` warning if a connection you expected didn't happen.
 
+## Use a different coding agent
+
+The server does not have to be OpenCode. OpenChamber reaches its backend through the OpenCode API, so any server that answers the calls OpenChamber makes will work, and sessions then run on whatever agent that server drives.
+
+Point OpenChamber at it the same way as any other server:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+In the desktop app you have two choices:
+
+- Add the address as a host in **Settings → Remote Instances**.
+- Set **OpenCode binary** in **Settings → OpenCode CLI** to a launcher for the other agent.
+
+When OpenChamber starts a binary itself, it runs it as `<binary> serve --hostname <host> --port <port>`, waits for the line `opencode server listening on <url>` on its output, then calls `/global/health` to confirm the server is up. A server only has to answer those two calls to be usable, so an adapter for another agent is usually a small process that translates the OpenCode API into that agent's own protocol.
+
+Community adapters exist for other agents, for example [openchamber-pi](https://github.com/qingzhu521/openchamber-pi-connector) and [openchamber-mcode](https://github.com/qingzhu521/openchamber-mcode-connector). They are third-party and maintained outside this project, so check their README for the exact command and the OpenChamber versions they support.
+
+Adapters answer only the calls they need, so some features may be missing for a given agent. Permission prompts and tool calls in the transcript are the usual gaps. Sessions, streaming replies, and file edits are what they implement first.
+
 ## Manage the server from the CLI
 
 ```bash
@@ -94,4 +115,5 @@ While the server is starting or restarting, OpenChamber shows an "OpenCode is re
 ## Related
 
 - [Providers, Models & Agents](/providers/) — set up what the server talks to
+- [Remote Instances](/remote-instances/) — add another machine or server as a host
 - [OpenCode connection](/troubleshooting/opencode-connection/) — if it won't connect
