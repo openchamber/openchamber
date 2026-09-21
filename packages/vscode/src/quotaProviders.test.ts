@@ -15,6 +15,7 @@ const ORIGINAL_FS = { ...fs };
 const AUTH = JSON.stringify({
   openai: { access: 'test-token' },
   'cline-pass': { key: 'test-token' },
+  'command-code': { access: 'test-token' },
   neuralwatt: { key: 'test-token' },
   'opencode-go': { key: 'test-token' },
   openrouter: { key: 'test-token' },
@@ -27,7 +28,7 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchCommandCodeQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -1190,4 +1191,275 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
       assert.equal(result.usage, null);
     });
   }
+});
+
+describe('Command Code quota provider (VS Code parity)', () => {
+  const creditsPayload = {
+    credits: { monthlyCredits: 120, purchasedCredits: 30, freeCredits: 5 },
+    windowLimits: {
+      fiveHour: { used: 25, cap: 100, resetAt: 1_776_000_000 },
+      weekly: { used: 70, cap: 200, resetAt: 1_776_604_800 },
+    },
+  };
+
+  const readAuth = () => ({ 'command-code': { access: 'test-token' } });
+
+  const respondWith = (credits: unknown) => async (url: string) => (
+    url.endsWith('/alpha/whoami')
+      ? Response.json({ user: { id: 'user-1' }, org: null })
+      : Response.json(credits)
+  );
+
+  test('parses balances and rate-limit windows', async () => {
+    const result = await fetchCommandCodeQuota({ readAuth, fetchImpl: respondWith(creditsPayload) });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'command-code');
+    assert.equal(result.providerName, 'Command Code');
+    assert.equal(result.configured, true);
+    assert.ok(result.usage);
+    const windows = result.usage.windows;
+    assert.equal(windows.monthly_credits?.usedPercent, null);
+    assert.equal(windows.monthly_credits?.valueLabel, '120');
+    assert.equal(windows.purchased_credits?.valueLabel, '30');
+    assert.equal(windows.free_credits?.valueLabel, '5');
+    assert.equal(windows['5h']?.usedPercent, 25);
+    assert.equal(windows['5h']?.windowSeconds, 18_000);
+    assert.equal(windows['5h']?.valueLabel, '25 / 100');
+    assert.equal(windows['5h']?.resetAt, 1_776_000_000_000);
+    assert.equal(windows.weekly?.usedPercent, 35);
+    assert.equal(windows.weekly?.windowSeconds, 604_800);
+  });
+
+  test('formats fractional credit values for display', async () => {
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: respondWith({
+        credits: { monthlyCredits: 69.7947070034 },
+        windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } },
+      }),
+    });
+
+    assert.equal(result.usage?.windows.monthly_credits?.valueLabel, '69.79');
+    assert.equal(result.usage?.windows['5h']?.valueLabel, '0.21 / 14');
+  });
+
+  test('resolves the organization before fetching credits', async () => {
+    const requests: Array<{ url: string; options: RequestInit }> = [];
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        return url.endsWith('/alpha/whoami') ? Response.json({ org: { id: 'org/a' } }) : Response.json(creditsPayload);
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requests.map(({ url }) => url), [
+      'https://api.commandcode.ai/alpha/whoami',
+      'https://api.commandcode.ai/alpha/billing/credits?orgId=org%2Fa',
+    ]);
+    assert.equal(new Headers(requests[0]?.options.headers).get('Authorization'), 'Bearer test-token');
+  });
+
+  test('fetches account-scoped credits without orgId for personal accounts', async () => {
+    const urls: string[] = [];
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: async (url) => {
+        urls.push(url);
+        return url.endsWith('/alpha/whoami')
+          ? Response.json({ user: { id: 'user-1' }, org: null })
+          : Response.json(creditsPayload);
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(urls, [
+      'https://api.commandcode.ai/alpha/whoami',
+      'https://api.commandcode.ai/alpha/billing/credits',
+    ]);
+  });
+
+  for (const [index, auth] of [
+    { 'command-code': { type: 'oauth', access: 'test-token' } },
+    { 'command-code': { key: 'test-token' } },
+    { 'command-code': { token: 'test-token' } },
+    { 'command-code': 'test-token' },
+  ].entries()) {
+    test(`reads credential variant ${index} from auth.json`, async () => {
+      const result = await fetchCommandCodeQuota({
+        readAuth: () => auth,
+        fetchImpl: async (_url, options) => {
+          assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer test-token');
+          return Response.json(creditsPayload);
+        },
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(JSON.stringify(result).includes('test-token'), false);
+    });
+  }
+
+  for (const providerId of ['commandcode', 'command_code', 'command code']) {
+    test(`recognizes auth entry alias ${JSON.stringify(providerId)}`, async () => {
+      const result = await fetchCommandCodeQuota({
+        readAuth: () => ({ [providerId]: { type: 'oauth', access: 'test-token' } }),
+        fetchImpl: async (_url, options) => {
+          assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer test-token');
+          return Response.json(creditsPayload);
+        },
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.providerId, 'command-code');
+    });
+  }
+
+  test('normalizes an inactive resetAt of 0 to null instead of a bogus date', async () => {
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: respondWith({
+        credits: { belowThreshold: false, creditThreshold: 0, monthlyCredits: 0, purchasedCredits: 2.42, freeCredits: 0 },
+        windowLimits: {
+          limited: true,
+          exceeded: null,
+          fiveHour: { used: 0, cap: 16, exceeded: false, resetAt: 0 },
+          weekly: { used: 20.11, cap: 40, exceeded: false, resetAt: 1_790_316_552_026 },
+        },
+      }),
+    });
+
+    const windows = result.usage!.windows;
+    assert.equal(windows.monthly_credits?.valueLabel, '0');
+    assert.equal(windows.purchased_credits?.valueLabel, '2.42');
+    assert.equal(windows.free_credits?.valueLabel, '0');
+    assert.equal(windows['5h']?.usedPercent, 0);
+    assert.equal(windows['5h']?.valueLabel, '0 / 16');
+    assert.equal(windows['5h']?.resetAt, null);
+    assert.equal(windows['5h']?.resetAfterSeconds, null);
+    assert.equal(windows['5h']?.resetAtFormatted, null);
+    assert.equal(windows['5h']?.resetAfterFormatted, null);
+    assert.equal(JSON.stringify(windows['5h']).includes('Jan'), false);
+    assert.equal(windows.weekly?.resetAt, 1_790_316_552_026);
+    assert.equal(windows.weekly?.usedPercent, 20.11 / 40 * 100);
+  });
+
+  test('normalizes positive epoch seconds to milliseconds and preserves milliseconds', async () => {
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: respondWith({
+        windowLimits: {
+          fiveHour: { used: 1, cap: 10, resetAt: 1_776_000_000 },
+          weekly: { used: 1, cap: 10, resetAt: 1_790_316_552_026 },
+        },
+      }),
+    });
+
+    assert.equal(result.usage?.windows['5h']?.resetAt, 1_776_000_000_000);
+    assert.equal(result.usage?.windows.weekly?.resetAt, 1_790_316_552_026);
+  });
+
+  for (const windowLimits of [
+    { fiveHour: { cap: 100 }, weekly: { used: 5, cap: 0 } },
+    { fiveHour: { used: 5, cap: -1 }, weekly: { used: null, cap: 10 } },
+  ]) {
+    test(`omits unusable windows: ${JSON.stringify(windowLimits)}`, async () => {
+      const result = await fetchCommandCodeQuota({
+        readAuth,
+        fetchImpl: respondWith({ credits: { monthlyCredits: 10 }, windowLimits }),
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows['5h'], undefined);
+      assert.equal(result.usage?.windows.weekly, undefined);
+      assert.equal(result.usage?.windows.monthly_credits?.valueLabel, '10');
+    });
+  }
+
+  test('does not expose credentials in authentication errors', async () => {
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: async () => new Response(null, { status: 401 }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Command Code authentication failed');
+    assert.equal(JSON.stringify(result).includes('test-token'), false);
+  });
+
+  test('reports non-2xx responses as explicit failures', async () => {
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: async () => new Response(null, { status: 500 }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Command Code usage API returned HTTP 500');
+  });
+
+  test('reports unparseable payloads instead of a partial result', async () => {
+    const result = await fetchCommandCodeQuota({
+      readAuth,
+      fetchImpl: async () => new Response('not-json'),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Command Code usage data could not be parsed');
+  });
+
+  test('uses COMMAND_CODE_API_KEY when auth.json has no entry', async () => {
+    const previous = process.env.COMMAND_CODE_API_KEY;
+    process.env.COMMAND_CODE_API_KEY = 'env-token';
+    try {
+      const result = await fetchCommandCodeQuota({
+        readAuth: () => ({}),
+        fetchImpl: async (_url, options) => {
+          assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer env-token');
+          return Response.json(creditsPayload);
+        },
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.configured, true);
+    } finally {
+      if (previous === undefined) delete process.env.COMMAND_CODE_API_KEY;
+      else process.env.COMMAND_CODE_API_KEY = previous;
+    }
+  });
+
+  test('does not request usage without usable credentials', async () => {
+    const previous = process.env.COMMAND_CODE_API_KEY;
+    delete process.env.COMMAND_CODE_API_KEY;
+    let requests = 0;
+    try {
+      const result = await fetchCommandCodeQuota({
+        readAuth: () => ({ 'command-code': { key: '  ', access: 42, token: null } }),
+        fetchImpl: async () => {
+          requests += 1;
+          return Response.json(creditsPayload);
+        },
+      });
+
+      assert.equal(requests, 0);
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, false);
+      assert.equal(result.error, 'Not configured');
+    } finally {
+      if (previous !== undefined) process.env.COMMAND_CODE_API_KEY = previous;
+    }
+  });
+
+  test('dispatches through the generic quota API', async () => {
+    stubFetchReturning(async () => Response.json(creditsPayload));
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'command-code');
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 35);
+  });
 });

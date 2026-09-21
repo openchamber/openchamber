@@ -788,6 +788,10 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('codex');
   }
 
+  if (getCommandCodeApiKey(auth)) {
+    configured.add('command-code');
+  }
+
   if (resolveGeminiCliAuth(auth) || resolveAntigravityAuth()) {
     configured.add('google');
   }
@@ -2983,6 +2987,126 @@ export const fetchHyperQuota = async ({ readAuth = readAuthFile, fetchImpl = fet
   }
 };
 
+const COMMAND_CODE_API_BASE_URL = 'https://api.commandcode.ai';
+const COMMAND_CODE_AUTH_ALIASES = ['command-code', 'commandcode', 'command_code', 'command code'];
+
+type CommandCodeQuotaDependencies = {
+  readAuth?: () => AuthFile;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+const getCommandCodeApiKey = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, COMMAND_CODE_AUTH_ALIASES));
+  return asNonEmptyString(entry?.key)
+    ?? asNonEmptyString(entry?.access)
+    ?? asNonEmptyString(entry?.token)
+    ?? asNonEmptyString(process.env.COMMAND_CODE_API_KEY);
+};
+
+const formatCommandCodeCredits = (value: number): string =>
+  String(Math.round((value + Number.EPSILON) * 100) / 100);
+
+const toCommandCodeBalanceWindow = (value: number): UsageWindow => toUsageWindow({
+  usedPercent: null,
+  windowSeconds: null,
+  resetAt: null,
+  valueLabel: formatCommandCodeCredits(value),
+});
+
+const parseCommandCodeCredits = (payload: unknown): Record<string, UsageWindow> => {
+  const root = asObject(payload);
+  const credits = asObject(root?.credits);
+  const limits = asObject(root?.windowLimits);
+  const windows: Record<string, UsageWindow> = {};
+
+  for (const [label, field] of [
+    ['monthly_credits', 'monthlyCredits'],
+    ['purchased_credits', 'purchasedCredits'],
+    ['free_credits', 'freeCredits'],
+  ] as const) {
+    const value = toNumber(credits?.[field]);
+    if (value !== null) windows[label] = toCommandCodeBalanceWindow(value);
+  }
+
+  for (const [label, field, windowSeconds] of [
+    ['5h', 'fiveHour', 5 * 60 * 60],
+    ['weekly', 'weekly', 7 * 24 * 60 * 60],
+  ] as const) {
+    const limit = asObject(limits?.[field]);
+    const used = toNumber(limit?.used);
+    const cap = toNumber(limit?.cap);
+    if (used === null || cap === null || cap <= 0) continue;
+    const resetAt = toNumber(limit?.resetAt);
+    windows[label] = toUsageWindow({
+      usedPercent: Math.min(100, Math.max(0, used / cap * 100)),
+      windowSeconds,
+      // The live API returns 0 while a window is inactive; a non-positive
+      // resetAt stays null so the shared formatter skips the date entirely.
+      resetAt: resetAt === null || resetAt <= 0 ? null : resetAt < 1_000_000_000_000 ? resetAt * 1000 : resetAt,
+      valueLabel: `${formatCommandCodeCredits(used)} / ${formatCommandCodeCredits(cap)}`,
+    });
+  }
+
+  return windows;
+};
+
+// Keep in sync with packages/web/server/lib/quota/providers/command-code.js:
+// the VS Code extension duplicates this parsing logic rather than importing it.
+export const fetchCommandCodeQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch }: CommandCodeQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = getCommandCodeApiKey(readAuth());
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'command-code',
+      providerName: 'Command Code',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const requestJson = async (endpoint: string) => {
+    const response = await fetchImpl(`${COMMAND_CODE_API_BASE_URL}${endpoint}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'OpenChamber quota provider',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status === 401 || response.status === 403) throw new Error('Command Code authentication failed');
+    if (!response.ok) throw new Error(`Command Code usage API returned HTTP ${response.status}`);
+    return response.json().catch(() => null);
+  };
+
+  try {
+    const identity = asObject(await requestJson('/alpha/whoami'));
+    const org = asObject(identity?.org);
+    const orgId = asNonEmptyString(org?.id) ?? '';
+    const creditsPath = orgId
+      ? `/alpha/billing/credits?orgId=${encodeURIComponent(orgId)}`
+      : '/alpha/billing/credits';
+    const windows = parseCommandCodeCredits(await requestJson(creditsPath));
+    if (Object.keys(windows).length === 0) throw new Error('Command Code usage data could not be parsed');
+    return buildResult({
+      providerId: 'command-code',
+      providerName: 'Command Code',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'command-code',
+      providerName: 'Command Code',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 const fetchXaiQuota = async (): Promise<ProviderResult> => {
   try {
     const entry = resolveXaiAuth();
@@ -3061,6 +3185,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchClaudeQuota();
     case 'codex':
       return fetchCodexQuota();
+    case 'command-code':
+      return fetchCommandCodeQuota();
     case 'github-copilot':
       return fetchCopilotQuota();
     case 'github-copilot-addon':
