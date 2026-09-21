@@ -1706,6 +1706,8 @@ export const settingsDict = {
   'settings.mcp.page.toast.importedVariablesCount': 'İçe aktarılan değişkenler: {count}',
   'settings.mcp.page.toast.pastedArgumentsCount': 'Yapıştırılan argümanlar: {count}',
   'settings.shared.projectSelector.fallbackProject': 'Proje',
+  'settings.shared.projectSelector.sheetTitle': 'Proje',
+  'settings.shared.projectSelector.searchPlaceholder': 'Proje ara...',
   'settings.shared.projectSelector.switchProjectAria': 'Proje değiştir',
   'settings.shared.projectSelector.switchProjectTitle': 'Proje değiştir',
   'settings.openchamber.defaults.title': 'Session Varsayılanları',
