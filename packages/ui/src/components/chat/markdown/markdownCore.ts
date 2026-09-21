@@ -593,6 +593,9 @@ const SANITIZE_CONFIG = {
   USE_PROFILES: { html: true, mathMl: true, svg: true },
   ADD_TAGS: ['svg', 'path', 'g', 'rect', 'line', 'polygon', 'polyline', 'circle', 'ellipse', 'text', 'tspan', 'defs', 'marker'],
   ADD_ATTR: ['d', 'viewBox', 'preserveAspectRatio', 'xmlns', 'target', 'fill', 'stroke', 'stroke-width', 'transform', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'style'],
+  // `img` with a data: URI stays inert (no scripts, no external references in
+  // the img sandbox), so embedded SVG/PNG data images can display inline.
+  ADD_DATA_URI_TAGS: ['img'],
   // Defense in depth for generated/highlighter HTML after raw markdown HTML
   // has been escaped by the marked renderer above.
   FORBID_TAGS: [...MARKDOWN_FORBIDDEN_TAGS],

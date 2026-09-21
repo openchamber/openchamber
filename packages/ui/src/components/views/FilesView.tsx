@@ -25,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
+import { useMarkdownPreviewImages } from './markdownPreviewImages';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
 import { hasFileStatChanged } from './fileStatChange';
@@ -994,6 +995,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [mdPreviewFindOpen, setMdPreviewFindOpen] = React.useState(false);
   const [mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce] = React.useState(0);
   const mdPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
+  // The markdown preview mounts later than the content that flips the preview
+  // state; feed the mounted node back as a rescan signal so the embedded
+  // image scan re-arms on the container that actually rendered.
+  const [mdPreviewNode, setMdPreviewNode] = React.useState<HTMLDivElement | null>(null);
   // Give the rendered preview keyboard focus (without scrolling it) unless the
   // user is typing somewhere else, so Cmd/Ctrl+F opens the preview find bar
   // right after a Markdown file opens and after any click inside it.
@@ -2448,6 +2453,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     || (isHtml && htmlViewMode === 'edit')
     || (isJson && jsonViewMode === 'text')
     || (!isMarkdown && !isHtml && !isJson && textViewMode === 'edit');
+  // Markdown preview renders on two mounts; images resolve on whichever is active.
+  const isMdPreviewActive = isMarkdown && mdViewMode === 'preview';
+  useMarkdownPreviewImages({
+    containerRef: mdPreviewContainerRef,
+    filePath: selectedFilePath,
+    directory: root,
+    enabled: isMdPreviewActive && !isFullscreen,
+    rescanKey: mdPreviewNode,
+  });
+  useMarkdownPreviewImages({
+    containerRef: mdFullscreenPreviewContainerRef,
+    filePath: selectedFilePath,
+    directory: root,
+    enabled: isMdPreviewActive && isFullscreen,
+    rescanKey: mdPreviewNode,
+  });
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],
@@ -3207,10 +3228,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const setMainMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     markdownPreviewRef.current = node;
     mdPreviewContainerRef.current = node;
+    setMdPreviewNode(node);
     setMainMarkdownScroll(node);
   }, [setMainMarkdownScroll]);
   const setFullscreenMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     mdFullscreenPreviewContainerRef.current = node;
+    setMdPreviewNode(node);
     setFullscreenMarkdownScroll(node);
   }, [setFullscreenMarkdownScroll]);
   const shikiWorkerPool = useWorkerPool('unified');

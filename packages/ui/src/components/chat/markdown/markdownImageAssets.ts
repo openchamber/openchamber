@@ -27,7 +27,7 @@ const throwIfAborted = (signal: AbortSignal): void => {
   if (signal.aborted) throw new DOMException('Image load aborted', 'AbortError');
 };
 
-const parseLocalImagePath = (source: string): string => {
+export const parseLocalImagePath = (source: string): string => {
   let value = source;
   if (/^file:\/\//i.test(value)) {
     try {
@@ -50,7 +50,7 @@ const parseLocalImagePath = (source: string): string => {
   }
 };
 
-const blobToDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+export const blobToDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => {
     if (typeof reader.result === 'string') {

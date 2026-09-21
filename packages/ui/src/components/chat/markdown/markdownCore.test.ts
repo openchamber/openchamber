@@ -380,6 +380,16 @@ describe('Markdown images', () => {
     expect(html).toContain('<img src="https://example.test/image.png"');
     expect(html).not.toContain('data-openchamber-markdown-image');
   });
+
+  test('keeps data image sources on img so embedded SVG/PNG can display', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4"/></svg>';
+    const base64 = `data:image/svg+xml;base64,${btoa(svg)}`;
+    const html = renderMarkdownSync(`![inline svg](${base64})`);
+
+    expect(html).toContain(`<img src="${base64}" alt="inline svg">`);
+    const encodedSvg = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    expect(renderMarkdownSync(`![inline svg](${encodedSvg})`)).toContain('<img');
+  });
 });
 
 describe('CJK-aware link parsing', () => {

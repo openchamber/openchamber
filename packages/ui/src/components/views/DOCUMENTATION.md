@@ -28,6 +28,22 @@ limits must never truncate a writable draft or its dirty-comparison baseline.
 Large code previews render the current draft and hash its full content only
 while previewing, so same-length edits in the middle invalidate cached output.
 
+## Markdown preview embedded images
+
+`useMarkdownPreviewImages` (in `markdownPreviewImages.ts`) rewrites the sources
+of Markdown preview images whose Markdown references local files, so relative
+and absolute workspace paths stop resolving against the app origin. Sources are
+resolved against the previewed file's directory and must stay inside the
+workspace root; each image is fetched through the authenticated `/api/fs/raw`
+route, checked against the image mime map and a 10 MiB cap, and swapped for a
+data URL. Every `<img>` is stamped with `data-md-preview-image` so repeated
+passes and morph churn stay idempotent; failed and outside-workspace images are
+stamped too instead of retrying. Remote and `data:` sources are left as
+authored — embedded data-URI images display because the shared sanitize config
+allows `data:` URIs on `img`, where browsers never execute scripts or load
+external references.
+
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`

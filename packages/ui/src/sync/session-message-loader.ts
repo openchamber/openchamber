@@ -374,7 +374,10 @@ export class SessionMessageLoader {
         visited.add(page.cursor)
         const older = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, page.cursor, "older", performance)
         if (!isCurrent()) return
-        if (older.session.length === 0 && !older.complete) throw new Error("Session history pagination made no progress")
+        // The cold-window loop treats a transient empty page as the end of
+        // this batch; interactive loads do the same and keep every record
+        // already fetched. The committed cursor stays authoritative for retries.
+        if (older.session.length === 0 && !older.complete) break
         page = {
           session: [...older.session, ...page.session],
           partsByMessageID: new Map([...page.partsByMessageID, ...older.partsByMessageID]),

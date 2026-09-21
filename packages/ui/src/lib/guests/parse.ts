@@ -4,6 +4,8 @@ import {
   GUEST_COMMANDS_MAX,
   GUEST_COMMAND_NAME,
   GUEST_SERVICE_PROVIDES,
+  GUEST_SURFACE_DOCK_SIZE_MAX,
+  GUEST_SURFACE_DOCK_SIZE_MIN,
   GUEST_SURFACE_DOCKS,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_MATCH,
@@ -88,7 +90,7 @@ const installedGuestSchema = z.object({
   entry: z.string().trim().min(1).optional(),
   /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
-  entrySize: z.number().int().positive().optional(),
+  entrySize: z.number().int().min(GUEST_SURFACE_DOCK_SIZE_MIN).max(GUEST_SURFACE_DOCK_SIZE_MAX).optional(),
   backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
