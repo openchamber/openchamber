@@ -2,9 +2,9 @@
   "metadata": {
     "id": "ayu-light",
     "name": "Ayu",
+    "variant": "light",
     "description": "Ayu",
     "version": "1.0.0",
-    "variant": "light",
     "tags": [
       "light",
       "palette"
@@ -13,11 +13,10 @@
   "colors": {
     "primary": {
       "base": "#4AA8C8",
+      "foreground": "#FDFAF4",
       "hover": "#6EB8D1",
       "active": "#4394B0",
-      "foreground": "#FDFAF4",
-      "muted": "#4AA8C880",
-      "emphasis": "#6EB8D1"
+      "muted": "#4AA8C880"
     },
     "surface": {
       "background": "#FDFAF4",
@@ -31,11 +30,10 @@
     },
     "interactive": {
       "border": "#ece5d9",
-      "borderHover": "#DCD3C5",
-      "borderFocus": "#B09F8F",
       "selection": "#9fb2c43e",
       "selectionForeground": "#171e25",
-      "focus": "#4AA8C8",
+      "borderHover": "#DCD3C5",
+      "borderFocus": "#B09F8F",
       "focusRing": "#4AA8C840",
       "cursor": "#1B232B",
       "hover": "#9fb2c42c",
@@ -44,27 +42,12 @@
     "status": {
       "error": "#E6656A",
       "errorForeground": "#FDFAF4",
-      "errorBackground": "#E6656A20",
-      "errorBorder": "#E6656A50",
       "warning": "#EA9F41",
       "warningForeground": "#FDFAF4",
-      "warningBackground": "#EA9F4120",
-      "warningBorder": "#EA9F4150",
       "success": "#5FB978",
       "successForeground": "#FDFAF4",
-      "successBackground": "#5FB97820",
-      "successBorder": "#5FB97850",
       "info": "#2F9BCE",
-      "infoForeground": "#FDFAF4",
-      "infoBackground": "#2F9BCE20",
-      "infoBorder": "#2F9BCE50"
-    },
-    "pr": {
-      "open": "#5FB978",
-      "draft": "#77818D",
-      "blocked": "#EA9F41",
-      "merged": "#7b3cda",
-      "closed": "#E6656A"
+      "infoForeground": "#FDFAF4"
     },
     "syntax": {
       "base": {
@@ -81,34 +64,17 @@
       },
       "tokens": {
         "boolean": "#ED982E",
-        "class": "#4AA8C8",
         "className": "#4AA8C8",
         "commentDoc": "#BABEC1",
         "constant": "#2F9BCE",
         "decorator": "#ED982E",
-        "enum": "#4AA8C8",
-        "exception": "#EF7D71",
-        "functionCall": "#4AA8C8",
-        "interface": "#ED982E",
-        "jsxTag": "#4AA8C8",
         "key": "#4AA8C8",
-        "keywordImport": "#EF7D71",
-        "label": "#EF7D71",
         "macro": "#2F9BCE",
         "method": "#5FB978",
-        "module": "#EF7D71",
-        "namespace": "#ED982E",
         "parameter": "#4F5964",
-        "preprocessor": "#EF7D71",
-        "punctuation": "#77818D",
-        "regex": "#7FAD00",
         "storageModifier": "#2F9BCE",
         "stringEscape": "#1B232B",
-        "struct": "#4AA8C8",
-        "tag": "#4AA8C8",
         "tagAttribute": "#ED982E",
-        "tagAttributeValue": "#7FAD00",
-        "typeParameter": "#ED982E",
         "url": "#2F9BCE",
         "variableGlobal": "#4AA8C8",
         "variableLocal": "#FBF8F2",
@@ -116,48 +82,37 @@
         "variableProperty": "#2F9BCE"
       },
       "highlights": {
-        "diffAdded": "#5FB978",
         "diffAddedBackground": "#EEF5E4",
-        "diffModified": "#2F9BCE",
         "diffModifiedBackground": "#E3EDF3",
-        "diffRemoved": "#E6656A",
         "diffRemovedBackground": "#FDE5E5",
         "lineNumber": "#C6BFAF",
         "lineNumberActive": "#1B232B"
       }
     },
+    "pr": {
+      "draft": "#77818D",
+      "merged": "#7b3cda"
+    },
+    "chat": {
+      "userMessageBackground": "#fff7e5",
+      "divider": "#E6DDCF"
+    },
     "markdown": {
-      "heading1": "#394049",
-      "heading2": "#394049",
-      "heading3": "#394049",
-      "heading4": "#394049",
       "link": "#2F9BCE",
       "linkHover": "#4AA8C8",
-      "inlineCode": "#7FAD00",
-      "inlineCodeBackground": "#FCF9F3",
+      "inlineCode": "#497700",
+      "inlineCodeBackground": "#F0EDE7",
       "blockquote": "#ED982E",
       "blockquoteBorder": "#E6DDCF",
       "listMarker": "#4AA8C899"
     },
-    "chat": {
-      "userMessage": "#4F5964",
-      "userMessageBackground": "#fff7e5",
-      "assistantMessage": "#4F5964",
-      "assistantMessageBackground": "#FDFAF4",
-      "timestamp": "#77818D",
-      "divider": "#E6DDCF"
-    },
     "tools": {
-      "background": "#FCF9F380",
       "border": "#cec6b980",
-      "headerHover": "#FAF7F1",
       "icon": "#77818D",
       "title": "#4F5964",
       "description": "#77818D",
       "edit": {
-        "added": "#5FB978",
         "addedBackground": "#5FB97825",
-        "removed": "#E6656A",
         "removedBackground": "#E6656A25",
         "lineNumber": "#C6BFAF"
       }

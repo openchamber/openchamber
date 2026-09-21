@@ -23,6 +23,8 @@ import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
  * because this runs above `SyncProvider` — that hook reads the sync context and
  * throws outside it, which took the whole app down with a blank window.
  */
+const AGENT_MEMORY_FRESH_MS = 60_000;
+
 export const useAgentMemorySync = (directory: string | null): void => {
   const enabled = useUIStore((state) => (
     state.agentMemoryFeatureAvailable && state.agentMemoryToolEnabled
@@ -31,11 +33,14 @@ export const useAgentMemorySync = (directory: string | null): void => {
   const owner = useProjectContextOwner(directory);
   const projectPath = owner?.path ?? null;
 
+  // The owner re-resolves on every directory switch; entries loaded moments
+  // ago for the same project are still current, and the change event below
+  // forces a re-read when the agent writes memory.
   React.useEffect(() => {
     if (!enabled) {
       return;
     }
-    void load(projectPath);
+    void load(projectPath, { maxAgeMs: AGENT_MEMORY_FRESH_MS });
   }, [enabled, load, projectPath]);
 
   // The agent writes memory mid-turn through its own tool, so the index for the

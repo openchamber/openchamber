@@ -21,6 +21,7 @@ const toUrl = (path: string, query?: RuntimeUrlQuery): string => {
 const urls: RuntimeUrlResolver = {
   api: toUrl,
   authenticatedAsset: toUrl,
+  assetWithUrlToken: (path: string, _token: string, query?: RuntimeUrlQuery) => toUrl(path, query),
   auth: toUrl,
   health: (query?: RuntimeUrlQuery) => toUrl('/health', query),
   rawFile: (path: string) => toUrl('/api/fs/raw', new URLSearchParams({ path })),
@@ -66,6 +67,7 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      signal: expect.any(AbortSignal),
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
 
@@ -74,7 +76,18 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      signal: expect.any(AbortSignal),
       cache: 'default',
+      headers: { 'x-opencode-directory': '/worktree-a' },
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(new Response('fresh content'));
+    await api.readFile?.('/worktree-b/file.txt', { directory: '/worktree-a', fresh: true });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      cache: 'no-store',
+      signal: expect.any(AbortSignal),
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
   });
@@ -90,6 +103,41 @@ describe('createWebFilesAPI', () => {
       query: { path: '/current-workspace/file.txt', download: true },
       headers: { 'x-opencode-directory': '/current-workspace' },
     });
+  });
+
+  it('reads an outside file directly without a grant', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const content = Array.from({ length: 100 }, (_, line) => `Line ${line + 1}`).join('\n');
+    runtimeFetchMock.mockResolvedValueOnce(new Response(content));
+
+    await expect(api.readFile?.('/tmp/plan.txt', { allowOutsideWorkspace: true }))
+      .resolves.toEqual({ path: '/tmp/plan.txt', content });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' }),
+      cache: 'default',
+      signal: expect.any(AbortSignal),
+      headers: { 'x-opencode-directory': '/workspace' },
+    });
+  });
+
+  it('rejects a stalled file read when its deadline expires', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    runtimeFetchMock.mockImplementationOnce((_path: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+    }));
+    try {
+      const pending = api.readFile?.('/tmp/plan.txt', { allowOutsideWorkspace: true });
+      const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      controller.abort(new DOMException('The operation timed out', 'TimeoutError'));
+      await rejected;
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it('uploads binary file contents to the active workspace', async () => {

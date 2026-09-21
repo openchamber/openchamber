@@ -9,6 +9,7 @@ import { raiseSessionOrderingBaselines } from '@/sync/session-ordering';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { persistManagedChatSessions, readManagedChatSessions } from '@/sync/persist-cache';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { ensureChatsRootDirectory, getChatsRootForHome } from '@/lib/chatDirectories';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import {
   applyGlobalSessionStructureMutations,
@@ -42,7 +43,11 @@ type GlobalSessionsState = {
   mutationRevision: number;
   mutationRevisionBySessionId: Map<string, number>;
   hasLoaded: boolean;
+  managedChatsHydrated: boolean;
   status: GlobalSessionsStatus;
+  /** Re-read the persisted managed-chats snapshot after the chats root is
+      warm; retain newer mutations and stop after an authoritative load. */
+  rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
@@ -77,6 +82,9 @@ const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promi
 };
 
 let inflightLoad: Promise<LoadResult> | null = null;
+// True while a page of an unfinished load is being merged. The managed-chats
+// snapshot is written from complete loads only, never from a partial list.
+let mergingSessionPage = false;
 // Bumped on runtime switch: an in-flight load from the previous instance must
 // not apply its (stale) snapshot after the reset.
 let loadGeneration = 0;
@@ -323,6 +331,9 @@ const applySnapshot = (
   activeSessions: Session[],
   archivedSessions: Session[],
   status: GlobalSessionsStatus,
+  /** False for a partial page merged mid-load: the lists are incomplete, so
+      they must not claim the authority `hasLoaded` grants. */
+  markLoaded = true,
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
   if (isVSCodeRuntime()) {
     activeSessions = filterManagedChatsForRuntime(activeSessions, true);
@@ -354,7 +365,7 @@ const applySnapshot = (
     && nextArchivedSessions === state.archivedSessions
     && nextSessionsByDirectory === state.sessionsByDirectory
     && nextReviewTransferMap === state.reviewTransferBySessionId
-    && state.hasLoaded
+    && (state.hasLoaded || !markLoaded)
     && state.status === status
   ) {
     return state;
@@ -367,9 +378,33 @@ const applySnapshot = (
     structure: nextStructure,
     sessionsByDirectory: nextSessionsByDirectory,
     reviewTransferBySessionId: nextReviewTransferMap,
-    hasLoaded: true,
+    hasLoaded: markLoaded ? true : state.hasLoaded,
     status,
   };
+};
+
+/**
+ * Merge one page of an in-flight global load into the visible lists. Never a
+ * replacement: the store may already hold the persisted managed-chats seed and
+ * earlier pages, and those must stay visible while pagination continues.
+ * Sessions the page reclassifies move buckets; mutations newer than the load's
+ * baseline win, so an archive or delete made while the page was in flight is
+ * not undone.
+ */
+const mergeSessionPage = (
+  state: GlobalSessionsState,
+  active: Session[],
+  archived: Session[],
+  baselineRevision: number,
+): Partial<GlobalSessionsState> | GlobalSessionsState => {
+  const incomingActiveIds = new Set(active.map((session) => session.id));
+  const incomingArchivedIds = new Set(archived.map((session) => session.id));
+  const mergedActive = mergeSessionLists(state.activeSessions, active)
+    .filter((session) => !incomingArchivedIds.has(session.id));
+  const mergedArchived = mergeSessionLists(state.archivedSessions, archived)
+    .filter((session) => !incomingActiveIds.has(session.id));
+  const reconciled = overlayMutationsSince(state, mergedActive, mergedArchived, baselineRevision);
+  return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, state.status, false);
 };
 
 const overlayMutationsSince = (
@@ -586,20 +621,24 @@ const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransfer
   return next
 }
 
+const buildManagedChatSessionsState = (sessions: Session[], archivedSessions: Session[] = []) => ({
+  activeSessions: sessions,
+  archivedSessions,
+  entityById: new Map([...sessions, ...archivedSessions].map((session) => [session.id, session])),
+  structure: buildGlobalSessionStructure(sessions),
+  sessionsByDirectory: buildSessionsByDirectory(sessions),
+  reviewTransferBySessionId: buildReviewTransferMap(sessions),
+});
+
 const initialManagedChatSessions = readManagedChatSessions();
-const initialEntityById = new Map(initialManagedChatSessions.map((session) => [session.id, session]));
-const initialStructure = buildGlobalSessionStructure(initialManagedChatSessions);
+const initialState = buildManagedChatSessionsState(initialManagedChatSessions);
 
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
-  activeSessions: initialManagedChatSessions,
-  archivedSessions: [],
-  entityById: initialEntityById,
-  structure: initialStructure,
-  sessionsByDirectory: buildSessionsByDirectory(initialManagedChatSessions),
-  reviewTransferBySessionId: buildReviewTransferMap(initialManagedChatSessions),
+  ...initialState,
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
+  managedChatsHydrated: false,
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
@@ -615,21 +654,29 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => applySessionMutations(state, mutations));
   },
 
+  // The module-init seed and runtime reset read the persisted snapshot before
+  // the server-resolved chats root is available, so relocated directories are
+  // filtered out of the stale sidebar paint until this runs after the warm-up.
+  rehydrateManagedChatSessions: () => {
+    const state = get();
+    if (state.managedChatsHydrated || state.hasLoaded) return;
+    const hydrated = overlayMutationsSince(state, readManagedChatSessions(), state.archivedSessions, 0);
+    const unchanged = sameSessionList(hydrated.activeSessions, state.activeSessions)
+      && sameSessionList(hydrated.archivedSessions, state.archivedSessions);
+    set(unchanged
+      ? { managedChatsHydrated: true }
+      : { ...buildManagedChatSessionsState(hydrated.activeSessions, hydrated.archivedSessions), managedChatsHydrated: true });
+  },
+
   resetForRuntimeSwitch: () => {
     loadGeneration += 1;
     inflightLoad = null;
-    const managedChatSessions = readManagedChatSessions();
-    const entityById = new Map(managedChatSessions.map((session) => [session.id, session]));
     set({
-      activeSessions: managedChatSessions,
-      archivedSessions: [],
-      entityById,
-      structure: buildGlobalSessionStructure(managedChatSessions),
-      sessionsByDirectory: buildSessionsByDirectory(managedChatSessions),
-      reviewTransferBySessionId: buildReviewTransferMap(managedChatSessions),
+      ...buildManagedChatSessionsState(readManagedChatSessions()),
       mutationRevision: 0,
       mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
+      managedChatsHydrated: false,
       status: 'idle',
     });
   },
@@ -639,21 +686,40 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return inflightLoad;
     }
 
-    set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
-
     const generation = loadGeneration;
     const baselineRevision = get().mutationRevision;
     const loadPromise = (async () => {
+      let rootsReady = false;
       try {
+        await ensureChatsRootDirectory();
+        if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
+        rootsReady = true;
+        get().rehydrateManagedChatSessions();
+        set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
         const sdk = opencodeClient.getSdkClient();
         // One inclusive fetch, split client-side. The server's
         // `time_archived IS NULL` active filter would exclude restored
         // sessions (`time.archived` falsy-but-present), so an
         // `archived: false` request cannot produce a truthful active list.
+        // Thousands of sessions paginate for seconds. Show the newest page as
+        // soon as it lands and keep loading the rest silently; the complete
+        // snapshot below is still the only authoritative result.
+        let firstPageMerged = false;
         const allSessions = await listGlobalSessionPages(sdk, {
           archived: true,
           narrowToArchived: false,
           pageSize: PAGE_SIZE,
+          onPage: (page) => {
+            if (firstPageMerged || generation !== loadGeneration) return;
+            firstPageMerged = true;
+            const firstPage = splitGlobalSessionsByArchived(page);
+            mergingSessionPage = true;
+            try {
+              set((state) => mergeSessionPage(state, firstPage.active, firstPage.archived, baselineRevision));
+            } finally {
+              mergingSessionPage = false;
+            }
+          },
         });
 
         if (generation !== loadGeneration) {
@@ -672,6 +738,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       } catch (error) {
         if (generation !== loadGeneration) {
           return { activeSessions: [], archivedSessions: [] };
+        }
+        if (!rootsReady) {
+          // No classification authority arrived. Preserve both memory and the
+          // persisted snapshot so a retry can hydrate it after root recovery.
+          set({ status: 'error' });
+          const state = get();
+          return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
         }
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
         set((state) => {
@@ -707,6 +780,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     const generation = loadGeneration;
     const baselineRevision = get().mutationRevision;
+    try {
+      await ensureChatsRootDirectory();
+    } catch {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
+    if (generation !== loadGeneration) {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
+    get().rehydrateManagedChatSessions();
     const sdk = opencodeClient.getSdkClient();
     const fetched = await fetchDirectoryPages(sdk, directorySet);
 
@@ -834,10 +918,18 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 useGlobalSessionsStore.subscribe((state, previous) => {
   countSyncPerformance('globalSessionPublications');
   if (
-    state.activeSessions !== previous.activeSessions
-    && (state.status !== 'idle' || state.activeSessions.length > 0)
+    !mergingSessionPage
+    && getChatsRootForHome(null) !== null
+    && (state.activeSessions !== previous.activeSessions
+      || (!state.managedChatsHydrated && state.mutationRevision !== previous.mutationRevision)
+      || (state.hasLoaded && !previous.hasLoaded))
   ) {
-    persistManagedChatSessions(state.activeSessions);
+    // A local mutation can precede the initial load. Preserve the saved seed
+    // and overlay its explicit mutations instead of persisting a partial list.
+    const sessions = !state.hasLoaded && !state.managedChatsHydrated
+      ? overlayMutationsSince(state, readManagedChatSessions(), [], 0).activeSessions
+      : state.activeSessions;
+    persistManagedChatSessions(sessions);
   }
 });
 

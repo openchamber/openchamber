@@ -23,14 +23,48 @@ export type ProjectIdentitySaveData = {
   icon: string | null;
   color: string | null;
   iconBackground: string | null;
+  defaultAgent: string | null;
   defaultModel: string | null;
   defaultVariant: string | null;
 };
 
 type EditableProject = Pick<
   ProjectEntry,
-  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'defaultVariant' | 'iconImage' | 'path'
+  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultAgent' | 'defaultModel' | 'defaultVariant' | 'iconImage' | 'path'
 >;
+
+/** The editable identity fields, in the shape the form state holds them. */
+type ProjectIdentity = {
+  label: string;
+  icon: string | null;
+  color: string | null;
+  iconBackground: string | null;
+  defaultAgent: string | undefined;
+  defaultModel: string | undefined;
+  defaultVariant: string | undefined;
+};
+
+const EMPTY_IDENTITY: ProjectIdentity = { label: '', icon: null, color: null, iconBackground: null, defaultAgent: undefined, defaultModel: undefined, defaultVariant: undefined };
+
+const identityOf = (project: EditableProject): ProjectIdentity => ({
+  label: project.label ?? '',
+  icon: project.icon ?? null,
+  color: project.color ?? null,
+  iconBackground: project.iconBackground ?? null,
+  defaultAgent: project.defaultAgent,
+  defaultModel: project.defaultModel,
+  defaultVariant: project.defaultVariant,
+});
+
+const sameIdentity = (left: ProjectIdentity, right: ProjectIdentity): boolean => (
+  left.label === right.label
+  && left.icon === right.icon
+  && left.color === right.color
+  && left.iconBackground === right.iconBackground
+  && left.defaultAgent === right.defaultAgent
+  && left.defaultModel === right.defaultModel
+  && left.defaultVariant === right.defaultVariant
+);
 
 export const useProjectIdentityForm = (project: EditableProject | null) => {
   const { t } = useI18n();
@@ -45,6 +79,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
+  const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>(undefined);
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>(undefined);
   const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>(undefined);
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
@@ -68,25 +103,55 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
 
   const projectId = project?.id ?? null;
 
+  // What the form shows versus what the store holds. The form follows the
+  // store only while it still matches what it was last seeded with; a form
+  // the user has changed keeps their text. The store hands out a fresh
+  // project object on every settings round trip, including the echo of this
+  // form's own auto-save, and re-seeding on each of those wiped the name
+  // mid-typing (#3552).
+  const formIdentityRef = React.useRef<ProjectIdentity>(EMPTY_IDENTITY);
+  formIdentityRef.current = { label: name, icon, color, iconBackground, defaultAgent, defaultModel, defaultVariant };
+  const seededRef = React.useRef<{ projectId: string | null; identity: ProjectIdentity }>({ projectId: null, identity: EMPTY_IDENTITY });
+
   React.useEffect(() => {
     if (!project) {
+      seededRef.current = { projectId: null, identity: EMPTY_IDENTITY };
       setName('');
       setIcon(null);
       setColor(null);
       setIconBackground(null);
+      setDefaultAgent(undefined);
       setDefaultModel(undefined);
       setDefaultVariant(undefined);
       return;
     }
-    setName(project.label ?? '');
-    setIcon(project.icon ?? null);
-    setColor(project.color ?? null);
-    setIconBackground(project.iconBackground ?? null);
-    setDefaultModel(project.defaultModel);
-    setDefaultVariant(project.defaultVariant);
-    setPendingRemoveImageIcon(false);
-    clearPendingUploadIcon();
-    setPreviewImageFailed(false);
+    const incoming = identityOf(project);
+    const seeded = seededRef.current;
+    const switchedProject = seeded.projectId !== project.id;
+    if (!switchedProject) {
+      if (sameIdentity(formIdentityRef.current, incoming)) {
+        // The store caught up with the form (a save landed): new baseline.
+        seededRef.current = { projectId: project.id, identity: incoming };
+        return;
+      }
+      if (!sameIdentity(formIdentityRef.current, seeded.identity)) {
+        // The user is editing; an external change does not overwrite them.
+        return;
+      }
+    }
+    seededRef.current = { projectId: project.id, identity: incoming };
+    setName(incoming.label);
+    setIcon(incoming.icon);
+    setColor(incoming.color);
+    setIconBackground(incoming.iconBackground);
+    setDefaultAgent(incoming.defaultAgent);
+    setDefaultModel(incoming.defaultModel);
+    setDefaultVariant(incoming.defaultVariant);
+    if (switchedProject) {
+      setPendingRemoveImageIcon(false);
+      clearPendingUploadIcon();
+      setPreviewImageFailed(false);
+    }
   }, [project, clearPendingUploadIcon]);
 
   React.useEffect(() => {
@@ -113,6 +178,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     || icon !== (project?.icon ?? null)
     || color !== (project?.color ?? null)
     || iconBackground !== (project?.iconBackground ?? null)
+    || (defaultAgent ?? undefined) !== (project?.defaultAgent ?? undefined)
     || (defaultModel ?? undefined) !== (project?.defaultModel ?? undefined)
     || (defaultVariant ?? undefined) !== (project?.defaultVariant ?? undefined)
     || pendingRemoveImageIcon
@@ -243,12 +309,14 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       icon,
       color,
       iconBackground: normalizeProjectIconBackground(willRemoveImageIcon ? null : iconBackground),
+      defaultAgent: defaultAgent ?? null,
       defaultModel: defaultModel ?? null,
       defaultVariant: defaultModel ? defaultVariant ?? null : null,
     };
   }, [
     clearPendingUploadIcon,
     color,
+    defaultAgent,
     defaultModel,
     defaultVariant,
     icon,
@@ -267,6 +335,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   }, [projectId, currentIconImage?.updatedAt]);
 
   return {
+    projectId,
     name,
     setName,
     icon,
@@ -275,6 +344,8 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setColor,
     iconBackground,
     setIconBackground,
+    defaultAgent,
+    setDefaultAgent,
     defaultModel,
     defaultVariant,
     parsedDefaultModel,

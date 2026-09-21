@@ -27,7 +27,8 @@ type BucketChange = {
 type SessionIndexFields = {
   directory?: string | null;
   parentID?: string | null;
-  project?: { worktree?: string | null } | null;
+  projectID?: string | null;
+  project?: { id?: string | null; worktree?: string | null } | null;
 };
 
 const indexFields = (session: Session): Session & SessionIndexFields => {
@@ -55,6 +56,13 @@ export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Sess
   const incomingWorktree = normalizePath(incomingRecord.project?.worktree ?? null);
   const existingDirectory = normalizePath(existingRecord.directory ?? null);
   const existingWorktree = normalizePath(existingRecord.project?.worktree ?? null);
+  const incomingProjectIdentity = incomingRecord.projectID ?? incomingRecord.project?.id ?? null;
+  const existingProjectIdentity = existingRecord.projectID ?? existingRecord.project?.id ?? null;
+  const projectIdentitiesConflict = Boolean(
+    incomingProjectIdentity
+    && existingProjectIdentity
+    && incomingProjectIdentity !== existingProjectIdentity,
+  );
   let changed = false;
   const next: typeof incomingRecord = { ...incomingRecord };
 
@@ -62,15 +70,26 @@ export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Sess
     next.directory = existingRecord.directory;
     changed = true;
   }
-  if (!incomingWorktree && existingWorktree) {
+  if (!projectIdentitiesConflict && !incomingWorktree && existingWorktree) {
     next.project = {
       ...(existingRecord.project ?? {}),
       ...(incomingRecord.project ?? {}),
       worktree: existingRecord.project?.worktree,
     };
     changed = true;
-  } else if (!incomingRecord.project && existingRecord.project) {
+  } else if (!projectIdentitiesConflict && !incomingRecord.project && existingRecord.project) {
     next.project = existingRecord.project;
+    changed = true;
+  }
+  if (!projectIdentitiesConflict && !incomingRecord.projectID && existingRecord.projectID) {
+    next.projectID = existingRecord.projectID;
+    changed = true;
+  }
+  if (!projectIdentitiesConflict && incomingRecord.project && !incomingRecord.project.id && existingRecord.project?.id) {
+    next.project = {
+      ...(next.project ?? incomingRecord.project),
+      id: existingRecord.project.id,
+    };
     changed = true;
   }
 

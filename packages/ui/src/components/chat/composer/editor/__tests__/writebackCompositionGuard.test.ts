@@ -19,7 +19,7 @@ describe('composer value writeback composition guard (issue #2527)', () => {
         const effect = writebackEffect();
         const equalityCheck = effect.indexOf('if (current === value) return;');
         const compositionGuard = effect.indexOf('if (view.compositionStarted) return;');
-        const dispatch = effect.indexOf('view.dispatch({');
+        const dispatch = effect.indexOf('view.dispatch(');
 
         expect(equalityCheck).toBeGreaterThan(-1);
         expect(compositionGuard).toBeGreaterThan(equalityCheck);

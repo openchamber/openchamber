@@ -17,6 +17,8 @@ import {
   deleteProjectNote,
   deleteProjectPlan,
   fetchProjectContext,
+  shareProjectPlan,
+  unshareProjectPlan,
   resolveProjectContextId,
   saveProjectTodos,
   setProjectPlanPinned,
@@ -33,6 +35,8 @@ interface ProjectContextEntry {
   notes: ProjectNote[];
   todos: ProjectTodoItem[];
   plans: ProjectPlanLink[];
+  /** The team's shared plans folder, when the project has one; sharing a plan needs it. */
+  sharedPlansDir: string | null;
   /** True once an authoritative load has succeeded at least once. */
   loaded: boolean;
   loading: boolean;
@@ -68,6 +72,8 @@ interface ProjectContextActions {
   savePlan: (project: ProjectRef, planId: string, raw: string) => Promise<boolean>;
   setPlanPinned: (project: ProjectRef, planId: string, pinned: boolean) => Promise<boolean>;
   deletePlan: (project: ProjectRef, planId: string) => Promise<boolean>;
+  /** Move a plan into the team's shared folder, or back; the plan gets a new id. */
+  movePlan: (project: ProjectRef, planId: string, direction: 'share' | 'unshare') => Promise<boolean>;
   reset: () => void;
 }
 
@@ -77,6 +83,7 @@ export const EMPTY_PROJECT_CONTEXT_ENTRY: ProjectContextEntry = {
   notes: [],
   todos: [],
   plans: [],
+  sharedPlansDir: null,
   loaded: false,
   loading: false,
   error: null,
@@ -166,6 +173,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
           notes: flags.notes ? committed.notes : data.notes,
           todos: flags.todos ? committed.todos : data.todos,
           plans: flags.plans ? committed.plans : data.plans,
+          sharedPlansDir: data.sharedPlansDir,
           loaded: true,
           loading: false,
           error: null,
@@ -409,6 +417,31 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
         return true;
       } catch (error) {
         patchEntry(projectId, { plans: previous, error: errorMessage(error, 'Failed to update plan') });
+        return false;
+      } finally {
+        flags.plans = false;
+      }
+    },
+
+    movePlan: async (project, planId, direction) => {
+      const projectId = resolveProjectContextId(project);
+      if (!projectId) return false;
+
+      const flags = flagsFor(projectId);
+      flags.plans = true;
+
+      try {
+        const result = await enqueueWrite(projectId, () => (
+          direction === 'share' ? shareProjectPlan(project, planId) : unshareProjectPlan(project, planId)
+        ));
+        if (!result) {
+          patchEntry(projectId, { plans: currentEntry(projectId).plans.filter((plan) => plan.id !== planId) });
+          return false;
+        }
+        patchEntry(projectId, { plans: result.context.plans, sharedPlansDir: result.context.sharedPlansDir, error: null });
+        return true;
+      } catch (error) {
+        patchEntry(projectId, { error: errorMessage(error, direction === 'share' ? 'Failed to share plan' : 'Failed to make plan personal') });
         return false;
       } finally {
         flags.plans = false;

@@ -161,14 +161,28 @@ Every pull request must explain:
   behavior.
 - **Non-goals:** nearby behavior intentionally left unchanged when the scope
   could otherwise be ambiguous.
-- **Affected surfaces:** packages, runtimes, persisted/external contracts, and
-  user-visible states affected by the change.
+- **Affected surfaces:** packages, persisted/external contracts, and
+  user-visible states affected by the change, plus one line per runtime (web,
+  desktop, VS Code, hosted mobile, Capacitor mobile) saying what the change
+  does there. "Not applicable" is an answer; a blank row is not. Write that
+  list while deciding what to build, not after: it is the same list the pull
+  request template asks for.
 - **Repository guidance:** the skills and owning documentation that were
   applicable, why they applied, and how the implementation satisfies their
   important constraints.
 - **Validation:** exact automated and manual checks performed, their result,
   and anything that was not verified. A command name without a result is not
   evidence.
+- **Live run:** if your change touches behavior a user can reach at run time,
+  say that you ran the built or running app and exercised the changed path.
+  This is in addition to any screenshot, recording, or measurement the change
+  needs, never instead of one: a screenshot shows what a surface looks like,
+  a live run says a person reached it in a running build.
+  Name the runtime you used (web, desktop, VS Code, hosted mobile, or Capacitor
+  mobile), the operating system, and what you saw. Reading the diff, passing
+  types, and green CI are not a live run. If you genuinely cannot run it, say
+  so and explain why; an honest gap is reviewable, a claim we later find hollow
+  is not.
 - **Risk and failure behavior:** meaningful failure, rollback, cleanup,
   compatibility, security, performance, or cross-runtime considerations.
 
@@ -216,8 +230,10 @@ The reviewer records the exact HEAD it inspected and returns one verdict:
 
 - `PASS`: no blocking correctness, compliance, or evidence issue was found.
 - `NEEDS_EVIDENCE`: no correctness, repository-guidance, or contribution-contract
-  blocker was found, but a required screenshot, interaction recording, or
-  empirical measurement is missing, stale, contradictory, or inadequate.
+  blocker was found, but a required screenshot, interaction recording,
+  empirical measurement, or live-run statement is missing, stale,
+  contradictory, or inadequate. A change to user-reachable behavior with no
+  live-run statement does not reach `PASS`.
 - `BLOCKED`: a concrete correctness, security, repository-rule, or contribution
   contract violation must be fixed.
 - `HUMAN_REVIEW_REQUIRED`: the change affects review policy or another boundary
@@ -264,7 +280,7 @@ See [AGENTS.md](./AGENTS.md) for detailed architecture reference.
 
 You can still help:
 
-- Report bugs or UX issues — even "this felt confusing" is valuable feedback
+- Report bugs or UX issues — even "this felt confusing" is valuable feedback. Write issues in English (machine translation is fine); reports in other languages wait until someone translates them
 - Test on different devices, browsers, or OS versions
 - Suggest features or improvements via issues
 - Help others in Discord

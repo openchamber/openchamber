@@ -38,12 +38,14 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
         // AlignUI-style rounded box. Use a real border so press/hover states never lose the outline.
         'group/checkbox relative flex shrink-0 self-center items-center justify-center rounded-[4px] border outline-none',
         boxSize,
+        // Small empty controls need a clearer outline than layout dividers.
+        '[--choice-border:color-mix(in_srgb,var(--foreground)_40%,var(--interactive-border))]',
         'transition-[background-color,border-color,box-shadow] duration-200 ease-out',
         // Drive fill directly from React props so the initial paint matches
         // the final state without waiting for Base UI to hydrate data attrs.
         isOn
           ? 'border-[color:color-mix(in_srgb,var(--primary-base)_65%,var(--interactive-border))] bg-transparent shadow-none hover:bg-[var(--interactive-hover)] hover:border-[color:color-mix(in_srgb,var(--primary-base)_75%,var(--interactive-border))]'
-          : 'border-[var(--interactive-border)] bg-transparent shadow-none hover:bg-[var(--interactive-hover)] hover:border-[var(--interactive-border)]',
+          : 'border-[var(--choice-border)] bg-transparent shadow-none hover:bg-[var(--interactive-hover)] hover:border-[var(--choice-border)]',
         // focus: transparent offset so parent bg (e.g. sidebar) doesn't create a visible gap
         'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-transparent',
         // disabled
@@ -54,16 +56,16 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
       <BaseCheckbox.Indicator
         keepMounted
         className={cn(
-          'flex items-center justify-center text-[var(--primary-base)]',
+          'flex items-center justify-center text-[var(--primary-text)]',
           // hide when fully unchecked (no state)
           'data-[unchecked]:hidden',
           iconClassName,
         )}
       >
         {indeterminate ? (
-          <Icon name="subtract" className={cn(iconSize, 'text-[var(--primary-base)]')} />
+          <Icon name="subtract" className={iconSize} />
         ) : (
-          <Icon name="check" className={cn(iconSize, 'text-[var(--primary-base)]')} />
+          <Icon name="check" className={iconSize} />
         )}
       </BaseCheckbox.Indicator>
     </BaseCheckbox.Root>

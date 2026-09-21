@@ -199,19 +199,28 @@ describe("VS Code permission auto-accept runtime", () => {
     expect(replyStarted).toBe(true)
   })
 
-  test("keeps the permission-state preflight for refresh reconciliation", async () => {
+  test("reconciles list-derived permissions without the stale V2 preflight", async () => {
     let replyCalls = 0
+    let stateChecks = 0
     const runtime = createVSCodePermissionAutoAcceptRuntime({
       getPolicy: () => ({ child: true }),
       getSessions: () => new Map(),
       getSession: async () => session("child"),
       listPendingPermissions: async () => [{ ...permission, id: "resolved" }],
-      getPermissionState: async () => "resolved",
+      getPermissionState: async () => {
+        stateChecks += 1
+        return "resolved"
+      },
       reply: async () => { replyCalls += 1 },
       wait: async () => undefined,
     })
 
+    // permission.list (V1 authority) and session.permission.get (V2
+    // authority) are different maps on the Stable runtime, so a "resolved"
+    // preflight verdict cannot prove a list-derived request was settled and
+    // must not suppress the reply.
     await runtime.reconcilePending("/repo")
-    expect(replyCalls).toBe(0)
+    expect(stateChecks).toBe(0)
+    expect(replyCalls).toBe(1)
   })
 })

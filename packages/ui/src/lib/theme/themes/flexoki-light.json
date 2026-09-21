@@ -2,9 +2,9 @@
   "metadata": {
     "id": "flexoki-light",
     "name": "Flexoki",
+    "variant": "light",
     "description": "An inky color scheme for prose and code - light variant",
     "version": "1.0.0",
-    "variant": "light",
     "tags": [
       "light",
       "warm",
@@ -15,11 +15,10 @@
   "colors": {
     "primary": {
       "base": "#BC5215",
+      "foreground": "#fffdf4",
       "hover": "#F9AE77",
       "active": "#DA702C",
-      "foreground": "#fffdf4",
-      "muted": "#BC521580",
-      "emphasis": "#F9AE77"
+      "muted": "#BC521580"
     },
     "surface": {
       "background": "#fffdf4",
@@ -27,19 +26,14 @@
       "muted": "#f6f5ee",
       "mutedForeground": "#686663",
       "elevated": "#fbfaf2",
-      "elevatedForeground": "#100F0F",
       "overlay": "#100F0F20",
       "subtle": "#f7f4ec"
     },
     "interactive": {
       "border": "#e6e4db",
-      "borderHover": "#CECDC3",
-      "borderFocus": "#BC5215",
       "selection": "#76736f30",
-      "selectionForeground": "#100F0F",
-      "focus": "#BC5215",
+      "borderHover": "#CECDC3",
       "focusRing": "#BC521540",
-      "cursor": "#100F0F",
       "hover": "#76736f20",
       "active": "#76736f20"
     },
@@ -61,17 +55,9 @@
       "infoBackground": "#4385BE20",
       "infoBorder": "#4385BE50"
     },
-    "pr": {
-      "open": "#66800B",
-      "draft": "#6F6E69",
-      "blocked": "#BC5215",
-      "merged": "#5E409D",
-      "closed": "#AF3029"
-    },
     "syntax": {
       "base": {
         "background": "#f6f5ee",
-        "foreground": "#100F0F",
         "comment": "#6F6E69",
         "keyword": "#205EA6",
         "string": "#24837B",
@@ -83,83 +69,52 @@
       },
       "tokens": {
         "commentDoc": "#B7B5AC",
-        "stringEscape": "#100F0F",
-        "keywordImport": "#AF3029",
-        "storageModifier": "#205EA6",
-        "functionCall": "#BC5215",
         "method": "#66800B",
         "variableProperty": "#205EA6",
         "variableOther": "#66800B",
         "variableGlobal": "#A02F6F",
         "variableLocal": "#E6E4D9",
-        "parameter": "#100F0F",
         "constant": "#100F0F",
-        "class": "#BC5215",
         "className": "#BC5215",
-        "interface": "#AD8301",
-        "struct": "#BC5215",
-        "enum": "#BC5215",
         "typeParameter": "#BC5215",
-        "namespace": "#AD8301",
-        "module": "#AF3029",
-        "tag": "#205EA6",
         "jsxTag": "#A02F6F",
         "tagAttribute": "#AD8301",
-        "tagAttributeValue": "#24837B",
         "boolean": "#AD8301",
         "decorator": "#AD8301",
         "label": "#A02F6F",
-        "punctuation": "#6F6E69",
-        "macro": "#205EA6",
         "preprocessor": "#A02F6F",
-        "regex": "#24837B",
         "url": "#205EA6",
         "key": "#BC5215",
         "exception": "#A02F6F"
       },
       "highlights": {
-        "diffAdded": "#66800B",
-        "diffAddedBackground": "#879A3920",
-        "diffRemoved": "#AF3029",
-        "diffRemovedBackground": "#D14D4120",
-        "diffModified": "#205EA6",
-        "diffModifiedBackground": "#4385BE20",
-        "lineNumber": "#CECDC3",
-        "lineNumberActive": "#100F0F"
+        "lineNumber": "#CECDC3"
       }
     },
+    "pr": {
+      "draft": "#6F6E69",
+      "merged": "#5E409D"
+    },
+    "chat": {
+      "userMessageBackground": "#f7f4ec",
+      "divider": "#DAD8CE"
+    },
     "markdown": {
-      "heading1": "#100F0F",
-      "heading2": "#100F0F",
-      "heading3": "#100F0F",
-      "heading4": "#100F0F",
       "link": "#205EA6",
       "linkHover": "#4385BE",
-      "inlineCode": "#24837B",
-      "inlineCodeBackground": "#f6f5ee",
+      "inlineCode": "#0A6961",
+      "inlineCodeBackground": "#F2F0E7",
       "blockquote": "#6F6E69",
       "blockquoteBorder": "#DAD8CE",
       "listMarker": "#AD830199"
     },
-    "chat": {
-      "userMessage": "#100F0F",
-      "userMessageBackground": "#f7f4ec",
-      "assistantMessage": "#100F0F",
-      "assistantMessageBackground": "#fffdf4",
-      "timestamp": "#6F6E69",
-      "divider": "#DAD8CE"
-    },
     "tools": {
-      "background": "#f6f5ee50",
       "border": "#b4b2a980",
-      "headerHover": "#DAD8CE",
       "icon": "#6F6E69",
       "title": "#100F0F",
       "description": "#6F6E69",
       "edit": {
-        "added": "#66800B",
         "addedBackground": "#66800B25",
-        "removed": "#AF3029",
         "removedBackground": "#AF302925",
         "lineNumber": "#CECDC3"
       }

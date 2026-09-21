@@ -22,12 +22,19 @@ type Args = {
   sessionOrderRanks: ReadonlyMap<string, number>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  sessionOwners?: ReadonlyMap<string, { scopeDirectory: string }>;
 };
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
+  // Read at call time rather than captured: the branch map is rebuilt whenever
+  // any directory's git status changes, and a builder that changed identity
+  // with it would invalidate every project section in the sidebar. The section
+  // cache compares the branches each project actually uses instead.
+  const gitBranchesRef = React.useRef(args.gitBranches);
+  gitBranchesRef.current = args.gitBranches;
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
     return [group.label, group.branch ?? '', group.description ?? '', group.directory ?? ''].join(' ').toLowerCase();
   }, []);
@@ -44,8 +51,13 @@ export const useSessionGrouping = (args: Args) => {
         return nodes;
       }
 
+      const normalizedQuery = query.trim().toLowerCase();
+      const isIdQuery = normalizedQuery.startsWith('ses_');
       return nodes.flatMap((node) => {
-        const nodeMatches = matchesRankQuery([buildSessionSearchText(node.session)], query);
+        if (isIdQuery && isArchivedSession(node.session)) return [];
+        const nodeMatches = isIdQuery
+          ? node.session.id.toLowerCase() === normalizedQuery
+          : matchesRankQuery([buildSessionSearchText(node.session)], query);
         if (nodeMatches) {
           return [node];
         }
@@ -149,12 +161,20 @@ export const useSessionGrouping = (args: Args) => {
         // Worktrees aren't registered in VS Code, so the desktop directory-match
         // below would otherwise dump these sessions into the archived bucket.
         if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
+        const resolvedScope = args.sessionOwners?.get(session.id)?.scopeDirectory;
+        if (resolvedScope) {
+          if (resolvedScope === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
+          if (worktreeByPath.has(resolvedScope)) return resolvedScope;
+        }
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
         const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
-        if (!normalizedDir) return archivedKey;
+        // Active sessions have already passed project ownership. An unavailable
+        // worktree directory is still owned by this configured project, not an
+        // archive; only archived records use the archive bucket.
+        if (!normalizedDir) return normalizedProjectRoot ?? '__project_root__';
         if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
-        return archivedKey;
+        return normalizedProjectRoot ?? '__project_root__';
       };
 
       roots.forEach((node) => {
@@ -233,7 +253,7 @@ export const useSessionGrouping = (args: Args) => {
       const worktreeGroups = args.isVSCode ? [] : sortedWorktrees;
       worktreeGroups.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
-        const currentBranch = args.gitBranches.get(directory)?.trim() || null;
+        const currentBranch = gitBranchesRef.current.get(directory)?.trim() || null;
         const metadataBranch = meta.branch?.trim() || null;
         const shouldSyncLabelWithBranch = Boolean(
           currentBranch && metadataBranch && meta.label && normalizeForBranchComparison(meta.label) === normalizeForBranchComparison(metadataBranch),
@@ -274,7 +294,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.sessionOrderRanks, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.sessionOrderRanks, args.isVSCode, args.sessionOwners, t],
   );
 
   return {

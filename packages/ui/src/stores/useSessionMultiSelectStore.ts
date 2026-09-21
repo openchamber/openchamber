@@ -1,18 +1,21 @@
 import { create } from 'zustand';
 
+import type { SessionRowOrderEntry } from '@/components/session/sidebar/sessions/sessionRowOrder';
+
 interface SessionMultiSelectState {
   enabled: boolean;
   selectedIds: Set<string>;
   scopeKey: string | null;
   anchorId: string | null;
+  anchorRowKey: string | null;
 }
 
 interface SessionMultiSelectActions {
   enable: () => void;
   disable: () => void;
   toggleMode: () => void;
-  toggleSelected: (id: string, scope: string | null, descendants?: string[]) => void;
-  setRange: (fromId: string | null, toId: string, orderedIds: string[], scope: string | null, descendantsById?: Map<string, string[]>) => void;
+  toggleSelected: (id: string, scope: string | null, descendants?: string[], rowKey?: string) => void;
+  setRange: (fromRowKey: string | null, toRowKey: string, entries: readonly SessionRowOrderEntry[], descendantIds: readonly string[], scope: string | null, descendantsById?: Map<string, string[]>) => void;
   replaceAll: (ids: string[], scope: string | null) => void;
   clear: () => void;
   removeMany: (ids: string[]) => void;
@@ -48,6 +51,7 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
   selectedIds: new Set<string>(),
   scopeKey: null,
   anchorId: null,
+  anchorRowKey: null,
 
   enable: () => {
     if (get().enabled) return;
@@ -55,28 +59,30 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
   },
 
   disable: () => {
-    set({ enabled: false, selectedIds: new Set(), scopeKey: null, anchorId: null });
+    set({ enabled: false, selectedIds: new Set(), scopeKey: null, anchorId: null, anchorRowKey: null });
   },
 
   toggleMode: () => {
     if (get().enabled) {
-      set({ enabled: false, selectedIds: new Set(), scopeKey: null, anchorId: null });
+      set({ enabled: false, selectedIds: new Set(), scopeKey: null, anchorId: null, anchorRowKey: null });
     } else {
       set({ enabled: true });
     }
   },
 
-  toggleSelected: (id, scope, descendants) => {
+  toggleSelected: (id, scope, descendants, rowKey) => {
     const state = get();
     const nextIds = new Set(state.selectedIds);
     let nextScope = state.scopeKey;
     let nextAnchor = state.anchorId;
+    let nextAnchorRowKey = state.anchorRowKey;
 
     const scopeChanged = scope !== null && state.scopeKey !== null && scope !== state.scopeKey;
     if (scopeChanged) {
       nextIds.clear();
       nextScope = scope;
       nextAnchor = null;
+      nextAnchorRowKey = null;
     } else if (nextScope === null && scope !== null) {
       nextScope = scope;
     }
@@ -89,30 +95,40 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
       }
       if (nextAnchor === id) {
         nextAnchor = null;
+        nextAnchorRowKey = null;
       }
     } else {
       for (const targetId of toToggle) {
         nextIds.add(targetId);
       }
       nextAnchor = id;
+      nextAnchorRowKey = rowKey ?? id;
     }
 
     if (nextIds.size === 0) {
-      set({ selectedIds: nextIds, scopeKey: null, anchorId: null });
+      set({ selectedIds: nextIds, scopeKey: null, anchorId: null, anchorRowKey: null });
     } else {
-      set({ selectedIds: nextIds, scopeKey: nextScope, anchorId: nextAnchor });
+      set({ selectedIds: nextIds, scopeKey: nextScope, anchorId: nextAnchor, anchorRowKey: nextAnchorRowKey });
     }
   },
 
-  setRange: (fromId, toId, orderedIds, scope, descendantsById) => {
+  setRange: (fromRowKey, toRowKey, entries, descendantIds, scope, descendantsById) => {
     const state = get();
-    if (orderedIds.length === 0) return;
-    const effectiveFrom = fromId && orderedIds.includes(fromId) ? fromId : orderedIds[0];
-    const start = orderedIds.indexOf(effectiveFrom);
-    const end = orderedIds.indexOf(toId);
+    const scopedEntries = scope ? entries.filter((entry) => entry.scopeKey === scope) : [...entries];
+    if (scopedEntries.length === 0) return;
+    const effectiveFrom = fromRowKey && scopedEntries.some((entry) => entry.rowKey === fromRowKey)
+      ? fromRowKey
+      : toRowKey;
+    if (!effectiveFrom) return;
+    const start = scopedEntries.findIndex((entry) => entry.rowKey === effectiveFrom);
+    const end = scopedEntries.findIndex((entry) => entry.rowKey === toRowKey);
     if (start < 0 || end < 0) return;
     const [lo, hi] = start <= end ? [start, end] : [end, start];
-    const slice = orderedIds.slice(lo, hi + 1);
+    const sliceEntries = scopedEntries.slice(lo, hi + 1);
+    const slice = sliceEntries.flatMap((entry) => {
+      const range = entry.descendantRange;
+      return range ? [entry.id, ...descendantIds.slice(range[0], range[1])] : [entry.id];
+    });
     const expanded = expandWithDescendants(slice, descendantsById);
 
     const scopeChanged = scope !== null && state.scopeKey !== null && scope !== state.scopeKey;
@@ -124,20 +140,21 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
     set({
       selectedIds: baseIds,
       scopeKey: scope ?? state.scopeKey,
-      anchorId: effectiveFrom,
+      anchorId: scopedEntries[start]?.id ?? state.anchorId,
+      anchorRowKey: effectiveFrom,
     });
   },
 
   replaceAll: (ids, scope) => {
     if (ids.length === 0) {
-      set({ selectedIds: new Set(), scopeKey: null, anchorId: null });
+      set({ selectedIds: new Set(), scopeKey: null, anchorId: null, anchorRowKey: null });
       return;
     }
-    set({ selectedIds: new Set(ids), scopeKey: scope, anchorId: ids[0] ?? null });
+    set({ selectedIds: new Set(ids), scopeKey: scope, anchorId: ids[0] ?? null, anchorRowKey: null });
   },
 
   clear: () => {
-    set({ selectedIds: new Set(), scopeKey: null, anchorId: null });
+    set({ selectedIds: new Set(), scopeKey: null, anchorId: null, anchorRowKey: null });
   },
 
   removeMany: (ids) => {
@@ -149,7 +166,7 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
     }
     if (next.size === state.selectedIds.size) return;
     if (next.size === 0) {
-      set({ selectedIds: next, scopeKey: null, anchorId: null });
+      set({ selectedIds: next, scopeKey: null, anchorId: null, anchorRowKey: null });
     } else {
       set({ selectedIds: next });
     }

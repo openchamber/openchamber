@@ -2,6 +2,8 @@ import express from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
+import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
+
 export function registerTtsRoutes(app, { sayTTSCapability }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
@@ -154,7 +156,8 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   // macOS 'say' command TTS speak endpoint
   app.post('/api/tts/say/speak', async (req, res) => {
     try {
-      const { text, voice = 'Samantha', rate = 200 } = req.body || {};
+      const { text, rate = 200, language, languageSample } = req.body || {};
+      let voice = typeof req.body?.voice === 'string' && req.body.voice.trim() ? req.body.voice.trim() : 'Samantha';
       
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
@@ -163,6 +166,23 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       // Check if we're on macOS
       if (process.platform !== 'darwin') {
         return res.status(503).json({ error: 'macOS say command not available on this platform' });
+      }
+
+      // `language: 'auto'`: keep the chosen voice while it speaks the text's
+      // language, otherwise switch to an installed voice that does. A
+      // language with no installed voice keeps the chosen voice — say still
+      // reads the text, just with an accent — rather than failing.
+      let resolvedLanguage = null;
+      if (language === 'auto') {
+        const capability = await sayTTSCapability;
+        const voices = Array.isArray(capability?.voices) ? capability.voices : [];
+        const sample = typeof languageSample === 'string' && languageSample.trim() ? languageSample.slice(0, 4000) : text;
+        resolvedLanguage = detectTextLanguage(sample).language;
+        const chosen = voices.find((entry) => entry.name === voice);
+        if (languageOfLocale(chosen?.locale) !== resolvedLanguage) {
+          const match = pickVoiceForLanguage(resolvedLanguage, voices);
+          if (match) voice = match;
+        }
       }
       
       const { exec } = await import('child_process');
@@ -195,6 +215,8 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       
       // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
+      res.setHeader('X-Speech-Voice', voice);
+      if (resolvedLanguage) res.setHeader('X-Speech-Language', resolvedLanguage);
       res.setHeader('Content-Length', audioBuffer.length);
       res.send(audioBuffer);
       

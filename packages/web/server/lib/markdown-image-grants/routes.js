@@ -200,7 +200,9 @@ const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl,
   const response = await fetch(url, {
     headers: {
       accept: 'application/json',
-      'x-opencode-directory': directory,
+      // Percent-encoded to match the SDK wire format; raw non-ASCII values
+      // are rejected by OpenCode.
+      'x-opencode-directory': encodeURIComponent(directory),
       ...getOpenCodeAuthHeaders(),
     },
     signal: AbortSignal.timeout(10_000),

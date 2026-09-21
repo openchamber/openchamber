@@ -18,6 +18,7 @@ import {
   SettingsStackedField,
   SettingsChipGroup,
   SETTINGS_SELECT_SIZE,
+  SETTINGS_NUMBER_INPUT_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
@@ -450,7 +451,7 @@ export const AgentsPage: React.FC = () => {
             inputMode="decimal"
             placeholder="—"
             emptyLabel="—"
-            className="w-16"
+            className={SETTINGS_NUMBER_INPUT_CLASS}
           />
           {temperature !== undefined && (
             <Button
@@ -488,7 +489,7 @@ export const AgentsPage: React.FC = () => {
             inputMode="decimal"
             placeholder="—"
             emptyLabel="—"
-            className="w-16"
+            className={SETTINGS_NUMBER_INPUT_CLASS}
           />
           {topP !== undefined && (
             <Button

@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 export interface InlineCommentInputProps {
@@ -38,7 +39,7 @@ export function InlineCommentInput({
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const saveShortcut = formatShortcutForDisplay('mod+enter');
+  const saveShortcut = formatShortcutForDisplay('enter');
   void isEditing;
 
   const handleTextChange = (value: string) => {
@@ -121,9 +122,11 @@ export function InlineCommentInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // As the placeholder promises: Cmd/Ctrl+Enter attaches, plain Enter
-    // breaks the line, Escape cancels.
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    if (isIMECompositionEvent(e)) return;
+
+    // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
+    // Keep Cmd/Ctrl+Enter available for hardware keyboards on mobile.
+    if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       save();
     } else if (e.key === 'Escape') {
@@ -153,7 +156,7 @@ export function InlineCommentInput({
     >
       <div className="oc-glass-popover rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
         {(fileLabel || displayRange) ? (
-          <div className="flex items-center gap-2 px-3 pt-2 text-xs font-medium text-[var(--surface-mutedForeground)] opacity-60">
+          <div className="flex items-center gap-2 px-3 pt-2 text-xs font-medium text-muted-foreground opacity-60">
             {fileLabel ? <span className="max-w-[200px] truncate">{fileLabel}</span> : null}
             {fileLabel && displayRange ? <span>•</span> : null}
             {displayRange ? (
@@ -172,7 +175,7 @@ export function InlineCommentInput({
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
           className={cn(
-            'min-w-0 flex-1 resize-none bg-transparent text-sm leading-5 text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)] placeholder:opacity-60',
+            'min-w-0 flex-1 resize-none bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60',
             isMobile ? 'py-1.5 text-base leading-6' : 'py-1.5'
           )}
           style={{ minHeight: 0, height: 'auto' }}

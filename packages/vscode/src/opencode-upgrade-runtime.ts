@@ -77,6 +77,19 @@ const fetchLatestVersion = async (): Promise<string> => {
   return versions.sort((left, right) => compareVersions(right, left))[0];
 };
 
+// OpenCode reports a rejected upgrade as `{ name, data: { message, kind } }`,
+// which carries no `error` field. Reading only `error` left the user with the
+// bare HTTP status text ("Bad Request") and nothing to act on.
+const readUpgradeErrorMessage = (
+  payload: { error?: unknown; message?: unknown; data?: { message?: unknown } } | null,
+  response: Response,
+): string => {
+  for (const candidate of [payload?.error, payload?.data?.message, payload?.message]) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim();
+  }
+  return response.statusText || 'Failed to upgrade OpenCode';
+};
+
 export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager): Promise<Record<string, unknown>> => {
   const upgrade = getCapability(manager);
   const apiUrl = getApiUrl(manager);
@@ -107,16 +120,33 @@ export const upgradeManagedOpenCode = async (manager: OpenCodeUpgradeManager | u
   if (openCodeUpgradePromise) {
     return { status: 409, body: { success: false, code: 'OPENCODE_UPGRADE_IN_PROGRESS', error: 'An OpenCode upgrade is already in progress.' } };
   }
-  const targetVersion = typeof target === 'string' ? target.trim() : '';
+  const requestedTarget = typeof target === 'string' ? target.trim() : '';
   const operation = (async (): Promise<UpgradeResult> => {
+    // The lookup runs inside the operation so the in-flight lock above already
+    // holds while the release version is resolved.
+    let targetVersion = requestedTarget;
+    if (!targetVersion) {
+      try {
+        targetVersion = await fetchLatestVersion();
+      } catch (error) {
+        return {
+          status: 502,
+          body: {
+            success: false,
+            code: 'OPENCODE_UPGRADE_TARGET_UNRESOLVED',
+            error: `Could not determine which OpenCode version to install: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        };
+      }
+    }
     try {
       const response = await fetch(new URL('global/upgrade', apiUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() },
-        body: JSON.stringify(targetVersion ? { target: targetVersion } : {}),
+        body: JSON.stringify({ target: targetVersion }),
       });
-      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
-      if (!response.ok) return { status: response.status, body: { success: false, error: typeof payload?.error === 'string' ? payload.error : response.statusText || 'Failed to upgrade OpenCode' } };
+      const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown; data?: { message?: unknown } } | null;
+      if (!response.ok) return { status: response.status, body: { success: false, error: readUpgradeErrorMessage(payload, response) } };
       try {
         await manager.restart();
       } catch (error) {

@@ -1,5 +1,5 @@
 /**
- * Sherpa-onnx offline TTS (Kokoro). Runs inside the dictation worker process
+ * Sherpa-onnx offline TTS (Kokoro and Piper/VITS). Runs inside the dictation worker process
  * only — never load the native addon in the main server process.
  */
 
@@ -23,20 +23,49 @@ function float32ToPcm16le(samples) {
   return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
 }
 
+/**
+ * sherpa-onnx model config for one catalog entry. Kokoro carries a voices
+ * bank (speaker ids) and optional lexicons; a Piper/VITS model is a single
+ * voice with espeak-ng phonemization.
+ * @param {{ modelDir: string, type?: string, files: Record<string, string>, lexicon?: string[] }} config
+ */
+function buildModelConfig(config) {
+  const file = (key, label) => {
+    const filePath = path.join(config.modelDir, config.files[key]);
+    assertFileExists(filePath, label);
+    return filePath;
+  };
+  const modelPath = file('model', 'TTS model');
+  const tokensPath = file('tokens', 'TTS tokens');
+
+  if (config.type === 'vits') {
+    // Piper models phonemize through espeak-ng (`espeakData`); character
+    // models (Coqui) read the text directly and carry no espeak data.
+    const dataDir = config.files.espeakData ? file('espeakData', 'TTS espeak-ng dataDir') : '';
+    return { vits: { model: modelPath, tokens: tokensPath, ...(dataDir ? { dataDir } : {}), lengthScale: 1.0 } };
+  }
+
+  const dataDir = file('espeakData', 'TTS espeak-ng dataDir');
+  const voicesPath = file('voices', 'TTS voices');
+  const lexicon = (config.lexicon ?? []).map((key) => file(key, 'TTS lexicon')).join(',');
+  return {
+    kokoro: {
+      model: modelPath,
+      voices: voicesPath,
+      tokens: tokensPath,
+      dataDir,
+      lengthScale: 1.0,
+      ...(lexicon ? { lexicon } : {}),
+    },
+  };
+}
+
 export class SherpaTtsEngine {
   /**
-   * @param {{ modelDir: string, files: { model: string, voices: string, tokens: string, espeakData: string }, numThreads?: number }} config
+   * @param {{ modelDir: string, type?: string, files: Record<string, string>, lexicon?: string[], numThreads?: number }} config
    */
   constructor(config) {
-    const modelPath = path.join(config.modelDir, config.files.model);
-    const voicesPath = path.join(config.modelDir, config.files.voices);
-    const tokensPath = path.join(config.modelDir, config.files.tokens);
-    const dataDir = path.join(config.modelDir, config.files.espeakData);
-
-    assertFileExists(modelPath, 'TTS model');
-    assertFileExists(voicesPath, 'TTS voices');
-    assertFileExists(tokensPath, 'TTS tokens');
-    assertFileExists(dataDir, 'TTS espeak-ng dataDir');
+    const model = buildModelConfig(config);
 
     const sherpa = loadSherpaOnnxNode();
     if (typeof sherpa.OfflineTts !== 'function') {
@@ -44,15 +73,7 @@ export class SherpaTtsEngine {
     }
 
     this.tts = new sherpa.OfflineTts({
-      model: {
-        kokoro: {
-          model: modelPath,
-          voices: voicesPath,
-          tokens: tokensPath,
-          dataDir,
-          lengthScale: 1.0,
-        },
-      },
+      model,
       numThreads: config.numThreads ?? 2,
       provider: 'cpu',
       maxNumSentences: 1,

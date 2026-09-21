@@ -166,6 +166,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/stat', {
       query: params,
+      signal: AbortSignal.timeout(30_000),
       headers: directoryHeaders(getDirectory, options?.directory),
     });
 
@@ -197,7 +198,8 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/read', {
       query: params,
-      cache: options?.optional ? 'no-store' : 'default',
+      signal: AbortSignal.timeout(30_000),
+      cache: options?.optional || options?.fresh ? 'no-store' : 'default',
       headers: directoryHeaders(getDirectory, options?.directory),
     });
 

@@ -1,0 +1,246 @@
+---
+title: Build an extension
+description: Add your own panel to OpenChamber with @openchamber/sdk, install it from a folder or a git URL, and talk to the app through connectHost.
+---
+
+# Build an extension
+
+Use `@openchamber/sdk` to add your own panel to OpenChamber. An extension is a small web page that OpenChamber shows on the right-hand rail. It talks to the app through `connectHost()`: it can read the current project and session, show toasts, put text in the chat box, attach a task to a session, and, with the user's approval, start sessions and send prompts.
+
+Extensions run in OpenChamber web and desktop. VS Code and mobile do not load them yet.
+
+## What an extension is
+
+A folder with three files:
+
+- `package.json` with an `openchamber` block (the manifest)
+- `panel/index.html`, the page OpenChamber shows
+- `panel/main.js`, your script, built into a single classic file (an IIFE, not an ES module, because the page loads in a sandboxed iframe)
+
+OpenChamber never compiles your code. Ship the built `.js` file. The SDK includes a bundler command; any bundler that outputs an IIFE works too.
+
+```bash
+npm install @openchamber/sdk
+bunx openchamber-guest-bundle panel/main.ts panel/main.js
+```
+
+The bundler command runs on Bun. Without Bun, use esbuild or any other bundler with `--format=iife --platform=browser`.
+
+A complete working extension, all three files, is on the [Example](/sdk/example/) page. Copy it and change the API and the list.
+
+Point `index.html` at `main.js` with a normal `<script src="main.js"></script>`.
+
+## Install it while you work
+
+1. Run OpenChamber on web or desktop.
+2. Open Settings → Extensions.
+3. Paste the absolute path of your folder and click Add.
+
+OpenChamber reads the manifest and shows a dialog listing what the extension asks for (see [Capabilities](#capabilities)). Approve it, and your icon appears on the rail. Click it and your page loads.
+
+You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber offers the update the next time the user opens Settings → Extensions. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello",
+  "version": "1.0.0",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=1.24.0" },
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "page": true,
+      "capabilities": ["prompt", "sessions"],
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "token": {
+          "apiOrigin": "https://api.acme.example",
+          "account": { "path": "/me", "name": "login" },
+          "scheme": "bearer"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`version` is required and must be semver. Settings → Extensions shows it on the card.
+
+`apiVersion` is `1`. OpenChamber refuses any other value.
+
+`engines.openchamber` is optional. Set the oldest OpenChamber version your extension works with, as `1.24.0` or `>=1.24.0`. Older builds refuse to install it instead of failing later.
+
+`contributes.panel` describes the rail entry. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `entry` is the HTML file inside your folder; leave it out for an extension that only declares `tools` (see [Your tools in the chat](#your-tools-in-the-chat)).
+
+`contributes.attach` is optional. It adds your extension to the + menu next to the chat box, so the user can pick a task and attach it to a session.
+
+- `"dialog"` opens your page in a window
+- `true` or `"panel"` opens the rail panel instead
+- `{ "mode": "dialog", "entry": "panel/attach.html" }` opens a separate page of yours in the window, so the picker does not have to share code with the rail panel
+- omit it and the extension stays off that menu
+
+Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, or `page`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
+
+`contributes.page: true` makes your panel available full-screen from the Extension pages menu above the session list. Use `{ "entry": "panel/page.html", "title": "Board" }` for separate HTML and an optional title. Ship that HTML and its built scripts. A page requires `panel.entry`, uses the same sandbox and permissions, and opens only when the user selects it. Reload, pause, removal, or a server switch closes it.
+
+For a board, use `host.storage` for persistent JSON and the project/worktree/session methods for shared app data. `startSession` can target another project or worktree without closing the board. See [Host API](/sdk/host/) for subscriptions, live states, and partial creation results.
+
+`contributes.integration` is optional. It adds a card at Settings → Integrations where the user connects an account. See [Accounts and network](#accounts-and-network).
+
+`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel.
+
+## Capabilities
+
+Drawing a panel and reading the current session need no permission. Anything that acts on the user's behalf does. List those in `contributes.capabilities`:
+
+| Capability | What it allows |
+| --- | --- |
+| `prompt` | send messages into the user's session (`prompt({ send: true })`, `startSession` with `text`) |
+| `sessions` | list projects, worktrees, and session states; create and open sessions across registered projects |
+| `files` | read and write files inside the open project (`readFile`, `writeFile`, `listDir`, `stat` with a relative path) |
+| `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
+
+Four more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
+
+The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
+
+## Generate text
+
+With the `model` capability, `host.generate` asks the user's Small Model for a one-off answer: a summary, a title, a draft. Nothing enters a session, no history is kept, and the extension never picks a provider. OpenChamber uses the same model it uses for its own background work, chosen in Settings → Sessions → Small Model, or picked automatically from the user's signed-in providers.
+
+```ts
+const { text } = await host.generate({
+  prompt: task.description,
+  system: "Write a one-line summary. Return only the summary.",
+  maxOutputTokens: 200,
+});
+```
+
+When no model is available the call fails with `NO_MODEL`; a model that errored is `MODEL_FAILED`. Prompts are limited to 64,000 characters, and the call waits up to 90 seconds. The user sees this permission as "Use your Small Model" and it costs them tokens, so keep prompts short and call it on a click, not on every keystroke.
+
+## Accounts and network
+
+Your page runs in a sandbox and cannot call the internet directly. Declare an `integration` and OpenChamber makes the calls for you through `host.request`, with the user's token attached. The token never reaches your page.
+
+- `token`: the user pastes an API token on the Settings → Integrations card. `apiOrigin` is the only origin `request` may call. `account` is optional: a GET path and a field name, so the card can show who is connected. `scheme` says how the token is sent; see the table below. Check the provider's API docs for which header it expects.
+- `oauth`: the user pastes a client id, and OpenChamber runs the authorize flow. Needs `authorizeUrl`, `tokenUrl`, and `apiOrigin`.
+- `host: { "provider": "linear" }`: reuse the Linear account already connected in OpenChamber. No client id needed.
+
+What each `scheme` sends:
+
+| `scheme` | Header OpenChamber sends | When to use it |
+| --- | --- | --- |
+| omitted | `Authorization: <token>` | the API documents a bare token in the header |
+| `"bearer"` | `Authorization: Bearer <token>` | the API documents a bearer or personal access token |
+| `"basic"` | `Authorization: Basic base64(username:token)` | the API documents HTTP Basic auth with a username (often an email) and an API token; the card asks for both, and `usernameLabel` names the first field |
+
+`settings` adds plain text fields to the card. Their values arrive in `ctx.settings`.
+
+## Files
+
+Your page cannot touch the disk itself. OpenChamber reads and writes for it, inside limits the user approved.
+
+- A relative path (`README.md`, `src/index.ts`, `.`) means the open project. Needs the `files` capability. No open project is `NO_DIRECTORY`.
+- A path starting with `/` or `~/` means anywhere else. It must match one of the patterns you declare in `contributes.filesystem`, and the user sees those exact patterns in the approval dialog:
+
+```json
+"filesystem": ["~/.config/opencode/opencode.json", "~/notes/**"]
+```
+
+Patterns use `*` for one path segment and `**` for any depth. Anything outside them is `BAD_PATH`, even after approval. `..` is never allowed.
+
+```ts
+const config = await host.readFile("~/.config/opencode/opencode.json");
+await host.writeFile("~/.config/opencode/opencode.json", nextJson);
+const { entries } = await host.listDir(".");
+```
+
+Writes are atomic: OpenChamber writes a temporary file and renames it, so a reader never sees a half-written file. Files are read and written as UTF-8 text, up to 2 MB.
+
+## Actions, commands, and the badge
+
+Beyond the rail and the + menu, an extension can appear in three more places. All of them hand the extension an `item` the same way a chip click does.
+
+**Actions on messages and sessions.** Declare menu entries and OpenChamber shows them next to the built-in ones:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+A message action opens your extension with `ctx.item` of `kind: "message"`: the session id and title, the project directory, the message id, its role, and its text. A session action opens it with `kind: "session"` and the session id, title, and directory. Add `"payload": ["messages"]` and the item also carries the whole conversation, oldest first, the same text the Markdown export produces. That needs the `conversation` capability, which the user sees as a separate line in the approval dialog. `item.action` tells you which entry was clicked.
+
+**Slash commands that attach.** Declare a command and handle it in the page:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+When the user types `/task ABC-12` in the chat box, OpenChamber asks your extension to resolve it and attaches what you return as a chip, without opening anything. Return `null` for "nothing found". If your panel is closed, OpenChamber loads it in the background for the call. A name that OpenChamber or OpenCode already uses is ignored.
+
+**Badge on the rail icon.** `host.setBadge(3)` shows a number on your icon, for example open tasks; `host.setBadge(null)` clears it. Opening the panel clears it too.
+
+## Your tools in the chat
+
+When your OpenCode plugin or MCP server adds a tool, the chat shows its calls with a generic icon and a raw output. Declare how they should look instead, with no code:
+
+```json
+"tools": [
+  {
+    "match": "mcp.jira.*",
+    "name": "Jira",
+    "icon": "task-line",
+    "title": "{input.key}",
+    "subtitle": "{output.status}",
+    "output": "table",
+    "columns": ["key", "summary", "status"]
+  }
+]
+```
+
+`match` is the tool name as OpenCode reports it; a trailing `*` matches a prefix. `icon` is a Remixicon name or an `.svg` file in your package, like `panel.icon`. `title` and `subtitle` are templates over the call's `input`, `output`, and `metadata`. `output` picks how the body renders: `text`, `json` (a tree), `markdown`, `code` with a `language`, `table` with `columns` (rows come from the output array or `output.items`), or `auto` for the default. An exact `match` beats a wildcard, and the first installed extension wins a tie. No permission is needed: this only changes how data already in the chat is drawn.
+
+An extension that only styles tools needs no page at all: leave out `panel.entry` and it has no rail icon, just a card in Settings → Extensions. Without a page it may declare `tools` and nothing else.
+
+## First lines in the panel
+
+```ts
+import { connectHost } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` only works inside OpenChamber. Opened as a plain file, every call rejects with `HOST_UNAVAILABLE`.
+
+Build the panel from the blocks in `@openchamber/sdk/ui` first: buttons, fields, dropdowns, tabs, lists, and more, styled with the app's colours and fonts, so the panel feels like part of OpenChamber. Write your own HTML and CSS only for what the kit lacks. See [UI kit](/sdk/ui/).
+
+## Related
+
+- [Extensions](/extensions/) for SSH installs and choosing the server's Git identity
+- [Host API](/sdk/host/) for every `connectHost` method, its limits, and error codes
+- [UI kit](/sdk/ui/) for the building blocks
+- [Example](/sdk/example/) for a complete three-file extension to copy

@@ -3,6 +3,10 @@ import { deleteQuotaCredential, readQuotaCredential, writeQuotaCredential } from
 const clean = (value) => typeof value === 'string' && !/[\r\n]/.test(value) ? value.trim() : '';
 
 export const normalizers = {
+  'exe-dev': (value) => {
+    const usageToken = clean(value?.usageToken);
+    return usageToken ? { usageToken } : null;
+  },
   'ollama-cloud': (value) => {
     const cookie = clean(value?.cookie);
     return cookie ? { cookie } : null;

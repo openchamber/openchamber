@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -14,8 +14,44 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
-import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
+import { stopEmbeddedServer } from './server-shutdown.mjs';
+import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import {
+  BACKGROUND_START_ARG,
+  DEEP_LINK_PROTOCOL,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  UI_PROTOCOL,
+  buildMainWindowOptions,
+  buildRendererAdditionalArguments,
+  buildStartupSplashUrl,
+  getLoginItemOptions,
+  getWindowIconPath,
+  installPackagedUiRequestHandler,
+  installStartupMarkSink,
+  isDev,
+  isMacMenuBarEnabled,
+  macosMajorVersion,
+  readLoginItemSettings,
+  readSettingsRoot,
+  readThemeSource,
+  resolveMainWindowBounds,
+  resolvePreloadPath,
+  resolveSplashBackgroundColor,
+  settingsFilePath,
+  shellEnvironmentAbort,
+  shouldStartInBackground,
+  shouldUsePackagedUi,
+  startShellEnvironmentProbe,
+  startupStartedAt,
+  takeDeferredAppEvents,
+  takeEarlyWindow,
+  usesFramelessChrome,
+  wasEarlyWindowClosed,
+} from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
+import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
@@ -33,91 +69,21 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
+import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
+import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
+import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 
 const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
-const electronStartupStartedAt = performance.now();
-
-const DEEP_LINK_PROTOCOL = 'openchamber';
-const UI_PROTOCOL = 'openchamber-ui';
-const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.desktop';
-const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
-const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
-const BACKGROUND_START_ARG = '--background';
-
-const getLoginItemOptions = () => {
-  if (process.platform === 'win32') {
-    return {
-      path: process.execPath,
-      args: [BACKGROUND_START_ARG],
-      name: APP_USER_MODEL_ID,
-    };
-  }
-  return {};
-};
-
-const readLoginItemSettings = () => {
-  if (process.platform === 'linux') {
-    return null;
-  }
-  if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
-  try {
-    return app.getLoginItemSettings(getLoginItemOptions());
-  } catch {
-    return null;
-  }
-};
-
-const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) => {
-  return (
-    process.argv.includes(BACKGROUND_START_ARG) ||
-    loginItemSettings?.wasOpenedAtLogin === true ||
-    loginItemSettings?.wasOpenedAsHidden === true
-  );
-};
-
-// Set the product name early so electron-log derives its log directory as
-// ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
-app.setName('OpenChamber');
-if (process.platform === 'linux') {
-  app.setDesktopName('openchamber.desktop');
-}
-if (isDev) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
-}
-app.setAppUserModelId(APP_USER_MODEL_ID);
-app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
-// Lift Chromium's per-host cap only for bundled UI. Applying this to Vite HMR
-// lets the renderer request most of the module graph at once, overwhelming the
-// dev server's transform pipeline and leaving the HTML splash visible for up
-// to a minute before React mounts.
-if (shouldIgnoreLoopbackConnectionLimit({
-  development: isDev,
-  packagedUi: process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1',
-})) {
-  app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
-}
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: UI_PROTOCOL,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-    },
-  },
-]);
-
-if (!app.requestSingleInstanceLock()) {
-  app.exit(0);
-  process.exit(0);
-}
+// This process runs quota/provider fetches under Node/undici, whose happy-eyeballs
+// default aborts each connect attempt after 250ms — distant provider endpoints
+// routinely need longer handshakes, surfacing as "fetch failed" (#3399). No-op on
+// runtimes without the setter.
+applyConnectAttemptTimeout();
 
 try {
   process.chdir(os.homedir());
@@ -139,7 +105,10 @@ Object.assign(console, log.functions);
 
 const STARTUP_PERF_ENABLED_VALUES = new Set(['1', 'true']);
 const ELECTRON_STARTUP_PERF_PHASES = new Set([
+  'electron.entry',
   'electron.app.ready',
+  'electron.window.created',
+  'electron.main.loaded',
   'electron.server.start',
   'electron.server.ready',
   'electron.navigation.start',
@@ -149,18 +118,27 @@ const ELECTRON_STARTUP_PERF_PHASES = new Set([
   'electron.window.ready-to-show',
 ]);
 const ELECTRON_STARTUP_DOCUMENT_CLASSES = new Set(['splash', 'application']);
-const recordElectronStartupPerformance = (phase, details = {}) => {
+const logElectronStartupEvent = ({ phase, at, totalDurationMs, durationMs, documentClass }) => {
   const enabled = STARTUP_PERF_ENABLED_VALUES.has(String(process.env.OPENCHAMBER_STARTUP_PERF ?? '').toLowerCase());
   if (!enabled || !ELECTRON_STARTUP_PERF_PHASES.has(phase)) return;
-  const event = {
-    phase,
-    at: Date.now(),
-    totalDurationMs: Math.max(0, performance.now() - electronStartupStartedAt),
-  };
-  if (Number.isFinite(details.durationMs) && details.durationMs >= 0) event.durationMs = details.durationMs;
-  if (ELECTRON_STARTUP_DOCUMENT_CLASSES.has(details.documentClass)) event.documentClass = details.documentClass;
+  const event = { phase, at, totalDurationMs };
+  if (Number.isFinite(durationMs) && durationMs >= 0) event.durationMs = durationMs;
+  if (ELECTRON_STARTUP_DOCUMENT_CLASSES.has(documentClass)) event.documentClass = documentClass;
   log.info('[startup-performance]', event);
 };
+const recordElectronStartupPerformance = (phase, details = {}) => {
+  logElectronStartupEvent({
+    phase,
+    at: Date.now(),
+    totalDurationMs: Math.max(0, performance.now() - startupStartedAt),
+    durationMs: details.durationMs,
+    documentClass: details.documentClass,
+  });
+};
+// The entry module and the early window recorded their marks before the
+// logger existed; they precede everything this module records.
+installStartupMarkSink(logElectronStartupEvent);
+recordElectronStartupPerformance('electron.main.loaded');
 const classifyStartupDocument = (url) => String(url || '').startsWith('data:') ? 'splash' : 'application';
 
 const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -215,10 +193,6 @@ const APP_VERSION = APP_METADATA.version;
 const DEFAULT_DESKTOP_PORT = 57123;
 const LOOPBACK_BIND_HOST = '127.0.0.1';
 const LAN_BIND_HOST = '0.0.0.0';
-const MIN_WINDOW_WIDTH = 800;
-const MIN_WINDOW_HEIGHT = 520;
-const MIN_RESTORE_WINDOW_WIDTH = 900;
-const MIN_RESTORE_WINDOW_HEIGHT = 560;
 const MINI_CHAT_WINDOW_WIDTH = 520;
 const MINI_CHAT_WINDOW_HEIGHT = 760;
 const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
@@ -232,12 +206,14 @@ const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // connecting to someone else's server).
 const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
 const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
+// Bump when discovery results change shape or matching semantics change, so cached
+// entries written by an older build are treated as stale and refresh immediately.
+const INSTALLED_APPS_CACHE_VERSION = 2;
 const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
 const { autoUpdater } = updaterPkg;
@@ -245,6 +221,7 @@ const { autoUpdater } = updaterPkg;
 const state = {
   serverHandle: null,
   sidecarUrl: null,
+  localUiUrl: null,
   localOrigin: null,
   apiBaseUrl: null,
   clientToken: null,
@@ -258,8 +235,13 @@ const state = {
   quitInProgress: false,
   quitConfirmationPending: false,
   backgroundShutdownComplete: false,
+  backgroundShutdownPromise: null,
   sshShutdownPromise: null,
   installingUpdate: false,
+  // Latched from the moment an update install starts until the installer has
+  // been handed control or the install has failed. While it is set, no other
+  // path may end the process: the update sequence owns the exit.
+  updateInstallPending: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
@@ -350,14 +332,18 @@ const quitConfirmationMessage = () => {
 };
 
 const shutdownBackgroundServices = () => {
-  if (state.backgroundShutdownComplete) return;
-  state.backgroundShutdownComplete = true;
-  setDesktopKeepAwakeActive(false);
-  if (state.installingUpdate) return;
-  killSidecar();
-  setImmediate(() => {
-    void shutdownSshSessions();
-  });
+  if (!state.backgroundShutdownPromise) {
+    setDesktopKeepAwakeActive(false);
+    shellEnvironmentAbort.abort();
+    state.backgroundShutdownPromise = Promise.all([
+      startShellEnvironmentProbe().catch(() => {}),
+      killSidecar(),
+      shutdownSshSessions(),
+    ]).finally(() => {
+      state.backgroundShutdownComplete = true;
+    });
+  }
+  return state.backgroundShutdownPromise;
 };
 
 const shutdownSshSessions = async () => {
@@ -375,10 +361,10 @@ const shutdownSshSessions = async () => {
   await state.sshShutdownPromise;
 };
 
-const prepareForQuit = ({ installingUpdate = false } = {}) => {
+const prepareForQuit = () => {
   state.quitRequested = true;
   state.quitConfirmed = true;
-  state.installingUpdate = installingUpdate;
+  state.installingUpdate = false;
   state.quitConfirmationPending = false;
 
   if (state.trayController) {
@@ -402,20 +388,25 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
 
   setDesktopKeepAwakeActive(false);
 
-  if (installingUpdate) {
-    state.backgroundShutdownComplete = true;
-    return;
-  }
-
-  shutdownBackgroundServices();
+  return shutdownBackgroundServices();
 };
 
-const performConfirmedQuit = () => {
+const performConfirmedQuit = async ({ relaunch = false } = {}) => {
+  if (state.updateInstallPending) {
+    log.info('[electron] quit suppressed: update install owns the exit');
+    return;
+  }
   if (state.quitInProgress) return;
   state.quitInProgress = true;
 
-  prepareForQuit();
-  app.exit(0);
+  try {
+    await prepareForQuit();
+  } catch (error) {
+    log.warn('[electron] background shutdown failed:', error);
+  } finally {
+    if (relaunch) app.relaunch();
+    app.exit(0);
+  }
 };
 
 // Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
@@ -425,12 +416,7 @@ const performConfirmedQuit = () => {
 // reaper remains the backstop for an unhandled hard crash (SIGKILL).
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => {
-    try {
-      shutdownBackgroundServices();
-    } catch (error) {
-      log.warn(`[electron] ${signal} shutdown failed:`, error);
-    }
-    app.exit(0);
+    void performConfirmedQuit();
   });
 }
 
@@ -528,31 +514,11 @@ const refreshQuitRiskFlags = async () => {
   }
 };
 
-const settingsFilePath = () => {
-  if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim()) {
-    return path.join(process.env.OPENCHAMBER_DATA_DIR.trim(), 'settings.json');
-  }
-  return path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
-};
-
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
   appVersion: APP_VERSION,
   emit: (event, detail) => emitToAllWindows(event, detail),
 });
-
-const readJsonFile = (filePath) => {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return {};
-    // Parse errors can happen if a concurrent writer just truncated the file
-    // and hasn't finished writing yet. Log loudly so we notice, then return
-    // {} as before. Writes are atomic (tmp + rename) so this race is rare.
-    log.warn?.('[electron] failed to read JSON file', filePath, error);
-    return {};
-  }
-};
 
 const writeJsonFile = async (filePath, data) => {
   const directory = path.dirname(filePath);
@@ -570,11 +536,6 @@ const writeJsonFile = async (filePath, data) => {
     await fsp.rm(tmp, { force: true }).catch(() => {});
     throw error;
   }
-};
-
-const readSettingsRoot = () => {
-  const root = readJsonFile(settingsFilePath());
-  return root && typeof root === 'object' && !Array.isArray(root) ? root : {};
 };
 
 // Serializes read-modify-write of the settings file within this process.
@@ -809,40 +770,6 @@ const writeDesktopHostsConfig = async (config) => {
   });
 };
 
-const readWindowState = () => {
-  const stateValue = readSettingsRoot().desktopWindowState;
-  return stateValue && typeof stateValue === 'object' ? stateValue : null;
-};
-
-const clampWindowBoundsToVisibleWorkArea = (bounds) => {
-  const width = Math.max(MIN_RESTORE_WINDOW_WIDTH, Math.round(Number(bounds?.width) || 0));
-  const height = Math.max(MIN_RESTORE_WINDOW_HEIGHT, Math.round(Number(bounds?.height) || 0));
-  const x = Math.round(Number(bounds?.x));
-  const y = Math.round(Number(bounds?.y));
-
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return { width, height };
-  }
-
-  try {
-    const display = screen.getDisplayMatching({ x, y, width, height }) || screen.getPrimaryDisplay();
-    const workArea = display.workArea;
-    const clampedWidth = Math.min(width, Math.max(MIN_WINDOW_WIDTH, workArea.width));
-    const clampedHeight = Math.min(height, Math.max(MIN_WINDOW_HEIGHT, workArea.height));
-    const maxX = workArea.x + workArea.width - clampedWidth;
-    const maxY = workArea.y + workArea.height - clampedHeight;
-
-    return {
-      x: clampedWidth >= workArea.width ? workArea.x : Math.min(Math.max(x, workArea.x), maxX),
-      y: clampedHeight >= workArea.height ? workArea.y : Math.min(Math.max(y, workArea.y), maxY),
-      width: clampedWidth,
-      height: clampedHeight,
-    };
-  } catch {
-    return { x, y, width, height };
-  }
-};
-
 const writeWindowState = async (browserWindow) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
@@ -900,123 +827,16 @@ const buildHealthUrl = (url) => {
   }
 };
 
-const buildVersionUrl = (url) => {
-  try {
-    const parsed = new URL(url);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/api/version`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const buildSessionStatusUrl = (url) => {
-  try {
-    const parsed = new URL(url);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/auth/session`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const classifyVersionPayload = (payload) => {
-  const compatibility = payload?.compatibility;
-  if (!payload || payload.status !== 'ok' || !compatibility || typeof compatibility !== 'object') {
-    return 'wrong-service';
-  }
-
-  if (!Array.isArray(compatibility.capabilities) || !compatibility.capabilities.includes('api.runtime-url.v1')) {
-    return 'incompatible';
-  }
-
-  if (compatibility.apiVersion !== 1 || compatibility.minClientApiVersion > 1) {
-    return 'update-recommended';
-  }
-
-  return 'ok';
-};
-
-const fetchVersionPayload = async (versionUrl, { headers, timeoutMs }) => {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  try {
-    return await fetch(versionUrl, { signal: timeoutSignal, headers });
-  } catch (error) {
-    if (timeoutSignal.aborted) {
-      throw error;
-    }
-    return await Promise.race([
-      electronNet.fetch(versionUrl, { headers }),
-      new Promise((_, reject) => setTimeout(() => reject(error), timeoutMs)),
-    ]);
-  }
-};
-
 const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
-  const versionUrl = buildVersionUrl(url);
-  const sessionStatusUrl = buildSessionStatusUrl(url);
-  if (!versionUrl || !sessionStatusUrl) {
-    throw new Error('Invalid URL');
-  }
-
-  const started = Date.now();
-
-  // Identity gate for learned/untrusted addresses: verify the UNAUTHENTICATED
-  // /health identity before the token-carrying version fetch, so the bearer
-  // token is never sent to a re-assigned address that now belongs to a
-  // different machine. Older servers omit serverId from /health; only an
-  // explicit mismatch rejects.
-  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
-    const healthUrl = buildHealthUrl(url);
-    if (healthUrl) {
-      try {
-        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' } });
-        if (response.ok) {
-          const payload = await response.json().catch(() => null);
-          const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
-          if (reported && reported !== expectedServerId.trim()) {
-            return { status: 'wrong-service', latencyMs: Date.now() - started };
-          }
-        }
-      } catch {
-        // Unreachable/timeout surfaces in the version fetch below.
-      }
-    }
-  }
-
-  try {
-    const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
-    const token = typeof clientToken === 'string' ? clientToken.trim() : '';
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    const response = await fetchVersionPayload(versionUrl, { headers, timeoutMs });
-    const status = response.status;
-    if (status === 401 || status === 403) {
-      return { status: 'auth', latencyMs: Date.now() - started };
-    }
-    if (status < 200 || status >= 300) {
-      return { status: 'unreachable', latencyMs: Date.now() - started };
-    }
-    const payload = await response.json().catch(() => null);
-    const versionStatus = classifyVersionPayload(payload);
-    if (versionStatus !== 'ok') {
-      return { status: versionStatus, latencyMs: Date.now() - started };
-    }
-    const sessionResponse = await fetchVersionPayload(sessionStatusUrl, { headers, timeoutMs });
-    if (sessionResponse.status === 401 || sessionResponse.status === 403) {
-      return { status: 'auth', latencyMs: Date.now() - started };
-    }
-    if (!sessionResponse.ok) {
-      return { status: 'unreachable', latencyMs: Date.now() - started };
-    }
-    return {
-      status: versionStatus,
-      latencyMs: Date.now() - started,
-    };
-  } catch {
-    return { status: 'unreachable', latencyMs: Date.now() - started };
-  }
+  return probeElectronHostWithDeadline({
+    url,
+    timeoutMs,
+    clientToken,
+    requestHeaders,
+    expectedServerId,
+    chromiumFetch: (requestUrl, options) => electronNet.fetch(requestUrl, options),
+    isReady: () => app.isReady(),
+  });
 };
 
 const resolveStoredClientTokenForUrl = (targetUrl, config = readDesktopHostsConfig()) => {
@@ -1122,11 +942,6 @@ const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
-const shouldUsePackagedUi = () => {
-  if (process.env.OPENCHAMBER_ELECTRON_LOAD_SERVER_UI === '1') return false;
-  if (process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1') return true;
-  return app.isPackaged;
-};
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
 const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${packagedUiOrigin()}/`).toString();
 
@@ -1220,7 +1035,7 @@ const hardenBrowserPanelSession = () => {
 
 const registerPackagedUiProtocol = () => {
   if (!shouldUsePackagedUi()) return;
-  protocol.handle(UI_PROTOCOL, async (request) => {
+  installPackagedUiRequestHandler(async (request) => {
     const distPath = resolveWebDistDir();
     let requestedPath = '/index.html';
     try {
@@ -1384,104 +1199,19 @@ const mapUpdaterProgressEvent = (payload) => ({
   data: payload.data,
 });
 
-const SHELL_ENV_TIMEOUT_MS = 5_000;
-let cachedShellEnv = null;
-let shellEnvProbed = false;
-
-const isNushell = (shell) => {
-  const name = path.basename(shell).toLowerCase();
-  return name === 'nu' || name === 'nu.exe';
-};
-
-const parseShellEnv = (buf) => {
-  const result = {};
-  for (const line of buf.toString('utf8').split('\0')) {
-    if (!line) continue;
-    const idx = line.indexOf('=');
-    if (idx <= 0) continue;
-    result[line.slice(0, idx)] = line.slice(idx + 1);
-  }
-  return result;
-};
-
-const probeShellEnv = (shell, mode) => {
-  const result = spawnSync(shell, [mode, '-c', 'env -0'], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: SHELL_ENV_TIMEOUT_MS,
-    windowsHide: true,
-  });
-  if (result.error || result.status !== 0) return null;
-  const env = parseShellEnv(result.stdout);
-  return Object.keys(env).length > 0 ? env : null;
-};
-
-const queryWindowsRegistryValue = (key, name) => {
-  const result = spawnSync('reg.exe', ['query', key, '/v', name], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  if (result.error || result.status !== 0) return '';
-  const line = String(result.stdout || '')
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .find((entry) => entry.toLowerCase().startsWith(name.toLowerCase()));
-  if (!line) return '';
-  const match = line.match(/^\S+\s+REG_\S+\s+(.+)$/);
-  return match?.[1]?.trim() || '';
-};
-
-const expandWindowsEnvRefs = (value) => String(value || '').replace(/%([^%]+)%/g, (_match, key) => process.env[key] || '');
-
-const loadWindowsEnv = () => {
-  const machinePath = queryWindowsRegistryValue('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path');
-  const userPath = queryWindowsRegistryValue('HKCU\\Environment', 'Path');
-  const homeDir = os.homedir();
-  const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
-  const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
-  const commonPaths = [
-    path.join(homeDir, '.opencode', 'bin'),
-    path.join(homeDir, '.bun', 'bin'),
-    path.join(homeDir, '.local', 'bin'),
-    path.join(localAppData, 'Programs', 'Microsoft VS Code', 'bin'),
-    path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', 'bin'),
-    path.join(appData, 'npm'),
-  ];
-  return {
-    PATH: [machinePath, userPath, process.env.PATH, ...commonPaths]
-      .map(expandWindowsEnvRefs)
-      .filter(Boolean)
-      .join(path.delimiter),
-  };
-};
-
-// Finder-launched apps on macOS inherit a minimal PATH (no /opt/homebrew, mise, asdf, etc.).
-// Probe the user's login shell once so the sidecar sees the same PATH / tool env as `$SHELL -il`.
-const loadShellEnv = () => {
-  if (shellEnvProbed) return cachedShellEnv;
-  shellEnvProbed = true;
-  if (process.platform === 'win32') {
-    cachedShellEnv = loadWindowsEnv();
-    return cachedShellEnv;
-  }
-  const shell = process.env.SHELL || '/bin/sh';
-  if (isNushell(shell)) return null;
-  cachedShellEnv = probeShellEnv(shell, '-il') || probeShellEnv(shell, '-l');
-  return cachedShellEnv;
-};
+import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
+import { provideLoginShellEnvSnapshot } from '@openchamber/web/server/lib/opencode/login-shell-env.js';
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
-import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
-
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar
 // subprocess to hand a custom env to.
-const inheritUserShellEnv = () => {
-  // Clear before probing/merging so login-shell snapshots and children never
-  // inherit the AppImage path as argv[0] via zsh's ARGV0 parameter (#2588).
-  clearAppImageArgv0FromProcessEnv();
-
-  const shellEnv = loadShellEnv();
+const inheritUserShellEnv = async () => {
+  const shellEnv = await startShellEnvironmentProbe();
+  // The server would otherwise snapshot the same shell again, synchronously,
+  // on this thread. Windows keeps the server's own registry-based snapshot:
+  // the desktop loader only knows PATH there.
+  if (process.platform !== 'win32') provideLoginShellEnvSnapshot(shellEnv);
   if (!shellEnv) return;
 
   const homeDir = os.homedir();
@@ -1502,15 +1232,15 @@ const inheritUserShellEnv = () => {
   }
 };
 
-const shouldSkipLocalServer = () => {
-  inheritUserShellEnv();
+const shouldSkipLocalServer = async () => {
+  await inheritUserShellEnv();
   return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
 };
 
 const spawnLocalServer = async () => {
   const serverStartedAt = performance.now();
   recordElectronStartupPerformance('electron.server.start');
-  inheritUserShellEnv();
+  await inheritUserShellEnv();
 
   const settings = readSettingsRoot();
   const storedPort = Number.isFinite(settings.desktopLocalPort) ? settings.desktopLocalPort : null;
@@ -1580,12 +1310,25 @@ const spawnLocalServer = async () => {
     attachSignals: false,
     exitOnShutdown: false,
     apiOnly: false,
+    builtInExtensionsDir: app.isPackaged
+      ? path.join(app.getAppPath().endsWith('.asar') ? `${app.getAppPath()}.unpacked` : app.getAppPath(), 'node_modules/@openchamber/web/server/built-in-extensions')
+      : undefined,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl: state.apiBaseUrl || '',
       requestHeaders: sanitizeRuntimeRequestHeaders(state.requestHeaders || {}),
     }),
+    desktopUpdater: {
+      check: () => handleInvoke(null, 'desktop_check_for_updates'),
+      install: async () => {
+        const updateInfo = await handleInvoke(null, 'desktop_check_for_updates');
+        if (!updateInfo.available) return updateInfo;
+        await handleInvoke(null, 'desktop_download_and_install_update');
+        return updateInfo;
+      },
+      restart: () => handleInvoke(null, 'desktop_restart'),
+    },
   });
 
   const port = handle.getPort();
@@ -1685,27 +1428,16 @@ Stop-ProcessTree $targetPid $true
   child.unref();
 };
 
-const killSidecar = () => {
+const killSidecar = async () => {
   const handle = state.serverHandle;
   state.serverHandle = null;
   state.sidecarUrl = null;
   if (!handle) return;
 
-  try {
-    launchDetachedOpenCodeKiller(handle.getOpenCodeProcessInfo?.());
-  } catch (error) {
-    log.warn('[electron] failed to launch OpenCode killer:', error);
-  }
-};
-
-const macosMajorVersion = () => {
-  if (process.platform !== 'darwin') return 0;
-  const result = spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' });
-  const raw = (result.stdout || '').trim();
-  const [majorRaw, minorRaw] = raw.split('.');
-  const major = Number.parseInt(majorRaw || '0', 10);
-  const minor = Number.parseInt(minorRaw || '0', 10);
-  return major === 10 ? minor : major;
+  await stopEmbeddedServer(handle, {
+    launchFallback: launchDetachedOpenCodeKiller,
+    warn: (error) => log.warn('[electron] embedded server shutdown failed:', error),
+  });
 };
 
 const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken = '', requestHeaders = {}) => {
@@ -1780,104 +1512,6 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
     return { target: 'remote', status: 'ok', hostId: host.id, url: host.apiUrl || host.url, ...availability };
   }
   return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
-};
-
-const buildStartupSplashHtml = () => {
-  const settings = readSettingsRoot();
-  const splashBgLight = typeof settings.splashBgLight === 'string' ? settings.splashBgLight.trim() : '#f5f5f4';
-  const splashFgLight = typeof settings.splashFgLight === 'string' ? settings.splashFgLight.trim() : '#1c1917';
-  const splashBgDark = typeof settings.splashBgDark === 'string' ? settings.splashBgDark.trim() : '#0c0a09';
-  const splashFgDark = typeof settings.splashFgDark === 'string' ? settings.splashFgDark.trim() : '#fafaf9';
-
-  return `<!doctype html>
-  <html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root { color-scheme: light dark; }
-      :root {
-        --splash-background: ${splashBgLight};
-        --splash-stroke: ${splashFgLight};
-        --splash-face-fill: rgba(0, 0, 0, 0.15);
-        --splash-cell-fill: rgba(0, 0, 0, 0.4);
-        --splash-logo-fill: var(--splash-stroke);
-      }
-      body {
-        margin: 0;
-        font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-        display: grid;
-        place-items: center;
-        height: 100vh;
-        background: var(--splash-background);
-        color: var(--splash-stroke);
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --splash-background: ${splashBgDark};
-          --splash-stroke: ${splashFgDark};
-          --splash-face-fill: rgba(255, 255, 255, 0.15);
-          --splash-cell-fill: rgba(255, 255, 255, 0.35);
-        }
-      }
-      @supports (color: color-mix(in srgb, white 50%, transparent)) {
-        :root {
-          --splash-face-fill: color-mix(in srgb, var(--splash-stroke) 15%, transparent);
-          --splash-cell-fill: color-mix(in srgb, var(--splash-stroke) 35%, transparent);
-        }
-      }
-      .stack {
-        display: grid;
-        justify-items: center;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="stack">
-      <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber loading icon">
-        <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M50 50 L39.608 44 L39.608 56 L50 62 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-        <path d="M39.608 44 L29.216 38 L29.216 50 L39.608 56 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-        <path d="M29.216 38 L18.824 32 L18.824 44 L29.216 50 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-        <path d="M18.824 32 L8.432 26 L8.432 38 L18.824 44 Z" fill="var(--splash-cell-fill)" opacity="0.55"/>
-        <path d="M50 62 L39.608 56 L39.608 68 L50 74 Z" fill="var(--splash-cell-fill)" opacity="0.35"/>
-        <path d="M39.608 56 L29.216 50 L29.216 62 L39.608 68 Z" fill="var(--splash-cell-fill)" opacity="0.1"/>
-        <path d="M29.216 50 L18.824 44 L18.824 56 L29.216 62 Z" fill="var(--splash-cell-fill)" opacity="0.5"/>
-        <path d="M18.824 44 L8.432 38 L8.432 50 L18.824 56 Z" fill="var(--splash-cell-fill)" opacity="0.25"/>
-        <path d="M50 74 L39.608 68 L39.608 80 L50 86 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
-        <path d="M39.608 68 L29.216 62 L29.216 74 L39.608 80 Z" fill="var(--splash-cell-fill)" opacity="0.3"/>
-        <path d="M29.216 62 L18.824 56 L18.824 68 L29.216 74 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-        <path d="M18.824 56 L8.432 50 L8.432 62 L18.824 68 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-        <path d="M50 86 L39.608 80 L39.608 92 L50 98 Z" fill="var(--splash-cell-fill)" opacity="0.55"/>
-        <path d="M39.608 80 L29.216 74 L29.216 86 L39.608 92 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-        <path d="M29.216 74 L18.824 68 L18.824 80 L29.216 86 Z" fill="var(--splash-cell-fill)" opacity="0.35"/>
-        <path d="M18.824 68 L8.432 62 L8.432 74 L18.824 80 Z" fill="var(--splash-cell-fill)" opacity="0.1"/>
-        <path d="M50 50 L91.568 26 L91.568 74 L50 98 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M50 50 L60.392 44 L60.392 56 L50 62 Z" fill="var(--splash-cell-fill)" opacity="0.3"/>
-        <path d="M60.392 44 L70.784 38 L70.784 50 L60.392 56 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-        <path d="M70.784 38 L81.176 32 L81.176 44 L70.784 50 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-        <path d="M81.176 32 L91.568 26 L91.568 38 L81.176 44 Z" fill="var(--splash-cell-fill)" opacity="0.25"/>
-        <path d="M50 62 L60.392 56 L60.392 68 L50 74 Z" fill="var(--splash-cell-fill)" opacity="0.5"/>
-        <path d="M60.392 56 L70.784 50 L70.784 62 L60.392 68 Z" fill="var(--splash-cell-fill)" opacity="0.35"/>
-        <path d="M70.784 50 L81.176 44 L81.176 56 L70.784 62 Z" fill="var(--splash-cell-fill)" opacity="0.1"/>
-        <path d="M81.176 44 L91.568 38 L91.568 50 L81.176 56 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
-        <path d="M50 74 L60.392 68 L60.392 80 L50 86 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-        <path d="M60.392 68 L70.784 62 L70.784 74 L60.392 80 Z" fill="var(--splash-cell-fill)" opacity="0.55"/>
-        <path d="M70.784 62 L81.176 56 L81.176 68 L70.784 74 Z" fill="var(--splash-cell-fill)" opacity="0.3"/>
-        <path d="M81.176 56 L91.568 50 L91.568 62 L81.176 68 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-        <path d="M50 86 L60.392 80 L60.392 92 L50 98 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-        <path d="M60.392 80 L70.784 74 L70.784 86 L60.392 92 Z" fill="var(--splash-cell-fill)" opacity="0.25"/>
-        <path d="M70.784 74 L81.176 68 L81.176 80 L70.784 86 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
-        <path d="M81.176 68 L91.568 62 L91.568 74 L81.176 80 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-        <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
-        <g transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-          <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="var(--splash-logo-fill)"/>
-          <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="var(--splash-logo-fill)" fill-opacity="0.4"/>
-        </g>
-      </svg>
-    </div>
-  </body>
-  </html>`;
 };
 
 const isBenignNavigationAbort = (error) => {
@@ -2356,6 +1990,13 @@ const getMenuTargetWindow = () => {
 
 const dispatchMenuAction = (action) => {
   const target = getMenuTargetWindow();
+  // Zoom actions are consumed by the renderer's DOM listener. Sending them
+  // through both the IPC bridge and the DOM event would invoke the handler
+  // multiple times because preload fans the IPC event back into both paths.
+  if (action === 'zoom-in' || action === 'zoom-out' || action === 'zoom-reset') {
+    dispatchDomEventToWindow(target, 'openchamber:zoom', action);
+    return;
+  }
   emitToWindow(target, 'openchamber:menu-action', action);
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
@@ -2395,36 +2036,12 @@ const openDevToolsForMenuTarget = () => {
 };
 
 const relaunchFromMenu = () => {
-  prepareForQuit();
-  app.relaunch();
-  app.exit(0);
+  void performConfirmedQuit({ relaunch: true });
 };
 
 const nextWindowLabel = () => {
   const value = state.windowCounter++;
   return value === 1 ? 'main' : `main-${value}`;
-};
-
-const readThemeSource = () => {
-  const settings = readSettingsRoot();
-  // themeMode is the user's intent; themeVariant is only the resolved
-  // concrete appearance at persist time. When mode === 'system', we must
-  // follow the OS even if variant was saved as a specific value.
-  if (settings.themeMode === 'system' || settings.useSystemTheme === true) return 'system';
-  if (settings.themeMode === 'light') return 'light';
-  if (settings.themeMode === 'dark') return 'dark';
-  if (settings.themeVariant === 'light') return 'light';
-  if (settings.themeVariant === 'dark') return 'dark';
-  return 'system';
-};
-
-const getWindowIconPath = () => {
-  if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
-  const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
-  const iconPath = isDev
-    ? path.join(__dirname, 'resources', 'icons', iconFileName)
-    : path.join(process.resourcesPath, 'icons', iconFileName);
-  return fs.existsSync(iconPath) ? iconPath : undefined;
 };
 
 const canUseTitleBarOverlay = (browserWindow) => (
@@ -2434,68 +2051,32 @@ const canUseTitleBarOverlay = (browserWindow) => (
   !browserWindow.isDestroyed()
 );
 
-const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }) => {
-  const saved = restoreGeometry ? readWindowState() : null;
-  const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
-  const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
+// `adopt` hands over the window the entry module created before this module
+// loaded; it is already on the splash and shows itself on ready-to-show.
+const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, adopt = null }) => {
+  const { bounds, maximized } = adopt
+    ? { bounds: null, maximized: adopt.maximized }
+    : restoreGeometry ? resolveMainWindowBounds() : { bounds: null, maximized: false };
   const desktopLocalOrigin = state.localOrigin || state.sidecarUrl || '';
   const rendererRuntimeConfig = buildRendererRuntimeConfig(url, runtimeConfig);
   const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
   const desktopClientToken = rendererRuntimeConfig.clientToken;
   const desktopRequestHeaders = rendererRuntimeConfig.requestHeaders || {};
-  const desktopHome = os.homedir() || '';
-  const desktopMacosMajor = String(macosMajorVersion());
-  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
-  const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
-  const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const titleBarOverlayEnabled = false;
-  const autoHidesNativeMenuBar = process.platform !== 'darwin';
-  const windowIconPath = getWindowIconPath();
-  const options = {
-    title: 'OpenChamber',
-    ...(Number.isFinite(restoredBounds?.x) && Number.isFinite(restoredBounds?.y)
-      ? { x: restoredBounds.x, y: restoredBounds.y }
-      : {}),
-    width: restoredBounds?.width ?? 1280,
-    height: restoredBounds?.height ?? 800,
-    minWidth: MIN_WINDOW_WIDTH,
-    minHeight: MIN_WINDOW_HEIGHT,
-    icon: windowIconPath,
-    show: false,
-    backgroundColor: '#151313',
-    frame: usesFramelessChrome ? false : undefined,
-    autoHideMenuBar: autoHidesNativeMenuBar,
-    // Electron's hiddenInset adds its own extra inset, which leaves the controls
-    // visibly lower than the app header. Use a plain hidden title bar instead.
-    titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
-    titleBarOverlay: titleBarOverlayEnabled,
-    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
-    webPreferences: {
-      additionalArguments: [
-        `--openchamber-local-origin=${desktopLocalOrigin}`,
-        `--openchamber-api-base-url=${desktopApiBaseUrl}`,
-        `--openchamber-client-token=${desktopClientToken}`,
-        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
-        `--openchamber-home=${desktopHome}`,
-        `--openchamber-macos-major=${desktopMacosMajor}`,
-        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
-        `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
-        `--openchamber-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
-      ],
-      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
-      backgroundThrottling: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-      webviewTag: true,
-      // sandbox must stay off: the preload uses contextBridge + ipcRenderer
-      // from Electron's Node layer. contextIsolation + nodeIntegration:false
-      // keep the renderer world walled off from Node. Do NOT flip to true —
-      // the preload would fail to load and the desktop bridge would be unavailable.
-      sandbox: false,
-    },
-  };
 
-  const browserWindow = new BrowserWindow(options);
+  const browserWindow = adopt?.browserWindow ?? new BrowserWindow(buildMainWindowOptions({
+    bounds,
+    backgroundColor: resolveSplashBackgroundColor(),
+    additionalArguments: buildRendererAdditionalArguments({
+      localOrigin: desktopLocalOrigin,
+      apiBaseUrl: desktopApiBaseUrl,
+      clientToken: desktopClientToken,
+      requestHeaders: desktopRequestHeaders,
+      bootOutcome: state.bootOutcome || null,
+      relayHostId: rendererRuntimeConfig.relayHostId || '',
+      trayEnabled: isMacMenuBarEnabled(),
+    }),
+  }));
   browserWindow.__ocLabel = label || nextWindowLabel();
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
@@ -2504,7 +2085,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     if (command === 'browser-backward') event.preventDefault();
   });
 
-  if (useSaved && saved.maximized) {
+  if (!adopt && maximized) {
     browserWindow.maximize();
   }
 
@@ -2587,7 +2168,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     }
     if (BrowserWindow.getAllWindows().length === 0) {
       if (process.platform !== 'darwin') {
-        if (state.installingUpdate) {
+        if (state.updateInstallPending) {
+          log.info('[electron] last window closed while an update install is pending; leaving the exit to the installer');
+        } else if (state.installingUpdate) {
+          log.info('[electron] last window closed after the installer took over; quitting');
           app.quit();
         } else {
           performConfirmedQuit();
@@ -2656,6 +2240,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.webContents.on('zoom-changed', () => {
     browserWindow.webContents.setZoomFactor(1);
   });
+  attachRendererRecovery(browserWindow, { log, label: 'window' });
 
   browserWindow.webContents.on('dom-ready', () => {
     if (browserWindow.__ocLabel === 'main') {
@@ -2682,27 +2267,54 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     }
   });
 
-  browserWindow.once('ready-to-show', () => {
-    if (browserWindow.__ocLabel === 'main') {
-      recordElectronStartupPerformance('electron.window.ready-to-show', {
-        documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
-      });
-    }
-    browserWindow.show();
-    browserWindow.focus();
-  });
+  if (!adopt) {
+    browserWindow.once('ready-to-show', () => {
+      if (browserWindow.__ocLabel === 'main') {
+        recordElectronStartupPerformance('electron.window.ready-to-show', {
+          documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
+        });
+      }
+      browserWindow.show();
+      browserWindow.focus();
+    });
+  }
 
   if (url) {
     void navigateWindow(browserWindow, url);
-  } else {
-    void navigateWindow(
-      browserWindow,
-      `data:text/html;charset=utf-8,${encodeURIComponent(buildStartupSplashHtml())}`,
-      { allowAbort: true },
-    );
+  } else if (!adopt) {
+    void navigateWindow(browserWindow, buildStartupSplashUrl(), { allowAbort: true });
   }
 
   return browserWindow;
+};
+
+// Bounded so a renderer that never reports ready-to-show cannot hold the
+// backend: the splash is a courtesy, the server is the product.
+const SPLASH_SHOW_WAIT_MS = 500;
+
+// Creates the main window on the splash and resolves once it is on screen, so
+// the caller can defer main-thread-heavy work until the first paint happened.
+const showMainWindowWithSplash = () => {
+  const early = takeEarlyWindow();
+  const browserWindow = createBrowserWindow({
+    label: 'main',
+    restoreGeometry: true,
+    url: null,
+    adopt: early,
+  });
+  state.mainWindow = browserWindow;
+  // The entry module already gave the early window its bounded wait.
+  if (early) return Promise.resolve();
+  // The window's own ready-to-show listener calls show(); this one runs right
+  // after it. macOS does not reliably emit 'show' for a window shown while the
+  // app is not yet active, so that event is not awaited.
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, SPLASH_SHOW_WAIT_MS);
+    browserWindow.once('ready-to-show', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 };
 
 const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig = {}) => {
@@ -2795,7 +2407,7 @@ const createAdditionalWindow = async (url, runtimeConfig = {}) => {
 const buildMiniChatUrl = ({ mode, sessionId, directory, projectId }) => {
   const base = shouldUsePackagedUi()
     ? buildPackagedUiUrl('/mini-chat.html')
-    : state.localOrigin || state.sidecarUrl;
+    : state.localUiUrl || state.localOrigin || state.sidecarUrl;
   if (!base) {
     throw new Error('Local UI is not available');
   }
@@ -2850,10 +2462,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopApiBaseUrl = effectiveRuntimeConfig.apiBaseUrl || '';
   const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
   const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
-  const desktopHome = os.homedir() || '';
-  const desktopMacosMajor = String(macosMajorVersion());
-  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
-  const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const browserWindow = new BrowserWindow({
     title: 'OpenChamber Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
@@ -2862,22 +2470,19 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     minHeight: MINI_CHAT_MIN_WINDOW_HEIGHT,
     icon: getWindowIconPath(),
     show: false,
-    backgroundColor: '#151313',
+    backgroundColor: resolveSplashBackgroundColor(),
     frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
-      additionalArguments: [
-        `--openchamber-local-origin=${desktopLocalOrigin}`,
-        `--openchamber-api-base-url=${desktopApiBaseUrl}`,
-        `--openchamber-client-token=${desktopClientToken}`,
-        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
-        `--openchamber-home=${desktopHome}`,
-        `--openchamber-macos-major=${desktopMacosMajor}`,
-        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
-      ],
-      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      additionalArguments: buildRendererAdditionalArguments({
+        localOrigin: desktopLocalOrigin,
+        apiBaseUrl: desktopApiBaseUrl,
+        clientToken: desktopClientToken,
+        requestHeaders: desktopRequestHeaders,
+      }),
+      preload: resolvePreloadPath(),
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -2892,6 +2497,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   browserWindow.__ocMiniChat = true;
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
+
+  attachRendererRecovery(browserWindow, { log, label: 'mini chat' });
 
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
@@ -2989,7 +2596,7 @@ const resolveInitialUrl = async () => {
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
-  const skipLocalServer = shouldSkipLocalServer();
+  const skipLocalServer = await shouldSkipLocalServer();
   const startupProbePlan = resolveStartupUrlProbePlan({
     development: isDev,
     packagedUi: usePackagedUi,
@@ -3007,7 +2614,18 @@ const resolveInitialUrl = async () => {
     ? hmrUiUrl
     : localUrl;
 
+  if (localUiUrl === hmrUiUrl) {
+    // The HMR dev script wipes Vite's dependency cache on every start, so the
+    // regenerated dependency chunks get new names under the same `?v=` hash.
+    // Vite serves those chunks as immutable and Chromium's disk cache survives
+    // app restarts, so a stale chunk set keeps answering 504 "Outdated
+    // Optimize Dep" and the splash never clears. Drop the cache before the
+    // first navigation so the renderer fetches the current chunk set.
+    await session.defaultSession.clearCache();
+  }
+
   state.sidecarUrl = localUrl;
+  state.localUiUrl = localUiUrl;
   const localAvailable = Boolean(localUrl);
 
   const localOrigin = localUrl ? new URL(localUrl).origin : null;
@@ -3145,24 +2763,94 @@ const setupAutoUpdater = () => {
   });
 };
 
-const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
-  try {
-    const response = await fetch(CHANGELOG_URL, { signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) return null;
-    const changelog = await response.text();
-    const sections = changelog.split(/^##\s+\[/m).slice(1);
-    const relevant = [];
-    for (const section of sections) {
-      const version = section.split(']')[0];
-      if (compareSemver(version, fromVersion) > 0 && compareSemver(version, toVersion) <= 0) {
-        relevant.push(`## [${section}`.trim());
-      }
+// quitAndInstall() reports failures (rejected code signature, a Squirrel
+// session already disabled by an earlier failure) asynchronously on the
+// 'error' event, long after the call returns. Give the install that long to
+// either take the app down or report why it did not.
+const UPDATE_INSTALL_GRACE_MS = 15_000;
+
+// Releasing terminals, the managed OpenCode child, and SSH sessions must not
+// hold the installer hostage: a stuck session would otherwise keep the app on
+// the old version forever. The backend's own stop() is already bounded; this
+// bounds everything the install path waits on, beyond the backend's 35s limit.
+const UPDATE_SHUTDOWN_TIMEOUT_MS = 40_000;
+
+/**
+ * Hand the downloaded update to the platform installer and keep the IPC call
+ * open until the app quits or the updater reports a failure, so a rejected
+ * install reaches the renderer instead of dying in the log. Restores the
+ * quit/install flags when the install never happens.
+ */
+const installDownloadedUpdate = () => new Promise((resolve, reject) => {
+  let settled = false;
+  let graceTimer;
+
+  // Hold the process from here until the installer has control. Every quit
+  // path checks this, so closing the last window during shutdown can no longer
+  // end the app with the install still pending.
+  state.updateInstallPending = true;
+
+  const rollbackQuitState = () => {
+    state.updateInstallPending = false;
+    state.quitRequested = false;
+    state.installingUpdate = false;
+  };
+
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(graceTimer);
+    autoUpdater.off('error', fail);
+    rollbackQuitState();
+    log.error('[electron] update install failed', error);
+    reject(error instanceof Error ? error : new Error(String(error)));
+  };
+
+  autoUpdater.on('error', fail);
+
+  // Defer so the renderer's invoke channel is idle before the app starts
+  // shutting down.
+  setImmediate(async () => {
+    let shutdownTimer;
+    try {
+      // Stop the backend first, then declare the quit intent, then hand over.
+      // The flags exist only to let the installer's own quit through the
+      // hide-on-close and confirmation guards, so nothing sets them while the
+      // app is still doing work that can fail.
+      await Promise.race([
+        shutdownBackgroundServices(),
+        new Promise((resolveTimeout) => {
+          shutdownTimer = setTimeout(() => {
+            log.warn('[electron] background shutdown timed out before update install; continuing');
+            resolveTimeout(null);
+          }, UPDATE_SHUTDOWN_TIMEOUT_MS);
+        }),
+      ]);
+      if (settled) return;
+      // Start the installer error window after terminal cleanup, which can
+      // legitimately take longer than UPDATE_INSTALL_GRACE_MS.
+      graceTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        autoUpdater.off('error', fail);
+        resolve(null);
+      }, UPDATE_INSTALL_GRACE_MS);
+      state.quitRequested = true;
+      state.installingUpdate = true;
+      state.quitConfirmationPending = false;
+      log.info('[electron] handing control to the platform installer');
+      autoUpdater.quitAndInstall();
+      // The installer owns the exit from here; other quit paths may run again.
+      state.updateInstallPending = false;
+    } catch (error) {
+      fail(error);
+    } finally {
+      clearTimeout(shutdownTimer);
     }
-    return relevant.length > 0 ? relevant.join('\n\n') : null;
-  } catch {
-    return null;
-  }
-};
+  });
+});
+
+const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareSemver);
 
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 
@@ -3782,6 +3470,7 @@ const runSpecChain = (specs, appName) => {
 // The tunnel client lives in the web package (it already has a WebSocket
 // client) and is loaded only if the user actually previews a remote dev server.
 let devTunnelClientPromise = null;
+const relayDevTunnelBridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannelMain(), logger: log });
 const getDevTunnelClient = async () => {
   if (!devTunnelClientPromise) {
     devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
@@ -3795,6 +3484,7 @@ const getDevTunnelClient = async () => {
 };
 
 const closeAllDevTunnels = () => {
+  relayDevTunnelBridge.closeAll();
   if (!devTunnelClientPromise) return;
   const pending = devTunnelClientPromise;
   devTunnelClientPromise = null;
@@ -3803,6 +3493,10 @@ const closeAllDevTunnels = () => {
 
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
+    case 'desktop_pick_theme_file': {
+      const { pickThemeFile } = await import('./theme-file-picker.mjs');
+      return pickThemeFile({ showDialog: (options) => dialog.showOpenDialog(browserWindow || undefined, options) });
+    }
     case 'desktop_start_window_drag':
       return null;
 
@@ -3902,6 +3596,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!baseUrl) throw new Error('baseUrl is required');
       if (!(port > 0 && port <= 65535)) throw new Error('A valid port is required');
 
+      if (args.relay === true) {
+        const targetKey = typeof args.targetKey === 'string' ? args.targetKey.trim() : '';
+        return relayDevTunnelBridge.open({ targetKey, remotePort: port, webContents: browserWindow?.webContents });
+      }
+
       const headers = {};
       const requestHeaders = args.requestHeaders && typeof args.requestHeaders === 'object' ? args.requestHeaders : {};
       for (const [name, value] of Object.entries(requestHeaders)) {
@@ -3923,6 +3622,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const client = await getDevTunnelClient();
       return { closed: client.close({ baseUrl, port }) };
     }
+
+    case 'desktop_relay_dev_tunnel_close_all':
+      return { closed: relayDevTunnelBridge.closeForWebContents(browserWindow?.webContents.id) };
 
     /**
      * Forces prefers-color-scheme for one previewed page.
@@ -4335,11 +4037,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
       const hasCache = Boolean(cache);
-      const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
+      const isCacheStale = !cache
+        || cache.version !== INSTALLED_APPS_CACHE_VERSION
+        || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
         const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
-        await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
+        await fsp.writeFile(cachePath, JSON.stringify({ version: INSTALLED_APPS_CACHE_VERSION, updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);
       };
       if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
@@ -4383,7 +4087,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return getOrCreateDesktopInstallId();
 
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {}, String(args.expectedServerId || ''));
+      return probeDirectHostWithRetry((timeoutMs) => probeHostWithTimeout(
+        String(args.url || ''),
+        timeoutMs,
+        String(args.clientToken || ''),
+        args.requestHeaders || {},
+        String(args.expectedServerId || ''),
+      ));
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
@@ -4396,6 +4106,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_set_window_theme': {
       const mode = typeof args.themeMode === 'string' ? args.themeMode : '';
       const variant = typeof args.themeVariant === 'string' ? args.themeVariant : '';
+      const splash = args.splash && typeof args.splash === 'object' ? args.splash : null;
+      if (splash) {
+        const colors = {};
+        for (const key of ['bgLight', 'fgLight', 'bgDark', 'fgDark']) {
+          if (typeof splash[key] === 'string' && splash[key].trim()) colors[key] = splash[key].trim();
+        }
+        if (Object.keys(colors).length === 4) {
+          const current = readSettingsRoot().desktopSplashColors;
+          const unchanged = current && typeof current === 'object'
+            && ['bgLight', 'fgLight', 'bgDark', 'fgDark'].every((key) => current[key] === colors[key]);
+          if (!unchanged) {
+            void mutateSettingsRoot((root) => ({ ...root, desktopSplashColors: colors }));
+          }
+        }
+      }
       // Priority order: themeMode expresses the user's intent (including
       // "follow OS"). Variant is just the resolved variant at send time;
       // when mode === 'system' with variant === 'dark' (because OS is
@@ -4482,9 +4207,20 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
             const onError = (error) => finish(reject, error);
             autoUpdater.on('update-downloaded', onDownloaded);
             autoUpdater.on('error', onError);
-            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+            // downloadUpdate() resolves once the payload is on disk. It stays
+            // the authoritative signal: when the file was already cached the
+            // updater emits no 'update-downloaded', and waiting only for the
+            // event left this promise pending and its listeners attached on
+            // every retry.
+            Promise.resolve(autoUpdater.downloadUpdate())
+              .then(() => finish(resolve, null))
+              .catch((error) => finish(reject, error));
           });
         }
+        // The 'update-downloaded' event does not fire for an already cached
+        // payload, so record the payload as ready here too; otherwise restart
+        // would relaunch without installing anything.
+        state.pendingUpdate.downloaded = true;
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
@@ -4509,35 +4245,23 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       if (applyUpdate) {
-        // Match the working updater pattern closely: only bypass the macOS
-        // hide-on-close / quit-confirmation guards, leave the rest of the
-        // updater-driven quit/install sequence alone.
-        state.quitRequested = true;
-        state.installingUpdate = true;
-        state.quitConfirmationPending = false;
+        // The quit/install flags belong to installDownloadedUpdate(), which
+        // sets them once the backend is down and the installer is about to take
+        // over. Setting them here left a window in which closing the last
+        // window quit the app with the install still pending (#3027).
         if (state.mainWindow && !state.mainWindow.isDestroyed()) {
           try {
             debounceWindowStatePersist(state.mainWindow, true);
           } catch {
           }
         }
+        return await installDownloadedUpdate();
       }
       // Defer so the IPC reply flushes before the app starts shutting down.
-      // Without this, quitAndInstall() can race with the renderer's pending
-      // invoke and the restart appears to do nothing from the UI side.
+      // Without this, relaunch can race with the renderer's pending invoke and
+      // the restart appears to do nothing from the UI side.
       setImmediate(() => {
-        try {
-          if (applyUpdate) {
-            killSidecar();
-            autoUpdater.quitAndInstall();
-          } else {
-            prepareForQuit();
-            app.relaunch();
-            app.exit(0);
-          }
-        } catch (err) {
-          log.error('[electron] desktop_restart failed', err);
-        }
+        void performConfirmedQuit({ relaunch: true });
       });
       return null;
     }
@@ -4833,6 +4557,10 @@ const buildMacMenu = () => {
         { role: 'minimize' },
         { role: 'zoom' },
         { type: 'separator' },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
+        { label: 'Reset Zoom', accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
+        { type: 'separator' },
         { role: 'close' },
       ],
     },
@@ -4946,6 +4674,9 @@ const buildAutoHiddenMenu = () => {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
+        { label: 'Zoom In', accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
+        { label: 'Zoom Out', accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
+        { label: 'Reset Zoom', accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
         { role: 'togglefullscreen' },
         { type: 'separator' },
         { role: 'close' },
@@ -5345,7 +5076,12 @@ app.on('window-all-closed', () => {
   }
 
   if (process.platform !== 'darwin') {
+    if (state.updateInstallPending) {
+      log.info('[electron] window-all-closed while an update install is pending; leaving the exit to the installer');
+      return;
+    }
     if (state.installingUpdate) {
+      log.info('[electron] window-all-closed after the installer took over; quitting');
       app.quit();
     } else {
       performConfirmedQuit();
@@ -5374,7 +5110,7 @@ app.on('before-quit', (event) => {
   }
 });
 
-app.on('second-instance', (_event, argv) => {
+const handleSecondInstance = (argv) => {
   const urls = Array.isArray(argv)
     ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
     : [];
@@ -5384,15 +5120,33 @@ app.on('second-instance', (_event, argv) => {
   } else {
     void openMainWindow();
   }
-});
+};
 
-app.on('open-url', (event, url) => {
-  event.preventDefault();
+const handleOpenUrl = (url) => {
   handleDeepLinks([url]);
   if (BrowserWindow.getAllWindows().length === 0) {
     void openMainWindow();
   }
+};
+
+app.on('second-instance', (_event, argv) => {
+  handleSecondInstance(argv);
 });
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleOpenUrl(url);
+});
+
+// Events the entry module buffered while this module was loading. Replayed
+// once startup has resolved, so a deep link that arrives with the launch
+// cannot start a second backend resolution next to the one in progress.
+const replayDeferredAppEvents = () => {
+  for (const event of takeDeferredAppEvents()) {
+    if (event.type === 'open-url') handleOpenUrl(event.url);
+    else if (event.type === 'second-instance') handleSecondInstance(event.argv);
+  }
+};
 
 app.on('activate', async () => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
@@ -5416,9 +5170,14 @@ app.on('activate', async () => {
 });
 
 app.whenReady().then(async () => {
-  recordElectronStartupPerformance('electron.app.ready');
+  if (wasEarlyWindowClosed()) return;
   const loginItemSettings = readLoginItemSettings();
   const isBackgroundStart = shouldStartInBackground(loginItemSettings);
+  // The window goes up before anything else so the splash renders while the
+  // rest of startup runs. Everything below shares the main thread with the
+  // renderer's navigation callbacks, and importing the server module graph
+  // blocks it for a few hundred milliseconds.
+  const mainWindowShown = isBackgroundStart ? null : showMainWindowWithSplash();
   log.info('[electron] app starting', {
     version: APP_VERSION,
     packaged: app.isPackaged,
@@ -5473,23 +5232,20 @@ app.whenReady().then(async () => {
     state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
     // Serverless background startup re-probes the remote when a window is
     // eventually opened instead of trusting reachability from login time.
-    state.startupResolved = !shouldSkipLocalServer();
+    state.startupResolved = !(await shouldSkipLocalServer());
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
+    replayDeferredAppEvents();
     return;
   }
-
-  state.mainWindow = createBrowserWindow({
-    label: 'main',
-    restoreGeometry: true,
-    url: null,
-  });
 
   const initial = extractInitialDeepLinks();
   if (initial.length > 0) handleDeepLinks(initial);
 
+  await mainWindowShown;
   const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  replayDeferredAppEvents();
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.
@@ -5497,6 +5253,7 @@ app.whenReady().then(async () => {
     emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
   });
 }).catch((error) => {
+  if (state.quitInProgress) return;
   log.error('[electron] startup failed:', error);
   app.exit(1);
 });

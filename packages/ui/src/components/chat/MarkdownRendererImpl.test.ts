@@ -129,6 +129,7 @@ const installRendererDom = () => {
             setTimeout,
             clearTimeout,
             requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0),
+            cancelAnimationFrame: clearTimeout,
         },
     });
     Object.defineProperty(globalThis, 'MutationObserver', {
@@ -193,6 +194,8 @@ const fakeReact = {
         return hookStates[index] as { current: T };
     },
     memo: <T>(component: T): T => component,
+    createContext: <T>(defaultValue: T) => ({ Provider: 'provider', defaultValue }),
+    useContext: <T>(context: { defaultValue: T }): T => context.defaultValue,
 };
 
 const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeElement[]): FakeElement => {
@@ -249,7 +252,6 @@ mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () 
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ editor: undefined, runtime: { isVSCode: false } }) }));
 mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, isDesktopShell: () => false, isVSCodeRuntime: () => false }));
 mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
-mock.module('@/lib/outsideFileGrants', () => ({ ensureOutsideFileGrantForDesktop: async () => undefined }));
 mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, toAbsoluteFilePath: () => '' }));
 mock.module('./markdown/markdownCore', () => ({
     getCachedMarkdownBlocks: () => cachedRendererBlocks,
@@ -286,6 +288,7 @@ mock.module('./markdown/decorate', () => ({
         );
     },
     getMarkdownCodeText: () => '',
+    stabilizeMarkdownTableWidths: () => undefined,
 }));
 mock.module('./markdown/textPosition', () => ({ findTextPosition: () => null }));
 mock.module('./markdown/mermaidViewer', () => ({

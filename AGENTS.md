@@ -28,6 +28,8 @@ read. Skill loading is a required part of the task, not optional guidance.
 - `packages/vscode`: extension host, webview, and runtime bridge.
 - `packages/mobile`: Capacitor iOS/Android shell; bundles the mobile web surface and connects to an existing OpenChamber server.
 - `packages/docs`: product documentation; not a Bun workspace.
+- `packages/sdk`: guest contract for third-party panels. Manifest parse, iframe envelope, `connectHost`. Host and guest import from here; do not copy these types into `packages/ui`.
+- `packages/extensions`: app-owned SDK extensions and their build registry, not a Bun workspace. See its `DOCUMENTATION.md` for trust, packaging, and migration rules.
 
 Shared UI calls official OpenCode APIs through `@opencode-ai/sdk/v2`. OpenChamber-owned capabilities use `RuntimeAPIs`, `runtimeFetch`, and shared browser/realtime transport helpers. Server-side upstream integrations may use their owning runtime modules.
 
@@ -42,6 +44,7 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - Do not add dependencies unless explicitly requested.
 - Never add or log secrets, bearer tokens, pairing credentials, or sensitive user data.
 - Keep changes minimal and preserve unrelated worktree changes.
+- Release notes are the maintainer's release-time work: they get written once, as one story, in `changelog/unreleased.md` when the maintainer asks to update the changelog. Until that request, treat `changelog/` as read-only — a fix, feature, or merged PR lands without a changelog line. `packages/vscode/CHANGELOG.md` and `changelog/index.json` are generated from `changelog/*.md` by `oc-dev create-release`, and `CHANGELOG.md` is a legacy copy for older installs: never edit or regenerate any of them; an agent's only changelog output is `changelog/unreleased.md`.
 - Enforce security and correctness in core/runtime logic, not only UI visibility or prompts.
 - Keep entrypoints and bridges thin; place domain logic in focused owning modules.
 - Update owning documentation when module ownership, contracts, or invariants change.
@@ -56,6 +59,12 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - One failed entity must not erase or block unrelated complete entities.
 - Runtime-specific differences must be intentional and visible in code.
 
+## Communication
+
+You and the maintainer are two people solving a problem together — talk like a trusted colleague, not a report generator. Plain words, short sentences, mechanisms explained through what the user experiences. Warm and direct, never familiar. A reply is something read in minutes, not a separate reading task: put the conclusion first and stand behind it. Answer in the language the maintainer addressed you in; code, comments, and docs stay in English.
+
+When writing or editing user-facing text — docs, UI copy, PR/issue comments, READMEs — load `.agents/skills/communication-style/SKILL.md` and apply its checklist.
+
 ## Documentation Discovery
 
 Before changing a module, search for the nearest `DOCUMENTATION.md`; before package-level work, read its `README.md`. Discover docs dynamically under `packages/**/DOCUMENTATION.md` rather than relying on a static exhaustive map.
@@ -69,6 +78,7 @@ High-value anchors:
 - VS Code runtime: `packages/vscode/src/DOCUMENTATION.md`
 - Electron: `packages/electron/README.md`
 - Mobile: `packages/mobile/README.md`
+- SDK: `packages/sdk/DOCUMENTATION.md`
 
 ## Project Skills
 
@@ -79,9 +89,6 @@ task-required reference named by those skills. Skills are canonical for their
 detailed workflows and checklists. Treating this table as optional advice is a
 process violation.
 
-**Always load `.agents/skills/communication-style/SKILL.md` at the start of
-every task, before any analysis, tool call, or response. Apply its guidance to
-all messages and written output, not only to user-facing copy or documentation.**
 
 | Trigger | Required skill |
 |---|---|
@@ -90,6 +97,7 @@ all messages and written output, not only to user-facing copy or documentation.*
 | Shared UI data access, OpenCode SDK or server routes, `RuntimeAPIs`, runtime auth/URLs, bridges, or runtime switching | `ui-api-decoupling` |
 | Electron main/preload, IPC, native UI, updater, deep links, SSH/tunnels, packaging, or child processes | `desktop-shell` |
 | Session sync, bootstrap/reconnect, reducers, polling, optimistic state, queues, live status, reconciliation, or directory-scoped caches | `sync-state-invariants` |
+| Isolated-space trust boundaries: hardening, networks and gatekeeper policy, exec and lifecycle, grants and credentials, code transfer and apply, dispatcher isolation, preview content, or protection tests | `isolated-space-boundary` |
 | Render/store/event hot paths, large lists, caches/indexes, or reported lag, freezes, CPU/memory, startup, or performance regressions | `performance-engineering` |
 | WebSocket, SSE, streaming transport, runtime transport internals, or private relay | `relay-transport` |
 | UI components, styling, colors, buttons, or icons | `theme-system` |
@@ -97,8 +105,11 @@ all messages and written output, not only to user-facing copy or documentation.*
 | Settings UI, settings dialogs, configuration surfaces, or settings search | `settings-ui-patterns` |
 | Sortable or drag-to-reorder behavior, especially `@dnd-kit` and touch/wrapping layouts | `drag-to-reorder` |
 | iOS Simulator build, launch, preview, gestures, or `serve-sim` control | `serve-sim` |
-| Drafting or updating user-facing CHANGELOG entries for the `[Unreleased]` section (main app or VS Code extension) | `changelog-authoring` |
+| The maintainer explicitly asks to update the changelog (main app or VS Code extension) — the only time `changelog/unreleased.md` is edited | `update-changelog` |
 | Creating or editing skills, `AGENTS.md`, or docs reached through agent instructions/context pointers | `writing-for-agents` |
+| Reviewing a single pull request or drafting a PR verdict/close/review comment | `pr-review` |
+| Triaging, cleaning up, or batch-processing the open PR queue | `triage-prs` |
+| Triaging, cleaning up, or batch-processing the issue backlog | `triage-issues` |
 
 Pure code-reading or explanation does not require implementation skills unless needed to interpret a specialized subsystem.
 
@@ -110,6 +121,7 @@ Keep each cross-cutting rule with one canonical owner; companion skills add only
 |---|---|
 | Change scope, abstraction discipline, and validation risk | `openchamber-change-discipline` |
 | State authority, reconciliation, optimistic state, and lifecycle correctness | `sync-state-invariants` |
+| Isolated-space trust boundaries and the evidence that each one holds | `isolated-space-boundary` |
 | Measurement, hot-path cost, caching performance, and optimization evidence | `performance-engineering` |
 | Shared UI API and runtime boundaries | `ui-api-decoupling` |
 | WebSocket/SSE and private relay mechanics | `relay-transport` |

@@ -16,13 +16,26 @@ import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { normalizePath } from "@/lib/pathNormalization"
 import { startSessionLoadPerformanceEvent } from "./session-load-performance"
+import { dropSessionCaches } from "./session-cache"
+import { SessionCacheRetention } from "./session-cache-retention"
+import { SESSION_CACHE_LIMIT } from "./types"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const INITIAL_MESSAGE_PAGE_SIZE = 50
-const CONSTRAINED_INITIAL_MESSAGE_PAGE_SIZE = 30
+// One agent turn can span well over a hundred tool steps, so the first
+// request is sized to hold a long last turn without a follow-up read.
+const INITIAL_MESSAGE_PAGE_SIZE = 100
+const CONSTRAINED_INITIAL_MESSAGE_PAGE_SIZE = 50
 const HISTORY_MESSAGE_PAGE_SIZE = 100
-const INITIAL_PAGE_EXPANSION_LIMITS = [100, 150] as const
-const CONSTRAINED_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
+// Extra pages one interactive history action may read to reach a user prompt.
+const HISTORY_TURN_ALIGNMENT_EXTRA_PAGES = 2
+// Cold navigation aims for this many user-led turns within the expansion bounds.
+const INITIAL_USER_TURNS = 10
+const CONSTRAINED_SESSION_CACHE_LIMIT = 6
+// Cold navigation extends the first page backward through the cursor, one
+// page at a time, until INITIAL_USER_TURNS prompts are present or this many
+// records are held. Nothing already downloaded is requested again.
+const INITIAL_WINDOW_MAX_RECORDS = 300
+const CONSTRAINED_INITIAL_WINDOW_MAX_RECORDS = 200
 
 export type SessionMessageTarget = {
   directory: string
@@ -51,6 +64,8 @@ type LoaderEntry = {
   queuedRefresh: Promise<void> | null
   queuedRefreshLimit: number
   optimistic: Map<string, OptimisticItem>
+  /** History was dropped by retention; events since then are not coverage. */
+  evicted: boolean
 }
 
 type FetchedPage = {
@@ -74,9 +89,9 @@ const isConstrainedRuntime = () => isVSCodeRuntime() || isMobileSurfaceRuntime()
 const getInitialPageSize = () => isConstrainedRuntime()
   ? CONSTRAINED_INITIAL_MESSAGE_PAGE_SIZE
   : INITIAL_MESSAGE_PAGE_SIZE
-const getInitialExpansionLimits = () => isConstrainedRuntime()
-  ? CONSTRAINED_INITIAL_PAGE_EXPANSION_LIMITS
-  : INITIAL_PAGE_EXPANSION_LIMITS
+const getInitialWindowMaxRecords = () => isConstrainedRuntime()
+  ? CONSTRAINED_INITIAL_WINDOW_MAX_RECORDS
+  : INITIAL_WINDOW_MAX_RECORDS
 
 const isUserMessage = (message: Message): boolean => {
   const candidate = message as Message & { clientRole?: unknown; role?: unknown }
@@ -85,6 +100,14 @@ const isUserMessage = (message: Message): boolean => {
 }
 
 const hasUserMessage = (messages: Message[]): boolean => messages.some(isUserMessage)
+
+const hasInitialTurns = (messages: Message[]): boolean => {
+  let turns = 0
+  for (const message of messages) {
+    if (isUserMessage(message) && ++turns === INITIAL_USER_TURNS) return true
+  }
+  return false
+}
 
 const formatSdkError = (error: unknown): string => {
   if (error instanceof Error) return error.message
@@ -131,6 +154,10 @@ export class SessionMessageLoader {
   private sdkEpoch = 0
   private disposed = false
   private readonly entries = new Map<string, LoaderEntry>()
+  private retention: SessionCacheRetention | null = null
+  private releaseDerivedCache: (target: SessionMessageTarget) => void = () => undefined
+  private readonly historyReaders = new Map<string, number>()
+  private readonly renderedSessions = new Map<string, number>()
 
   constructor(
     private readonly childStores: ChildStoreManager,
@@ -176,6 +203,105 @@ export class SessionMessageLoader {
     this.disposed = false
   }
 
+  startCacheRetention(options: {
+    idleTtlMs?: number
+    isCurrent: () => boolean
+    isViewed: (target: SessionMessageTarget) => boolean
+    isActive: (target: SessionMessageTarget) => boolean
+    releaseDerivedCache: (target: SessionMessageTarget) => void
+  }): () => void {
+    this.retention?.dispose()
+    this.releaseDerivedCache = options.releaseDerivedCache
+    const retention = new SessionCacheRetention(this.childStores, {
+      limit: isConstrainedRuntime() ? CONSTRAINED_SESSION_CACHE_LIMIT : SESSION_CACHE_LIMIT,
+      idleTtlMs: options.idleTtlMs,
+      isCurrent: options.isCurrent,
+      isViewed: options.isViewed,
+      isProtected: (target) => {
+        const key = this.keyFor(target)
+        const entry = this.entries.get(key)
+        return options.isActive(target) || Boolean(this.historyReaders.get(key))
+          || Boolean(this.renderedSessions.get(key))
+          || Boolean(entry?.inflight) || Boolean(entry?.optimistic.size)
+      },
+      evict: (target) => this.evictSessionHistory(target),
+    })
+    this.retention = retention
+    return () => {
+      retention.dispose()
+      if (this.retention === retention) this.retention = null
+    }
+  }
+
+  touchSessionCache(target: SessionMessageTarget): void {
+    const normalized = this.normalizeTarget(target)
+    if (normalized) this.retention?.touch(normalized)
+  }
+
+  scheduleCacheRetention(directory: string): void {
+    const normalized = normalizePath(directory)
+    if (normalized) this.retention?.schedule(normalized)
+  }
+
+  /** Hold history for an imperative reader or a transcript still on screen. */
+  retainSessionHistory(target: SessionMessageTarget, reason: "read" | "rendered" = "read"): () => void {
+    const normalized = this.normalizeTarget(target)
+    if (!normalized) return () => undefined
+    const key = this.keyFor(normalized)
+    const holders = reason === "rendered" ? this.renderedSessions : this.historyReaders
+    holders.set(key, (holders.get(key) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const remaining = (holders.get(key) ?? 1) - 1
+      if (remaining > 0) holders.set(key, remaining)
+      else holders.delete(key)
+      this.scheduleCacheRetention(normalized.directory)
+    }
+  }
+
+  private evictSessionHistory(target: SessionMessageTarget): void {
+    const store = this.childStores.getChild(target.directory)
+    if (!store) return
+    const current = store.getState()
+    const draft = {
+      message: { ...current.message }, part: { ...current.part },
+      session_status: { ...current.session_status }, session_diff: { ...current.session_diff },
+      todo: { ...current.todo }, permission: { ...current.permission }, question: { ...current.question },
+    }
+    this.invalidateSession(target)
+    this.getEntry(target).evicted = true
+    clearSessionPrefetch(target.directory, [target.sessionID], this.runtimeKey)
+    dropSessionCaches(draft, [target.sessionID])
+    this.releaseDerivedCache(target)
+    store.setState(draft)
+  }
+
+  initializeCreatedSession(target: SessionMessageTarget): void {
+    const normalized = this.normalizeTarget(target)
+    if (!normalized || this.disposed) return
+    const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
+    const current = store.getState()
+    // The create response establishes an empty transcript, but events or a
+    // prompt may already have materialized a newer snapshot while it travelled.
+    if (current.message[normalized.sessionID] !== undefined) return
+    const entry = this.getEntry(normalized)
+    this.bumpGeneration(entry)
+    entry.inflight = null
+    store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
+    this.patchEntry(entry, {
+      status: "ready",
+      loadingKind: null,
+      error: null,
+      resolved: true,
+      cursor: undefined,
+      complete: true,
+      updatedAt: Date.now(),
+    })
+    this.persistCoverage(normalized, entry.snapshot)
+  }
+
   ensure(
     target: SessionMessageTarget,
     options?: { force?: boolean; reason?: "navigation" | "reactive" | "prefetch" },
@@ -185,7 +311,10 @@ export class SessionMessageLoader {
     const entry = this.getEntry(normalized)
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID)
-    if (!options?.force && materialization.renderable) {
+    if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
+    // Messages that arrived by event after an eviction are renderable but are
+    // not history coverage: the earlier transcript must be fetched again.
+    if (!options?.force && materialization.renderable && !entry.evicted) {
       if (!entry.snapshot.resolved) {
         this.patchEntry(entry, {
           status: "ready",
@@ -210,20 +339,51 @@ export class SessionMessageLoader {
   }
 
   prefetch(target: SessionMessageTarget): Promise<void> {
-    return this.ensure(target, { reason: "prefetch" })
+    const normalized = this.normalizeTarget(target)
+    if (!normalized || this.disposed) return Promise.resolve()
+    this.childStores.ensureChild(normalized.directory, { bootstrap: false })
+    if (this.retention && !this.retention.admitPrefetch(normalized)) return Promise.resolve()
+    return this.ensure(normalized, { reason: "prefetch" })
   }
 
   loadOlder(target: SessionMessageTarget): Promise<void> {
+    return this.loadOlderPage(target, "interactive")
+  }
+
+  private loadOlderPage(target: SessionMessageTarget, mode: "interactive" | "complete"): Promise<void> {
     const normalized = this.normalizeTarget(target)
     if (!normalized || this.disposed) return Promise.resolve()
     const entry = this.getEntry(normalized)
-    if (entry.inflight) return entry.inflight.then(() => this.loadOlder(normalized))
+    if (entry.inflight) {
+      if (entry.snapshot.loadingKind === "older") return entry.inflight
+      return entry.inflight.then(() => this.loadOlderPage(normalized, mode))
+    }
     if (entry.snapshot.complete || !entry.snapshot.cursor) return Promise.resolve()
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const cursor = entry.snapshot.cursor
     return this.startLoad(normalized, entry, store, "older", async (isCurrent, performance) => {
-      const page = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, cursor, "older", performance)
+      let page = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, cursor, "older", performance)
       if (!isCurrent()) return
+      const visited = new Set([cursor])
+      // An interactive batch tries to start on a user prompt so the oldest
+      // visible turn is whole. Every fetched record is kept, and the server
+      // cursor stays authoritative; the extra reads are bounded.
+      for (let extra = 0; mode === "interactive" && extra < HISTORY_TURN_ALIGNMENT_EXTRA_PAGES; extra += 1) {
+        if (page.complete || !page.session[0] || isUserMessage(page.session[0])) break
+        if (!page.cursor || visited.has(page.cursor)) throw new Error("Session history pagination made no progress")
+        visited.add(page.cursor)
+        const older = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, page.cursor, "older", performance)
+        if (!isCurrent()) return
+        if (older.session.length === 0 && !older.complete) throw new Error("Session history pagination made no progress")
+        page = {
+          session: [...older.session, ...page.session],
+          partsByMessageID: new Map([...page.partsByMessageID, ...older.partsByMessageID]),
+          cursor: older.cursor,
+          complete: older.complete,
+        }
+      }
+      // Commit the whole batch atomically. A failed follow-up read keeps the
+      // previous visible history and its retry cursor intact.
       const committed = this.commitPage(normalized, entry, store, page, "prepend", isCurrent)
       if (!committed || !isCurrent()) return
       this.patchEntry(entry, {
@@ -243,21 +403,26 @@ export class SessionMessageLoader {
   async loadComplete(target: SessionMessageTarget): Promise<void> {
     const normalized = this.normalizeTarget(target)
     if (!normalized || this.disposed) throw new Error("Session message loader is unavailable")
-    const initial = this.getSnapshot(normalized)
-    await this.ensure(normalized, { force: !initial.resolved })
+    const release = this.retainSessionHistory(normalized)
+    try {
+      const initial = this.getSnapshot(normalized)
+      await this.ensure(normalized, { force: !initial.resolved })
 
-    const visitedCursors = new Set<string>()
-    while (true) {
-      const snapshot = this.getSnapshot(normalized)
-      if (snapshot.status === "error") throw snapshot.error ?? new Error("Session history could not be loaded")
-      if (snapshot.complete) return
-      if (!snapshot.cursor) throw new Error("Session history coverage is unresolved")
-      if (visitedCursors.has(snapshot.cursor)) {
-        throw new Error("Session history pagination made no progress")
+      const visitedCursors = new Set<string>()
+      while (true) {
+        const snapshot = this.getSnapshot(normalized)
+        if (snapshot.status === "error") throw snapshot.error ?? new Error("Session history could not be loaded")
+        if (snapshot.complete) return
+        if (!snapshot.cursor) throw new Error("Session history coverage is unresolved")
+        if (visitedCursors.has(snapshot.cursor)) {
+          throw new Error("Session history pagination made no progress")
+        }
+        visitedCursors.add(snapshot.cursor)
+
+        await this.loadOlderPage(normalized, "complete")
       }
-      visitedCursors.add(snapshot.cursor)
-
-      await this.loadOlder(normalized)
+    } finally {
+      release()
     }
   }
 
@@ -405,6 +570,8 @@ export class SessionMessageLoader {
 
   dispose(): void {
     this.disposed = true
+    this.retention?.dispose()
+    this.retention = null
     this.sdkEpoch += 1
     for (const entry of this.entries.values()) {
       this.bumpGeneration(entry)
@@ -448,6 +615,7 @@ export class SessionMessageLoader {
       queuedRefresh: null,
       queuedRefreshLimit: 0,
       optimistic: new Map(),
+      evicted: false,
     }
     this.entries.set(key, entry)
     return entry
@@ -511,6 +679,7 @@ export class SessionMessageLoader {
       })
       .finally(() => {
         if (entry.inflight === promise) entry.inflight = null
+        this.scheduleCacheRetention(target.directory)
       })
     entry.inflight = promise
     return promise
@@ -524,33 +693,37 @@ export class SessionMessageLoader {
     performance?: LoadPerformanceDetails,
   ): Promise<void> {
     const storeMessageCount = store.getState().message[target.sessionID]?.length ?? 0
+    // Cold navigation aims for several whole turns; history readers and
+    // sessions that already hold messages only need one user boundary.
+    const coldNavigation = (storeMessageCount === 0 || entry.evicted) && !this.historyReaders.get(this.keyFor(target))
+    const hasBoundary = coldNavigation ? hasInitialTurns : hasUserMessage
     const firstLimit = Math.max(entry.snapshot.limit, storeMessageCount, getInitialPageSize())
     const firstPage = await this.fetchPage(target, firstLimit, undefined, "initial-page", performance)
     if (!isCurrent()) return
-    const deferFirstCommit = !firstPage.complete && !hasUserMessage(firstPage.session)
-    let committed = deferFirstCommit
-      ? { messages: firstPage.session }
-      : this.commitPage(target, entry, store, firstPage, "merge", isCurrent)
     let acceptedPage = firstPage
 
-    if (deferFirstCommit) {
-      for (const limit of getInitialExpansionLimits()) {
-        if (limit <= firstLimit || !isCurrent()) continue
-        const expandedPage = await this.fetchPage(target, limit, undefined, "initial-page", performance)
-        if (!isCurrent()) return
-        acceptedPage = expandedPage
-        const boundaryFound = hasUserMessage(expandedPage.session)
-        const isLast = limit === getInitialExpansionLimits()[getInitialExpansionLimits().length - 1]
-        if (expandedPage.complete || boundaryFound || isLast) {
-          committed = this.commitPage(target, entry, store, expandedPage, "merge", isCurrent)
-        } else {
-          committed = { messages: expandedPage.session }
-        }
-        if (expandedPage.complete || boundaryFound) break
+    const visited = new Set<string>()
+    while (!acceptedPage.complete && !hasBoundary(acceptedPage.session)
+      && acceptedPage.session.length < getInitialWindowMaxRecords()) {
+      const cursor = acceptedPage.cursor
+      if (!cursor || visited.has(cursor)) break
+      visited.add(cursor)
+      const remaining = getInitialWindowMaxRecords() - acceptedPage.session.length
+      const older = await this.fetchPage(target, Math.min(HISTORY_MESSAGE_PAGE_SIZE, remaining), cursor, "initial-page", performance)
+      if (!isCurrent()) return
+      if (older.session.length === 0 && !older.complete) break
+      acceptedPage = {
+        session: [...older.session, ...acceptedPage.session],
+        partsByMessageID: new Map([...acceptedPage.partsByMessageID, ...older.partsByMessageID]),
+        cursor: older.cursor,
+        complete: older.complete,
       }
     }
 
+    // Publish the chosen window once.
+    const committed = this.commitPage(target, entry, store, acceptedPage, "merge", isCurrent)
     if (!committed || !isCurrent()) return
+    entry.evicted = false
     this.patchEntry(entry, {
       status: "ready",
       loadingKind: null,

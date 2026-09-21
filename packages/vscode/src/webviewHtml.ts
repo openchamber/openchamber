@@ -195,38 +195,64 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},
     };
     window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
-    
-    function getBootstrapMessages() {
-      var locale = 'en';
+    // VS Code's display language. The UI bundle uses it as the default locale
+    // until the user picks one; the splash below picks its strings from it too.
+    window.__OPENCHAMBER_HOST_LANGUAGE__ = ${JSON.stringify(vscode.env.language)};
+
+    // OpenChamber's own saved locale wins; before one exists, VS Code's display
+    // language decides, so a fresh install in a supported language never boots
+    // in English.
+    function resolveBootstrapLanguage() {
       try {
         var rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
         if (rawLocale) {
           var parsedLocale = JSON.parse(rawLocale);
-          if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-            locale = 'fr';
-          }
+          if (parsedLocale && typeof parsedLocale.locale === 'string') return parsedLocale.locale.toLowerCase();
         }
       } catch {}
+      return String(window.__OPENCHAMBER_HOST_LANGUAGE__ || '').toLowerCase();
+    }
 
-      return locale === 'fr'
-        ? {
-            startingApi: 'Démarrage de l’API OpenCode…',
-            initializing: 'Initialisation…',
-            connecting: 'Connexion…',
-            connected: 'Connecté !',
-            connectionError: 'Erreur de connexion',
-            reconnecting: 'Reconnexion…',
-            cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
-          }
-        : {
-            startingApi: 'Starting OpenCode API…',
-            initializing: 'Initializing…',
-            connecting: 'Connecting…',
-            connected: 'Connected!',
-            connectionError: 'Connection error',
-            reconnecting: 'Reconnecting…',
-            cliNotFound: 'OpenCode CLI not found. Please install it first.',
-          };
+    function getBootstrapMessages() {
+      var locale = 'en';
+      var detected = resolveBootstrapLanguage();
+      if (detected.indexOf('fr') === 0) {
+        locale = 'fr';
+      } else if (detected.indexOf('tr') === 0) {
+        locale = 'tr';
+      }
+
+      if (locale === 'fr') {
+        return {
+          startingApi: 'Démarrage de l’API OpenCode…',
+          initializing: 'Initialisation…',
+          connecting: 'Connexion…',
+          connected: 'Connecté !',
+          connectionError: 'Erreur de connexion',
+          reconnecting: 'Reconnexion…',
+          cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
+        };
+      }
+      if (locale === 'tr') {
+        return {
+          startingApi: 'OpenCode API başlatılıyor…',
+          initializing: 'Başlatılıyor…',
+          connecting: 'Bağlanıyor…',
+          connected: 'Bağlandı!',
+          connectionError: 'Bağlantı hatası',
+          reconnecting: 'Yeniden bağlanıyor…',
+          cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
+        };
+      }
+      return {
+        startingApi: 'Starting OpenCode API…',
+        initializing: 'Initializing…',
+        connecting: 'Connecting…',
+        connected: 'Connected!',
+        connectionError: 'Connection error',
+        reconnecting: 'Reconnecting…',
+        cliNotFound: 'OpenCode CLI not found. Please install it first.',
+      };
     }
 
     (function applyBootstrapLocale() {
@@ -279,18 +305,19 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 
       const statusEl = document.getElementById('loading-status');
       const getDevMessages = () => {
-        try {
-          const rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
-          if (rawLocale) {
-            const parsedLocale = JSON.parse(rawLocale);
-            if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-              return {
-                startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
-                waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
-              };
-            }
-          }
-        } catch {}
+        const detected = resolveBootstrapLanguage();
+        if (detected.indexOf('fr') === 0) {
+          return {
+            startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
+            waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
+          };
+        }
+        if (detected.indexOf('tr') === 0) {
+          return {
+            startingDevServer: (host) => 'Webview dev sunucusu başlatılıyor (' + host + ')...',
+            waitingDevServer: (host, attempt) => 'Webview dev sunucusu bekleniyor (' + host + ')... deneme ' + attempt,
+          };
+        }
         return {
           startingDevServer: (host) => 'Starting webview dev server (' + host + ')...',
           waitingDevServer: (host, attempt) => 'Waiting for webview dev server (' + host + ')... attempt ' + attempt,

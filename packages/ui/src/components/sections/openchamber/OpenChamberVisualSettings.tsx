@@ -1,10 +1,12 @@
 import React from 'react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { ThemeImportButton } from './ThemeImportButton';
+import { ThemeSelectItem } from './ThemeSelectItem';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
@@ -27,7 +29,7 @@ import {
 } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -54,15 +56,23 @@ import {
     SETTINGS_CLUSTER_CONTROL_CLASS,
     SETTINGS_NUMBER_STEPPER_ROW_CLASS,
     SETTINGS_NUMBER_UNIT_CLASS,
+    SETTINGS_NUMBER_INPUT_CLASS,
     SETTINGS_FIELDS_STACK_CLASS,
     SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { TerminalShellOption } from '@/lib/api/types';
+import {
+    MAX_INPUT_HISTORY_LIMIT,
+    MIN_INPUT_HISTORY_LIMIT,
+    isInputHistoryLimit,
+    type InputHistoryScope,
+} from '@/lib/inputHistoryScope';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 
 interface Option<T extends string> {
     id: T;
@@ -263,11 +273,37 @@ const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
     },
 ];
 
+const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: Option<LargeTextPasteBehavior>[] = [
+    {
+        id: 'ask',
+        labelKey: 'settings.openchamber.visual.option.largeTextPaste.ask.label',
+    },
+    {
+        id: 'attach',
+        labelKey: 'settings.openchamber.visual.option.largeTextPaste.attach.label',
+    },
+    {
+        id: 'inline',
+        labelKey: 'settings.openchamber.visual.option.largeTextPaste.inline.label',
+    },
+];
+
+const INPUT_HISTORY_SCOPE_OPTIONS: Option<InputHistoryScope>[] = [
+    {
+        id: 'global',
+        labelKey: 'settings.openchamber.visual.option.inputHistoryScope.global.label',
+    },
+    {
+        id: 'session',
+        labelKey: 'settings.openchamber.visual.option.inputHistoryScope.session.label',
+    },
+];
+
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'animatedActivityIndicators';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -307,6 +343,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setStreamingAutoFollowEnabled = useUIStore(state => state.setStreamingAutoFollowEnabled);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
+    const animatedActivityIndicators = useSessionDisplayStore((s) => s.animatedActivityIndicators);
+    const setAnimatedActivityIndicators = useSessionDisplayStore((s) => s.setAnimatedActivityIndicators);
 
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
@@ -358,10 +396,21 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
     const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
+    const inputHistoryScope = useInputHistoryStore(state => state.scope);
+    const inputHistoryLimit = useInputHistoryStore(state => state.entryLimit);
+    const applyInputHistoryScope = useInputHistoryStore(state => state.applyScope);
+    const applyInputHistoryLimit = useInputHistoryStore(state => state.applyEntryLimit);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
     const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
+    const largeTextPasteBehavior = useUIStore(state => state.largeTextPasteBehavior);
+    const setLargeTextPasteBehavior = useUIStore(state => state.setLargeTextPasteBehavior);
+    const enterToSend = useUIStore(state => state.enterToSend);
+    const setEnterToSend = useUIStore(state => state.setEnterToSend);
+    const enterToSendConfigured = useUIStore(state => state.enterToSendConfigured);
+    const setEnterToSendConfigured = useUIStore(state => state.setEnterToSendConfigured);
+    const enterSendSelected = enterToSendConfigured ? enterToSend : !isMobile;
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
@@ -410,6 +459,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     );
     const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
     const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
+    const alwaysShowScrollbars = useUIStore(state => state.alwaysShowScrollbars === true);
+    const setAlwaysShowScrollbars = useUIStore(state => state.setAlwaysShowScrollbars);
     const showWindowControlsPosition = usesFramelessElectronChrome();
     const desktopWindowControlsPosition = useUIStore((state) => state.desktopWindowControlsPosition);
     const setDesktopWindowControlsPosition = useUIStore((state) => state.setDesktopWindowControlsPosition);
@@ -521,6 +572,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
     }, [setInputSpellcheckEnabled]);
 
+    const handleEnterToSendChange = React.useCallback((enabled: boolean) => {
+        setEnterToSend(enabled);
+        setEnterToSendConfigured(true);
+        void updateDesktopSettings({ enterToSend: enabled, enterToSendConfigured: true });
+    }, [setEnterToSend, setEnterToSendConfigured]);
+
     const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
         setChatRenderMode(mode);
         void updateDesktopSettings({ chatRenderMode: mode });
@@ -530,6 +587,20 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setMessageStreamTransport(mode);
         void updateDesktopSettings({ messageStreamTransport: mode });
     }, [setMessageStreamTransport]);
+
+    const handleInputHistoryScopeChange = React.useCallback((scope: InputHistoryScope) => {
+        applyInputHistoryScope(scope);
+        void updateDesktopSettings({ inputHistoryScope: scope });
+    }, [applyInputHistoryScope]);
+
+    const handleInputHistoryLimitChange = React.useCallback((value: number) => {
+        const nextLimit = Math.round(value);
+        if (!isInputHistoryLimit(nextLimit)) {
+            return;
+        }
+        applyInputHistoryLimit(nextLimit);
+        void updateDesktopSettings({ inputHistoryLimit: nextLimit });
+    }, [applyInputHistoryLimit]);
 
     const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
         setActivityRenderMode(mode);
@@ -607,6 +678,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, []);
 
     const shouldShow = (setting: VisibleSetting): boolean => {
+        if (setting === 'enterToSend' && isMobile) return false;
         if (!visibleSettings) return true;
         return visibleSettings.includes(setting);
     };
@@ -618,14 +690,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
-    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
+    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('scrollbars') && !hasThemeSettings) || (shouldShow('inputBarOffset') && isMobile);
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
+        || shouldShow('activityRenderMode')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || (shouldShow('promptNavigatorEnabled') && !isVSCode)
@@ -638,17 +710,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('fileViewerPreview')
         || shouldShow('reasoning')
         || shouldShow('followUpBehavior')
+        || shouldShow('inputHistoryScope')
+        || shouldShow('inputHistoryLimit')
         || shouldShow('persistDraft')
+        || shouldShow('largeTextPaste')
         || shouldShow('showToolFileIcons')
         || shouldShow('expandedTools')
-        || (!isMobile && shouldShow('inputSpellcheck'));
+        || (!isMobile && shouldShow('inputSpellcheck'))
+        || shouldShow('enterToSend');
     const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
+        || shouldShow('activityRenderMode');
     const showTransportSection = shouldShow('messageTransport');
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
         || (shouldShow('diffLayout') && !isVSCode)
-        || shouldShow('followUpBehavior');
+        || shouldShow('followUpBehavior')
+        || shouldShow('inputHistoryScope')
+        || shouldShow('inputHistoryLimit');
     const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('subagentReadOnlyBanner')
@@ -661,9 +739,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
         || shouldShow('persistDraft')
+        || shouldShow('largeTextPaste')
         || shouldShow('showToolFileIcons')
         || shouldShow('showTurnChangedFiles')
         || (!isMobile && shouldShow('inputSpellcheck'))
+        || shouldShow('enterToSend')
         || shouldShow('reasoning')
         || shouldShow('expandedTools');
     // First behavior section under the page header should not draw a top border on Chat-only;
@@ -777,24 +857,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
         const loadPwaInstallName = async () => {
             try {
-                const response = await runtimeFetch('/api/config/settings', {
-                    method: 'GET',
-                    headers: { Accept: 'application/json' },
-                    cache: 'no-store',
-                });
+                const settings = await loadDesktopSettings();
 
-                if (!response.ok) {
+                if (!settings) {
                     if (!cancelled) {
                         setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
                     }
                     return;
                 }
 
-                const settings = await response.json().catch(() => ({}));
-                const raw = typeof settings?.pwaAppName === 'string' ? settings.pwaAppName : '';
+                const raw = settings.pwaAppName ?? '';
                 const normalized = raw.trim().replace(/\s+/g, ' ').slice(0, 64);
-                const orientation = normalizePwaOrientation(settings?.pwaOrientation);
-                const nextMobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode);
+                const orientation = normalizePwaOrientation(settings.pwaOrientation);
+                const nextMobileKeyboardMode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode);
 
                 if (!cancelled) {
                     if (showPwaInstallNameSetting) {
@@ -828,6 +903,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
             cancelled = true;
         };
     }, [setMobileKeyboardMode, showMobileKeyboardModeSetting, showPwaInstallNameSetting, showPwaOrientationSetting]);
+
+    const scrollbarSetting = shouldShow('scrollbars') ? (
+        <SettingsCheckboxRow
+            checked={alwaysShowScrollbars}
+            onChange={setAlwaysShowScrollbars}
+            label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
+            info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
+            settingsItem="appearance.scrollbars"
+        />
+    ) : null;
 
     return (
         <div className="space-y-0">
@@ -868,9 +953,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {lightThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'light')}
-                                                        </SelectItem>
+                                                        <ThemeSelectItem key={theme.metadata.id} id={theme.metadata.id} label={formatThemeLabel(theme.metadata.name, 'light')} />
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -889,9 +972,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {darkThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                        </SelectItem>
+                                                        <ThemeSelectItem key={theme.metadata.id} id={theme.metadata.id} label={formatThemeLabel(theme.metadata.name, 'dark')} />
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -924,6 +1005,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
                                             </SettingsInfoHint>
                                         </div>
+                                        <ThemeImportButton />
                                     </div>
                                 </SettingsTwoColumn>
 
@@ -938,6 +1020,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     </SettingsInset>
                                 )}
+                                {scrollbarSetting && <SettingsInset>{scrollbarSetting}</SettingsInset>}
                             </SettingsSection>
                         )}
 
@@ -1269,6 +1352,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={50}
                                                 max={200}
                                                 step={5}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
                                                 aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
@@ -1299,6 +1383,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={9}
                                                 max={52}
                                                 step={1}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
@@ -1328,6 +1413,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={9}
                                                 max={32}
                                                 step={1}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
@@ -1362,6 +1448,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={50}
                                                 max={200}
                                                 step={5}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
                                             <Button size="sm"
@@ -1392,6 +1479,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={0}
                                                 max={100}
                                                 step={5}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
@@ -1410,6 +1498,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                             </SettingsTwoColumn>
                         ) : null}
+                        {!hasThemeSettings && scrollbarSetting}
+                    </SettingsSection>
+                )}
+
+                {shouldShow('animatedActivityIndicators') && (
+                    <SettingsSection
+                        title={t('settings.openchamber.visual.section.sessionActivity')}
+                        settingsItem="appearance.session-activity"
+                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                    >
+                        <SettingsCheckboxRow
+                            checked={animatedActivityIndicators}
+                            onChange={setAnimatedActivityIndicators}
+                            label={t('settings.openchamber.visual.field.animatedActivityIndicators')}
+                            ariaLabel={t('settings.openchamber.visual.field.animatedActivityIndicatorsAria')}
+                            info={t('settings.openchamber.visual.field.animatedActivityIndicatorsInfo')}
+                            settingsItem="appearance.animated-activity-indicators"
+                        />
                     </SettingsSection>
                 )}
 
@@ -1531,11 +1637,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         className={cn(
                                                             'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
                                                             selected
-                                                                ? 'border-primary bg-primary/5'
-                                                                : 'border-border hover:border-border/80 hover:bg-muted/50'
+                                                                ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
+                                                                : 'border-border hover:border-border/80 hover:bg-interactive-hover'
                                                         )}
                                                     >
-                                                        <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
+                                                        <span className={cn('typography-ui-label', selected ? 'text-inherit' : 'text-muted-foreground')}>
                                                             {tUnsafe(option.labelKey)}
                                                         </span>
                                                         <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
@@ -1599,8 +1705,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </SettingsControlGroup>
                                 )}
 
-                                {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')}>
+                                {shouldShow('activityRenderMode') && (
+                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')} settingsItem="chat.activity-default">
                                         <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.activityDefaultAria')}>
                                             {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => (
                                                 <SettingsRadioOption
@@ -1715,6 +1821,51 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     />
                                                 ))}
                                             </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
+
+                                    {shouldShow('inputHistoryScope') && (
+                                        <SettingsControlGroup
+                                            title={t('settings.openchamber.visual.field.inputHistoryScope')}
+                                            info={t('settings.openchamber.visual.field.inputHistoryScopeDescription')}
+                                            settingsItem="chat.input-history-scope"
+                                        >
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.inputHistoryScopeAria')}>
+                                                {INPUT_HISTORY_SCOPE_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={inputHistoryScope === option.id}
+                                                        onSelect={() => handleInputHistoryScopeChange(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={tUnsafe(option.labelKey)}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
+
+                                    {shouldShow('inputHistoryLimit') && (
+                                        <SettingsControlGroup
+                                            title={t('settings.openchamber.visual.field.inputHistoryLimit')}
+                                            description={t('settings.openchamber.visual.field.inputHistoryLimitDescription')}
+                                            contentClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                                            settingsItem="chat.input-history-limit"
+                                        >
+                                            <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                                <NumberInput
+                                                    value={inputHistoryLimit}
+                                                    onValueChange={handleInputHistoryLimitChange}
+                                                    min={MIN_INPUT_HISTORY_LIMIT}
+                                                    max={MAX_INPUT_HISTORY_LIMIT}
+                                                    step={1}
+                                                    className={SETTINGS_NUMBER_INPUT_CLASS}
+                                                    deferExternalValueWhileFocused
+                                                    aria-label={t('settings.openchamber.visual.field.inputHistoryLimitAria')}
+                                                />
+                                                <span className={SETTINGS_NUMBER_UNIT_CLASS}>
+                                                    {t('settings.openchamber.visual.field.inputHistoryLimitUnit')}
+                                                </span>
+                                            </div>
                                         </SettingsControlGroup>
                                     )}
                                 </SettingsTwoColumn>
@@ -1976,12 +2127,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </SettingsSection>
                                 )}
 
-                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                {(shouldShow('persistDraft') || shouldShow('largeTextPaste') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('enterToSend')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.composer')}
                                     settingsItem="chat.composer"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                    contentClassName="space-y-6"
                                 >
+                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                <div className={SETTINGS_OPTION_STACK_CLASS}>
                                 {shouldShow('persistDraft') && (
                                     <SettingsCheckboxRow
                                         checked={persistChatDraft}
@@ -2000,6 +2153,50 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ariaLabel={t('settings.openchamber.visual.field.enableSpellcheckInTextInputsAria')}
                                         settingsItem="chat.spellcheck"
                                     />
+                                )}
+                                </div>
+                                )}
+
+                                {shouldShow('largeTextPaste') && (
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.field.largeTextPaste')}
+                                        description={t('settings.openchamber.visual.field.largeTextPasteHint')}
+                                        settingsItem="chat.large-text-paste"
+                                    >
+                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.largeTextPasteAria')}>
+                                            {LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS.map((option) => (
+                                                <SettingsRadioOption
+                                                    key={option.id}
+                                                    selected={largeTextPasteBehavior === option.id}
+                                                    onSelect={() => setLargeTextPasteBehavior(option.id)}
+                                                    label={tUnsafe(option.labelKey)}
+                                                    ariaLabel={t('settings.openchamber.visual.field.largeTextPasteOptionAria', { option: tUnsafe(option.labelKey) })}
+                                                />
+                                            ))}
+                                        </SettingsRadioGroup>
+                                     </SettingsControlGroup>
+                                )}
+                                {shouldShow('enterToSend') && (
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.field.enterToSend')}
+                                        description={t('settings.openchamber.visual.field.enterToSendHint')}
+                                        settingsItem="chat.enter-to-send"
+                                    >
+                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.enterToSend')}>
+                                            <SettingsRadioOption
+                                                selected={enterSendSelected}
+                                                onSelect={() => handleEnterToSendChange(true)}
+                                                label={t('settings.openchamber.visual.option.enterToSend.enter.label')}
+                                                ariaLabel={t('settings.openchamber.visual.option.enterToSend.enter.label')}
+                                            />
+                                            <SettingsRadioOption
+                                                selected={!enterSendSelected}
+                                                onSelect={() => handleEnterToSendChange(false)}
+                                                label={t('settings.openchamber.visual.option.enterToSend.modifier.label')}
+                                                ariaLabel={t('settings.openchamber.visual.option.enterToSend.modifier.label')}
+                                            />
+                                        </SettingsRadioGroup>
+                                    </SettingsControlGroup>
                                 )}
                                 </SettingsSection>
                                 )}

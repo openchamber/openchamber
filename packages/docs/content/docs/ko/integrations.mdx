@@ -1,54 +1,53 @@
 ---
 title: 통합 기능
-description: Claude 또는 Cursor 구독을 공급자로 사용하세요.
+description: GitHub와 Linear를 OpenChamber에 연결합니다.
 ---
 
 # 통합 기능
 
-통합 기능(인테그레이션)은 이미 가지고 있는 구독을 사용해 OpenChamber에 공급자를 추가하는 작은 플러그인입니다. **Settings → Integrations**에서 관리합니다.
+**설정 → 통합 기능**에서 OpenChamber가 함께 사용하는 서비스에 로그인합니다. 로그인 정보는 OpenChamber 서버에 저장되므로 웹, 데스크톱, 페어링된 휴대전화가 이를 공유합니다.
 
-> **실험 단계 기능.** 프로바이더 정책을 존중하려 노력하지만, 계정 제한과 정지는 각 프로바이더의 결정입니다. 본인의 책임 아래 통합 기능을 사용하세요.
+## GitHub
 
-사용 가능한 통합 기능:
+**GitHub** 카드를 펼치고 **Connect GitHub**를 선택해 짧은 기기 코드로 로그인합니다. 연결되면 OpenChamber가 이슈와 풀 리퀘스트에서 세션을 시작하고, 메시지에 첨부하고, PR을 열거나 업데이트할 수 있습니다. GitHub로 할 수 있는 모든 것은 [GitHub 이슈 및 PR](/ko/github/)에 있습니다.
 
-- **Claude Code** — Claude Pro 또는 Max 플랜, API 키 불필요
-- **Cursor** — Cursor 플랜의 모델 한도
+## Linear
 
-## 통합 기능 설치
+### 워크스페이스 연결하기
 
-1. **Settings → Integrations**를 엽니다.
-2. 통합 기능을 찾아 **Install**을 선택합니다.
-3. 요청되면 OpenCode를 다시 시작합니다 — 재시작 후 공급자가 나타납니다.
-4. **Set up**를 선택하고 로그인합니다. 그러면 채팅의 모델 선택기에 모델이 나타납니다.
+1. **Linear** 카드를 펼치고 **Connect**를 선택합니다.
+2. 열리는 브라우저 탭에서 접근을 승인합니다. 승인 전까지 카드에는 **Waiting for Linear**가 표시됩니다.
 
-통합 기능은 사용자 단위로 설치되므로 모든 프로젝트에서 작동합니다. 같은 카드에서 언제든 업데이트하거나 제거할 수 있습니다.
+다른 Linear 조직은 **Add workspace**로 연결합니다. 현재 워크스페이스는 한 번에 하나이며, **Switch to**로 전환하고 **Disconnect**는 현재 워크스페이스만 제거합니다. 프로젝트 매핑은 유지됩니다.
 
-## Claude Code
+### 이슈 찾아보기
 
-Claude Code는 Claude Pro 또는 Max 플랜을 사용합니다 — API 키도 별도의 Claude 앱도 필요 없습니다.
+워크스페이스가 연결되면 오른쪽 컨텍스트 레일에 **Linear** 패널이 나타납니다. 현재 워크스페이스의 이슈를 나열하며 다음을 할 수 있습니다.
 
-1. 통합 기능을 설치합니다(위 참고).
-2. **Set up**를 선택하고 로그인합니다. Claude Code CLI가 아직 없으면 설정에서 먼저 설치를 제안한 뒤 로그인을 진행합니다.
+- 상태(**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), 담당자(**Anyone** 또는 **Assigned to me**), 팀, 우선순위로 필터링
+- 제목, 식별자 또는 Linear URL로 검색
+- 이슈를 열어 설명, 댓글, 라벨, 우선순위 확인
+- **Status** 변경 또는 **Close issue** 선택
+- 현재 **Workspace** 전환
 
-Claude Code는 여기에서 유일하게 공급자 CLI 설치와 로그인을 필요로 하는 통합 기능입니다. Cursor는 CLI가 필요 없습니다.
+### 이슈에서 세션 시작하기
 
-**Claude 계정이 안전하게 유지되는 방식:** 이 통합 기능은 Anthropic의 공식 Claude Agent SDK와 설치된 Claude Code CLI를 사용합니다. OAuth 탈취, 브라우저 토큰 추출·재사용, 지원되지 않는 클라이언트로의 위장, Anthropic 인증 우회를 하지 않습니다. Anthropic이 지원하는 정상 경로를 사용하므로 토큰 탈취나 비인가 인증 우회에 따른 계정 정지 위험이 없습니다.
+- Linear 패널에서 이슈를 열고 **Start session**을 선택합니다. 이슈를 스크롤해도 버튼은 하단에 남아 있습니다.
+- 채팅에서 **New Session From Linear Issue**를 선택해 목록에서 고릅니다. 새 브랜치가 필요하면 **Create in worktree**를 사용합니다.
+- **New Worktree** 대화상자에서 **Start from Linear Issue**를 선택합니다.
 
-## Cursor
+세션은 이슈의 팀에 매핑된 프로젝트에서 열리고, 이슈가 첫 프롬프트가 됩니다. 팀 매핑은 Linear 카드에서 합니다. **Default project**는 모든 팀에 적용되고 **Team projects**는 팀별로 이를 덮어씁니다. 매핑되지 않은 팀은 먼저 매핑하라고 요청합니다. 첫 메시지는 **Issue Review** 매직 프롬프트로 만들어지며 **설정 → Magic Prompts → Linear**에서 편집할 수 있습니다.
 
-Cursor는 Cursor 플랜에 포함된 모델을 OpenChamber에서 사용할 수 있게 합니다.
+### 이슈를 메시지에 연결하기
 
-1. 통합 기능을 설치합니다(위 참고).
-2. **Set up**를 선택하고 링크를 열어 브라우저에서 접근을 승인합니다. API 키는 필요 없습니다. 로그인 후 모델 목록이 자동으로 로드됩니다.
+채팅 작성창에서 **Link Linear Issue**를 선택합니다. 이슈가 다음 메시지에 컨텍스트로 함께 전송되고, 세션의 작업 상태 패널에 링크가 남습니다.
 
-## 업데이트 및 제거
+### 세션 댓글
 
-- **Update**는 플러그인의 최신 공개 버전을 설치합니다.
-- **Remove**는 OpenCode 설정에서 플러그인을 삭제합니다. OpenCode가 다시 로드되면 공급자는 더 이상 로드되지 않습니다.
-
-카드에 항목을 수동으로 관리해야 한다고 표시되면 **Manage plugins**를 선택해 중복 항목을 정리하세요.
+Linear 카드에서 **Session comments**를 켜면 이슈에서 시작한 세션이 시작, 완료, 실패 시 해당 이슈에 댓글을 남기며, 각 댓글에는 세션을 여는 링크가 포함됩니다. 댓글은 이 OpenChamber 서버에 공개 주소가 있을 때만 게시되어 이슈의 모든 사람이 링크를 열 수 있습니다. 로컬이나 사설 주소에서는 아무것도 게시되지 않습니다.
 
 ## 관련 문서
 
-- [공급자, 모델, 에이전트](/ko/providers/) — 다른 공급자 연결과 모델 선택
-- [사용량 및 할당량](/ko/usage/) — 사용량 추적
+- [GitHub 이슈 및 PR](/ko/github/) — OpenChamber에서 GitHub로 할 수 있는 모든 것
+- [워크트리 세션](/ko/worktrees/) — 이슈 세션을 시작할 수 있는 곳
+- [Magic Prompts](/ko/magic-prompts/) — Linear 세션이 시작하는 프롬프트 편집

@@ -1,6 +1,8 @@
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
+import { z } from "zod";
+import { OpencodeRequestError, toUpstreamErrorDetail, upstreamErrorPayloadSchema } from "./upstreamError";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -31,6 +33,8 @@ export type FetchPermissionResult =
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
+import { normalizePath } from "@/lib/pathNormalization";
+import { hostSessionStatusSnapshotSchema, sessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -70,26 +74,16 @@ type SdkResult<T> = {
 };
 
 type DirectoryAvailability = "available" | "missing" | "unknown";
+const directoryProbeErrorSchema = z.object({ reason: z.string().optional(), isDirectory: z.boolean().optional() });
 
-const isMissingDirectoryError = (error: unknown): boolean => {
-  if (error instanceof FilesystemError) {
-    return error.reason === "not-found" || error.reason === "not-directory";
-  }
-  if (error && typeof error === "object") {
-    const code = (error as { code?: unknown }).code;
-    if (code === "ENOENT" || code === "ENOTDIR") {
-      return true;
-    }
-  }
-  return /\bENOENT\b|\bENOTDIR\b|no such file or directory/i.test(formatSdkError(error));
-};
 
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
   if (result.error) {
     const status = result.response?.status;
-    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
-    if (status !== undefined) error.status = status;
-    throw error;
+    throw new OpencodeRequestError(
+      `${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`,
+      toUpstreamErrorDetail(upstreamErrorPayloadSchema.safeParse(result.error).data, status),
+    );
   }
   if (result.data === undefined || result.data === null) {
     throw new Error(`${operation} failed: empty response`);
@@ -100,9 +94,10 @@ function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
 function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | undefined {
   if (result.error) {
     const status = result.response?.status;
-    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
-    if (status !== undefined) error.status = status;
-    throw error;
+    throw new OpencodeRequestError(
+      `${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`,
+      toUpstreamErrorDetail(upstreamErrorPayloadSchema.safeParse(result.error).data, status),
+    );
   }
   return result.data;
 }
@@ -237,7 +232,9 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
         return runtimeFetch(input, init);
       }
       const timeout = createTimeoutSignal(requestTimeoutMs);
-      const callerSignal = init?.signal;
+      const callerSignal = init?.signal !== undefined
+        ? init.signal
+        : input instanceof Request ? input.signal : undefined;
       const supportsAny = typeof AbortSignal !== 'undefined'
         && typeof (AbortSignal as { any?: unknown }).any === 'function';
       let signal: AbortSignal;
@@ -268,16 +265,27 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       } else {
         signal = timeout.signal;
       }
+      const cleanup = () => {
+        detachFallback?.();
+        timeout.cleanup();
+      };
+      let responseHasBody = false;
       try {
-        return await runtimeFetch(input, { ...init, signal });
+        const response = await runtimeFetch(input, { ...init, signal });
+        responseHasBody = response.body !== null;
+        return response;
       } catch (error) {
         if (timeout.signal.aborted && !callerSignal?.aborted) {
           throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`);
         }
         throw error;
       } finally {
-        detachFallback?.();
-        timeout.cleanup();
+        // The SDK consumes JSON after fetch resolves. Keep cancellation and the
+        // deadline alive through body delivery, including on older WebViews
+        // using the manual signal composition. Retention is bounded by the
+        // request deadline, just like native AbortSignal.timeout.
+        if (!responseHasBody || signal.aborted) cleanup();
+        else signal.addEventListener('abort', cleanup, { once: true });
       }
     },
   });
@@ -341,6 +349,16 @@ const getDesktopFilesApi = (): FilesAPI | null => {
   return null;
 };
 
+// /api/fs/home parsing boundary. Older servers answer without chatsRoot;
+// only a valid home response may use the legacy chats-root fallback.
+const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/);
+const fsHomeResponseSchema = z.object({
+  home: fsAbsolutePathSchema,
+  chatsRoot: fsAbsolutePathSchema.optional(),
+  canonicalChatsRoot: fsAbsolutePathSchema.optional(),
+  canonicalLegacyChatsRoot: fsAbsolutePathSchema.optional(),
+});
+
 class OpencodeService {
   private client: OpencodeClient;
   private baseUrl: string;
@@ -375,9 +393,8 @@ class OpencodeService {
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
     const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
-    if (nextBaseUrl === this.baseUrl) {
-      return;
-    }
+    // An explicit reconnect can change the instance or transport behind the
+    // same URL. Its SDK client and in-flight directory requests are obsolete.
     this.baseUrl = nextBaseUrl;
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
     this.scopedClients.clear();
@@ -415,23 +432,7 @@ class OpencodeService {
   }
 
   private normalizeCandidatePath(path?: string | null): string | null {
-    if (typeof path !== 'string') {
-      return null;
-    }
-
-    const trimmed = path.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    // Normalize backslashes and uppercase the Windows drive letter so that
-    // d:\MyProject and D:\MyProject resolve to the same canonical form.
-    const normalized = trimmed
-      .replace(/\\/g, '/')
-      .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
-    const withoutTrailingSlash = normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
-
-    return withoutTrailingSlash || null;
+    return normalizePath(path);
   }
 
   private deriveHomeDirectory(path: string): { homeDirectory: string; username?: string } {
@@ -451,7 +452,7 @@ class OpencodeService {
         return { homeDirectory, username: segments[0] };
       }
 
-      return { homeDirectory: drive, username: undefined };
+      return { homeDirectory: `${drive}/`, username: undefined };
     }
 
     const absolute = path.startsWith('/');
@@ -602,24 +603,30 @@ class OpencodeService {
   }
 
   /**
-   * Distinguishes a confirmed-missing directory from an unavailable probe.
-   * Offline, permission, and other transport failures stay `unknown` so callers
-   * do not treat a temporary outage as proof the path was deleted.
-   */
+    * Distinguishes a confirmed-missing directory from an unavailable probe.
+    * Offline, permission, and other transport failures stay `unknown` so callers
+    * do not treat a temporary outage as proof the path was deleted.
+    *
+    * The probe is OpenChamber's own `/api/fs/directory-stat`, which asks the
+    * server to stat the path without listing its contents. OpenCode's `/path`
+    * cannot answer this question: it echoes the requested directory and resolves
+    * its project through Git discovery that swallows errors, so a deleted worktree
+    * still comes back as a valid location. A runtime without that route (VS Code)
+    * answers `unknown`.
+    */
   async getDirectoryAvailability(directory: string): Promise<DirectoryAvailability> {
     const normalized = this.normalizeCandidatePath(directory);
     if (!normalized) {
       return "unknown";
     }
     try {
-      const response = await this.client.path.get({ directory: normalized }) as SdkResult<{ directory?: unknown }>;
-      if (response.error) {
-        return isMissingDirectoryError(response.error) ? "missing" : "unknown";
-      }
-      const returned = typeof response.data?.directory === "string" ? response.data.directory.trim() : "";
-      return returned ? "available" : "unknown";
-    } catch (error) {
-      return isMissingDirectoryError(error) ? "missing" : "unknown";
+      const response = await runtimeFetch("/api/fs/directory-stat", { query: { path: normalized } });
+      const body = directoryProbeErrorSchema.safeParse(await response.json().catch(() => null)).data;
+      if (response.ok && body?.isDirectory === true) return "available";
+      const reason = parseFilesystemErrorReason(body?.reason);
+      return reason === "not-found" || reason === "not-directory" ? "missing" : "unknown";
+    } catch {
+      return "unknown";
     }
   }
 
@@ -1166,15 +1173,13 @@ class OpencodeService {
     directory: string | null | undefined
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
-      const trimmedDirectory = typeof directory === "string" ? directory.trim() : "";
+      const trimmedDirectory = this.normalizeCandidatePath(directory);
       const result = await this.client.session.status(trimmedDirectory ? { directory: trimmedDirectory } : undefined);
-      if (result.error || !result.data || typeof result.data !== "object") {
+      if (result.error) {
         return null;
       }
-      return result.data as Record<
-        string,
-        { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
-      >;
+      const parsed = sessionStatusSnapshotSchema.safeParse(result.data);
+      return parsed.success ? parsed.data : null;
     } catch {
       return null;
     }
@@ -1184,6 +1189,28 @@ class OpencodeService {
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
     return (await this.getSessionStatusForDirectory(null)) ?? {};
+  }
+
+  /**
+   * Cross-project busy/retry/idle map kept by the OpenChamber host from the
+   * single upstream event stream. One request that creates no OpenCode
+   * instance, unlike `/session/status?directory=`. `null` means the fetch
+   * failed; callers must preserve their current state.
+   */
+  async getHostSessionStatusSnapshot(): Promise<HostSessionStatusSnapshot | null> {
+    try {
+      const response = await runtimeFetch('/api/sessions/status', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const parsed = hostSessionStatusSnapshotSchema.safeParse(await response.json().catch(() => null));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1301,12 +1328,10 @@ class OpencodeService {
    * endpoint introduced in OpenCode SDK v1.17.12. Wraps
    * `session.permission.get`.
    *
-   * Returns a tagged `FetchPermissionResult` so the caller can distinguish
-   * a confirmed-resolved permission (HTTP 404) from a fetch failure
-   * (network error, malformed response, or pre-v1.17.12 server without
-   * the V2 endpoint). The auto-accept flow uses this distinction to drop
-   * resolved permissions from the resync output, preventing stale
-   * `permission.list` entries from sticking around in the UI.
+   * Returns the state of the V2 permission authority. Its HTTP 404 result
+   * does not prove that a request from `permission.list` has settled:
+   * list-derived reconciliation must use that list's own reply path.
+   * Fetch failures remain distinct from the V2 resolved result.
    */
   async fetchPermission(
     sessionID: string,
@@ -1585,7 +1610,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.configProvidersInFlight.delete(key);
+      if (this.configProvidersInFlight.get(key) === request) this.configProvidersInFlight.delete(key);
     }
   }
 
@@ -1656,63 +1681,19 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.listAgentsInFlight.delete(key);
+      if (this.listAgentsInFlight.get(key) === request) this.listAgentsInFlight.delete(key);
     }
   }
 
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles
   // all SSE event ingestion via the SDK's global.event() async iterator.
 
-  // File Operations
-  async readFile(path: string): Promise<string> {
-    try {
-      const response = await this.client.file.read({
-        path,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      });
-      return String(unwrapSdkData(response, 'file.read'));
-    } catch {
-      // Return placeholder for development
-      return `// Content of ${path}\n// This would be loaded from the server`;
-    }
-  }
-
-  async listFiles(directory?: string): Promise<Record<string, unknown>[]> {
-    try {
-      const targetDir = directory || this.currentDirectory || '/';
-      const response = await this.client.file.list({
-        path: targetDir,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      });
-      const data = unwrapSdkData(response, 'file.list');
-      return Array.isArray(data) ? data as Record<string, unknown>[] : [];
-    } catch {
-      // Return mock data for development
-      return [];
-    }
-  }
-
   // Command Management
-  async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
-    const response = await this.client.command.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    const commands = unwrapSdkData(response, 'command.list');
-    // Return only lightweight info for autocomplete
-    return (commands || []).map((cmd: Record<string, unknown>) => ({
-      name: cmd.name as string,
-      description: cmd.description as string | undefined,
-      agent: cmd.agent as string | undefined,
-      model: cmd.model as string | undefined,
-      source: cmd.source as string | undefined,
-      // Intentionally excluding template to keep memory usage low
-    }));
-  }
-
-  async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+  async listCommandsWithDetails(directory?: string | null, signal?: AbortSignal): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
     const response = await this.client.command.list(
-      requestDirectory ? { directory: requestDirectory } : undefined
+      requestDirectory ? { directory: requestDirectory } : undefined,
+      { signal },
     );
     const commands = unwrapSdkData(response, 'command.list');
     // Return full command details including template
@@ -1724,58 +1705,6 @@ class OpencodeService {
       source: cmd.source as string | undefined,
       template: cmd.template as string | undefined,
     }));
-  }
-
-  async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {
-    try {
-      const response = await this.client.app.skills(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined,
-      );
-      const data = response.data;
-      if (!Array.isArray(data)) {
-        return [];
-      }
-
-      const skills: Array<{ name: string; description?: string; location: string; content?: string }> = [];
-      for (const item of data as Array<Record<string, unknown>>) {
-          const name = typeof item.name === 'string' ? item.name.trim() : '';
-          const location = typeof item.location === 'string' ? item.location : '';
-          if (!name || !location) {
-            continue;
-          }
-          const skill: { name: string; description?: string; location: string; content?: string } = { name, location };
-          if (typeof item.description === 'string') skill.description = item.description;
-          if (typeof item.content === 'string') skill.content = item.content;
-          skills.push(skill);
-      }
-      return skills;
-    } catch {
-      return [];
-    }
-  }
-
-  async getCommandDetails(name: string): Promise<{ name: string; template: string; description?: string; agent?: string; model?: string } | null> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-
-      if (response.data) {
-        const command = response.data.find((cmd: Record<string, unknown>) => cmd.name === name);
-        if (command) {
-          return {
-            name: command.name as string,
-            template: command.template as string,
-            description: command.description as string | undefined,
-            agent: command.agent as string | undefined,
-            model: command.model as string | undefined
-          };
-        }
-      }
-      return null;
-    } catch {
-      return null;
-    }
   }
 
   // Lightweight readiness check. Full diagnostics still live at /health.
@@ -2044,6 +1973,21 @@ class OpencodeService {
       console.warn('Failed to resolve filesystem home directory:', error);
       return null;
     }
+  }
+
+  // Both roots must describe the same server response, including on desktop.
+  // Failure is distinct from an older server omitting chatsRoot.
+  async getFilesystemHomeInfo(): Promise<z.infer<typeof fsHomeResponseSchema>> {
+    const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to resolve the chats root (${response.status})`);
+    }
+    return fsHomeResponseSchema.parse(await response.json());
   }
 
   async setOpenCodeWorkingDirectory(directoryPath: string | null | undefined): Promise<DirectorySwitchResult | null> {

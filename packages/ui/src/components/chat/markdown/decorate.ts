@@ -2,6 +2,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { IconName } from '@/components/icon/icons';
+import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
 import { getMermaidViewerController } from './mermaidViewer';
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,7 @@ const ICONS = {
   fit: 'refresh',
   textWrap: 'text-wrap',
   image: 'file-image',
+  disclosure: 'arrow-right-s',
 } as const satisfies Record<string, IconName>;
 
 const ICON_BTN_CLASS =
@@ -78,6 +80,19 @@ const decorateImageLabels = (root: HTMLElement): void => {
     icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
     setIcon(icon, 'image');
     label.prepend(icon);
+  }
+};
+
+const decorateDisclosures = (root: HTMLElement): void => {
+  for (const summary of root.querySelectorAll<HTMLElement>('details[data-md-details] > summary')) {
+    if (summary.querySelector('[data-md-disclosure-icon]')) continue;
+    const label = document.createElement('span');
+    label.append(...Array.from(summary.childNodes));
+    const icon = document.createElement('span');
+    icon.setAttribute('data-md-disclosure-icon', '');
+    icon.setAttribute('aria-hidden', 'true');
+    setIcon(icon, 'disclosure');
+    summary.append(icon, label);
   }
 };
 
@@ -333,6 +348,10 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
   return menu;
 };
 
+const TABLE_COLUMN_MIN_WIDTH = 120;
+const TABLE_COLUMN_MAX_WIDTH = 320;
+const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
+
 const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
   const tables = root.querySelectorAll<HTMLTableElement>('table');
   for (const table of Array.from(tables)) {
@@ -340,7 +359,7 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex flex-col space-y-2';
+    wrapper.className = 'group my-4 flex w-fit max-w-full flex-col space-y-2';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
 
     const toolbar = document.createElement('div');
@@ -373,7 +392,8 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (!parent) continue;
     parent.replaceChild(wrapper, table);
     table.setAttribute('data-markdown', 'table');
-    table.classList.add('w-full', 'border-collapse', 'text-sm');
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'pending');
+    table.classList.add('w-max', 'border-collapse', 'text-sm');
 
     for (const tr of Array.from(table.querySelectorAll('tr'))) {
       tr.classList.add('border-b', 'border-border/60');
@@ -382,15 +402,110 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     lastBodyRow?.classList.remove('border-b');
     lastBodyRow?.classList.add('border-0');
     for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
+      th.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
     }
     for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
+      td.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
     }
 
     scroll.appendChild(table);
     wrapper.appendChild(toolbar);
     wrapper.appendChild(scroll);
+  }
+};
+
+export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
+  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(
+    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"])`,
+  ));
+  if (tables.length === 0 || !root.isConnected) return;
+
+  const measurementRoot = root.ownerDocument.createElement('div');
+  measurementRoot.setAttribute('aria-hidden', 'true');
+  measurementRoot.setAttribute('data-md-table-measure', '');
+  measurementRoot.style.position = 'fixed';
+  measurementRoot.style.left = '-100000px';
+  measurementRoot.style.top = '0';
+  measurementRoot.style.visibility = 'hidden';
+  measurementRoot.style.pointerEvents = 'none';
+  measurementRoot.style.width = 'max-content';
+
+  const probes = tables.map((table) => {
+    const getRowCells = (row: HTMLTableRowElement): HTMLTableCellElement[] => (
+      Array.from(row.children).filter((child): child is HTMLTableCellElement => (
+        child.tagName === 'TH' || child.tagName === 'TD'
+      ))
+    );
+    const bodyRows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody tr'));
+    const sourceRows = bodyRows.some((row) => getRowCells(row).length > 0)
+      ? bodyRows
+      : Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr'));
+    const columnCount = Math.max(
+      0,
+      ...Array.from(table.querySelectorAll<HTMLTableRowElement>('tr')).map((row) => getRowCells(row).length),
+    );
+    const columnProbes: HTMLTableElement[] = [];
+
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const probeTable = root.ownerDocument.createElement('table');
+      probeTable.className = table.className;
+      probeTable.style.tableLayout = 'auto';
+      probeTable.style.width = 'max-content';
+      const probeBody = root.ownerDocument.createElement('tbody');
+
+      for (const row of sourceRows) {
+        const sourceCell = getRowCells(row)[columnIndex];
+        if (!sourceCell) continue;
+        const probeRow = root.ownerDocument.createElement('tr');
+        const probeCell = sourceCell.cloneNode(true);
+        if (!(probeCell instanceof HTMLElement)) continue;
+        probeCell.style.width = 'auto';
+        probeCell.style.minWidth = '0';
+        probeCell.style.maxWidth = 'none';
+        probeCell.style.whiteSpace = 'nowrap';
+        probeCell.style.overflowWrap = 'normal';
+        probeRow.appendChild(probeCell);
+        probeBody.appendChild(probeRow);
+      }
+
+      probeTable.appendChild(probeBody);
+      measurementRoot.appendChild(probeTable);
+      columnProbes.push(probeTable);
+    }
+
+    return { table, columnProbes };
+  });
+
+  root.appendChild(measurementRoot);
+  const plans = probes.map(({ table, columnProbes }) => ({
+    table,
+    widths: columnProbes.map((probe) => Math.min(
+      TABLE_COLUMN_MAX_WIDTH,
+      Math.max(TABLE_COLUMN_MIN_WIDTH, Math.ceil(probe.getBoundingClientRect().width)),
+    )),
+  }));
+  measurementRoot.remove();
+
+  for (const { table, widths } of plans) {
+    const existingColumns = Array.from(table.children).find((child) => (
+      child.matches('colgroup[data-md-table-columns]')
+    ));
+    existingColumns?.remove();
+
+    const colgroup = root.ownerDocument.createElement('colgroup');
+    colgroup.setAttribute('data-md-table-columns', '');
+    for (const width of widths) {
+      const column = root.ownerDocument.createElement('col');
+      column.style.width = `${width}px`;
+      colgroup.appendChild(column);
+    }
+    const firstSection = Array.from(table.children).find((child) => (
+      child.tagName === 'THEAD' || child.tagName === 'TBODY' || child.tagName === 'TFOOT'
+    )) ?? null;
+    table.insertBefore(colgroup, firstSection);
+    table.style.tableLayout = 'fixed';
+    table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
   }
 };
 
@@ -481,6 +596,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
     const faviconUrl = getExternalFaviconUrl(href);
     if (faviconUrl) {
       const favWrap = document.createElement('span');
+      favWrap.setAttribute(MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, 'true');
       favWrap.className =
         'mr-1 inline-flex size-[18px] items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)] align-middle';
       const img = document.createElement('img');
@@ -511,6 +627,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  decorateDisclosures(root);
   decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);

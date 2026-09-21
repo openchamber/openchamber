@@ -82,7 +82,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
         }
       }
     }
-  }, [group.name, group.sessions, selectedSessionId, currentSessionId, selectSession, setCurrentSession]);
+  }, [group.id, group.sessions, selectedSessionId, currentSessionId, selectSession, setCurrentSession]);
 
   const isSessionSynced = selectedSession?.id === currentSessionId;
 

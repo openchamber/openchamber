@@ -28,6 +28,8 @@ export interface CreateMultiRunParams {
 
 export interface CreateMultiRunResult {
   groupSlug: string;
+  groupKey: string;
   sessionIds: string[];
   firstSessionId: string | null;
+  failedCount: number;
 }

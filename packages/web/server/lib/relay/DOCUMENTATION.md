@@ -25,6 +25,7 @@ Host side (`packages/web/server/lib/relay/`):
 - `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.
 - `host-lock.js` — the per-machine host claim. Every local instance sharing the data dir shares the relay identity (same serverId), so concurrent relay hosts evict each other at the relay worker (`4001: Control replaced`) and paired devices land on whichever local process won last. The claim file (`<data-dir>/relay-host.lock`, `{ pid }`) makes this deterministic: `service.js` only starts the host when no LIVE process holds the claim (stale claims from dead pids are ignored), goes to `standby` otherwise, and a 30s watcher both takes over when the claimant dies and stands down when another process claims. A standby watcher waits a 2-minute grace after the claim frees before taking over, so a cleanly restarting host (app update/relaunch) — which reclaims at boot with no wait — always wins the restart window over a bystander instance. Explicit user intent — creating a pairing link or hitting `/relay/enable` — force-claims; the previous holder's watcher sees the takeover and backs off instead of fighting. Instances created with `allowPassiveHost: false` (dev servers via `OPENCHAMBER_RELAY_HOST=off`, the Electron dev shell via `OPENCHAMBER_ELECTRON_DEV`; `OPENCHAMBER_RELAY_HOST=on` overrides) never start the host passively at all — boot, demand reconcile, and watcher takeover leave them in `standby`; only explicit enable/pairing hosts there. The claim is cooperative (the relay worker still enforces the single host slot); it only decides which process keeps retrying.
 - `tunnel-host.js` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials.
+- `downstream-scheduler.js` owns end-client delivery credit and round-robin transmission across response streams. It selects plaintext frames before encryption.
 - `e2ee.js`, `tunnel-codec.js` — host-side (JS) mirrors of the shared crypto and framing (see "Two implementations" below).
 
 Client side (`packages/ui/src/lib/relay/`):
@@ -41,13 +42,80 @@ Relay is not a separate link format: it is one transport candidate inside the un
 Everything a client normally sends to the single OpenChamber origin:
 - **HTTP** — REST endpoints and proxied OpenCode SDK calls under `/api/*`, plus `/auth/*` and `/health`.
 - **SSE** — long-lived streamed responses (the event stream and notifications). These are just HTTP responses whose body streams; the tunnel needs no special SSE handling.
-- **WebSocket** — the endpoints that use a real socket (the global event stream on platforms that support WS, terminal I/O, dictation).
+- **WebSocket** — the endpoints that use a real socket (the global event stream on platforms that support WS, terminal I/O, dictation, and desktop dev-server previews).
 
 The host dispatcher restricts tunneled traffic to explicit path allowlists (one for HTTP, one for WS).
 
 Request bodies crossing the tunnel are buffered on the host and forwarded to loopback only once the client's `StreamEnd` frame arrives (bodies above ~512 KB stream live instead). A body whose frames were lost in transit therefore never reaches the loopback server as an empty/truncated chunked body — the host aborts the stream and the client sees an ambiguous transport failure it can retry, instead of the loopback server's bare `400` ("Failed to send message (400)" from the mobile app).
 
+## Downstream flow control
+
+`hello` and `ready` negotiate `flowControl: true` independently of `batch`.
+When either peer omits the flag, the host keeps the legacy transmission path.
+This capability controls host-to-client traffic only. Uploads retain their
+existing request-body behavior. The Cloudflare broker needs no changes.
+
+The client sends encrypted `DeliveryAck` frames on stream zero. Their payload is
+an eight-byte unsigned big-endian cumulative count of received raw tunnel-frame
+bytes on nonzero streams, including the five-byte frame header. Batch envelopes,
+encryption overhead and stream-zero keepalives are excluded. The count resets
+with each handshake. ACKs cover complete frames and include late frames for
+cancelled streams, since those frames still consumed credit. The host rejects
+duplicate, regressing, partial-frame or beyond-sent acknowledgements.
+
+The client acknowledges after decoding and dispatching transport data, without
+waiting for React rendering. It coalesces acknowledgements by byte count with a
+short timer for the tail. Keepalives and ACK processing never await downstream
+credit, which would deadlock the channel.
+
+The scheduler starts with a small byte window. A backlogged sender can grow its
+window when ACK latency stays near the best observed round trip, and reduces it
+when delivery delay rises. Sparse traffic cannot inflate the window for a later
+bulk burst. The window has a hard upper bound; a sudden bandwidth drop can still
+delay bytes already sent, but cannot create an unlimited network backlog.
+
+HTTP bodies and WS messages are sliced into small frames. The scheduler rotates
+streams, preserves each stream's order, and batches selected frames before the
+serialized encryption step. Producers offer a bounded group of slices and await
+transmission before reading more. The legacy timed batcher remains in use only
+without negotiated flow control.
+
+HTTP/SSE backpressure reaches the loopback response reader. Node's `ws` pauses
+loopback socket reads while output is waiting. Bun's `ws` shim cannot pause, so
+the dispatcher instead enforces a connection-wide pending WS byte/message cap
+and explicitly aborts the offending substream on overflow. It never silently
+discards deltas. WS output messages are serialized through their last fragment,
+and the close frame follows pending output. Cancellation releases queued work;
+channel teardown releases all producers and acknowledgement state.
+
+Regression coverage lives in `downstream-scheduler.test.js`, `flow-control.test.js`
+and `cross-compat.test.js`. The end-to-end fixture uses the real client, host,
+crypto and loopback requests with a byte-paced relay leg. It compares delivery
+ordering, queue growth and a concurrent small response, including both legacy
+fallback directions, unbatched operation, cancellation and fragmented WS output.
+It does not replace a physical iOS/LTE check.
+
 ## Authentication model
+
+### Self-reported app diagnostics
+
+Host-control, host-data and client upgrades include optional `appId`,
+`appVersion` and `platform` query parameters. OpenChamber sends `openchamber`,
+the local package version and the local runtime. Client platforms use the
+existing presence values: `desktop` for Electron, `vscode`, `ios`, `android`
+and `web` for browsers, including hosted mobile. Hosts use
+`OPENCHAMBER_RUNTIME`, defaulting to `web`, so SSH hosts report `ssh-remote`.
+These labels describe the connecting process, not its remote target.
+
+These fields are diagnostics only, outside the signed auth payload. Older
+relays ignore them and older apps remain connectable. The hosted relay groups
+missing or invalid fields as `unknown`. Its analytics count host-control and
+client connections separately, including reconnects, and show labels as
+self-reported, never as verified app identity. Host-data sockets are excluded.
+App diagnostics are written on connection, without per-app traffic counters.
+No credentials, device names or application contents are added to diagnostics.
+
+### Access checks
 
 - The tunnel is **transport only**. The OpenChamber server still authenticates every tunneled request exactly as it authenticates a direct remote client. The relay path grants reachability, not authorization.
 - Clients carry their normal credential. HTTP and SSE requests authenticate with the client's bearer token (a header). **WebSocket upgrades cannot send headers**, so they authenticate with a short-lived URL-scoped token minted beforehand and passed as a query parameter. This asymmetry is important when adding new WebSocket features (see the skill).
@@ -86,6 +154,13 @@ belong to a different machine.
 The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
 
 ## Runtime integration (client)
+
+Client keepalive liveness comes from received frames only. Outbound HTTP retries
+cannot suppress a probe of a silent peer. Any valid inbound traffic, including a
+Pong, clears the probe deadline. Terminal relay close codes retain their error
+for the lifetime of that client: subsequent HTTP requests and WS opens fail
+immediately rather than waiting for a reconnect that will never be scheduled.
+Transient failures still use the existing reconnect/backoff path.
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 

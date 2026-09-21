@@ -12,6 +12,8 @@ const baseOptions = {
   isVSCode: false,
   screenWidth: 1200,
   tabs: [],
+  linearConnected: true,
+  githubConnected: true,
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
@@ -62,5 +64,37 @@ describe('getVisibleContextRailSurfaces', () => {
   test('respects the persisted user rail order', () => {
     const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['git', 'context'] });
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);
+  });
+
+  test('places Linear right after the walkthrough in the default order', () => {
+    const ids = getVisibleContextRailSurfaces(baseOptions).map((surface) => surface.id);
+    const walkthrough = ids.indexOf('walkthrough');
+    expect(walkthrough).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('linear')).toBe(walkthrough + 1);
+  });
+
+  test('hides the pull request surface until GitHub is connected', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, githubConnected: false }).some((s) => s.id === 'pr')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, githubConnected: true }).some((s) => s.id === 'pr')).toBe(true);
+  });
+
+  test('hides Linear until a workspace is connected', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: false }).some((s) => s.id === 'linear')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: true }).some((s) => s.id === 'linear')).toBe(true);
+  });
+
+  test('appends installed guest panels except on VS Code', () => {
+    const hello = {
+      id: 'plugin:hello' as const,
+      mode: 'plugin:hello' as const,
+      icon: 'window' as const,
+      label: 'Hello',
+      labelKey: 'contextRail.surface.plugin' as const,
+      descriptionKey: 'contextRail.surface.plugin.description' as const,
+      availability: 'always' as const,
+      defaultWidthFraction: 0.45,
+    };
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, extras: [hello] }).some((s) => s.id === 'plugin:hello')).toBe(true);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, extras: [hello], isVSCode: true }).some((s) => s.id === 'plugin:hello')).toBe(false);
   });
 });

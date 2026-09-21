@@ -4,8 +4,11 @@ import {
   getOAuthAuthMethods,
   normalizeAuthType,
   parseAuthPayload,
-  requiresOpenCodeRestartAfterOAuth,
+requiresOpenCodeRestartAfterOAuth,
+  providerHasCredentials,
+  shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
+  shouldShowModelsSection,
 } from './providerAuth';
 
 describe('ProvidersPage available provider loading', () => {
@@ -70,5 +73,150 @@ describe('provider auth method helpers', () => {
   test('Claude CLI OAuth does not require an OpenCode restart', () => {
     expect(requiresOpenCodeRestartAfterOAuth('claude-code')).toBe(false);
     expect(requiresOpenCodeRestartAfterOAuth('github-copilot')).toBe(true);
+  });
+});
+
+describe('provider credential state helpers', () => {
+  test('providerHasCredentials requires key, options.apiKey, declared env, or auth source', () => {
+    // Built-in catalog entry with no credential signal at all.
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false })).toBe(false);
+    expect(providerHasCredentials({ key: '', authSourceExists: false })).toBe(false);
+    expect(providerHasCredentials({ key: '   ', authSourceExists: false })).toBe(false);
+
+    // OpenCode reports an active credential via provider.key.
+    expect(providerHasCredentials({ key: 'sk-...', authSourceExists: false })).toBe(true);
+    // Auth.json provenance alone is enough while sources are authoritative.
+    expect(providerHasCredentials({ key: undefined, authSourceExists: true })).toBe(true);
+  });
+
+  test('providerHasCredentials counts declared env vars for multi-variable providers', () => {
+    // Bedrock/Azure/Vertex resolve credentials from several env vars, so
+    // OpenCode never sets Provider.key for them; the declared env list is the
+    // only signal that the provider is configured.
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false, envDeclared: true })).toBe(true);
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false, envDeclared: false })).toBe(false);
+  });
+
+  test('providerHasCredentials treats options.apiKey as a usable credential', () => {
+    // Config-defined providers ship provider.options to the client but never
+    // reach Provider.key, so the only authoritative signal is options.apiKey.
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false, optionsApiKey: 'sk-config' })).toBe(true);
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false, optionsApiKey: '' })).toBe(false);
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false, optionsApiKey: '   ' })).toBe(false);
+    expect(providerHasCredentials({ key: undefined, authSourceExists: false, optionsApiKey: null })).toBe(false);
+  });
+
+  test('env-less OAuth-only provider without credentials opens panel and hides models', () => {
+    const hasCredentials = providerHasCredentials({
+      key: undefined,
+      authSourceExists: false,
+    });
+    expect(hasCredentials).toBe(false);
+    expect(shouldAutoOpenAuthPanel({
+      sourcesLoaded: true,
+      hasCredentials,
+      userDismissed: false,
+    })).toBe(true);
+    expect(shouldShowModelsSection({
+      modelCount: 1,
+      sourcesLoaded: true,
+      hasCredentials,
+    })).toBe(false);
+  });
+
+  test('provider with stored auth or key shows Connected and models', () => {
+    const fromKey = providerHasCredentials({ key: 'sk-live', authSourceExists: false });
+    const fromAuth = providerHasCredentials({ key: undefined, authSourceExists: true });
+    expect(fromKey).toBe(true);
+    expect(fromAuth).toBe(true);
+    expect(shouldAutoOpenAuthPanel({
+      sourcesLoaded: true,
+      hasCredentials: fromKey,
+      userDismissed: false,
+    })).toBe(false);
+    expect(shouldShowModelsSection({
+      modelCount: 3,
+      sourcesLoaded: true,
+      hasCredentials: fromAuth,
+    })).toBe(true);
+  });
+
+  test('editable custom provider keeps models visible even with no credentials signal', () => {
+    // Config-defined custom providers (e.g. local LM Studio/Ollama style)
+    // are user-editable in place; a stale 'Credentials missing' must not
+    // hide their models section. Without the exemption, a keyless local
+    // custom provider regresses to 'Credentials missing' with models hidden.
+    const hasCredentials = providerHasCredentials({
+      key: undefined,
+      authSourceExists: false,
+      optionsApiKey: null,
+    });
+    expect(hasCredentials).toBe(false);
+    expect(shouldShowModelsSection({
+      modelCount: 1,
+      sourcesLoaded: true,
+      hasCredentials: false,
+      isEditableCustomProvider: true,
+    })).toBe(true);
+    expect(shouldShowModelsSection({
+      modelCount: 1,
+      sourcesLoaded: true,
+      hasCredentials: false,
+      isEditableCustomProvider: false,
+    })).toBe(false);
+  });
+
+  test('auth save followed by providers refresh recognizes credentials without stale missing state', () => {
+    // Pre-save: sources say no auth, provider has no key yet.
+    const before = providerHasCredentials({
+      key: undefined,
+      authSourceExists: false,
+    });
+    expect(before).toBe(false);
+    expect(shouldShowModelsSection({
+      modelCount: 2,
+      sourcesLoaded: true,
+      hasCredentials: before,
+    })).toBe(false);
+
+    // After reloadOpenCodeConfiguration, providers array gets a key even if the
+    // sources snapshot has not been refetched yet.
+    const afterProvidersRefresh = providerHasCredentials({
+      key: 'oauth-token-present',
+      authSourceExists: false,
+    });
+    expect(afterProvidersRefresh).toBe(true);
+    expect(shouldAutoOpenAuthPanel({
+      sourcesLoaded: true,
+      hasCredentials: afterProvidersRefresh,
+      userDismissed: false,
+    })).toBe(false);
+    expect(shouldShowModelsSection({
+      modelCount: 2,
+      sourcesLoaded: true,
+      hasCredentials: afterProvidersRefresh,
+    })).toBe(true);
+
+    // After sources refetch completes, auth.exists also becomes true.
+    expect(providerHasCredentials({
+      key: 'oauth-token-present',
+      authSourceExists: true,
+    })).toBe(true);
+  });
+
+  test('explicit hide keeps the auth panel closed while credentials are still missing', () => {
+    expect(shouldAutoOpenAuthPanel({
+      sourcesLoaded: true,
+      hasCredentials: false,
+      userDismissed: true,
+    })).toBe(false);
+  });
+
+  test('models stay visible while sources are still loading', () => {
+    expect(shouldShowModelsSection({
+      modelCount: 4,
+      sourcesLoaded: false,
+      hasCredentials: false,
+    })).toBe(true);
   });
 });

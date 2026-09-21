@@ -43,6 +43,10 @@ Les actions du navigateur constituent l'**outil OpenChamber Web**, qui s'active 
 
 Cela nécessite l'application de bureau : une page affichée dans un onglet de navigateur ne peut pas être pilotée.
 
+### Fournisseur de navigateur
+
+Une extension peut remplacer ici l'application de bureau. Une extension qui déclare un fournisseur de navigateur exécute son propre navigateur sur le serveur OpenChamber et répond aux mêmes actions, si bien qu'un agent peut naviguer sans application de bureau ouverte, par exemple sur un serveur distant. Choisissez-la dans **Réglages → Général → Outils OpenChamber → Fournisseur de navigateur** ; sans extension de ce type, la liste n'affiche que « OpenChamber Web » et reste désactivée. Le choix s'applique à la prochaine action de navigateur. Si cette extension est mise en pause ou supprimée, OpenChamber Web est de nouveau utilisé et une notification vous le signale. Auteurs d'extensions : voir `GUEST_SERVICES.md` dans le paquet SDK.
+
 ## Outils de développement
 
 Appuyez sur le bouton terminal de la barre pour ouvrir les outils de développement de Chromium pour la page — console, réseau, éléments, tout ce à quoi vous vous attendez.

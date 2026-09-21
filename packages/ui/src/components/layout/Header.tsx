@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useGuestsStore } from '@/lib/guests/store';
 import {
   Tooltip,
   TooltipContent,
@@ -9,31 +10,30 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useGlobalSessionStatus, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useDirectoryStore as useAppDirectoryStore } from '@/stores/useDirectoryStore';
 import { isChatDirectoryForHome } from '@/lib/chatDirectories';
-import { useSync } from '@/sync/use-sync';
+import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { collectSessionSubtreeIds } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { toContextUsageReading } from '@/components/ui/contextUsageReading';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
@@ -45,10 +45,12 @@ import {
 
 import {
 } from '@/components/ui/collapsible';
-import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { isSameContextUsage } from '@/stores/utils/tokenUtils';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
+import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
@@ -69,11 +71,18 @@ import type { IconName } from "@/components/icon/icons";
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestSessionAction } from '@/lib/guests/session-action';
+import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
+import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
+import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 
-const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
+const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 
 type HeaderIconActionButtonProps = {
   visible?: boolean;
@@ -123,136 +132,9 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   );
 });
 
-type DesktopGitHubControlProps = {
-  isMobile: boolean;
-  githubAuthStatus: GitHubAuthStatus | null;
-  githubAccounts: Array<NonNullable<GitHubAuthStatus['accounts']>[number]>;
-  githubAvatarUrl: string | null;
-  githubLogin: string | null;
-  isSwitchingGitHubAccount: boolean;
-  handleGitHubAccountSwitch: (accountId: string) => Promise<void>;
-};
-
-const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
-  isMobile,
-  githubAuthStatus,
-  githubAccounts,
-  githubAvatarUrl,
-  githubLogin,
-  isSwitchingGitHubAccount,
-  handleGitHubAccountSwitch,
-}: DesktopGitHubControlProps) {
-  const { t } = useI18n();
-  if (!githubAuthStatus?.connected || isMobile) {
-    return null;
-  }
-
-  if (githubAccounts.length > 1) {
-    return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              DESKTOP_HEADER_ICON_BUTTON_CLASS,
-              'h-7 w-7 overflow-hidden rounded-full border border-border/60 bg-muted/80 p-0'
-            )}
-            title={githubLogin ? t('header.github.connectedWithLogin', { login: githubLogin }) : t('header.github.connected')}
-            disabled={isSwitchingGitHubAccount}
-          >
-            {githubAvatarUrl ? (
-              <img
-                src={githubAvatarUrl}
-                alt={githubLogin ? t('header.github.avatarWithLogin', { login: githubLogin }) : t('header.github.avatar')}
-                className="h-full w-full object-cover"
-                loading="lazy"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
-            )}
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">
-            {t('header.github.accountsTitle')}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {githubAccounts.map((account) => {
-            const accountUser = account.user;
-            const isCurrent = Boolean(account.current);
-            const sourceLabel = account.source === 'gh-cli'
-              ? t('header.github.accountSource.cli')
-              : t('header.github.accountSource.oauth');
-            return (
-              <DropdownMenuItem
-                key={account.id}
-                className="gap-2"
-                disabled={isSwitchingGitHubAccount}
-                onSelect={() => {
-                  if (!isCurrent) {
-                    void handleGitHubAccountSwitch(account.id);
-                  }
-                }}
-              >
-                {accountUser?.avatarUrl ? (
-                  <img
-                    src={accountUser.avatarUrl}
-                    alt={accountUser.login ? t('header.github.avatarWithLogin', { login: accountUser.login }) : t('header.github.avatar')}
-                    className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
-                    <Icon name="github-fill" className="h-3 w-3 text-muted-foreground" />
-                  </div>
-                )}
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate typography-ui-label text-foreground">
-                    {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
-                  </span>
-                  {accountUser?.login ? (
-                    <span className="truncate typography-micro text-muted-foreground">
-                      <span className="font-mono">{accountUser.login}</span>
-                      <span className="mx-1 opacity-50">·</span>
-                      <span>{sourceLabel}</span>
-                    </span>
-                  ) : null}
-                </span>
-                {isCurrent ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    );
-  }
-
-  return (
-    <div
-      className="app-region-no-drag flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80"
-      title={githubLogin ? t('header.github.connectedWithLogin', { login: githubLogin }) : t('header.github.connected')}
-    >
-      {githubAvatarUrl ? (
-        <img
-          src={githubAvatarUrl}
-          alt={githubLogin ? t('header.github.avatarWithLogin', { login: githubLogin }) : t('header.github.avatar')}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
-      )}
-    </div>
-  );
-});
-
 type DesktopServicesMenuProps = {
   isDesktopApp: boolean;
   currentInstanceLabel: string;
-  compactCurrentInstanceLabel: string;
   currentInstanceIsLocal: boolean;
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -267,7 +149,6 @@ type DesktopServicesMenuProps = {
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   isDesktopApp,
   currentInstanceLabel,
-  compactCurrentInstanceLabel,
   currentInstanceIsLocal,
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
@@ -299,12 +180,12 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                 : t('header.services.open')}
               className={cn(
                 DESKTOP_HEADER_ICON_BUTTON_CLASS,
-                isDesktopApp ? 'w-auto max-w-[14rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
+                isDesktopApp ? 'w-auto max-w-[20rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
               )}
             >
               <Icon name="server" className="h-[18px] w-[18px]" />
               {isDesktopApp ? (
-                <span className="truncate typography-ui-label font-medium text-foreground">{compactCurrentInstanceLabel}</span>
+                <span className="truncate typography-ui-label font-medium text-foreground">{currentInstanceLabel}</span>
               ) : null}
             </button>
           </DropdownMenuTrigger>
@@ -363,43 +244,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   );
 });
 
-const isSameContextUsage = (
-  a: SessionContextUsage | null,
-  b: SessionContextUsage | null,
-): boolean => {
-  if (a === b) return true;
-  if (!a || !b) return false;
-
-  return a.totalTokens === b.totalTokens
-    && a.percentage === b.percentage
-    && a.contextLimit === b.contextLimit
-    && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
-    && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
-    && a.thresholdLimit === b.thresholdLimit
-    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
-};
-
-const formatCompactHeaderLabel = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  if (words.length >= 2) {
-    const first = words[0];
-    const second = words[1].slice(0, 3);
-    const shortTwoWord = `${first} ${second}`.trim();
-    if (words.length > 2 || shortTwoWord.length < trimmed.length) {
-      return `${shortTwoWord}...`;
-    }
-    return shortTwoWord;
-  }
-
-  return trimmed.length > 12 ? `${trimmed.slice(0, 9).trimEnd()}...` : trimmed;
-};
-
-
 const normalize = (value: string): string => {
   if (!value) return '';
   const replaced = value.replace(/\\/g, '/');
@@ -437,9 +281,6 @@ export const Header: React.FC = () => {
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
-
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const runtimeApis = useRuntimeAPIs();
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
@@ -488,8 +329,6 @@ export const Header: React.FC = () => {
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
 
   const { isMobile } = useDeviceInfo();
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const setGitHubAuthStatus = useGitHubAuthStore((state) => state.setStatus);
 
   const headerRef = React.useRef<HTMLElement | null>(null);
 
@@ -545,12 +384,7 @@ export const Header: React.FC = () => {
     setIsDesktopApp(isDesktopShell());
   }, []);
 
-  const currentModel = getCurrentModel();
-  const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
-    ? (currentModel.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
-  const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
+  const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId);
   const contextUsage = getContextUsage(contextLimit, outputLimit);
   const [stableDesktopContextUsage, setStableDesktopContextUsage] = React.useState<SessionContextUsage | null>(null);
   const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
@@ -561,7 +395,7 @@ export const Header: React.FC = () => {
       return;
     }
 
-    if (contextUsage && contextUsage.totalTokens > 0) {
+    if (contextUsage) {
       setStableDesktopContextUsage((prev) => (isSameContextUsage(prev, contextUsage) ? prev : contextUsage));
       return;
     }
@@ -571,10 +405,6 @@ export const Header: React.FC = () => {
     }
   }, [contextUsage, currentSessionId, isContextUsageResolvedForSession]);
 
-  const githubAvatarUrl = githubAuthStatus?.connected ? (githubAuthStatus.user?.avatarUrl ?? null) : null;
-  const githubLogin = githubAuthStatus?.connected ? (githubAuthStatus.user?.login ?? null) : null;
-  const githubAccounts = githubAuthStatus?.accounts ?? [];
-  const [isSwitchingGitHubAccount, setIsSwitchingGitHubAccount] = React.useState(false);
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
   const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
   const [currentInstanceIsLocal, setCurrentInstanceIsLocal] = React.useState(true);
@@ -582,7 +412,6 @@ export const Header: React.FC = () => {
   const [remoteUpdateInfo, setRemoteUpdateInfo] = React.useState<UpdateInfo | null>(null);
   const [remoteUpdateChecking, setRemoteUpdateChecking] = React.useState(false);
   const [remoteUpdateError, setRemoteUpdateError] = React.useState<string | null>(null);
-  const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   // While the work-status panel is on screen it already reports the project,
   // the branch and the context fill — three paces away in the same window.
@@ -611,11 +440,7 @@ export const Header: React.FC = () => {
   }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
   const showDesktopHeaderContextUsage = !isVSCode
     && !workStatusPanelVisible
-    && !!stableDesktopContextUsage
-    && stableDesktopContextUsage.totalTokens > 0;
-  const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
-    ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
-    : 0;
+    && !!stableDesktopContextUsage;
 
   const refreshCurrentInstanceLabel = React.useCallback(async () => {
     if (typeof window === 'undefined' || !isDesktopApp) {
@@ -839,6 +664,7 @@ export const Header: React.FC = () => {
     if (!worktreeAttachment) return null;
     return formatSessionWorktreeBadge(worktreeAttachment, {
       pending: t('gitView.empty.worktreeSetupInProgress'),
+      missing: t('sessions.sidebar.group.worktreeMissing'),
     });
   }, [t, worktreeAttachment]);
 
@@ -860,6 +686,7 @@ export const Header: React.FC = () => {
     const raw = typeof currentSession?.directory === 'string' ? currentSession.directory : '';
     return normalize(raw || '');
   }, [currentSession?.directory]);
+  const isCurrentSessionAiRenaming = useIsSessionAiRenamePending(currentSessionId ?? '', sessionDirectory);
 
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) {
@@ -916,8 +743,7 @@ export const Header: React.FC = () => {
     const trimmedTitle = currentSession?.title?.trim();
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
-  const headerDirectoryStore = useDirectoryStore(openDirectory || undefined, { bootstrap: false });
-  const sync = useSync();
+  const loadSessionRecords = useSessionMessageRecordsForExport();
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const shareSession = useSessionUIStore((state) => state.shareSession);
   const unshareSession = useSessionUIStore((state) => state.unshareSession);
@@ -941,6 +767,15 @@ export const Header: React.FC = () => {
 
   const beginHeaderSessionRenameRef = React.useRef(beginHeaderSessionRename);
   beginHeaderSessionRenameRef.current = beginHeaderSessionRename;
+
+  // The rename field opens with the whole title selected, so the first
+  // keystroke replaces it. Stable ref callback: an inline one would re-run on
+  // every render and re-select the text mid-edit.
+  const focusHeaderRenameInput = React.useCallback((node: HTMLInputElement | null) => {
+    if (!node) return;
+    node.focus();
+    node.select();
+  }, []);
 
   React.useEffect(() => {
     setIsHeaderSessionMenuOpen(false);
@@ -1023,13 +858,11 @@ export const Header: React.FC = () => {
       toast.error(t('sessions.sidebar.session.export.nothingToExport'));
       return;
     }
-    try {
-      await sync.loadCompleteHistory(currentSessionId, openDirectory);
-    } catch {
+    const records = await loadSessionRecords({ sessionID: currentSessionId, directory: openDirectory }).catch(() => null);
+    if (!records) {
       toast.error(t('sessions.sidebar.session.export.failedLoadHistory'));
       return;
     }
-    const records = buildSessionMessageRecordsSnapshot(headerDirectoryStore.getState(), currentSessionId).list;
     if (records.length === 0) {
       toast.error(t('sessions.sidebar.session.export.nothingToExport'));
       return;
@@ -1039,7 +872,34 @@ export const Header: React.FC = () => {
     const savedPath = await saveAsMarkdownDesktop(markdown, filename);
     if (!savedPath) downloadAsMarkdown(markdown, filename);
     toast.success(t('sessions.sidebar.session.export.success'));
-  }, [currentSession?.title, currentSessionId, headerDirectoryStore, openDirectory, sync, t]);
+  }, [currentSession?.title, currentSessionId, loadSessionRecords, openDirectory, t]);
+
+  // Extension session actions on the current session. The conversation is
+  // loaded the same way Export as Markdown loads it.
+  const guestActionEntries = useGuestActions();
+  const guestSessionActionEntries = React.useMemo(() => guestSessionActions(guestActionEntries), [guestActionEntries]);
+  const runCurrentSessionGuestAction = React.useCallback((entry: GuestActionEntry) => {
+    if (!currentSessionId) return;
+    void runGuestSessionAction({
+      entry,
+      t,
+      session: { id: currentSessionId, title: currentSession?.title, directory: sessionDirectory ?? openDirectory },
+      loadRecords: async () => {
+        if (!openDirectory) return null;
+        try {
+          return await loadSessionRecords({ sessionID: currentSessionId, directory: openDirectory });
+        } catch {
+          return null;
+        }
+      },
+      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
+    });
+  }, [currentSession?.title, currentSessionId, loadSessionRecords, openDirectory, sessionDirectory, t]);
+  const renderGuestSessionActionItems = React.useCallback((Item: React.ElementType) => guestSessionActionEntries.map((entry) => (
+    <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => runCurrentSessionGuestAction(entry)}>
+      <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="mr-1 size-4" />{entry.action.label}
+    </Item>
+  )), [guestSessionActionEntries, runCurrentSessionGuestAction]);
 
   const isCurrentSessionActive = currentSessionStatus?.type === 'busy' || currentSessionStatus?.type === 'retry';
   const moveCurrentSessionToWorktree = React.useCallback(() => {
@@ -1059,28 +919,25 @@ export const Header: React.FC = () => {
       }
     }
 
-    startSessionTreeWorktreeMove({
+    requestSessionTreeMove({
+      kind: 'quick',
       root,
       descendants,
       sourceDirectory: sessionDirectory,
-      successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
-      failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
+      messages: buildSessionTreeMoveMessages(t, {
+        success: 'sessions.sidebar.session.moveToWorktree.success',
+        failure: 'sessions.sidebar.session.moveToWorktree.failed',
+      }),
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
 
   const confirmHeaderRetentionAction = React.useCallback(async () => {
     if (!pendingHeaderRetentionAction) return;
-    const sessions = useGlobalSessionsStore.getState().activeSessions;
-    const ids = [pendingHeaderRetentionAction.sessionId];
-    for (let index = 0; index < ids.length; index += 1) {
-      const parentId = ids[index];
-      for (const session of sessions) {
-        if ((session as typeof session & { parentID?: string | null }).parentID === parentId && !ids.includes(session.id)) {
-          ids.push(session.id);
-        }
-      }
-    }
     const action = pendingHeaderRetentionAction.action;
+    const ids = [
+      pendingHeaderRetentionAction.sessionId,
+      ...collectSessionSubtreeIds(pendingHeaderRetentionAction.sessionId, [], action === 'delete'),
+    ];
     setPendingHeaderRetentionAction(null);
     const result = action === 'archive' ? await archiveSessions(ids) : await deleteSessions(ids);
     const failedIds = result.failedIds;
@@ -1098,6 +955,8 @@ export const Header: React.FC = () => {
   // Full-page surfaces (Scheduled, Archive, Worktrees, Multi-run) replace the
   // chat area; while one is open the header shows the surface identity
   // instead of the session switcher.
+  const openGuestPageId = useUIStore((state) => state.openGuestPageId);
+  const guestPage = useGuestsStore((state) => state.guests.find((guest) => guest.id === openGuestPageId));
   const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isArchiveSurfaceOpen = useUIStore((state) => state.isArchivePageOpen);
   const worktreesSurfaceProjectId = useUIStore((state) => state.worktreesPageProjectId);
@@ -1108,6 +967,7 @@ export const Header: React.FC = () => {
     return project?.label?.trim() || project?.path?.split('/').pop() || null;
   });
   const activeSurfaceHeader = React.useMemo<{ title: string; subtitle: string | null } | null>(() => {
+    if (guestPage) return { title: guestPage.pageTitle ?? guestPage.name, subtitle: null };
     if (isScheduledSurfaceOpen) {
       return { title: t('sessions.scheduledTasks.dialog.title'), subtitle: null };
     }
@@ -1124,34 +984,16 @@ export const Header: React.FC = () => {
       return { title: t('sessions.sidebar.header.actions.newMultiRun'), subtitle: null };
     }
     return null;
-  }, [isArchiveSurfaceOpen, isMultiRunSurfaceOpen, isScheduledSurfaceOpen, t, worktreesSurfaceProjectId, worktreesSurfaceProjectLabel]);
+  }, [guestPage, isArchiveSurfaceOpen, isMultiRunSurfaceOpen, isScheduledSurfaceOpen, t, worktreesSurfaceProjectId, worktreesSurfaceProjectLabel]);
 
 
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
   }, [activeProject?.path, openDirectory]);
 
-  const activeProjectRef = React.useMemo(() => {
-    if (!activeProject) {
-      return null;
-    }
-    return { id: activeProject.id, path: activeProject.path };
-  }, [activeProject]);
-
-  const lastProjectActionsContextRef = React.useRef<{
-    projectRef: { id: string; path: string };
-    directory: string;
-  } | null>(null);
-
-  React.useEffect(() => {
-    if (!activeProjectRef || !actionDirectory) {
-      return;
-    }
-    lastProjectActionsContextRef.current = {
-      projectRef: activeProjectRef,
-      directory: actionDirectory,
-    };
-  }, [actionDirectory, activeProjectRef]);
+  // Same resolution the titlebar overlay used to own: worktree → session →
+  // draft → project path, sticky across session switches.
+  const projectActionsContext = useProjectActionsContext();
 
 
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
@@ -1180,37 +1022,6 @@ export const Header: React.FC = () => {
     sessionDirectory,
   ]);
 
-  const handleGitHubAccountSwitch = React.useCallback(async (accountId: string) => {
-    if (!accountId || isSwitchingGitHubAccount) return;
-    setIsSwitchingGitHubAccount(true);
-    try {
-      const payload = runtimeApis.github
-        ? await runtimeApis.github.authActivate(accountId)
-        : await (async () => {
-          const response = await runtimeFetch('/api/github/auth/activate', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ accountId }),
-          });
-          const body = (await response.json().catch(() => null)) as
-            | (GitHubAuthStatus & { error?: string })
-            | null;
-          if (!response.ok || !body) {
-            throw new Error(body?.error || response.statusText);
-          }
-          return body;
-        })();
-
-      setGitHubAuthStatus(payload);
-    } catch (error) {
-      console.error('Failed to switch GitHub account:', error);
-    } finally {
-      setIsSwitchingGitHubAccount(false);
-    }
-  }, [isSwitchingGitHubAccount, runtimeApis.github, setGitHubAuthStatus]);
 
 
 
@@ -1271,7 +1082,9 @@ export const Header: React.FC = () => {
   // `--oc-titlebar-left-inset` so the sidebar strip can mirror it.
   const titlebarLeftInset = React.useMemo(() => {
     if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
-      return '5.5rem';
+      // Native traffic lights have a fixed physical footprint. Keep this
+      // clearance in pixels so shrinking the interface cannot overlap them.
+      return '88px';
     }
     if (isTabletStandalonePwa) {
       return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
@@ -1353,6 +1166,14 @@ export const Header: React.FC = () => {
       return undefined;
     }
 
+    // Custom in-window controls (frameless Electron, right side) own the right
+    // edge: no inline padding, so the pr-0 class applies and the close button
+    // sits flush with the window corner per Windows conventions. Only the
+    // browser's native window-controls overlay reserves padding + right inset.
+    if (usesFramelessChrome && windowControlsSide === 'right') {
+      return undefined;
+    }
+
     return {
       // Left inset is handled by the no-drag spacer (see renderDesktop); only
       // the right inset / titlebar height are owned by the window-controls overlay.
@@ -1360,7 +1181,7 @@ export const Header: React.FC = () => {
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isVSCode, usesFramelessChrome]);
+  }, [isDesktopApp, isVSCode, usesFramelessChrome, windowControlsSide]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1451,6 +1272,13 @@ export const Header: React.FC = () => {
 
   const desktopSidebarActions = (
     <>
+      {projectActionsContext ? (
+        <ProjectActionsButton
+          projectRef={projectActionsContext.projectRef}
+          directory={projectActionsContext.directory}
+          className="mr-2"
+        />
+      ) : null}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
       {/* Instances only exist in the desktop app. On web the menu was left
           holding a single dev-only shutdown action, which is not a reason to
@@ -1459,7 +1287,6 @@ export const Header: React.FC = () => {
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
-        compactCurrentInstanceLabel={compactCurrentInstanceLabel}
         currentInstanceIsLocal={currentInstanceIsLocal}
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
@@ -1471,52 +1298,45 @@ export const Header: React.FC = () => {
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
       />
       ) : null}
-      <DesktopGitHubControl
-        isMobile={isMobile}
-        githubAuthStatus={githubAuthStatus}
-        githubAccounts={githubAccounts}
-        githubAvatarUrl={githubAvatarUrl}
-        githubLogin={githubLogin}
-        isSwitchingGitHubAccount={isSwitchingGitHubAccount}
-        handleGitHubAccountSwitch={handleGitHubAccountSwitch}
-      />
     </>
   );
 
   const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
-  const renderSessionTabMenu = React.useCallback(({ session, isActive, select, closeOtherTabs, components }: SessionTabMenuArgs) => {
+  const renderSessionTabMenu = React.useCallback(({ session, open, isActive, select, closeOtherTabs, components }: SessionTabMenuArgs) => {
     const { Item, Separator } = components;
     const shareUrl = session.share?.url ?? null;
     const canMoveToWorktree = isActive && !isVSCode && !isChatContext && currentSession && !currentSession.parentId;
     return (
       <>
         <Item onClick={() => { if (!isActive) select(); pendingHeaderRenameRef.current = session.id; }}>
-          <Icon name="pencil-ai" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.rename')}
+          <Icon name="pencil-ai" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.rename')}
         </Item>
+        <SessionAiRenameMenuItem sessionID={session.id} directory={session.directory} open={open} Item={Item} />
         <Item onClick={() => copySessionIdFor(session.id)}>
-          <Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyId')}
+          <Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}
         </Item>
         <Separator />
         {shareUrl ? (
           <>
             <Item onClick={() => copySessionShareUrl(shareUrl)}>
-              <Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyLink')}
+              <Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyLink')}
             </Item>
             <Item onClick={() => void unshareSessionFor(session.id)}>
-              <Icon name="link-unlink-m" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.unshare')}
+              <Icon name="link-unlink-m" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.unshare')}
             </Item>
           </>
         ) : (
           <Item onClick={() => void shareSessionFor(session.id)}>
-            <Icon name="share-2" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.share')}
+            <Icon name="share-2" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.share')}
           </Item>
         )}
         {isActive ? (
           <Item onClick={() => void exportCurrentSession()}>
-            <Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
+            <Icon name="download" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
           </Item>
         ) : null}
+        {isActive ? renderGuestSessionActionItems(Item) : null}
         {canMoveToWorktree ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1526,7 +1346,7 @@ export const Header: React.FC = () => {
                   onClick={moveCurrentSessionToWorktree}
                   className="w-full"
                 >
-                  <Icon name="folder-shared" className="mr-2 size-4" />
+                  <Icon name="folder-shared" className="mr-1 size-4" />
                   {t('sessions.sidebar.session.menu.moveToWorktree')}
                 </Item>
               </span>
@@ -1542,18 +1362,18 @@ export const Header: React.FC = () => {
         ) : null}
         <Separator />
         <Item onClick={closeOtherTabs}>
-          <Icon name="close-circle" className="mr-2 size-4" />{t('header.sessionTabs.closeOtherTabs')}
+          <Icon name="close-circle" className="mr-1 size-4" />{t('header.sessionTabs.closeOtherTabs')}
         </Item>
         <Separator />
         <Item onClick={() => setPendingHeaderRetentionAction({ action: 'archive', sessionId: session.id })}>
-          <Icon name="inbox-archive" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.archive')}
+          <Icon name="inbox-archive" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.archive')}
         </Item>
         <Item className="text-destructive focus:text-destructive" onClick={() => setPendingHeaderRetentionAction({ action: 'delete', sessionId: session.id })}>
-          <Icon name="delete-bin" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.delete')}
+          <Icon name="delete-bin" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}
         </Item>
       </>
     );
-  }, [copySessionIdFor, copySessionShareUrl, currentSession, exportCurrentSession, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, sessionDirectory, shareSessionFor, t, unshareSessionFor]);
+  }, [copySessionIdFor, copySessionShareUrl, currentSession, exportCurrentSession, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, renderGuestSessionActionItems, sessionDirectory, shareSessionFor, t, unshareSessionFor]);
 
   const renderDesktop = () => (
     <div
@@ -1587,6 +1407,21 @@ export const Header: React.FC = () => {
           while the sidebar is closed. */}
       <div className="flex min-w-0 flex-1 items-center">
         {activeSurfaceHeader ? (
+          <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="app-region-no-drag mr-1 text-muted-foreground hover:bg-transparent hover:text-foreground"
+                aria-label={t('header.mainSurface.backToChat')}
+                onClick={() => useUIStore.getState().closeMainSurfaces()}
+              >
+                <Icon name="arrow-left" className="size-[18px]" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('header.mainSurface.backToChat')}</TooltipContent>
+          </Tooltip>
           <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
             <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
               {activeSurfaceHeader.title}
@@ -1597,8 +1432,10 @@ export const Header: React.FC = () => {
               </span>
             ) : null}
           </div>
+          </>
         ) : (isVSCode || !sessionTabsEnabled) ? (
           <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
+            {isCurrentSessionAiRenaming ? <Icon name="loader-4" className="mr-1 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} /> : null}
             {!isSidebarOpen ? (
               <SessionSwitcherDropdown align="start">
                 <button
@@ -1622,15 +1459,10 @@ export const Header: React.FC = () => {
                   }}
                 >
                   <input
+                    ref={focusHeaderRenameInput}
                     value={headerSessionTitleDraft}
                     onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
-                    autoFocus
-                    onKeyDown={(event) => {
-                      event.stopPropagation();
-                      if (event.key === 'Escape') {
-                        setIsRenamingHeaderSession(false);
-                      }
-                    }}
+                    onKeyDown={(event) => handleSessionRenameKeyDown(event, () => setIsRenamingHeaderSession(false))}
                     placeholder={t('sessions.sidebar.session.menu.rename')}
                     className="min-w-0 flex-1 bg-transparent typography-ui-label text-[14px] font-normal leading-tight outline-none placeholder:text-muted-foreground"
                   />
@@ -1652,9 +1484,9 @@ export const Header: React.FC = () => {
                     <Icon name="close" className="size-4" />
                   </button>
                 </form>
-              ) : (
+              ) : isNewSessionDraftOpen ? null : (
                 <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
-                  {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
+                  {currentSessionTitle}
                 </span>
               )}
               {showHeaderMetaRow ? (
@@ -1701,18 +1533,20 @@ export const Header: React.FC = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[190px]">
-                    <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem>
+                    <SessionAiRenameMenuItem sessionID={currentSessionId} directory={sessionDirectory} open={isHeaderSessionMenuOpen} Item={DropdownMenuItem} />
+                    <DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem>
                     <DropdownMenuSeparator />
                     {currentSession?.shareUrl ? (
                       <>
-                        <DropdownMenuItem onClick={() => copySessionShareUrl(currentSession?.shareUrl)}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyLink')}</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { if (currentSessionId) void unshareSessionFor(currentSessionId); }}><Icon name="link-unlink-m" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.unshare')}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => copySessionShareUrl(currentSession?.shareUrl)}><Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyLink')}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { if (currentSessionId) void unshareSessionFor(currentSessionId); }}><Icon name="link-unlink-m" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.unshare')}</DropdownMenuItem>
                       </>
                     ) : (
-                      <DropdownMenuItem onClick={() => { if (currentSessionId) void shareSessionFor(currentSessionId); }}><Icon name="share-2" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.share')}</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { if (currentSessionId) void shareSessionFor(currentSessionId); }}><Icon name="share-2" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.share')}</DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem>
+                    {renderGuestSessionActionItems(DropdownMenuItem)}
                     {!isVSCode && !isChatContext && currentSession && !currentSession.parentId ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1722,7 +1556,7 @@ export const Header: React.FC = () => {
                               onClick={moveCurrentSessionToWorktree}
                               className="w-full"
                             >
-                              <Icon name="folder-shared" className="mr-2 size-4" />
+                              <Icon name="folder-shared" className="mr-1 size-4" />
                               {t('sessions.sidebar.session.menu.moveToWorktree')}
                             </DropdownMenuItem>
                           </span>
@@ -1737,8 +1571,8 @@ export const Header: React.FC = () => {
                       </Tooltip>
                     ) : null}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId }); }}><Icon name="inbox-archive" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.archive')}</DropdownMenuItem>
-                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'delete', sessionId: currentSessionId }); }}><Icon name="delete-bin" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId }); }}><Icon name="inbox-archive" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.archive')}</DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'delete', sessionId: currentSessionId }); }}><Icon name="delete-bin" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : null}
@@ -1779,15 +1613,10 @@ export const Header: React.FC = () => {
                   }}
                 >
                   <input
+                    ref={focusHeaderRenameInput}
                     value={headerSessionTitleDraft}
                     onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
-                    autoFocus
-                    onKeyDown={(event) => {
-                      event.stopPropagation();
-                      if (event.key === 'Escape') {
-                        setIsRenamingHeaderSession(false);
-                      }
-                    }}
+                    onKeyDown={(event) => handleSessionRenameKeyDown(event, () => setIsRenamingHeaderSession(false))}
                     placeholder={t('sessions.sidebar.session.menu.rename')}
                     className="min-w-0 flex-1 bg-transparent text-[13px] font-medium leading-4 outline-none placeholder:text-muted-foreground"
                   />
@@ -1824,9 +1653,7 @@ export const Header: React.FC = () => {
         <div className="flex shrink-0 items-center gap-1">
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
-              totalTokens={stableDesktopContextUsage.totalTokens}
-              percentage={desktopHeaderDisplayPercentage}
-              colorPercentage={stableDesktopContextUsage.percentage}
+              reading={toContextUsageReading(stableDesktopContextUsage)}
               contextLimit={stableDesktopContextUsage.contextLimit}
               outputLimit={stableDesktopContextUsage.outputLimit ?? 0}
               size="compact"

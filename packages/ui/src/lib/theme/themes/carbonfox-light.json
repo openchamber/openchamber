@@ -2,9 +2,9 @@
   "metadata": {
     "id": "carbonfox-light",
     "name": "Carbonfox",
+    "variant": "light",
     "description": "Carbonfox",
     "version": "1.0.0",
-    "variant": "light",
     "tags": [
       "light",
       "palette"
@@ -15,9 +15,7 @@
       "base": "#0072C3",
       "hover": "#338ECF",
       "active": "#0061A6",
-      "foreground": "#FFFFFF",
-      "muted": "#0072C380",
-      "emphasis": "#338ECF"
+      "muted": "#0072C380"
     },
     "surface": {
       "background": "#FFFFFF",
@@ -25,16 +23,15 @@
       "muted": "#F4F4F4",
       "mutedForeground": "#868585",
       "elevated": "#f4f4f7",
-      "elevatedForeground": "#161616",
       "overlay": "#00000020",
       "subtle": "#f6f6f8"
     },
     "interactive": {
       "border": "#e3e2e2",
-      "borderHover": "#D0D0D0",
-      "borderFocus": "#0F62FE",
       "selection": "#cacfd87f",
       "selectionForeground": "#000000",
+      "borderHover": "#D0D0D0",
+      "borderFocus": "#0F62FE",
       "focus": "#0F62FE",
       "focusRing": "#0F62FE40",
       "cursor": "#000000",
@@ -43,33 +40,14 @@
     },
     "status": {
       "error": "#DA1E28",
-      "errorForeground": "#FFFFFF",
-      "errorBackground": "#DA1E2820",
-      "errorBorder": "#DA1E2850",
       "warning": "#F1C21B",
       "warningForeground": "#FFFFFF",
-      "warningBackground": "#F1C21B20",
-      "warningBorder": "#F1C21B50",
       "success": "#198038",
-      "successForeground": "#FFFFFF",
-      "successBackground": "#19803820",
-      "successBorder": "#19803850",
-      "info": "#0043CE",
-      "infoForeground": "#FFFFFF",
-      "infoBackground": "#0043CE20",
-      "infoBorder": "#0043CE50"
-    },
-    "pr": {
-      "open": "#42BE65",
-      "draft": "#8D8D8D",
-      "blocked": "#F1C21B",
-      "merged": "#BE95FF",
-      "closed": "#FF8389"
+      "info": "#0043CE"
     },
     "syntax": {
       "base": {
         "background": "#F4F4F4",
-        "foreground": "#161616",
         "comment": "#525252",
         "keyword": "#0043CE",
         "string": "#198038",
@@ -81,34 +59,15 @@
       },
       "tokens": {
         "boolean": "#007D79",
-        "class": "#0043CE",
         "className": "#0043CE",
         "commentDoc": "#A9A9A9",
         "constant": "#6929C4",
         "decorator": "#007D79",
-        "enum": "#0043CE",
-        "exception": "#DA1E28",
-        "functionCall": "#0043CE",
-        "interface": "#007D79",
-        "jsxTag": "#0043CE",
         "key": "#0043CE",
-        "keywordImport": "#DA1E28",
-        "label": "#DA1E28",
-        "macro": "#0043CE",
         "method": "#198038",
-        "module": "#DA1E28",
-        "namespace": "#007D79",
         "parameter": "#161616",
-        "preprocessor": "#DA1E28",
-        "punctuation": "#525252",
-        "regex": "#198038",
-        "storageModifier": "#0043CE",
         "stringEscape": "#000000",
-        "struct": "#0043CE",
-        "tag": "#0043CE",
         "tagAttribute": "#007D79",
-        "tagAttributeValue": "#198038",
-        "typeParameter": "#007D79",
         "url": "#0072C3",
         "variableGlobal": "#0043CE",
         "variableLocal": "#E8E8E8",
@@ -116,48 +75,36 @@
         "variableProperty": "#6929C4"
       },
       "highlights": {
-        "diffAdded": "#198038",
-        "diffAddedBackground": "#19803820",
-        "diffModified": "#0043CE",
-        "diffModifiedBackground": "#0043CE20",
-        "diffRemoved": "#DA1E28",
-        "diffRemovedBackground": "#DA1E2820",
         "lineNumber": "#D0D0D0",
         "lineNumberActive": "#000000"
       }
     },
+    "pr": {
+      "open": "#42BE65",
+      "draft": "#8D8D8D",
+      "merged": "#BE95FF",
+      "closed": "#FF8389"
+    },
+    "chat": {
+      "userMessageBackground": "#f4f4f7",
+      "divider": "#DCDCDC"
+    },
     "markdown": {
-      "heading1": "#161616",
-      "heading2": "#161616",
-      "heading3": "#161616",
-      "heading4": "#161616",
       "link": "#0072C3",
       "linkHover": "#0043CE",
-      "inlineCode": "#198038",
-      "inlineCodeBackground": "#F4F4F4",
+      "inlineCode": "#00661E",
+      "inlineCodeBackground": "#F2F2F2",
       "blockquote": "#525252",
       "blockquoteBorder": "#DCDCDC",
       "listMarker": "#0072C399"
     },
-    "chat": {
-      "userMessage": "#161616",
-      "userMessageBackground": "#f4f4f7",
-      "assistantMessage": "#161616",
-      "assistantMessageBackground": "#FFFFFF",
-      "timestamp": "#525252",
-      "divider": "#DCDCDC"
-    },
     "tools": {
-      "background": "#F4F4F480",
       "border": "#bdbbbb80",
-      "headerHover": "#DCDCDC",
       "icon": "#525252",
       "title": "#161616",
       "description": "#525252",
       "edit": {
-        "added": "#198038",
         "addedBackground": "#19803825",
-        "removed": "#DA1E28",
         "removedBackground": "#DA1E2825",
         "lineNumber": "#D0D0D0"
       }

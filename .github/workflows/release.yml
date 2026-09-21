@@ -48,26 +48,12 @@ jobs:
           fi
 
       - name: Extract changelog for release
+        id: release_notes
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const version = process.env.VERSION;
-          const changelogPath = 'CHANGELOG.md';
-          if (!fs.existsSync(changelogPath)) {
-            throw new Error('CHANGELOG.md not found; add it before releasing.');
-          }
-          const changelog = fs.readFileSync(changelogPath, 'utf8');
-          const sections = changelog.split(/^## /m);
-          const section = sections.find(s => s.startsWith('[' + version + ']'));
-          if (!section) {
-            throw new Error('Changelog section [' + version + '] not found. Add a section like "## [' + version + '] - YYYY-MM-DD".');
-          }
-          const content = ('## ' + section).trim();
-          fs.mkdirSync('artifacts', { recursive: true });
-          fs.writeFileSync('artifacts/release-notes.md', content + '\n');
-          NODE
+          title=$(node scripts/changelog/release-notes.mjs "$VERSION" artifacts/release-notes.md)
+          echo "name=OpenChamber v$VERSION: $title" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         id: create_release
@@ -77,7 +63,7 @@ jobs:
           draft: true
           generate_release_notes: false
           body_path: artifacts/release-notes.md
-          name: OpenChamber v${{ steps.get_version.outputs.version }}
+          name: ${{ steps.release_notes.outputs.name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -102,9 +88,20 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # Both packages are packed and published with bun so the
+      # `workspace:*` link from @openchamber/web to @openchamber/sdk is
+      # rewritten to the released version. npm leaves it in place and the
+      # published tarball then fails to install.
+      - name: Publish SDK to npm
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        working-directory: packages/sdk
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create npm tarball
         working-directory: packages/web
-        run: npm pack
+        run: bun pm pack
 
       - name: Upload npm tarball to release
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -118,9 +115,9 @@ jobs:
       - name: Publish to npm
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: packages/web
-        run: npm publish --access public
+        run: bun publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   build-desktop-electron-macos:
     needs: create-release

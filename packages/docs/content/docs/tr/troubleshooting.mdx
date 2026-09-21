@@ -1,0 +1,40 @@
+---
+title: Sorun giderme
+description: Hızlı çözümlerle sık görülen kurulum ve çalışma zamanı sorunları.
+---
+
+# Sorun giderme
+
+Bir aksilik mi oldu? Aşağıda belirtiyi bulun ve çözümü deneyin.
+
+## OpenChamber komutu kapanıyor ya da başlamıyor
+
+- Node.js sürümünün `>=22` olduğunu doğrulayın
+- `openchamber --version` çalıştırın
+- Gerekirse en son CLI'yı yeniden kurun
+
+## Web arayüzüne ulaşılamıyor
+
+- Sunucu günlüklerini `openchamber logs` ile kontrol edin
+- Aktif portu doğrulayın. Varsayılan `3000`
+- Tunnel bağlantılarını test etmeden önce doğrudan `http://localhost:3000` açın
+
+## Uzak/tunnel bağlantısı çalışmıyor
+
+- `openchamber tunnel status --all` çalıştırın
+- Tunnel'ı aynı örnek ve porttan yeniden başlatın
+- Önceki token zaten kullanıldıysa bağlantı bağlantısını yeniden üretin
+
+Tam kurulum için [Tunnels](/tunnels/) sayfasına, bir reverse proxy kullanıyorsanız da [Reverse Proxy](/reverse-proxy/) sayfasına bakın.
+
+## VS Code uzantısı bağlanmıyor
+
+- OpenChamber sunucusunun çalıştığını doğrulayın
+- Uzantının güncel olduğunu kontrol edin
+- VS Code penceresini yeniden yükleyin ve bağlantıyı tekrar deneyin
+
+## İlgili
+
+- [Quickstart](/quickstart/)
+- [Tunnels](/tunnels/)
+- [Reverse Proxy](/reverse-proxy/)

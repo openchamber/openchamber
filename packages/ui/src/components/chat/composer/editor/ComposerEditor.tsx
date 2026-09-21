@@ -34,10 +34,14 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
+import type { ComposerAutoCorrect } from './autocorrect';
 import { composerLanguage, setLanguageContext } from './composerLanguage';
+import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
+import { getComposerHeightLimit } from './heightLimit';
+import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 
 export interface ComposerSelection {
     start: number;
@@ -63,8 +67,8 @@ export interface ComposerEditorHandle {
     selectAll(): void;
     /** Replace the current selection, leaving the caret after the insertion. */
     insertText(text: string): void;
-    /** Replace an explicit range; the caret lands at `caret` or after the text. */
-    replaceRange(from: number, to: number, text: string, caret?: number): void;
+    /** Replace a range; selection defaults to a caret after the inserted text. */
+    replaceRange(from: number, to: number, text: string, selectionStart?: number, selectionEnd?: number): void;
     /** Viewport coordinates of the caret, for positioning popups. */
     caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
     /** The scrollable element, for measuring and scroll compensation. */
@@ -89,9 +93,14 @@ export interface ComposerEditorProps {
     placeholder?: string;
     editable?: boolean;
     spellCheck?: boolean;
-    /** Mobile keyboards; ignored on desktop. */
-    autoCorrect?: boolean;
+    /**
+     * The content element's autocorrect keyword. See `autocorrect.ts` for the
+     * case-sensitive CodeMirror workaround.
+     */
+    autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
+    /** Retain the untouched key policy before a mobile user opts in. */
+    preserveDeferredEnterShift?: boolean;
     /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
     /** Lines of text shown before the editor starts scrolling. */
@@ -107,6 +116,13 @@ export interface ComposerEditorProps {
     className?: string;
     contentClassName?: string;
     /**
+     * Value of the host's `data-chat-input` attribute. The default `"true"`
+     * marks the composer's prompt editor for global helpers (`focusChatInput`,
+     * shortcut guards); a second editor in the same column — the mobile
+     * comment editor — passes its own marker so those helpers skip it.
+     */
+    dataChatInput?: string;
+    /**
      * Keeps the underlying view alive across unmounts. Supply one from a parent
      * that outlives the swap; without it the view is built and destroyed with
      * the component, which is correct but expensive on an interaction path.
@@ -115,7 +131,6 @@ export interface ComposerEditorProps {
     'aria-label'?: string;
     'data-testid'?: string;
 }
-
 
 /**
  * The text inserted by a transaction, used to tell a typed `@` from a pasted
@@ -157,7 +172,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             placeholder,
             editable = true,
             spellCheck = false,
-            autoCorrect = false,
+            autoCorrect = 'off',
             autoCapitalize = 'none',
             fillContainer = false,
             maxLines = 8,
@@ -170,13 +185,17 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
         const hostRef = React.useRef<HTMLDivElement | null>(null);
         const viewRef = React.useRef<EditorView | null>(null);
 
-        // The real keydown's shift state for the LAST Enter that reached the
-        // editor. CodeMirror defers Enter on iOS (and Chrome Android) and
-        // re-dispatches it as a synthetic keydown built from the key name
-        // alone, dropping every modifier (see `trackRealEnterShift` and the
-        // `interceptKeys` handler below); this ref is what lets the deferred
-        // event still tell Shift+Enter from Enter.
-        const lastRealEnterShiftRef = React.useRef(false);
+        // CodeMirror defers Enter on iOS and Chrome Android, then re-dispatches
+        // a synthetic keydown. Keep modifiers only for that short handoff.
+        const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false });
+        const deferredEnterModsTimeoutRef = React.useRef<number | null>(null);
+        const clearDeferredEnterModifiers = () => {
+            lastRealEnterModsRef.current = { shiftKey: false, ctrlKey: false, metaKey: false };
+            if (deferredEnterModsTimeoutRef.current !== null) {
+                window.clearTimeout(deferredEnterModsTimeoutRef.current);
+                deferredEnterModsTimeoutRef.current = null;
+            }
+        };
 
         // Callbacks reach the CodeMirror extensions through a ref: the view is
         // built once and must not be torn down when a handler identity changes,
@@ -219,11 +238,11 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
             const interceptKeys: KeyBinding[] = [{
                 any: (_view, event) => {
-                    // A deferred Enter lost its modifiers in the re-dispatch;
-                    // give the caller's policy (Enter vs Shift+Enter) back the
-                    // shift state it saw on the real keydown.
-                    if (event.key === 'Enter' && isDeferredSyntheticEvent(event) && lastRealEnterShiftRef.current) {
-                        Object.defineProperty(event, 'shiftKey', { value: true });
+                    // A deferred Enter loses its modifiers in the re-dispatch.
+                    if (event.key === 'Enter' && isDeferredSyntheticEvent(event)) {
+                        const preserveShift = handlersRef.current.preserveDeferredEnterShift !== false;
+                        restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current, preserveShift);
+                        clearDeferredEnterModifiers();
                     }
                     return handlersRef.current.onKeyDown?.(event) ?? false;
                 },
@@ -287,7 +306,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         }),
                         EditorView.contentAttributes.of({
                             spellcheck: String(handlersRef.current.spellCheck ?? false),
-                            autocorrect: handlersRef.current.autoCorrect ? 'on' : 'off',
+                            autocorrect: handlersRef.current.autoCorrect ?? 'off',
                             autocapitalize: handlersRef.current.autoCapitalize ?? 'none',
                             ...(handlersRef.current['aria-label']
                                 ? { 'aria-label': handlersRef.current['aria-label'] }
@@ -301,26 +320,26 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             viewRef.current = view;
             if (store) store.view = view;
 
-            // CodeMirror defers Enter on iOS (and Chrome Android): the real
-            // keydown is captured without running the keymaps, the browser's
-            // native newline goes through, and the keymaps then run against a
-            // synthetic keydown `dispatchKey` builds from the key name alone —
-            // which has NO modifiers. Recording the real shift state here (a
-            // plain listener, registered after CodeMirror's own, so it runs
-            // after the deferral decision but before the deferred dispatch)
-            // lets the deferred Enter be re-presented with Shift+Enter intact
-            // instead of arriving as a plain Enter that "sends" where Enter
-            // sends. Without it, Shift+Enter on iOS/Android submits the
-            // message instead of inserting a newline. The listener lives on
+            // Record the real modifier state after CodeMirror decides to defer
+            // the event, before its synthetic dispatch. The state expires if
+            // CodeMirror never dispatches the replacement, so a later Android
+            // keyboard Enter cannot inherit an unrelated earlier keydown. The listener lives on
             // the kept-alive view's contentDOM, so it stays across mounts and
             // keeps feeding the same ref the `interceptKeys` closure reads.
-            const trackRealEnterShift = (event: KeyboardEvent) => {
+            const trackRealEnterMods = (event: KeyboardEvent) => {
                 if (event.key !== 'Enter' || isDeferredSyntheticEvent(event)) return;
-                lastRealEnterShiftRef.current = event.shiftKey;
+                clearDeferredEnterModifiers();
+                lastRealEnterModsRef.current = {
+                    shiftKey: event.shiftKey,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                };
+                deferredEnterModsTimeoutRef.current = window.setTimeout(clearDeferredEnterModifiers, 500);
             };
-            view.contentDOM.addEventListener('keydown', trackRealEnterShift);
+            view.contentDOM.addEventListener('keydown', trackRealEnterMods);
 
             return () => {
+                clearDeferredEnterModifiers();
                 viewRef.current = null;
                 // A stored view is detached, not destroyed: the store owns its
                 // lifetime now, and whoever owns the store ends it.
@@ -347,17 +366,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             // A stale value echo can differ from CodeMirror's newer document,
             // and replacing it would interrupt the IME session and move the caret.
             if (view.compositionStarted) return;
-            view.dispatch({
-                changes: { from: 0, to: current.length, insert: value },
-                // An external rewrite (draft restore, history navigation,
-                // "add to chat", dictation insert) lands the caret at the END,
-                // matching what a plain textarea did when its value was
-                // replaced. Every rewrite that reaches here appends or
-                // replaces wholesale; keeping the old caret instead left it
-                // stranded before the inserted text, and the next insertion
-                // or keystroke landed inside the previous one.
-                selection: { anchor: value.length },
-            });
+            // An external rewrite (draft restore, history navigation,
+            // "add to chat", dictation insert) lands the caret at the END,
+            // matching what a plain textarea did when its value was replaced.
+            // Every rewrite that reaches here appends or replaces wholesale;
+            // keeping the old caret instead left it stranded before the
+            // inserted text, and the next insertion or keystroke landed inside
+            // the previous one.
+            view.dispatch(replaceWithCaret(view.state, 0, current.length, value));
             // A large insert can push the caret below the fold, and a
             // transaction-time `scrollIntoView` cannot reach it: wrapped-line
             // heights are still estimates during the update, and the
@@ -426,12 +442,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     getComputedStyle(view.contentDOM).lineHeight || '',
                 );
                 if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
-                let cap = lineHeight * maxLines;
-                if (boundEl && branch) {
-                    const chrome = branch.offsetHeight - view.scrollDOM.offsetHeight;
-                    const available = boundEl.clientHeight - chrome - boundGapPx;
-                    if (available > 0) cap = Math.min(cap, available);
-                }
+                const cap = getComposerHeightLimit({
+                    maxLinesHeight: lineHeight * maxLines,
+                    boundHeight: boundEl?.clientHeight,
+                    surroundingHeight: branch
+                        ? branch.offsetHeight - view.scrollDOM.offsetHeight
+                        : undefined,
+                    boundGapPx,
+                });
                 const next = `${cap}px`;
                 // The scroller growing re-fires the observer with an unchanged
                 // result; writing only on change keeps that loop silent.
@@ -454,7 +472,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             if (!view) return;
             const content = view.contentDOM;
             content.setAttribute('spellcheck', String(spellCheck));
-            content.setAttribute('autocorrect', autoCorrect ? 'on' : 'off');
+            content.setAttribute('autocorrect', autoCorrect);
             content.setAttribute('autocapitalize', autoCapitalize);
         }, [autoCapitalize, autoCorrect, spellCheck]);
 
@@ -511,17 +529,18 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 if (!view || !text) return;
                 const { from, to } = view.state.selection.main;
                 view.dispatch({
-                    changes: { from, to, insert: text },
-                    selection: { anchor: from + text.length },
+                    ...replaceWithCaret(view.state, from, to, text),
                     userEvent: 'input.type',
                 });
             },
-            replaceRange(from, to, text, caret) {
+            replaceRange(from, to, text, selectionStart, selectionEnd = selectionStart) {
                 const view = viewRef.current;
                 if (!view) return;
+                const caret = selectionStart === undefined
+                    ? undefined
+                    : { anchor: selectionStart, head: selectionEnd ?? selectionStart };
                 view.dispatch({
-                    changes: { from, to, insert: text },
-                    selection: { anchor: caret ?? from + text.length },
+                    ...replaceWithCaret(view.state, from, to, text, caret),
                     userEvent: 'input.type',
                 });
             },
@@ -543,7 +562,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             <div
                 ref={hostRef}
                 data-testid={props['data-testid']}
-                data-chat-input="true"
+                data-chat-input={props.dataChatInput ?? 'true'}
                 onMouseDown={handleHostMouseDown}
                 className={cn(
                     'composer-editor w-full',

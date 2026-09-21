@@ -3,19 +3,18 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
-import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
-import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 
 const ICON_BUTTON_CLASS =
-  'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
+  'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-interactive-hover transition-colors';
 
 /**
- * Persistent top-left titlebar controls (sidebar toggle + project actions).
+ * Persistent top-left titlebar controls (app menu on frameless chrome + sidebar toggle).
  *
  * Rendered exactly once as an absolutely-positioned overlay above both the
  * sidebar and the header, so the buttons never migrate / re-mount between the
@@ -28,11 +27,17 @@ const ICON_BUTTON_CLASS =
 export const TitlebarLeftControls: React.FC = () => {
   const { t } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
+  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const projectActionsContext = useProjectActionsContext();
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
+  // Starting a session shares the titlebar row with the sidebar toggle, so it
+  // stays in one place whether the sidebar is open or collapsed.
+  const handleNewSession = React.useCallback(() => {
+    useUIStore.getState().closeMainSurfaces();
+    useSessionUIStore.getState().openNewSessionDraft();
+  }, []);
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -124,12 +129,34 @@ export const TitlebarLeftControls: React.FC = () => {
           </TooltipContent>
         </Tooltip>
 
-        {projectActionsContext ? (
-          <ProjectActionsButton
-            projectRef={projectActionsContext.projectRef}
-            directory={projectActionsContext.directory}
-          />
-        ) : null}
+        {/* Labelled while the sidebar is open; collapses to an icon with a
+            tooltip so the cluster stays compact over the header otherwise. */}
+        {isSidebarOpen ? (
+          <button
+            type="button"
+            onClick={handleNewSession}
+            className={cn(ICON_BUTTON_CLASS, '-ml-1 w-auto shrink-0 px-2 font-normal')}
+          >
+            <Icon name="chat-new" className="h-[18px] w-[18px]" />
+            <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
+          </button>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleNewSession}
+                aria-label={t('sessions.sidebar.header.actions.newSession')}
+                className={cn(ICON_BUTTON_CLASS, '-ml-1 shrink-0')}
+              >
+                <Icon name="chat-new" className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('sessions.sidebar.header.actions.newSession')}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

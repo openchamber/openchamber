@@ -1,7 +1,6 @@
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import {
   getDesktopLanAddress,
@@ -16,14 +15,13 @@ import {
   setDesktopMinimizeToTray,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import {
   SettingsSection,
   SettingsCheckboxRow,
   SETTINGS_OPTION_STACK_CLASS,
   SettingsStackedField,
-  SETTINGS_ICON_BUTTON_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
 export const DesktopNetworkSettings: React.FC = () => {
@@ -34,9 +32,11 @@ export const DesktopNetworkSettings: React.FC = () => {
     && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
-  const [savedPassword, setSavedPassword] = React.useState('');
+  // The password is write-only: the server says whether one is set, and the
+  // page sends a value only when the user types a new one or removes it.
+  const [hasSavedPassword, setHasSavedPassword] = React.useState(false);
   const [draftPassword, setDraftPassword] = React.useState('');
-  const [showPassword, setShowPassword] = React.useState(false);
+  const [removePassword, setRemovePassword] = React.useState(false);
   const [lanAccessActive, setLanAccessActive] = React.useState(false);
   const [lanAccessBlockedReason, setLanAccessBlockedReason] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -64,36 +64,23 @@ export const DesktopNetworkSettings: React.FC = () => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await runtimeFetch('/api/config/settings', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
+        const data = await loadDesktopSettings();
+        if (!data) {
           throw new Error(t('settings.openchamber.desktopNetwork.error.loadFailed'));
         }
-
-        const data = (await response.json().catch(() => null)) as null | {
-          desktopLanAccessEnabled?: unknown;
-          desktopUiPassword?: unknown;
-          desktopLanAccessActive?: unknown;
-          desktopLanAccessBlockedReason?: unknown;
-          desktopMacMenuBarEnabled?: unknown;
-        };
         if (cancelled) {
           return;
         }
 
-        const enabled = data?.desktopLanAccessEnabled === true;
-        const password = typeof data?.desktopUiPassword === 'string' ? data.desktopUiPassword : '';
+        const enabled = data.desktopLanAccessEnabled === true;
         setSavedValue(enabled);
         setDraftValue(enabled);
-        setSavedPassword(password);
-        setDraftPassword(password);
-        setLanAccessActive(data?.desktopLanAccessActive === true);
-        setLanAccessBlockedReason(
-          typeof data?.desktopLanAccessBlockedReason === 'string' ? data.desktopLanAccessBlockedReason : null
-        );
-        const macMenuBarEnabled = data?.desktopMacMenuBarEnabled !== false;
+        setHasSavedPassword(data.hasDesktopUiPassword === true);
+        setDraftPassword('');
+        setRemovePassword(false);
+        setLanAccessActive(data.desktopLanAccessActive === true);
+        setLanAccessBlockedReason(data.desktopLanAccessBlockedReason ?? null);
+        const macMenuBarEnabled = data.desktopMacMenuBarEnabled !== false;
         setSavedMacMenuBarEnabled(macMenuBarEnabled);
         setDraftMacMenuBarEnabled(macMenuBarEnabled);
         setError(null);
@@ -196,8 +183,10 @@ export const DesktopNetworkSettings: React.FC = () => {
     };
   }, [draftValue, isLocalDesktop]);
 
+  const nextPassword = draftPassword.trim();
+  const passwordDirty = nextPassword.length > 0 || removePassword;
   const isDirty = draftValue !== savedValue
-    || draftPassword !== savedPassword
+    || passwordDirty
     || draftMacMenuBarEnabled !== savedMacMenuBarEnabled;
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -215,15 +204,22 @@ export const DesktopNetworkSettings: React.FC = () => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, []);
   const lanUrl = draftValue && lanAccessActive && lanAddress && currentPort ? `http://${lanAddress}:${currentPort}` : null;
-  const lanRequiresPassword = draftValue && !draftPassword.trim();
+  const passwordWillBeSet = nextPassword.length > 0 || (hasSavedPassword && !removePassword);
+  const lanRequiresPassword = draftValue && !passwordWillBeSet;
   const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
   const saveDisabled = isLoading || isSaving || !isDirty || lanRequiresPassword;
 
   const handlePasswordChange = React.useCallback((value: string) => {
     setDraftPassword(value);
-    if (!value.trim()) {
-      setDraftValue(false);
+    if (value.trim()) {
+      setRemovePassword(false);
     }
+  }, []);
+
+  const handleRemovePassword = React.useCallback(() => {
+    setDraftPassword('');
+    setRemovePassword(true);
+    setDraftValue(false);
   }, []);
 
   const handleLaunchAtLoginToggle = React.useCallback(async () => {
@@ -310,25 +306,25 @@ export const DesktopNetworkSettings: React.FC = () => {
     setError(null);
 
     try {
-      const response = await runtimeFetch('/api/config/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          desktopLanAccessEnabled: draftValue,
-          desktopUiPassword: draftPassword,
-          desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
-        }),
+      const result = await updateDesktopSettings({
+        desktopLanAccessEnabled: draftValue,
+        // Omitted when unchanged: the server keeps the password it has.
+        ...(nextPassword ? { desktopUiPassword: nextPassword } : removePassword ? { desktopUiPassword: '' } : {}),
+        desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         throw new Error(t('settings.openchamber.desktopNetwork.error.saveFailed'));
       }
 
       setSavedValue(draftValue);
-      setSavedPassword(draftPassword);
+      if (nextPassword) {
+        setHasSavedPassword(true);
+      } else if (removePassword) {
+        setHasSavedPassword(false);
+      }
+      setDraftPassword('');
+      setRemovePassword(false);
       setSavedMacMenuBarEnabled(draftMacMenuBarEnabled);
 
       const restarted = await restartDesktopApp();
@@ -339,7 +335,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftMacMenuBarEnabled, draftPassword, draftValue, isDirty, t]);
+  }, [draftMacMenuBarEnabled, draftValue, isDirty, nextPassword, removePassword, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -420,26 +416,29 @@ export const DesktopNetworkSettings: React.FC = () => {
         >
           <Input
             id="desktop-ui-password"
-            type={showPassword ? 'text' : 'password'}
+            type="password"
             className="h-8 min-w-0 flex-1"
             value={draftPassword}
             onChange={(event) => handlePasswordChange(event.target.value)}
-            placeholder={t('settings.openchamber.desktopPassword.field.passwordPlaceholder')}
+            placeholder={t(hasSavedPassword && !removePassword
+              ? 'settings.openchamber.desktopPassword.field.passwordSetPlaceholder'
+              : 'settings.openchamber.desktopPassword.field.passwordPlaceholder')}
             disabled={isLoading || isSaving}
-            required={draftValue}
+            required={draftValue && !passwordWillBeSet}
             aria-invalid={lanRequiresPassword}
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={() => setShowPassword((current: boolean) => !current)}
-            className={SETTINGS_ICON_BUTTON_CLASS}
-            aria-label={t(showPassword ? 'settings.openchamber.desktopPassword.actions.hidePassword' : 'settings.openchamber.desktopPassword.actions.showPassword')}
-            aria-pressed={showPassword}
-          >
-            <Icon name={showPassword ? 'eye-off' : 'eye'} className="h-4 w-4" />
-          </Button>
+          {hasSavedPassword && !removePassword ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={handleRemovePassword}
+              disabled={isLoading || isSaving}
+              className="shrink-0 !font-normal"
+            >
+              {t('settings.openchamber.desktopPassword.actions.removePassword')}
+            </Button>
+          ) : null}
         </SettingsStackedField>
 
         <div className={SETTINGS_OPTION_STACK_CLASS}>

@@ -14,10 +14,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export interface LocalTTSSpeakOptions {
-    /** Kokoro speaker id (0-10) */
+    /** Catalog id of the local model to use; defaults to the server's default model. */
+    model?: string;
+    /** Speaker id within the model (Kokoro voices; Piper models have one) */
     speakerId?: number;
     /** Playback speed multiplier (1.0 = normal) */
     speed?: number;
+    /**
+     * `'auto'`: the server picks a model and voice for the text's language.
+     * The language is judged on the whole message, not on each chunk sent for
+     * synthesis, so a short chunk cannot flip the voice mid-reply.
+     */
+    language?: 'auto';
     onStart?: () => void;
     onEnd?: () => void;
     onError?: (error: string) => void;
@@ -35,6 +43,8 @@ export interface UseLocalTTSReturn {
 /** Target chunk size: big enough to amortize requests, small enough for low latency. */
 const MIN_CHUNK_CHARS = 60;
 const MAX_CHUNK_CHARS = 400;
+// Enough of the message for language detection to see whole sentences.
+const LANGUAGE_SAMPLE_CHARS = 2000;
 
 /**
  * Split text into sentence-aligned chunks for pipelined synthesis.
@@ -170,6 +180,7 @@ export function useLocalTTS(): UseLocalTTSReturn {
 
         const session: PlaybackSession = { cancelled: false, abort: new AbortController() };
         sessionRef.current = session;
+        const languageSample = options?.language === 'auto' ? text.slice(0, LANGUAGE_SAMPLE_CHARS) : undefined;
 
         const fetchChunk = async (chunk: string): Promise<ArrayBuffer> => {
             const response = await runtimeFetch('/api/dictation/tts/speak', {
@@ -177,8 +188,11 @@ export function useLocalTTS(): UseLocalTTSReturn {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     text: chunk,
+                    model: options?.model,
                     ...(typeof options?.speakerId === 'number' ? { speakerId: options.speakerId } : {}),
                     ...(typeof options?.speed === 'number' ? { speed: options.speed } : {}),
+                    language: options?.language,
+                    languageSample,
                 }),
                 signal: session.abort.signal,
             });

@@ -256,6 +256,7 @@ type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
   sideOffset?: number;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
+  showArrow?: boolean;
 };
 
 function TooltipContent({
@@ -265,6 +266,7 @@ function TooltipContent({
   align,
   children,
   style,
+  showArrow = false,
   ...props
 }: ContentProps) {
   return (
@@ -277,14 +279,17 @@ function TooltipContent({
               // data-instant is set when moving between grouped tooltips
               // (shared TooltipProvider): reposition without replaying the
               // full exit/enter animation.
-              "oc-glass-tooltip text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
+              "oc-glass-tooltip text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
+              showArrow ? "overflow-visible" : "overflow-hidden",
               className
             )}
             style={{ ...style }}
             {...props}
           >
             {children}
-            <BaseTooltip.Arrow className="fill-[var(--surface-elevated)] z-50 size-2" />
+            {showArrow ? (
+              <BaseTooltip.Arrow className="relative z-50 block h-1.5 w-3 overflow-clip data-[side=bottom]:top-[-6px] data-[side=left]:right-[-9px] data-[side=left]:rotate-90 data-[side=right]:left-[-9px] data-[side=right]:-rotate-90 data-[side=top]:bottom-[-6px] data-[side=top]:rotate-180 before:absolute before:bottom-0 before:left-1/2 before:block before:h-[calc(6px*sqrt(2))] before:w-[calc(6px*sqrt(2))] before:border before:border-border/60 before:bg-[var(--surface-elevated)] before:content-[''] before:[transform:translate(-50%,50%)_rotate(45deg)]" />
+            ) : null}
           </BaseTooltip.Popup>
         </BaseTooltip.Positioner>
       </BaseTooltip.Portal>

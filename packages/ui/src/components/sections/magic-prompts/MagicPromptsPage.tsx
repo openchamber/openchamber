@@ -61,6 +61,14 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'github.issue.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'linear.issue.review': {
+    titleKey: 'settings.magicPrompts.page.group.linearIssueReview.title',
+    descriptionKey: 'settings.magicPrompts.page.group.linearIssueReview.description',
+    blocks: [
+      { id: 'linear.issue.review.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'linear.issue.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
   'github.pr.checks.review': {
     titleKey: 'settings.magicPrompts.page.group.githubPrFailedChecksReview.title',
     descriptionKey: 'settings.magicPrompts.page.group.githubPrFailedChecksReview.description',

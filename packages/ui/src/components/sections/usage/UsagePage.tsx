@@ -46,7 +46,7 @@ export const UsagePage: React.FC = () => {
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const lastUpdated = useQuotaStore((state) => state.lastUpdated);
-  const error = useQuotaStore((state) => state.error);
+  const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const setDropdownProviderIds = useQuotaStore((state) => state.setDropdownProviderIds);
   const selectedModels = useQuotaStore((state) => state.selectedModels);
@@ -76,11 +76,16 @@ export const UsagePage: React.FC = () => {
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
-  const selectedProviderError = selectedResult?.configured && !selectedResult.ok
-    ? selectedResult.error
-    : null;
+  const refreshError = selectedProviderId ? refreshErrors[selectedProviderId] : undefined;
+  const selectedProviderError = refreshError
+    ? usage
+      ? t('header.services.usageRefreshFailedStale', { error: refreshError })
+      : refreshError
+    : selectedResult?.configured && !selectedResult.ok
+      ? selectedResult.error
+      : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
-  const hasCredentialsForm = selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
+  const hasCredentialsForm = selectedProviderId === 'exe-dev' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
   const handleDropdownToggle = React.useCallback((enabled: boolean) => {
     if (!selectedProviderId) {
       return;
@@ -187,10 +192,14 @@ export const UsagePage: React.FC = () => {
         <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
-      {(error || selectedProviderError) && (
+      {/* Only the selected provider's own failure belongs in its panel. The
+          store's global `error` is whichever provider failed first and has no
+          UI consumer left; shown here it labeled DeepSeek with Claude's
+          rate-limit message. */}
+      {selectedProviderError && (
         <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
-          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error ?? selectedProviderError}</p>
+          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError}</p>
         </div>
       )}
 
@@ -204,7 +213,7 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {(selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor') && (
+      {(selectedProviderId === 'exe-dev' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor') && (
         <QuotaCredentials providerId={selectedProviderId} providerName={providerName} />
       )}
 

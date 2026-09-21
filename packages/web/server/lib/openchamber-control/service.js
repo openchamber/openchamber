@@ -329,7 +329,7 @@ export const createOpenChamberControlService = (dependencies) => {
    * should come back as a usage error the agent can correct, without waking a
    * client or waiting for a round trip.
    */
-  const browserAction = async (action, input, signal, contextDirectory) => {
+  const browserAction = async (action, input, signal, contextDirectory, contextSessionId) => {
     const parameters = {};
 
     const readViewport = (required) => {
@@ -417,7 +417,13 @@ export const createOpenChamberControlService = (dependencies) => {
     // exceed the client's own wait; sharing one timeout with the quick actions
     // made a slow page indistinguishable from an unreachable browser.
     const timeoutMs = action === 'browser.open' ? 45_000 : 20_000;
-    const result = await browserControl.request(action, parameters, { signal, timeoutMs });
+    // Where the call came from, for a provider that keeps one browser per
+    // project or chat. Filled by the tool plugin, never by the model.
+    const context = {
+      directory: asNonEmptyString(contextDirectory),
+      sessionId: asNonEmptyString(contextSessionId),
+    };
+    const result = await browserControl.request(action, parameters, { signal, timeoutMs, context });
 
     // The image is written here rather than in the renderer: the file belongs
     // beside the code it documents, and the client that took it may be on a
@@ -469,7 +475,7 @@ export const createOpenChamberControlService = (dependencies) => {
         if (!browserControl) {
           throw new OpenChamberControlError('The in-app browser is not available on this server', 503);
         }
-        return browserAction(action, input, options.signal, contextDirectory);
+        return browserAction(action, input, options.signal, contextDirectory, options.contextSessionId);
       }
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'models.list') return models();

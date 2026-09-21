@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionNodeItemProps } from './SessionNodeItem';
+import type { SessionTreeItemProps } from './SessionTreeItem';
 import { installHookTestDom } from '../test-utils/testDom';
 import { I18nProvider } from '@/lib/i18n';
 
@@ -39,6 +40,11 @@ mock.module('./hooks/useSessionActions', () => ({
 
 const { SessionTreeItem } = await import('./SessionTreeItem');
 
+const noopStartSessionWorktreeMenuLoad: SessionTreeItemProps['startSessionWorktreeMenuLoad'] = () => ({
+  cachedTargets: [],
+  refreshTargets: Promise.resolve([]),
+});
+
 const session = (id: string): Session => ({
   id,
   slug: id,
@@ -50,7 +56,7 @@ const session = (id: string): Session => ({
 });
 
 describe('SessionTreeItem public behavior', () => {
-  test('coordinates duplicate project and Recent rows through their shared visible-list state', async () => {
+  test('keeps duplicate row state parent-owned while targeting one rename occurrence', async () => {
     const dom = installHookTestDom();
     const root = createRoot(dom.container);
     const sharedSession = session('same-session');
@@ -59,12 +65,13 @@ describe('SessionTreeItem public behavior', () => {
 
     const Harness = () => {
       const [editingId, setEditingId] = React.useState<string | null>(null);
+      const [editingRowKey, setEditingRowKey] = React.useState<string | null>(null);
       const [editTitle, setEditTitle] = React.useState('');
       const [menuKey, setMenuKey] = React.useState<string | null>(null);
       const [copiedSessionId, setCopiedSessionId] = React.useState<string | null>(null);
       const rows = [
-        { renderContext: 'project' as const, groupDirectory: '/workspace' },
-        { renderContext: 'recent' as const, groupDirectory: '/workspace' },
+        { renderContext: 'project' as const, groupDirectory: '/workspace', rowKey: 'project:session:same-session' },
+        { renderContext: 'recent' as const, groupDirectory: '/workspace', rowKey: 'recent:session:same-session' },
       ];
       return <>{rows.map((context) => <SessionTreeItem
         key={context.renderContext}
@@ -75,7 +82,9 @@ describe('SessionTreeItem public behavior', () => {
         normalizedSessionSearchQuery=""
         notifyOnSubtasks={false}
         editingId={editingId}
+        editingRowKey={editingRowKey}
         setEditingId={setEditingId}
+        setEditingRowKey={setEditingRowKey}
         editTitle={editTitle}
         setEditTitle={setEditTitle}
         toggleParent={noop}
@@ -83,14 +92,12 @@ describe('SessionTreeItem public behavior', () => {
         openSidebarMenuKey={menuKey}
         setOpenSidebarMenuKey={setMenuKey}
         allowReselect={false}
-        isSessionSearchOpen={false}
-        sessionSearchQuery=""
-        setSessionSearchQuery={noop}
-        setIsSessionSearchOpen={noop}
+        resetSessionSearch={noop}
         deleteSessionConfirm={null}
         setDeleteSessionConfirm={noop}
         startFolderRename={noop}
         setCopiedSessionId={setCopiedSessionId}
+        startSessionWorktreeMenuLoad={noopStartSessionWorktreeMenuLoad}
         mobileVariant={false}
         alwaysShowActions={false}
         {...context}
@@ -103,13 +110,16 @@ describe('SessionTreeItem public behavior', () => {
 
       await act(async () => renderedRows[0]?.handleSessionDoubleClick(sharedSession.id, sharedSession.title));
       expect(renderedRows).toHaveLength(4);
-      expect(renderedRows.slice(-2).map((row) => [row.editingId, row.editTitle]))
-        .toEqual([[sharedSession.id, sharedSession.title], [sharedSession.id, sharedSession.title]]);
+      expect(renderedRows.slice(-2).map((row) => [row.editingId, row.editingRowKey, row.editTitle]))
+        .toEqual([
+          [sharedSession.id, 'project:session:same-session', sharedSession.title],
+          [sharedSession.id, 'project:session:same-session', sharedSession.title],
+        ]);
 
-      await act(async () => renderedRows[3]?.setOpenSidebarMenuKey('recent:active:same-session'));
+      await act(async () => renderedRows[3]?.setOpenSidebarMenuKey('session-menu:recent:session:same-session'));
       expect(renderedRows).toHaveLength(6);
       expect(renderedRows.slice(-2).map((row) => row.openSidebarMenuKey))
-        .toEqual(['recent:active:same-session', 'recent:active:same-session']);
+        .toEqual(['session-menu:recent:session:same-session', 'session-menu:recent:session:same-session']);
     } finally {
       await act(async () => root.unmount());
       renderedRows.length = 0;

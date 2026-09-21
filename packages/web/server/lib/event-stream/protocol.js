@@ -71,6 +71,14 @@ export function parseSseEventEnvelope(block) {
 }
 
 export function sendMessageStreamWsFrame(socket, payload) {
+  try {
+    return sendSerializedMessageStreamWsFrame(socket, JSON.stringify(payload));
+  } catch {
+    return false;
+  }
+}
+
+export function sendSerializedMessageStreamWsFrame(socket, serializedFrame) {
   if (!socket || socket.readyState !== 1) {
     return false;
   }
@@ -86,7 +94,7 @@ export function sendMessageStreamWsFrame(socket, payload) {
   }
 
   try {
-    socket.send(JSON.stringify(payload));
+    socket.send(serializedFrame);
     const bufferedAfter = typeof socket.bufferedAmount === 'number' ? socket.bufferedAmount : 0;
     if (bufferedAfter > MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES) {
       try {
@@ -124,10 +132,16 @@ export function sendMessageStreamWsFrame(socket, payload) {
 }
 
 export function sendMessageStreamWsEvent(socket, payload, options = {}) {
-  return sendMessageStreamWsFrame(socket, {
-    type: 'event',
-    payload,
-    ...(typeof options.eventId === 'string' && options.eventId.length > 0 ? { eventId: options.eventId } : {}),
-    ...(typeof options.directory === 'string' && options.directory.length > 0 ? { directory: options.directory } : {}),
-  });
+  try {
+    return sendSerializedMessageStreamWsFrame(socket, serializeMessageStreamWsEvent(payload, options));
+  } catch {
+    return false;
+  }
+}
+
+export function serializeMessageStreamWsEvent(payload, options = {}) {
+  const frame = { type: 'event', payload };
+  if (typeof options.eventId === 'string' && options.eventId.length > 0) frame.eventId = options.eventId;
+  if (typeof options.directory === 'string' && options.directory.length > 0) frame.directory = options.directory;
+  return JSON.stringify(frame);
 }

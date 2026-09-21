@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from './toolOutput';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
-import { tryParseJsonOutput } from '../toolRenderers';
+import { parseDiffToUnified, tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 import { getToolDescriptionFallback } from './toolRenderUtils';
 
@@ -39,6 +39,29 @@ describe('getToolOutput', () => {
 
     test('ignores empty metadata.output for bash', () => {
         expect(getToolOutput('bash', undefined, '', 'completed')).toBe(undefined);
+    });
+});
+
+describe('parseDiffToUnified', () => {
+    test('handles a streamed diff with a bare Index header', () => {
+        expect(parseDiffToUnified('Index:')).toEqual([]);
+        expect(parseDiffToUnified('Index:\n@@ -1,1 +1,1 @@\n-old\n+new')).toEqual([
+            {
+                file: 'file',
+                oldStart: 1,
+                newStart: 1,
+                lines: [
+                    { type: 'removed', lineNumber: 1, content: 'old' },
+                    { type: 'added', lineNumber: 1, content: 'new' },
+                ],
+            },
+        ]);
+    });
+
+    test('preserves spaces when extracting the indexed filename', () => {
+        const [hunk] = parseDiffToUnified('Index: src/my file.ts\n@@ -1,1 +1,1 @@\n-old\n+new');
+
+        expect(hunk?.file).toBe('my file.ts');
     });
 });
 

@@ -74,6 +74,20 @@ const prepare = (app, directory, sources) => request(app)
   .expect(200);
 
 describe('session image assets', () => {
+  it('percent-encodes the directory header on the message fetch', async () => {
+    const fixture = await createFixture();
+    await prepare(fixture.app, fixture.directory, ['image.png']);
+
+    expect(fixture.fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-opencode-directory': encodeURIComponent(fixture.directory),
+        }),
+      }),
+    );
+  });
+
   it('prepares workspace and OpenCode temporary images with one message fetch', async () => {
     const fixture = await createFixture({ sources: ['workspace.png'] });
     await fs.writeFile(path.join(fixture.directory, 'workspace.png'), PNG);

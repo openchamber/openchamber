@@ -28,4 +28,13 @@ describe('getTunnelDependencyInstallInfo', () => {
 
     expect(info.installCommand).toBe('brew install cloudflared');
   });
+
+  it('returns the current Linux cloudflared download guidance', () => {
+    const info = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE, 'linux');
+    const downloadUrl = 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/';
+
+    expect(info.installUrl).toBe(downloadUrl);
+    expect(info.installCommand).toBe(`Download cloudflared from ${downloadUrl}`);
+    expect(info.message).toContain(downloadUrl);
+  });
 });

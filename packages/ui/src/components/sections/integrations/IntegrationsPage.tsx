@@ -1,42 +1,49 @@
 import React from 'react';
-import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
-import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { GuestIntegrationCard, GuestIntegrationsSection } from './GuestIntegrationsSection';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isGuestActive } from '@/lib/guests/capabilities';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { GitHubIntegration } from './GitHubIntegration';
+import { LinearSettings } from './LinearSettings';
 
-interface IntegrationsPageProps {
-  onOpenProviderSetup: (providerId: string) => Promise<boolean>;
-  onOpenPluginManager: () => void;
-}
-
-export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
-  onOpenProviderSetup,
-  onOpenPluginManager,
-}) => {
+export const IntegrationsPage: React.FC = () => {
   const { t } = useI18n();
+  // GitHub sign-in is an OpenChamber server feature; the VS Code extension
+  // uses the editor's own GitHub session instead.
+  const hasGitHub = !isVSCodeRuntime();
+  const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
+  const guests = useGuestsStore((state) => state.guests);
+  const runtimeKey = useGuestsStore((state) => state.runtimeKey);
+  const builtInGuests = !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+    ? guests.filter((guest) => guest.source === 'bundled' && guest.integration && isGuestActive(guest))
+    : [];
+  const hasBuiltIn = hasGitHub || hasLinear || builtInGuests.length > 0;
 
   return (
     <SettingsPageLayout
       title={t('settings.page.integrations.title')}
-      description={(
-        <div className="space-y-3">
-          <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.page.integrations.description')}</p>
-          <div role="alert" className="flex items-start gap-2 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3">
-            <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-            <p className="typography-meta text-[var(--status-warning)]">
-              {t('settings.integrations.experimentalWarning')}
-            </p>
-          </div>
-        </div>
-      )}
-      showSaveStatus={false}
+      description={t('settings.page.integrations.description')}
+      showSaveStatus
     >
-      <ThirdPartyIntegrationsSection
-        divider={false}
-        onOpenProviderSetup={onOpenProviderSetup}
-        onOpenPluginManager={onOpenPluginManager}
-      />
+      {hasBuiltIn ? (
+        <SettingsSection
+          title={t('settings.integrations.firstParty.title')}
+          info={t('settings.integrations.firstParty.info')}
+          divider={false}
+          settingsItem="integrations.first-party"
+          contentClassName="space-y-3"
+        >
+          {hasGitHub ? <GitHubIntegration /> : null}
+          {hasLinear ? <LinearSettings /> : null}
+          {builtInGuests.map((guest) => <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />)}
+        </SettingsSection>
+      ) : null}
+      <GuestIntegrationsSection divider={hasBuiltIn} />
     </SettingsPageLayout>
   );
 };

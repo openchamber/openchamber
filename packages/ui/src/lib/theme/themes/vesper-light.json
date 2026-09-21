@@ -2,9 +2,9 @@
   "metadata": {
     "id": "vesper-light",
     "name": "Vesper",
+    "variant": "light",
     "description": "Vesper",
     "version": "1.0.0",
-    "variant": "light",
     "tags": [
       "light",
       "palette"
@@ -15,9 +15,7 @@
       "base": "#a06535",
       "hover": "#FFD2AD",
       "active": "#D9A982",
-      "foreground": "#FFFFFF",
-      "muted": "#cf9c7280",
-      "emphasis": "#FFD2AD"
+      "muted": "#cf9c7280"
     },
     "surface": {
       "background": "#FFFFFF",
@@ -25,16 +23,15 @@
       "muted": "#F8F8F8",
       "mutedForeground": "#6e6d6d",
       "elevated": "#f6f5f5",
-      "elevatedForeground": "#101010",
       "overlay": "#00000020",
       "subtle": "#f6f2f2"
     },
     "interactive": {
       "border": "#dfdada",
-      "borderHover": "#E0E0E0",
-      "borderFocus": "#9e9e9e",
       "selection": "#5e5b5b22",
       "selectionForeground": "#000000",
+      "borderHover": "#E0E0E0",
+      "borderFocus": "#9e9e9e",
       "focus": "#be875b",
       "focusRing": "#cf9c7240",
       "cursor": "#000000",
@@ -59,17 +56,9 @@
       "infoBackground": "#cf9c7220",
       "infoBorder": "#cf9c7250"
     },
-    "pr": {
-      "open": "#0f926f",
-      "draft": "#888787",
-      "blocked": "#bf6f2e",
-      "merged": "#9f5fc1",
-      "closed": "#c56161"
-    },
     "syntax": {
       "base": {
         "background": "#F8F8F8",
-        "foreground": "#101010",
         "comment": "#868686",
         "keyword": "#cf9c72",
         "string": "#43ae91",
@@ -80,35 +69,18 @@
         "operator": "#b95f5f"
       },
       "tokens": {
-        "boolean": "#cf9c72",
-        "class": "#cf9c72",
-        "className": "#cf9c72",
         "commentDoc": "#D0D0D0",
         "constant": "#838282",
-        "decorator": "#cf9c72",
-        "enum": "#cf9c72",
-        "exception": "#b95f5f",
-        "functionCall": "#cf9c72",
-        "interface": "#cf9c72",
-        "jsxTag": "#cf9c72",
         "key": "#cf9c72",
-        "keywordImport": "#b95f5f",
-        "label": "#b95f5f",
         "macro": "#717070",
         "method": "#74e8c9",
-        "module": "#b95f5f",
-        "namespace": "#cf9c72",
         "parameter": "#101010",
-        "preprocessor": "#b95f5f",
         "punctuation": "#717070",
         "regex": "#67e7c5",
         "storageModifier": "#7b7b7b",
         "stringEscape": "#000000",
-        "struct": "#cf9c72",
-        "tag": "#cf9c72",
         "tagAttribute": "#cf9c72",
         "tagAttributeValue": "#6adebf",
-        "typeParameter": "#cf9c72",
         "url": "#797878",
         "variableGlobal": "#cf9c72",
         "variableLocal": "#F0F0F0",
@@ -126,38 +98,33 @@
         "lineNumberActive": "#000000"
       }
     },
+    "pr": {
+      "open": "#0f926f",
+      "draft": "#888787",
+      "blocked": "#bf6f2e",
+      "merged": "#9f5fc1",
+      "closed": "#c56161"
+    },
+    "chat": {
+      "userMessageBackground": "#f4f1f1",
+      "divider": "#E8E8E8"
+    },
     "markdown": {
-      "heading1": "#101010",
-      "heading2": "#101010",
-      "heading3": "#101010",
-      "heading4": "#101010",
       "link": "#717070",
       "linkHover": "#c48959",
       "inlineCode": "#665050",
-      "inlineCodeBackground": "#f3f1f1",
+      "inlineCodeBackground": "#F2F2F2",
       "blockquote": "#101010",
       "blockquoteBorder": "#E8E8E8",
       "listMarker": "#10101099"
     },
-    "chat": {
-      "userMessage": "#101010",
-      "userMessageBackground": "#f4f1f1",
-      "assistantMessage": "#101010",
-      "assistantMessageBackground": "#FFFFFF",
-      "timestamp": "#717070",
-      "divider": "#E8E8E8"
-    },
     "tools": {
-      "background": "#F8F8F880",
       "border": "#d0cece80",
-      "headerHover": "#E8E8E8",
       "icon": "#717070",
       "title": "#101010",
       "description": "#717070",
       "edit": {
-        "added": "#40d7af",
         "addedBackground": "#99FFE425",
-        "removed": "#b95f5f",
         "removedBackground": "#b95f5f25",
         "lineNumber": "#b4b2b2"
       }

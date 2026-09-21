@@ -34,7 +34,9 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useGitStatus } from '@/stores/useGitStore';
+import { useGitStatus, useGitStore } from '@/stores/useGitStore';
+import { DirectoryRequests } from '@/components/views/files/directoryRequests';
+import { areDirectoryNodesEqual } from '@/components/views/files/fileTreeStatus';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -47,6 +49,7 @@ import { isFilesystemError } from '@/lib/api/files-errors';
 import { notifyFileContentInvalidated } from '@/lib/fileContentInvalidation';
 import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { recordFileTreeDragStart, shouldTreatFileTreeDragEndAsClick } from './fileTreeDragClick';
 
 type FileNode = {
   name: string;
@@ -210,10 +213,6 @@ const getOrCreateCache = (root: string): FileTreeCache => {
   };
   fileTreeCacheByRoot.set(key, created);
   return created;
-};
-
-const dropCacheForRoot = (root: string): void => {
-  fileTreeCacheByRoot.delete(fileTreeCacheKey(root));
 };
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
@@ -388,11 +387,19 @@ const FileRow: React.FC<FileRowProps> = ({
   );
 
   const handleDragStart = React.useCallback((e: React.DragEvent) => {
+    recordFileTreeDragStart(e);
     const path = getRelativePath(root, node.path);
     if (!path || path === '.') return;
     e.dataTransfer.setData('application/x-openchamber-file-path', path);
     e.dataTransfer.effectAllowed = 'copy';
   }, [node.path, root]);
+
+  const handleDragEnd = React.useCallback((e: React.DragEvent) => {
+    // A micro-drag suppressed the click this gesture was meant to be (#2368).
+    if (shouldTreatFileTreeDragEndAsClick(e)) {
+      handleInteraction();
+    }
+  }, [handleInteraction]);
 
   const handleExternalDragOver = React.useCallback((event: React.DragEvent) => {
     if (!canUpload || !uploadDirectory || !hasExternalFiles(event.dataTransfer)) return;
@@ -420,7 +427,13 @@ const FileRow: React.FC<FileRowProps> = ({
     <ContextMenu open={rightClickOpen} onOpenChange={setRightClickOpen}>
       <ContextMenuTrigger render={(
         <div
-          className="group relative flex items-center"
+          className="group relative flex items-center typography-meta"
+          style={{
+            contentVisibility: 'auto',
+            // Keep skipped rows the same size after font changes. Expanded
+            // child lists remain outside this single-line row's containment.
+            blockSize: 'calc(max(1lh, 1rem) + 0.5rem)',
+          }}
           onContextMenu={handleContextMenu}
           onDragEnter={handleExternalDragOver}
           onDragOver={handleExternalDragOver}
@@ -434,12 +447,12 @@ const FileRow: React.FC<FileRowProps> = ({
         onContextMenu={handleContextMenu}
         draggable
         onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
           isDropTarget
             ? 'bg-interactive-selection ring-2 ring-inset ring-primary'
-            : (isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'),
-          'cursor-grab active:cursor-grabbing'
+            : (isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40')
         )}
       >
         {isDir ? (
@@ -525,17 +538,26 @@ const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 // --- Main component ---
 
-export const SidebarFilesTree: React.FC = () => {
+export const SidebarFilesTree: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
+  const runtimeKey = useGitStore((state) => state.runtimeKey);
+  const directory = useEffectiveDirectory();
+  return <SidebarFilesTreeContent key={JSON.stringify([runtimeKey, directory])} visible={visible} />;
+};
+
+const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) => {
+  const visibleRef = React.useRef(visible);
+  visibleRef.current = visible;
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const isBrowserClient = isBrowserClientRuntime(runtime.platform);
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
+  const cacheKey = fileTreeCacheKey(root);
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const openContextFile = useUIStore((state) => state.openContextFile);
-  const gitStatus = useGitStatus(currentDirectory);
+  const gitStatus = useGitStatus(visible ? currentDirectory : null);
 
   const [searchQuery, setSearchQuery] = React.useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
@@ -552,7 +574,8 @@ export const SidebarFilesTree: React.FC = () => {
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
-  const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const directoryRequests = React.useMemo(() => new DirectoryRequests(), []);
+  React.useEffect(() => () => directoryRequests.clear(), [directoryRequests]);
   const refreshAbortRef = React.useRef<AbortController | null>(null);
 
   // Hydrate the per-root cache on mount or root change. The cache is
@@ -616,15 +639,16 @@ export const SidebarFilesTree: React.FC = () => {
   // rehydrates instantly.
   React.useEffect(() => () => {
     if (!root) return;
-    const cache = fileTreeCacheByRoot.get(root);
+    const cache = fileTreeCacheByRoot.get(cacheKey);
     if (cache && cache.loadedDirs.size === 0 && Object.keys(cache.childrenByDir).length === 0) {
-      dropCacheForRoot(root);
+      fileTreeCacheByRoot.delete(cacheKey);
     }
-  }, [root]);
+  }, [cacheKey, root]);
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const EMPTY_CONTEXT_TABS: Array<{ mode: string; targetPath: string | null }> = React.useMemo(() => [], []);
   const expandedPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
+  const expandedPathSet = React.useMemo(() => new Set(expandedPaths), [expandedPaths]);
   const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
@@ -692,54 +716,39 @@ export const SidebarFilesTree: React.FC = () => {
     return sortNodes(nodes);
   }, [showGitignored, showHidden]);
 
-  const loadDirectory = React.useCallback(async (dirPath: string, isCancelled?: () => boolean) => {
+  const loadDirectory = React.useCallback(async (dirPath: string, isCancelled?: () => boolean, force = false) => {
+    if (!visibleRef.current || isCancelled?.()) return;
     const normalizedDir = normalizePath(dirPath.trim());
     if (!normalizedDir) return;
 
-    if (loadedDirsRef.current.has(normalizedDir) || inFlightDirsRef.current.has(normalizedDir)) return;
-
-    inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-    inFlightDirsRef.current.add(normalizedDir);
-
-    const listPromise = files.listDirectory
-      ? files.listDirectory(normalizedDir).then((result) => result.entries.map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        isDirectory: entry.isDirectory,
-      })))
-      : opencodeClient.listLocalDirectory(normalizedDir).then((result) => result.map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        isDirectory: entry.isDirectory,
-      })));
-
-    try {
-      const entries = await listPromise;
-      if (isCancelled?.()) return;
-      const mapped = mapDirectoryEntries(normalizedDir, entries);
-
-      loadedDirsRef.current = new Set(loadedDirsRef.current);
-      loadedDirsRef.current.add(normalizedDir);
-      setLoadErrorsByDir((prev) => {
-        if (!prev[normalizedDir]) return prev;
-        const next = { ...prev };
-        delete next[normalizedDir];
-        return next;
-      });
-      setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
-    } catch (error) {
-      if (isCancelled?.()) return;
-      const message = error instanceof Error ? error.message : String(error ?? '');
-      console.error('Failed to load sidebar directory:', error);
-      setLoadErrorsByDir((prev) => ({
-        ...prev,
-        [normalizedDir]: message,
-      }));
-    } finally {
-      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-      inFlightDirsRef.current.delete(normalizedDir);
-    }
-  }, [files, mapDirectoryEntries]);
+    if (!force && loadedDirsRef.current.has(normalizedDir)) return;
+    const requestRuntime = getRuntimeKey();
+    return directoryRequests.run(normalizedDir, async (ownsRequest) => {
+      const stale = () => !ownsRequest() || getRuntimeKey() !== requestRuntime;
+      try {
+        const entries = files.listDirectory
+          ? (await files.listDirectory(normalizedDir)).entries
+          : await opencodeClient.listLocalDirectory(normalizedDir);
+        if (stale()) return;
+        const mapped = mapDirectoryEntries(normalizedDir, entries);
+        loadedDirsRef.current = new Set(loadedDirsRef.current);
+        loadedDirsRef.current.add(normalizedDir);
+        setLoadErrorsByDir((prev) => {
+          if (!prev[normalizedDir]) return prev;
+          const next = { ...prev };
+          delete next[normalizedDir];
+          return next;
+        });
+        setChildrenByDir((prev) => prev[normalizedDir] && areDirectoryNodesEqual(prev[normalizedDir], mapped)
+          ? prev : { ...prev, [normalizedDir]: mapped });
+      } catch (error) {
+        if (stale()) return;
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        console.error('Failed to load sidebar directory:', error);
+        setLoadErrorsByDir((prev) => ({ ...prev, [normalizedDir]: message }));
+      }
+    }, force);
+  }, [directoryRequests, files, mapDirectoryEntries]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
@@ -749,6 +758,7 @@ export const SidebarFilesTree: React.FC = () => {
     refreshAbortRef.current?.abort();
     const controller = new AbortController();
     refreshAbortRef.current = controller;
+    directoryRequests.clear();
 
     try {
       // Refresh root and every expanded directory under it, but keep the
@@ -798,7 +808,7 @@ export const SidebarFilesTree: React.FC = () => {
         refreshAbortRef.current = null;
       }
     }
-  }, [loadDirectory, root]);
+  }, [directoryRequests, loadDirectory, root]);
 
   /**
    * Incrementally refresh a single directory without nuking the rest of the
@@ -813,9 +823,7 @@ export const SidebarFilesTree: React.FC = () => {
     const normalized = normalizePath(dirPath);
     loadedDirsRef.current = new Set(loadedDirsRef.current);
     loadedDirsRef.current.delete(normalized);
-    inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-    inFlightDirsRef.current.delete(normalized);
-    await loadDirectory(normalized);
+    await loadDirectory(normalized, undefined, true);
   }, [loadDirectory, refreshRoot]);
 
   React.useEffect(() => {
@@ -825,14 +833,14 @@ export const SidebarFilesTree: React.FC = () => {
     // the user switches projects or toggles showHidden / showGitignored.
     refreshAbortRef.current?.abort();
     loadedDirsRef.current = new Set();
-    inFlightDirsRef.current = new Set();
+    directoryRequests.clear();
     setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     void loadDirectory(root);
-  }, [loadDirectory, root, showHidden, showGitignored]);
+  }, [directoryRequests, loadDirectory, root, showHidden, showGitignored]);
 
   React.useEffect(() => {
-    if (!root || expandedPaths.length === 0) return;
+    if (!visible || !root || expandedPaths.length === 0) return;
 
     // Sort by depth so parent dirs load before children
     const toLoad = expandedPaths
@@ -842,16 +850,15 @@ export const SidebarFilesTree: React.FC = () => {
         normalized !== root &&
         normalized.startsWith(`${root}/`) &&
         !loadedDirsRef.current.has(normalized) &&
-        !inFlightDirsRef.current.has(normalized),
+          !directoryRequests.has(normalized),
       )
       .sort((a, b) => a.split('/').length - b.split('/').length);
 
     if (toLoad.length === 0) return;
 
     // Load with concurrency limit to avoid API stampede on startup.
-    // Each per-dir fetch gets a cancellation predicate so the load stops
-    // touching state once the effect tears down (e.g. user collapses the
-    // directory or the directory list changes mid-flight).
+    // Cancellation stops queued batches. Already-started, shared reads still
+    // populate the same-scope cache; scope changes and unmount invalidate them.
     let cancelled = false;
     const isCancelled = () => cancelled;
     void (async () => {
@@ -861,11 +868,19 @@ export const SidebarFilesTree: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [expandedPaths, loadDirectory, root]);
+  }, [directoryRequests, expandedPaths, loadDirectory, root, visible]);
+
+  const wasVisibleRef = React.useRef(visible);
+  React.useEffect(() => {
+    const resumed = visible && !wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+    if (resumed) void refreshRoot();
+  }, [refreshRoot, visible]);
 
   // --- Fuzzy search scoring (matching FilesView) ---
 
   React.useEffect(() => {
+    if (!visible) return;
     if (!currentDirectory) {
       setSearchResults([]);
       setSearching(false);
@@ -916,7 +931,7 @@ export const SidebarFilesTree: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored, visible]);
 
   // --- Git status helpers (matching FilesView) ---
   //
@@ -1245,7 +1260,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     return nodes.map((node, index) => {
       const isDir = node.type === 'directory';
-      const isExpanded = isDir && expandedPaths.includes(node.path);
+      const isExpanded = isDir && expandedPathSet.has(node.path);
       const isActive = selectedPath === node.path;
       const isLast = index === nodes.length - 1;
 
@@ -1423,13 +1438,20 @@ export const SidebarFilesTree: React.FC = () => {
                     onClick={() => handleOpenFile(node)}
                     draggable
                     onDragStart={(e) => {
+                      recordFileTreeDragStart(e);
                       const path = node.relativePath || getRelativePath(root ?? '', node.path);
                       if (!path || path === '.') return;
                       e.dataTransfer.setData('application/x-openchamber-file-path', path);
                       e.dataTransfer.effectAllowed = 'copy';
                     }}
+                    onDragEnd={(e) => {
+                      // A micro-drag suppressed the click this gesture was meant to be (#2368).
+                      if (shouldTreatFileTreeDragEndAsClick(e)) {
+                        void handleOpenFile(node);
+                      }
+                    }}
                     className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors cursor-grab active:cursor-grabbing',
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
                       isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
                     )}
                     title={node.path}

@@ -78,6 +78,18 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-paths.js`
   - Data, run, log, settings, tunnel profile, and managed-local config paths.
 
+- `cli-settings-accessors.js`
+  - Minimal settings.json read/write for CLI contexts that must not load the
+    full web settings runtime (`connect-url` relay identity resolution).
+  - Mirrors the settings runtime's guarantees so a CLI read-modify-write can
+    never corrupt shared state: atomic tmp+rename writes (no concurrent reader
+    in the running app can observe a torn file), a strict read that throws on
+    corrupt/unreadable payloads, and the same `0600` file mode.
+  - The strict read gates relay identity regeneration exactly like the server
+    runtime: a swallowed read failure can never mint a replacement signing or
+    encryption keypair, which would change `serverId` and orphan every paired
+    device and push binding.
+
 - `cli-process.js`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
 

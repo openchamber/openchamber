@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -230,7 +231,7 @@ export function GitHubIssuePickerDialog({
   const repoUrl = result?.repo?.url ?? null;
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
@@ -514,7 +515,7 @@ export function GitHubIssuePickerDialog({
         />
       </div>
 
-      <div className={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 overflow-y-auto mt-2')}>
+      <ScrollableOverlay outerClassName={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 mt-2')} disableHorizontal>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">{t('session.githubIssuePicker.empty.noActiveProject')}</div>
           ) : null}
@@ -636,7 +637,7 @@ export function GitHubIssuePickerDialog({
               </button>
             </div>
           ) : null}
-      </div>
+      </ScrollableOverlay>
 
       {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">
@@ -663,7 +664,7 @@ export function GitHubIssuePickerDialog({
                   setCreateInWorktree((v) => !v);
                 }}
                 aria-label={t('session.githubIssuePicker.actions.toggleWorktreeAria')}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {createInWorktree ? (
                   <Icon name="checkbox" className="h-4 w-4 text-primary" />

@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { getRemotes, getStatus } from '../git/index.js';
+import { getRemotes, getTrackingBranch } from '../git/index.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { noteIfGitHubRateLimit } from './rate-limit.js';
 
@@ -644,13 +644,13 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
   const normalizedBranch = normalizeText(branch);
   const normalizedRemoteName = normalizeText(remoteName) || 'origin';
 
-  const [status, remotes] = await Promise.all([
-    getStatus(directory).catch(() => null),
+  const [tracking, remotes] = await Promise.all([
+    getTrackingBranch(directory).catch(() => null),
     getRemotes(directory).catch(() => []),
   ]);
 
-  const trackingRemoteName = parseTrackingRemoteName(status?.tracking);
-  const trackingBranchName = parseTrackingBranchName(status?.tracking);
+  const trackingRemoteName = parseTrackingRemoteName(tracking);
+  const trackingBranchName = parseTrackingBranchName(tracking);
   const branchCandidates = [];
   pushUnique(branchCandidates, normalizedBranch);
   pushUnique(branchCandidates, trackingBranchName);

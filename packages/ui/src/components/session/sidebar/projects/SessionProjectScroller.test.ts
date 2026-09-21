@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildGroupRenderDescriptors, selectRenderedProjectSections } from './sessionProjectRender';
+import { buildGroupRenderDescriptors, resolveSearchResultPlacement, selectRenderedProjectSections } from './sessionProjectRender';
 import type { SessionGroup } from '../types';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
@@ -87,5 +87,18 @@ describe('single-project scroller projection', () => {
     } finally {
       useSessionDisplayStore.setState(previous, true);
     }
+  });
+});
+
+// Issue #3200: a query matching only a managed chat leaves no project section to
+// render. The chats live in the scroller's top content, so answering with the
+// empty state there hid a result the header was already counting.
+describe('resolveSearchResultPlacement', () => {
+  test('keeps the top content when the only match lives there', () => {
+    expect(resolveSearchResultPlacement(true)).toBe('top-content');
+  });
+
+  test('falls back to the empty state when nothing matched anywhere', () => {
+    expect(resolveSearchResultPlacement(false)).toBe('empty-state');
   });
 });

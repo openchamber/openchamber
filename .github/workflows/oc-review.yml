@@ -32,6 +32,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Changelog outputs match their sources
+        run: bun run changelog:check
+
       - name: Tests
         run: bun run test
 

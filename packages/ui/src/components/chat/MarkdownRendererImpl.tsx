@@ -16,9 +16,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
-import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import {
   getCachedMarkdownBlocks,
@@ -33,6 +32,7 @@ import {
   applyMarkdownCodeBlockWrapState,
   decorateMarkdown,
   getMarkdownCodeText,
+  stabilizeMarkdownTableWidths,
   type DecorateContext,
   type DecorateLabels,
   type MermaidControlOptions,
@@ -51,6 +51,7 @@ import {
 import { fileReferenceExists } from './fileReferenceStat';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { detachedMarkdownDomCache, type DetachedMarkdownDomKey } from './markdown/detachedMarkdownDomCache';
+import { TimelineRevealGateContext } from './timelineRevealGate';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const useCurrentMermaidTheme = () => {
@@ -448,10 +449,8 @@ const useFileReferenceInteractions = ({
 
         linkedCount += 1;
 
-        const canGrantOutsideFile = isDesktopShell()
-          && isDesktopLocalOriginActive()
-          && !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
-        const existsPromise = canGrantOutsideFile
+        const outsideWorkspace = !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
+        const existsPromise = outsideWorkspace
           ? Promise.resolve(true)
           : fileReferenceExists(resolved.resolvedPath, effectiveDirectory);
 
@@ -497,10 +496,6 @@ const useFileReferenceInteractions = ({
             : undefined,
         );
         return;
-      }
-
-      if (!isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory)) {
-        await ensureOutsideFileGrantForDesktop(resolved.resolvedPath, effectiveDirectory);
       }
 
       const uiStore = useUIStore.getState();
@@ -692,6 +687,30 @@ const useMermaidInlineInteractions = ({
 const MERMAID_RENDER_CACHE = new Map<string, MermaidRender>();
 const MERMAID_RENDER_CACHE_MAX = 100;
 const MARKDOWN_DECORATION_ID_ATTR = 'data-md-decoration-id';
+
+// True when the container already holds exactly these settled blocks with the
+// current decoration. The first paint of a remounted message is served from
+// the block cache; when that paint is already final, the async render would
+// only parse, highlight, sanitize, and morph the same HTML into place again.
+const domMatchesRenderedBlocks = (
+  target: HTMLElement,
+  blocks: ReadonlyArray<{ id: string }>,
+  decorationId: string,
+): boolean => {
+  const children = target.children;
+  if (children.length !== blocks.length) return false;
+  for (let index = 0; index < blocks.length; index += 1) {
+    const child = children[index];
+    if (
+      !child
+      || child.getAttribute('data-md-id') !== blocks[index]?.id
+      || child.getAttribute(MARKDOWN_DECORATION_ID_ATTR) !== decorationId
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
 const MARKDOWN_DECORATION_IDS = new WeakMap<DecorateContext, string>();
 let nextMarkdownDecorationId = 0;
 const MARKDOWN_DOM_CACHE_MAX_SOURCE_CHARS = 200_000;
@@ -789,6 +808,7 @@ const useMorphdomMarkdown = ({
   syntaxVars,
   ctx,
   domCacheKey,
+  tableLayoutSettled,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
@@ -797,6 +817,7 @@ const useMorphdomMarkdown = ({
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
   domCacheKey?: DetachedMarkdownDomKey | null;
+  tableLayoutSettled: boolean;
 }) => {
   React.useEffect(() => {
     ensureMarkdownShikiTheme();
@@ -804,6 +825,17 @@ const useMorphdomMarkdown = ({
 
   const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
   const renderRevisionRef = React.useRef(0);
+  const tableLayoutFrameRef = React.useRef<number | null>(null);
+  // A provisional first paint (blocks not in the settled cache) holds the
+  // timeline reveal until the async render lands, so the session opens with
+  // final code highlighting instead of a visible restyle.
+  const revealGate = React.useContext(TimelineRevealGateContext);
+  const releaseRevealHoldRef = React.useRef<(() => void) | null>(null);
+  const releaseRevealHold = React.useCallback(() => {
+    releaseRevealHoldRef.current?.();
+    releaseRevealHoldRef.current = null;
+  }, []);
+  React.useEffect(() => releaseRevealHold, [releaseRevealHold]);
   // Only DOM that was actually restored or completed by the async pipeline is
   // eligible for capture. A fallback from an earlier content revision is not.
   const mountedDomRef = React.useRef<{
@@ -824,6 +856,28 @@ const useMorphdomMarkdown = ({
     }
     mermaidViewerRef.current.refresh();
   }, [containerRef]);
+  const scheduleTableLayout = React.useCallback(() => {
+    if (!tableLayoutSettled) return;
+    const previousFrame = tableLayoutFrameRef.current;
+    if (previousFrame !== null) window.cancelAnimationFrame(previousFrame);
+    const renderRevision = renderRevisionRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      if (tableLayoutFrameRef.current !== frame) return;
+      tableLayoutFrameRef.current = null;
+      if (renderRevisionRef.current !== renderRevision) return;
+      const container = containerRef.current;
+      const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+      if (target) stabilizeMarkdownTableWidths(target);
+    });
+    tableLayoutFrameRef.current = frame;
+  }, [containerRef, tableLayoutSettled]);
+
+  React.useEffect(() => () => {
+    const frame = tableLayoutFrameRef.current;
+    if (frame === null) return;
+    window.cancelAnimationFrame(frame);
+    tableLayoutFrameRef.current = null;
+  }, []);
 
   React.useLayoutEffect(() => {
     renderRevisionRef.current += 1;
@@ -909,6 +963,9 @@ const useMorphdomMarkdown = ({
         }
         if (hasMermaidBlock) refreshMermaidViewers();
       } else {
+        if (!streaming && !releaseRevealHoldRef.current) {
+          releaseRevealHoldRef.current = revealGate?.hold() ?? null;
+        }
         const block = document.createElement('div');
         block.setAttribute('data-md-block', '');
         block.style.display = 'contents';
@@ -924,7 +981,7 @@ const useMorphdomMarkdown = ({
       // or re-decorating ordinary blocks.
       refreshMermaidViewers();
     }
-  }, [containerRef, text, streaming, imageMode, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, imageMode, ctx, refreshMermaidViewers, revealGate]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -939,9 +996,28 @@ const useMorphdomMarkdown = ({
     const renderRevision = renderRevisionRef.current;
     const decorationId = getMarkdownDecorationId(ctx);
 
+    if (!streaming) {
+      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode);
+      if (cachedBlocks && domMatchesRenderedBlocks(target, cachedBlocks, decorationId)) {
+        mountedDomRef.current = domCacheKey
+          ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
+          : null;
+        streamPerfCount('ui.markdown_renderer.settled_paint.reused');
+        scheduleTableLayout();
+        releaseRevealHold();
+        return;
+      }
+    }
+
     void renderMarkdownBlocks(text, streaming, imageMode).then((blocks) => {
       if (!active || renderRevisionRef.current !== renderRevision) return;
       const existing = Array.from(target.children) as HTMLElement[];
+      // Capture before block reconciliation: streaming completion changes the
+      // wrapper layout, and theme changes can replace entire decorated blocks.
+      // Match by disclosure order plus heading so unrelated replacements cannot
+      // inherit the previous disclosure's state. No persistent/global state.
+      const disclosureStates = Array.from(target.querySelectorAll<HTMLDetailsElement>('details[data-md-details]'))
+        .map((details) => ({ summary: details.querySelector('summary')?.textContent, open: details.open }));
 
       // Reconcile per block: only re-morph blocks whose content changed, leaving
       // stable leading blocks untouched. Keeps per-stream-step DOM work bounded
@@ -1004,7 +1080,13 @@ const useMorphdomMarkdown = ({
         const tempHasMermaidBlock = shouldRefreshMermaidViewers(temp);
         morphdom(el, temp, {
           childrenOnly: true,
-          onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
+          onBeforeElUpdated: (fromEl, toEl) => {
+            if (fromEl.matches('details[data-md-details]') && toEl.matches('details[data-md-details]')
+              && fromEl.querySelector('summary')?.textContent === toEl.querySelector('summary')?.textContent) {
+              toEl.toggleAttribute('open', fromEl.hasAttribute('open'));
+            }
+            return !fromEl.isEqualNode(toEl);
+          },
         });
         el.setAttribute('data-md-id', block.id);
         el.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
@@ -1025,15 +1107,25 @@ const useMorphdomMarkdown = ({
       if (removedMermaidBlock || (existing.length > blocks.length && hadMermaidBeforeTrailingCleanup)) {
         refreshMermaidViewers();
       }
+      if (disclosureStates.length > 0) {
+        target.querySelectorAll<HTMLDetailsElement>('details[data-md-details]').forEach((details, index) => {
+          const previous = disclosureStates[index];
+          if (previous && previous.summary === details.querySelector('summary')?.textContent) {
+            details.open = previous.open;
+          }
+        });
+      }
       mountedDomRef.current = domCacheKey
         ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
         : null;
+      scheduleTableLayout();
+      releaseRevealHold();
     });
 
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, imageMode, refreshMermaidViewers, streaming, text]);
+  }, [containerRef, ctx, domCacheKey, imageMode, refreshMermaidViewers, releaseRevealHold, scheduleTableLayout, streaming, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1152,6 +1244,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     syntaxVars,
     ctx,
     domCacheKey,
+    tableLayoutSettled: !isStreaming,
   });
 
   const markdownContent = (
@@ -1242,6 +1335,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     streaming: false,
     syntaxVars,
     ctx,
+    tableLayoutSettled: true,
   });
 
   return (

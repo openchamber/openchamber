@@ -1,4 +1,5 @@
 import React from 'react';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import {
   DndContext,
   MouseSensor,
@@ -35,6 +36,7 @@ import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
@@ -52,6 +54,7 @@ export type SessionTabMenuComponents = {
 
 export type SessionTabMenuArgs = {
   session: Session;
+  open: boolean;
   isActive: boolean;
   select: () => void;
   closeOtherTabs: () => void;
@@ -106,6 +109,7 @@ const SessionTabItem: React.FC<{
 
   // Session state for the dot and the hover tooltip.
   const sessionStatus = useGlobalSessionStatus(tab.id);
+  const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
   const isStreaming = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const unseenCount = useSessionUnseenCount(tab.id);
   const showUnread = unseenCount > 0 && !isActive && !isStreaming;
@@ -116,6 +120,7 @@ const SessionTabItem: React.FC<{
 
   const menuArgsFor = (components: SessionTabMenuComponents): SessionTabMenuArgs => ({
     session: tab.session,
+    open: menuOpen || contextMenuOpen,
     isActive,
     select: () => onSelect(tab),
     closeOtherTabs: () => closeOtherTabs(tab.id),
@@ -159,10 +164,13 @@ const SessionTabItem: React.FC<{
                   }}
                   data-controls-open={overlayVisible ? 'true' : 'false'}
                   className={cn(
+                    // No color transition: activation must snap. A crossfade
+                    // here reads as the switch itself being slow, since the
+                    // old and new tab trade colors over several frames right
+                    // after the click.
                     'session-tab group/session-tab relative flex h-7 w-full min-w-0 select-none items-center rounded-md px-2',
-                    'transition-colors duration-75',
                     isActive
-                      ? 'bg-interactive-selection'
+                      ? 'bg-interactive-selection text-interactive-selection-foreground'
                       : cn(
                         'cursor-pointer text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                         overlayVisible && 'bg-interactive-hover text-foreground',
@@ -180,19 +188,24 @@ const SessionTabItem: React.FC<{
                       !suppressControls && 'session-tab-title',
                     )}
                     >
+                      {/* Same box as the active content the header renders
+                          (a centered column with a block title), so the
+                          title sits at the same height before and after
+                          activation and does not jump when the tab swaps
+                          its content. */}
                       {isActive ? children : (
-                        <span className="text-[13px] font-medium leading-4">{title}</span>
+                        <div className="flex min-w-0 flex-col justify-center">
+                          <span className="block max-w-full overflow-hidden whitespace-nowrap text-[13px] font-medium leading-4">{title}</span>
+                        </div>
                       )}
                     </div>
-                    {showDot ? (
-                      <span
-                        className={cn(
-                          'ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-                          isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                          !suppressControls && 'group-hover/session-tab:opacity-0',
-                          overlayVisible && 'opacity-0',
-                        )}
-                        aria-label={dotLabel}
+                    {isAiRenaming ? (
+                      <Icon name="loader-4" className="ml-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
+                    ) : showDot ? (
+                      <SessionActivityIndicator
+                        state={isStreaming ? 'running' : 'unread'}
+                        label={dotLabel}
+                        className={cn('ml-1.5 shrink-0', !suppressControls && 'group-hover/session-tab:opacity-0', overlayVisible && 'opacity-0')}
                       />
                     ) : null}
                   </div>

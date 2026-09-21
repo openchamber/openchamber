@@ -2,9 +2,9 @@
   "metadata": {
     "id": "mono-plus-dark",
     "name": "Mono Plus",
+    "variant": "dark",
     "description": "A pure monochromatic theme - dark variant with slight colors added",
     "version": "1.0.0",
-    "variant": "dark",
     "tags": [
       "dark",
       "monochrome",
@@ -16,9 +16,7 @@
       "base": "#a2bee8",
       "hover": "#E5E5E5",
       "active": "#CCCCCC",
-      "foreground": "#000000",
-      "muted": "#FFFFFF80",
-      "emphasis": "#FFFFFF"
+      "muted": "#FFFFFF80"
     },
     "surface": {
       "background": "#000000",
@@ -26,16 +24,14 @@
       "muted": "#0A0A0A",
       "mutedForeground": "#808080",
       "elevated": "#141414",
-      "elevatedForeground": "#E5E5E5",
       "overlay": "#00000080",
       "subtle": "#1A1A1A"
     },
     "interactive": {
       "border": "#2f2f2f",
+      "selection": "#ffffff1f",
       "borderHover": "#333333",
       "borderFocus": "#FFFFFF",
-      "selection": "#ffffff1f",
-      "selectionForeground": "#E5E5E5",
       "focus": "#FFFFFF",
       "focusRing": "#FFFFFF50",
       "cursor": "#E5E5E5",
@@ -45,27 +41,12 @@
     "status": {
       "error": "#9e6a6a",
       "errorForeground": "#0a0a0a",
-      "errorBackground": "#9e6a6a20",
-      "errorBorder": "#9e6a6a50",
       "warning": "#9e8a6a",
       "warningForeground": "#0a0a0a",
-      "warningBackground": "#9e8a6a20",
-      "warningBorder": "#9e8a6a50",
       "success": "#6a8e6a",
       "successForeground": "#0a0a0a",
-      "successBackground": "#6a8e6a20",
-      "successBorder": "#6a8e6a50",
       "info": "#6a7e9e",
-      "infoForeground": "#0a0a0a",
-      "infoBackground": "#6a7e9e20",
-      "infoBorder": "#6a7e9e50"
-    },
-    "pr": {
-      "open": "#6a8e6a",
-      "draft": "#8c8c8c",
-      "blocked": "#9e8a6a",
-      "merged": "#bda2e8",
-      "closed": "#9e6a6a"
+      "infoForeground": "#0a0a0a"
     },
     "syntax": {
       "base": {
@@ -81,63 +62,39 @@
         "operator": "#dccdbeff"
       },
       "tokens": {
-        "commentDoc": "#8c8c8c",
         "stringEscape": "#b6d8e6ff",
-        "keywordImport": "#dccdbeff",
-        "storageModifier": "#dccdbeff",
-        "functionCall": "#a2bee8",
-        "method": "#a2bee8",
         "variableProperty": "#c0dcc0ff",
-        "variableOther": "#d4d4d4",
-        "class": "#edcbb8ff",
-        "className": "#edcbb8ff",
-        "interface": "#edcbb8ff",
         "tag": "#a2bee8",
-        "boolean": "#e3bdadff",
-        "url": "#b6d8e6ff",
-        "key": "#c0dcc0ff"
+        "boolean": "#e3bdadff"
       },
       "highlights": {
-        "diffAdded": "#6a8e6a",
-        "diffAddedBackground": "#6a8e6a20",
-        "diffRemoved": "#9e6a6a",
-        "diffRemovedBackground": "#9e6a6a20",
-        "lineNumber": "#7c7c7c",
-        "lineNumberActive": "#d4d4d4"
+        "lineNumber": "#7c7c7c"
       }
     },
+    "pr": {
+      "draft": "#8c8c8c",
+      "merged": "#bda2e8"
+    },
+    "chat": {
+      "userMessageBackground": "#1A1A1A",
+      "divider": "#333333"
+    },
     "markdown": {
-      "heading1": "#FFFFFF",
-      "heading2": "#F2F2F2",
-      "heading3": "#E5E5E5",
-      "heading4": "#D9D9D9",
       "link": "#CCCCCC",
       "linkHover": "#a2bee8",
       "inlineCode": "#a2bee8",
-      "inlineCodeBackground": "#1A1A1A",
+      "inlineCodeBackground": "#0D0D0D",
       "blockquote": "#808080",
       "blockquoteBorder": "#333333",
       "listMarker": "#99999999"
     },
-    "chat": {
-      "userMessage": "#E5E5E5",
-      "userMessageBackground": "#1A1A1A",
-      "assistantMessage": "#E5E5E5",
-      "assistantMessageBackground": "#000000",
-      "timestamp": "#808080",
-      "divider": "#333333"
-    },
     "tools": {
-      "background": "#0A0A0A50",
       "border": "#4040409d",
-      "headerHover": "#33333350",
       "icon": "#A6A6A6",
       "title": "#E5E5E5",
       "description": "#808080",
       "edit": {
-        "added": "#6a8e6a",
         "addedBackground": "#6a8e6a20",
-        "removed": "#9e6a6a",
         "removedBackground": "#9e6a6a20",
         "lineNumber": "#2a2a2a"
       }

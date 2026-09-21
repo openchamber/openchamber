@@ -7,6 +7,8 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
+import { formatCost } from './subagentCost';
+import { useSubagentCostRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
 
 type Props = {
@@ -31,6 +33,11 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId) : []),
     [liveSessions, sessionId],
   );
+
+  // Each child's own subtree total (its cost plus every descendant of its
+  // own), so nested subagent-of-subagent cost rolls up under the immediate
+  // child row shown here rather than disappearing.
+  const { perChildCost } = useSubagentCostRollup(sessionId);
 
   // One subscription covers every child: per-session hooks would multiply
   // store subscriptions by the number of subagents.
@@ -88,20 +95,26 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
           const asked = (questions[child.id]?.length ?? 0) > 0;
           const busy = statuses[child.id]?.type === 'busy';
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
+          const childCost = perChildCost.get(child.id) ?? 0;
           return (
             <WorkStatusRow
               key={child.id}
               onClick={directory ? () => openChildSession(child.id, label) : undefined}
               ariaLabel={t('chat.workStatus.action.openSubagent', { name: label })}
               label={label}
-              value={blocked ? (
-                <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
-              ) : asked ? (
-                <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
-              ) : busy ? (
-                <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>
-              ) : (
-                <WorkStatusValue tone="muted">{t('chat.workStatus.subagent.done')}</WorkStatusValue>
+              value={(
+                <>
+                  {blocked ? (
+                    <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
+                  ) : asked ? (
+                    <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
+                  ) : busy ? (
+                    <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>
+                  ) : (
+                    <WorkStatusValue tone="muted">{t('chat.workStatus.subagent.done')}</WorkStatusValue>
+                  )}
+                  {childCost > 0 ? <WorkStatusValue tone="muted">{formatCost(childCost)}</WorkStatusValue> : null}
+                </>
               )}
             />
           );

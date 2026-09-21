@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTerminalShellResolver, getTerminalShellLoginArgs } from './shells.js';
+import * as shells from './shells.js';
+
+const { createTerminalShellResolver, getTerminalShellLoginArgs } = shells;
 
 const createResolver = ({ platform = 'linux', env = {}, augmentedPath = '/augmented/bin', executables = [] } = {}) => {
   const available = new Set(executables);
@@ -69,5 +71,34 @@ describe('terminal shell resolver', () => {
     expect(getTerminalShellLoginArgs('/usr/bin/pwsh', 'linux')).toEqual(['-Login']);
     expect(getTerminalShellLoginArgs('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32')).toBeNull();
     expect(getTerminalShellLoginArgs('/bin/dash', 'linux')).toBeNull();
+  });
+
+  it('builds interactive shell launches by shell family', () => {
+    const buildLaunch = shells.buildTerminalShellLaunch;
+
+    expect(buildLaunch('/bin/bash', { mode: 'interactive', loginShell: true, platform: 'linux' })).toEqual({ executable: '/bin/bash', args: ['-l'] });
+    expect(buildLaunch('/opt/homebrew/bin/fish', { mode: 'interactive', loginShell: true, platform: 'darwin' })).toEqual({ executable: '/opt/homebrew/bin/fish', args: ['--login'] });
+    expect(buildLaunch('/usr/bin/nu', { mode: 'interactive', loginShell: true, platform: 'linux' })).toEqual({ executable: '/usr/bin/nu', args: ['--login'] });
+    expect(buildLaunch('/usr/bin/pwsh', { mode: 'interactive', loginShell: true, platform: 'linux' })).toEqual({ executable: '/usr/bin/pwsh', args: ['-Login'] });
+    expect(buildLaunch('C:\\Windows\\System32\\cmd.exe', { mode: 'interactive', loginShell: false, platform: 'win32' })).toEqual({ executable: 'C:\\Windows\\System32\\cmd.exe', args: [] });
+  });
+
+  it('builds command launches by shell family', () => {
+    const buildLaunch = shells.buildTerminalShellLaunch;
+
+    expect(buildLaunch('/bin/zsh', { mode: 'command', command: 'printf ready', loginShell: true, platform: 'linux' })).toEqual({ executable: '/bin/zsh', args: ['-l', '-i', '-c', 'printf ready'] });
+    expect(buildLaunch('/opt/homebrew/bin/fish', { mode: 'command', command: 'echo ready', loginShell: true, platform: 'darwin' })).toEqual({ executable: '/opt/homebrew/bin/fish', args: ['--login', '-i', '-c', 'echo ready'] });
+    expect(buildLaunch('/usr/bin/nu', { mode: 'command', command: 'ls', loginShell: true, platform: 'linux' })).toEqual({ executable: '/usr/bin/nu', args: ['--login', '-c', 'ls'] });
+    expect(buildLaunch('/usr/bin/pwsh', { mode: 'command', command: 'Get-ChildItem', loginShell: true, platform: 'linux' })).toEqual({ executable: '/usr/bin/pwsh', args: ['-Login', '-Command', 'Get-ChildItem'] });
+    expect(buildLaunch('C:\\Program Files\\PowerShell\\7\\pwsh.exe', { mode: 'command', command: 'Get-Date', loginShell: false, platform: 'win32' })).toEqual({ executable: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-Command', 'Get-Date'] });
+    expect(buildLaunch('C:\\Windows\\System32\\cmd.exe', { mode: 'command', command: 'dir', loginShell: false, platform: 'win32' })).toEqual({ executable: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', 'dir'] });
+  });
+
+  it('rejects unsupported login and command combinations', () => {
+    const buildLaunch = shells.buildTerminalShellLaunch;
+
+    expect(() => buildLaunch('/bin/sh', { mode: 'interactive', loginShell: true, platform: 'linux' })).toThrow('does not support login mode');
+    expect(() => buildLaunch('/bin/dash', { mode: 'command', command: 'pwd', loginShell: true, platform: 'linux' })).toThrow('does not support login mode');
+    expect(() => buildLaunch('/bin/bash', { mode: 'command', command: '', loginShell: false, platform: 'linux' })).toThrow('Terminal command is required');
   });
 });

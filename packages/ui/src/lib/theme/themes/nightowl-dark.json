@@ -2,9 +2,9 @@
   "metadata": {
     "id": "nightowl-dark",
     "name": "Night Owl",
+    "variant": "dark",
     "description": "Night Owl",
     "version": "1.0.0",
-    "variant": "dark",
     "tags": [
       "dark",
       "palette"
@@ -13,11 +13,10 @@
   "colors": {
     "primary": {
       "base": "#82AAFF",
+      "foreground": "#011627",
       "hover": "#6F94DF",
       "active": "#95B7FF",
-      "foreground": "#011627",
-      "muted": "#82AAFF80",
-      "emphasis": "#6F94DF"
+      "muted": "#82AAFF80"
     },
     "surface": {
       "background": "#011627",
@@ -25,17 +24,14 @@
       "muted": "#0B253A",
       "mutedForeground": "#7d8892",
       "elevated": "#001122",
-      "elevatedForeground": "#D6DEEB",
       "overlay": "#FFFFFF20",
       "subtle": "#162431"
     },
     "interactive": {
       "border": "#2b3339",
-      "borderHover": "#234561",
-      "borderFocus": "#82AAFF",
       "selection": "#555d6d94",
       "selectionForeground": "#FFFFFF",
-      "focus": "#82AAFF",
+      "borderHover": "#234561",
       "focusRing": "#82AAFF40",
       "cursor": "#FFFFFF",
       "hover": "#555d6d68",
@@ -44,32 +40,16 @@
     "status": {
       "error": "#EF5350",
       "errorForeground": "#011627",
-      "errorBackground": "#EF535020",
-      "errorBorder": "#EF535050",
       "warning": "#ECC48D",
       "warningForeground": "#011627",
-      "warningBackground": "#ECC48D20",
-      "warningBorder": "#ECC48D50",
       "success": "#C5E478",
       "successForeground": "#011627",
-      "successBackground": "#C5E47820",
-      "successBorder": "#C5E47850",
       "info": "#82AAFF",
-      "infoForeground": "#011627",
-      "infoBackground": "#82AAFF20",
-      "infoBorder": "#82AAFF50"
-    },
-    "pr": {
-      "open": "#C5E478",
-      "draft": "#5F7E97",
-      "blocked": "#ECC48D",
-      "merged": "#BC82FF",
-      "closed": "#EF5350"
+      "infoForeground": "#011627"
     },
     "syntax": {
       "base": {
-        "background": "#0B253A",
-        "foreground": "#D6DEEB",
+        "background": "#061e31",
         "comment": "#5F7E97",
         "keyword": "#82AAFF",
         "string": "#ECC48D",
@@ -81,34 +61,15 @@
       },
       "tokens": {
         "boolean": "#C5E478",
-        "class": "#82AAFF",
         "className": "#82AAFF",
         "commentDoc": "#516E86",
         "constant": "#7FDBCA",
         "decorator": "#C5E478",
-        "enum": "#82AAFF",
-        "exception": "#F78C6C",
-        "functionCall": "#82AAFF",
-        "interface": "#C5E478",
-        "jsxTag": "#82AAFF",
         "key": "#82AAFF",
-        "keywordImport": "#F78C6C",
-        "label": "#F78C6C",
-        "macro": "#82AAFF",
         "method": "#C5E478",
-        "module": "#F78C6C",
-        "namespace": "#C5E478",
         "parameter": "#D6DEEB",
-        "preprocessor": "#F78C6C",
-        "punctuation": "#5F7E97",
-        "regex": "#ECC48D",
-        "storageModifier": "#82AAFF",
         "stringEscape": "#FFFFFF",
-        "struct": "#82AAFF",
-        "tag": "#82AAFF",
         "tagAttribute": "#C5E478",
-        "tagAttributeValue": "#ECC48D",
-        "typeParameter": "#C5E478",
         "url": "#7FDBCA",
         "variableGlobal": "#82AAFF",
         "variableLocal": "#001122",
@@ -116,48 +77,37 @@
         "variableProperty": "#7FDBCA"
       },
       "highlights": {
-        "diffAdded": "#C5E478",
         "diffAddedBackground": "#0A2E1A",
-        "diffModified": "#82AAFF",
         "diffModifiedBackground": "#0B253A",
-        "diffRemoved": "#EF5350",
         "diffRemovedBackground": "#2D1B1B",
         "lineNumber": "#82AAFF",
         "lineNumberActive": "#FFFFFF"
       }
     },
+    "pr": {
+      "draft": "#5F7E97",
+      "merged": "#BC82FF"
+    },
+    "chat": {
+      "userMessageBackground": "#0f283f",
+      "divider": "#1D3B53"
+    },
     "markdown": {
-      "heading1": "#D6DEEB",
-      "heading2": "#D6DEEB",
-      "heading3": "#D6DEEB",
-      "heading4": "#D6DEEB",
       "link": "#7FDBCA",
       "linkHover": "#82AAFF",
       "inlineCode": "#C5E478",
-      "inlineCodeBackground": "#0B253A",
+      "inlineCodeBackground": "#0E2334",
       "blockquote": "#5F7E97",
       "blockquoteBorder": "#1D3B53",
       "listMarker": "#82AAFF99"
     },
-    "chat": {
-      "userMessage": "#D6DEEB",
-      "userMessageBackground": "#0f283f",
-      "assistantMessage": "#D6DEEB",
-      "assistantMessageBackground": "#011627",
-      "timestamp": "#5F7E97",
-      "divider": "#1D3B53"
-    },
     "tools": {
-      "background": "#0B253A80",
       "border": "#24496780",
-      "headerHover": "#000C17",
       "icon": "#5F7E97",
       "title": "#D6DEEB",
       "description": "#5F7E97",
       "edit": {
-        "added": "#C5E478",
         "addedBackground": "#C5E47825",
-        "removed": "#EF5350",
         "removedBackground": "#EF535025",
         "lineNumber": "#58698f"
       }

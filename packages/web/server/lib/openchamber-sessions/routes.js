@@ -1,6 +1,6 @@
 import express from 'express';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { createWorktree, getWorktreeBootstrapStatus } from '../git/index.js';
+import { createWorktree, getWorktreeBootstrapStatus, resolvePrimaryWorktreeRoot } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
@@ -75,6 +75,7 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
   if (!normalized) return undefined;
   const provider = providers.find((entry) => entry?.id === providerID);
   const model = providerModels(provider).find((entry) => entry?.id === modelID);
+  if (!model) return normalized;
   return model?.variants && Object.prototype.hasOwnProperty.call(model.variants, normalized)
     ? normalized
     : undefined;
@@ -82,8 +83,23 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
 
 const parseConfigModel = (value) => splitModel(value);
 
+const resolveProjectDefaults = (settings, directory, projectId) => {
+  const projects = Array.isArray(settings?.projects) ? settings.projects : [];
+  const matchedProject = projectId
+    ? projects.find((entry) => entry?.id === projectId) || null
+    : projects.find((entry) => entry?.path === directory) || null;
+  return {
+    defaultAgent: asNonEmptyString(matchedProject?.defaultAgent),
+    defaultModel: asNonEmptyString(matchedProject?.defaultModel),
+    defaultVariant: asNonEmptyString(matchedProject?.defaultVariant),
+  };
+};
+
 const buildDirectoryHeaders = (directory) => ({
-  ...(directory ? { 'x-opencode-directory': directory } : {}),
+  // OpenCode rejects non-ASCII header values; the official SDK sends this
+  // header percent-encoded, so match that wire format (non-ASCII checkout
+  // paths such as "Masaüstü" otherwise fail every dispatched prompt).
+  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
 });
 
 const fetchJson = async (url, authHeaders, fallback, directory) => {
@@ -118,11 +134,15 @@ const fetchSelectionInputs = async ({ buildOpenCodeUrl, authHeaders, directory, 
   };
 };
 
-const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultAgent, opencodeDefaultModel }) => {
+const resolveDefaultSelection = ({ agents, providers, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
+  const projectDefaultAgent = asNonEmptyString(projectDefaults?.defaultAgent);
   const settingsDefaultAgent = asNonEmptyString(settings?.defaultAgent);
-  if (settingsDefaultAgent) {
+  if (projectDefaultAgent) {
+    resolvedAgent = agents.find((agent) => agent?.name === projectDefaultAgent) || null;
+  }
+  if (!resolvedAgent && settingsDefaultAgent) {
     resolvedAgent = agents.find((agent) => agent?.name === settingsDefaultAgent) || null;
   }
   if (!resolvedAgent && opencodeDefaultAgent) {
@@ -137,20 +157,24 @@ const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultA
 
   let model = null;
   let variant;
+  const projectDefaultModel = parseConfigModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = parseConfigModel(settings?.defaultModel);
-  if (settingsDefaultModel && hasProviderModel(providers, settingsDefaultModel.providerID, settingsDefaultModel.modelID)) {
+  if (projectDefaultModel) {
+    model = projectDefaultModel;
+    variant = resolveVariant(providers, model.providerID, model.modelID, projectDefaults?.defaultVariant);
+  }
+  if (!model && settingsDefaultModel) {
     model = settingsDefaultModel;
     variant = resolveVariant(providers, model.providerID, model.modelID, settings?.defaultVariant);
   }
 
-  if (!model && resolvedAgent?.model?.providerID && resolvedAgent?.model?.modelID
-    && hasProviderModel(providers, resolvedAgent.model.providerID, resolvedAgent.model.modelID)) {
+  if (!model && resolvedAgent?.model?.providerID && resolvedAgent?.model?.modelID) {
     model = { providerID: resolvedAgent.model.providerID, modelID: resolvedAgent.model.modelID };
     variant = resolveVariant(providers, model.providerID, model.modelID, resolvedAgent.variant);
   }
 
   const opencodeModel = parseConfigModel(opencodeDefaultModel);
-  if (!model && opencodeModel && hasProviderModel(providers, opencodeModel.providerID, opencodeModel.modelID)) {
+  if (!model && opencodeModel) {
     model = opencodeModel;
   }
 
@@ -250,6 +274,40 @@ const latestCompletedAssistantMessageID = async ({ client, sessionID, directory 
   return asNonEmptyString(latest?.id);
 };
 
+/**
+ * Upper bound on one archive batch.
+ *
+ * The batch is applied one session at a time against OpenCode, so an unbounded
+ * list would hold a request open for as long as the list is large. Callers with
+ * more sessions than this send several batches and keep their own partial
+ * results.
+ */
+const MAX_ARCHIVE_BATCH = 500;
+
+const parseArchiveRequest = (payload) => {
+  const rawIds = payload?.ids;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    return { ok: false, error: 'ids must be a non-empty array of session ids' };
+  }
+  if (rawIds.length > MAX_ARCHIVE_BATCH) {
+    return { ok: false, error: `ids must contain at most ${MAX_ARCHIVE_BATCH} session ids` };
+  }
+
+  const ids = [];
+  for (const value of rawIds) {
+    const id = asNonEmptyString(value);
+    if (!id) return { ok: false, error: 'ids must contain non-empty session ids' };
+    ids.push(id);
+  }
+
+  const archivedAt = payload?.archivedAt;
+  if (archivedAt !== undefined && (!Number.isSafeInteger(archivedAt) || archivedAt <= 0)) {
+    return { ok: false, error: 'archivedAt must be a positive integer timestamp' };
+  }
+
+  return { ok: true, ids, archivedAt: archivedAt ?? Date.now() };
+};
+
 const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
@@ -267,9 +325,15 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
 
   const directory = asNonEmptyString(payload?.directory);
   const validated = await validateDirectoryPath(directory);
-  return validated.ok
-    ? { ok: true, directory: validated.directory }
-    : { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  if (!validated.ok) return { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  const settings = await readSettingsFromDiskMigrated();
+  const projects = sanitizeProjects(settings?.projects || []);
+  let project = projects.find((entry) => entry.path === validated.directory);
+  if (!project && projects.length > 0) {
+    const { root } = await resolvePrimaryWorktreeRoot(validated.directory);
+    project = projects.find((entry) => entry.path === root);
+  }
+  return { ok: true, directory: validated.directory, ...(project ? { projectId: project.id } : {}) };
 };
 
 const PROMPT_LANDED_TIMEOUT_MS = 5_000;
@@ -358,6 +422,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
+    // Auto routing. Prompts dispatched here go straight to OpenCode, not
+    // through the proxy that rewrites the Auto sentinel, so the same hook runs
+    // on the body before it is sent. Null when routing is not wired in.
+    resolvePromptBody = null,
   } = dependencies;
 
   // Last user message of an existing session, as a selection to reuse. Returns
@@ -431,6 +499,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     authHeaders,
     sessionID,
     directory,
+    projectId,
     prompt,
     goalInput,
     requestedModel,
@@ -458,7 +527,10 @@ export const createOpenChamberSessionService = (dependencies) => {
         directory,
         readSettingsFromDiskMigrated,
       });
-      const defaults = resolveDefaultSelection(inputs);
+      const defaults = resolveDefaultSelection({
+        ...inputs,
+        projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+      });
       if (!model) {
         model = defaults.model;
         if (variant == null) variant = defaults.variant;
@@ -528,25 +600,21 @@ export const createOpenChamberSessionService = (dependencies) => {
         ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
           .catch(() => ({ text: '', signature: '' }))
         : { text: '', signature: '' };
+      const payload = {
+        model,
+        ...(agent ? { agent } : {}),
+        ...(variant ? { variant } : {}),
+        parts: [
+          ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
+          { type: 'text', text: expandedPrompt },
+          ...(goalInput.enabled
+            ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
+            : []),
+        ],
+      };
+      await resolvePromptBody?.(payload, { sessionId: sessionID, directory });
       try {
-        await runPromptAsync({
-          baseUrl,
-          authHeaders,
-          sessionID,
-          directory,
-          payload: {
-            model,
-            ...(agent ? { agent } : {}),
-            ...(variant ? { variant } : {}),
-            parts: [
-              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
-              { type: 'text', text: expandedPrompt },
-              ...(goalInput.enabled
-                ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
-                : []),
-            ],
-          },
-        });
+        await runPromptAsync({ baseUrl, authHeaders, sessionID, directory, payload });
       } catch (error) {
         throw markGoalPartial(error);
       }
@@ -574,6 +642,64 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     return { model, agent, variant, promptDispatched: true, dispatchedAsCommand: Boolean(resolvedCommand) };
+  };
+
+  /**
+   * Archive a batch of sessions in one request.
+   *
+   * The UI archives every session linked to a worktree before removing it.
+   * Doing that from the browser costs one request per session plus a store
+   * reconciliation between each of them, which is what made deleting a
+   * worktree with many sessions take tens of seconds. Here the batch stays on
+   * the server, next to OpenCode, and the client reconciles once.
+   *
+   * Sessions are updated one at a time on purpose: they are archived against a
+   * single OpenCode instance, and a fan-out of concurrent writes would trade a
+   * UI stall for server event-loop starvation. One failed session never stops
+   * the batch — it is reported in `failedIds` while the rest still archive, so
+   * callers keep the partial-failure behaviour they already show.
+   */
+  const archive = async (payload = {}) => {
+    const parsed = parseArchiveRequest(payload);
+    if (!parsed.ok) {
+      throw new OpenChamberControlError(parsed.error, 400);
+    }
+
+    const resolvedDirectory = await resolveRequestedDirectory({
+      payload,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolvedDirectory.ok) {
+      throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
+    }
+
+    if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+
+    const directory = resolvedDirectory.directory;
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const client = createOpencodeClient({ baseUrl, headers: getOpenCodeAuthHeaders() });
+
+    const archived = [];
+    const failedIds = [];
+    for (const sessionID of parsed.ids) {
+      try {
+        const response = await client.session.update({
+          sessionID,
+          directory,
+          time: { archived: parsed.archivedAt },
+        });
+        const session = response?.data;
+        if (session?.id) archived.push(session);
+        else failedIds.push(sessionID);
+      } catch (error) {
+        console.warn('[OpenChamberSessions] failed to archive session', sessionID, error);
+        failedIds.push(sessionID);
+      }
+    }
+
+    return { directory, archived, failedIds };
   };
 
   const create = async (payload = {}) => {
@@ -640,6 +766,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID,
         directory: sessionDirectory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel: model,
@@ -743,6 +870,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID: targetSessionID,
         directory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel,
@@ -810,6 +938,7 @@ export const createOpenChamberSessionService = (dependencies) => {
 
   return {
     create,
+    archive,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
   };
@@ -837,6 +966,15 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('[OpenChamberSessions] failed to create session:', error);
       return sendServiceError(res, error, 'Failed to create session');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/archive', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.archive(req.body && typeof req.body === 'object' ? req.body : {}));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to archive sessions:', error);
+      return sendServiceError(res, error, 'Failed to archive sessions');
     }
   });
 

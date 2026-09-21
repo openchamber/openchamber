@@ -16,6 +16,14 @@ Policy inheritance uses the nearest explicit session value. A child `false` ther
 
 Unknown lineage and failed policy loads fail closed. A failed pending-permission fetch is distinct from an empty successful response and never clears policy state.
 
+## Safety net
+
+`evaluatePermission` (the routing runtime, `../routing/DOCUMENTATION.md`) is
+consulted after the policy check and before the reply. `hold` counts the
+request as handled without replying, so it stays on screen; `accept` replies as
+before. A `permission.replied` event is passed to `onPermissionReplied` so the
+routing runtime forgets its cached decision.
+
 ## Routes
 
 - `GET /api/permission-auto-accept`

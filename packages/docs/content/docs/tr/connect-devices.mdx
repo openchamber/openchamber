@@ -1,0 +1,68 @@
+---
+title: Bir Cihaz Bağlayın
+description: Tek kullanımlık bir QR kodu ile telefonunuzu, masaüstünüzü veya başka bir tarayıcıyı OpenChamber sunucunuza eşleştirin.
+---
+
+# Bir Cihaz Bağlayın
+
+Mobil uygulamayı, masaüstü uygulamasını ya da başka bir makinedeki tarayıcıyı, tek kullanımlık bir QR kodunu tarayarak OpenChamber sunucunuza eşleştirin. Cihaz bağlamak için önerilen yol budur; açılacak port yok, yazılacak adres yok.
+
+## Cihaz eşleştirme
+
+1. OpenChamber'ın çalıştığı makinede **Settings → Remote Instances → Connect to this server** bölümünü açın ve **Add a device** düğmesine basın.
+2. Cihaza bir ad verin (ör. *My iPhone*), böylece sonra tanıyabilirsiniz.
+3. Cihazı nerede kullanacağınızı seçin:
+   - **This computer only** — aynı makinede çalışan uygulamalar için
+   - **Home network only** — doğrudan Wi-Fi üzerinden bağlanır; bu ağın dışındayken çalışmaz
+   - **Anywhere** — evde de dışarıda da çalışır; dışarıdaki trafik, kuruluma gerek olmadan uçtan uca şifreli bir tünel olan [Private Relay](/private-relay/) üzerinden gider
+4. **Create QR code** düğmesine basın.
+5. Diğer cihazda kodu tarayın:
+   - **mobile app** — bağlanma ekranında (ya da instances listesinden) **Scan QR code** düğmesine dokunun
+   - **desktop app** — bunun yerine bağlantı bağlantısını kopyalayın ve **Settings → Remote Instances → Other OpenChamber servers → Import Link** içine yapıştırın
+
+İletişim kurulduğu anda iletişim kutusu kendiliğinden kapanır ve cihaz canlı durumuyla listede görünür. Hepsi bu kadar, eşleştirme tamam.
+
+## Eşleştirme nasıl güvenli kalır
+
+- **QR kodu tek kullanımlıktır.** Bir cihaz onu kullandığı anda çalışmayı bırakır ve hiç kullanılmazsa kendiliğinden süresi dolar.
+- **Her cihaza kendi token'ı verilir.** Bir kodu taramak UI parolanızı açığa çıkarmaz ve bir cihazın token'ı başka bir cihazı taklit etmek için kullanılamaz.
+- **Kontrol sizdedir.** Eşleştirilen her cihaz adı, platformu ve bağlantı durumu ile listelenir. İstediğiniz zaman bunlardan herhangi birini iptal edebilirsiniz.
+- **Ev dışı trafik uçtan uca şifrelenir.** **Anywhere** ile ağınız dışındaki trafik [Private Relay](/private-relay/) üzerinden akar ve üzerinden geçen şeyi okuyamaz.
+
+## Eşleştirilmiş cihazları yönetme
+
+**Settings → Remote Instances → Connect to this server** bu sunucuya ulaşabilen tüm cihazları listeler. Cihaz çevrimiçiyse yeşil nokta görünür; yerel ağ üzerinden mi yoksa relay üzerinden mi bağlı olduğu da belirtilir.
+
+- **Revoke** bir cihazın bağlantısını hemen keser. Fikriniz değişirse yeni bir QR koduyla yeniden eşleştirin.
+- **Clear revoked** listeyi temizler.
+
+Aynı fiziksel cihaz daha sonra yeniden giriş yapsa bile tek bir kayıt olarak kalır. Kopya kayıt birikmez.
+
+## Komut satırından bağlanma
+
+Sunucu başsız çalışıyorsa, yani açık bir UI yoksa, o makinedeki bir terminalden bağlantı bağlantısı oluşturun.
+
+Aynı ağdaki bir cihaz için:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Her yerden bağlanması gereken bir cihaz için. Diyalogda **Anywhere** seçmeye denktir:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+`--relay` bağlantısı, diyalogdaki gibi iki yolu da taşır. Cihaz sunucuya erişebildiğinde yerel ağ üzerinden doğrudan bağlanır ve dışarıdayken [Private Relay](/private-relay/) ile devam eder. Relay kendi kendine başlar. Çalışan bir örnek bağlantıyı bir dakika içinde alır, durdurulmuş bir örnek ise sonraki açılışında alır.
+
+> Doğrudan yol yalnızca sunucu gerçekten ağınızda dinliyorsa çalışır. Varsayılan olarak OpenChamber yalnızca makinenin kendisinde dinler. Wi-Fi üzerinden erişilebilir olması için `--lan` ile başlatın. Komut, bağlantının doğrudan yolunun başka cihazlardan kullanılamayacağını anlarsa sizi (`[LAN_UNREACHABLE]`) uyarır. Bu durumda `--relay` bağlantısı yine çalışır, ama her zaman relay üzerinden gider.
+
+Yazdırılan bağlantı ve QR kodu, ayar iletişim kutusundakilerle tam aynıdır. Tek kullanımlık, süresi dolan ve iptal edilebilir.
+
+## İlgili
+
+- [Private Relay](/private-relay/) — "Anywhere" bağlantıları nasıl çalışır ve relay neleri görebilir, neleri göremez
+- [Mobile Apps](/mobile/) — iOS ya da Android uygulamasını yükleyin
+- [Remote Instances](/remote-instances/) — masaüstü uygulamasını SSH ya da bağlantılar üzerinden sunuculara bağlayın
+- [Remote access](/troubleshooting/remote-access/) — bir cihaz bağlanmadığında

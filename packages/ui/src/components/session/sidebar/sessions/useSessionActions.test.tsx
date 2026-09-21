@@ -25,6 +25,7 @@ describe('explicit session row behavior', () => {
     type SharedRowCapture = {
       actions?: ReturnType<typeof useSessionActions>;
       editingId?: string | null;
+      editingRowKey?: string | null;
       editTitle?: string;
       menuKey?: string | null;
       setMenuKey?: (key: string | null) => void;
@@ -43,28 +44,30 @@ describe('explicit session row behavior', () => {
     };
     const Harness = () => {
       const [editingId, setEditingId] = React.useState<string | null>(null);
+      const [editingRowKey, setEditingRowKey] = React.useState<string | null>(null);
       const [editTitle, setEditTitle] = React.useState('');
       const [menuKey, setMenuKey] = React.useState<string | null>(null);
       const [confirmation, setConfirmation] = React.useState<DeleteSessionConfirmState>(null);
       capture.actions = useSessionActions({
         mobileVariant: false,
         allowReselect: false,
-        isSessionSearchOpen: false,
-        sessionSearchQuery: '',
-        setSessionSearchQuery: () => undefined,
-        setIsSessionSearchOpen: () => undefined,
+        resetSessionSearch: () => undefined,
         descendantIds: [],
         showDeletionDialog: true,
         setDeleteSessionConfirm: setConfirmation,
         deleteSessionConfirm: confirmation,
         editingId,
         setEditingId,
+        setEditingRowKey,
+        editingSessionId: 'same-session',
+        editingOccurrenceKey: 'project:session:same-session',
         editTitle,
         setEditTitle,
         copiedSessionId: null,
         setCopiedSessionId: () => undefined,
       });
       capture.editingId = editingId;
+      capture.editingRowKey = editingRowKey;
       capture.editTitle = editTitle;
       capture.menuKey = menuKey;
       capture.setMenuKey = setMenuKey;
@@ -77,6 +80,7 @@ describe('explicit session row behavior', () => {
       await act(async () => root.render(React.createElement(I18nProvider, null, React.createElement(Harness))));
       await act(async () => capture.actions!.handleSessionDoubleClick('same-session', 'Shared title'));
       expect(capture.editingId).toBe('same-session');
+      expect(capture.editingRowKey).toBe('project:session:same-session');
       expect(capture.editTitle).toBe('Shared title');
       expect(capture.project).toEqual(capture.recent);
       await act(async () => capture.setMenuKey!('recent:active:same-session'));
@@ -107,22 +111,23 @@ describe('explicit session row behavior', () => {
     const capture: ConfirmationCapture = {};
     const Harness = () => {
       const [editingId, setEditingId] = React.useState<string | null>(null);
+      const [, setEditingRowKey] = React.useState<string | null>(null);
       const [editTitle, setEditTitle] = React.useState('');
       const [confirmation, setConfirmation] = React.useState<DeleteSessionConfirmState>(null);
       capture.confirmation = confirmation;
       capture.actions = useSessionActions({
         mobileVariant: false,
         allowReselect: false,
-        isSessionSearchOpen: false,
-        sessionSearchQuery: '',
-        setSessionSearchQuery: () => undefined,
-        setIsSessionSearchOpen: () => undefined,
+        resetSessionSearch: () => undefined,
         descendantIds: descendants,
         showDeletionDialog: true,
         setDeleteSessionConfirm: setConfirmation,
         deleteSessionConfirm: confirmation,
         editingId,
         setEditingId,
+        setEditingRowKey,
+        editingSessionId: 'root',
+        editingOccurrenceKey: 'project:session:root',
         editTitle,
         setEditTitle,
         copiedSessionId: null,

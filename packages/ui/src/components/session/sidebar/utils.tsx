@@ -112,8 +112,8 @@ export const isPathWithinProject = (directory?: string | null, projectPath?: str
 const isNormalizedPathWithinProject = (normalizedDirectory: string | null, normalizedProjectPath: string | null): boolean => {
   if (!normalizedDirectory || !normalizedProjectPath) return false;
   if (normalizedDirectory === normalizedProjectPath) return true;
-  if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
-  return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+  const prefix = normalizedProjectPath.endsWith('/') ? normalizedProjectPath : `${normalizedProjectPath}/`;
+  return normalizedDirectory.startsWith(prefix);
 };
 
 export const normalizeForBranchComparison = (value: string): string => {

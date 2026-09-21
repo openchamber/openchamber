@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fetchUpdateNotes } from './changelog/update-notes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +12,6 @@ const __dirname = path.dirname(__filename);
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
 let cachedDetectedPm = null;
@@ -737,34 +737,9 @@ function compareVersions(left, right) {
   return 0;
 }
 
-/**
- * Fetch changelog notes between versions
- */
+/** Release notes between the installed and the offered version, or undefined. */
 async function fetchChangelogNotes(fromVersion, toVersion) {
-  try {
-    const response = await fetch(CHANGELOG_URL, {
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) return undefined;
-
-    const changelog = await response.text();
-    const sections = changelog.split(/^## /m).slice(1);
-
-    const relevantSections = sections.filter((section) => {
-      const match = section.match(/^\[(\d+\.\d+\.\d+)\]/);
-      if (!match) return false;
-      return compareVersions(match[1], fromVersion) > 0 && compareVersions(match[1], toVersion) <= 0;
-    });
-
-    if (relevantSections.length === 0) return undefined;
-
-    return relevantSections
-      .map((s) => '## ' + s.trim())
-      .join('\n\n');
-  } catch {
-    return undefined;
-  }
+  return (await fetchUpdateNotes(fromVersion, toVersion, compareVersions)) ?? undefined;
 }
 
 export async function checkForUpdates(options = {}) {

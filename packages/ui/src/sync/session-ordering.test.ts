@@ -7,6 +7,7 @@ import {
   reconcileSessionActivitySnapshot,
   removeSessionOrdering,
   resetSessionOrdering,
+  promoteRestoredSessionOrdering,
   useSessionOrderingStore,
   raiseSessionOrderingBaselines,
 } from './session-ordering';
@@ -30,7 +31,7 @@ describe('session lifecycle ordering', () => {
 
     observeSessionActivityEvent('session-a', 'active');
     const activeRank = useSessionOrderingStore.getState().rankById.get('session-a');
-    expect(typeof activeRank).toBe('number');
+    expect(activeRank ?? 0).toBeGreaterThan(0);
 
     observeSessionActivityEvent('session-a', 'active');
     expect(useSessionOrderingStore.getState().rankById.get('session-a')).toBe(activeRank);
@@ -94,6 +95,27 @@ describe('session lifecycle ordering', () => {
 
     observeSessionActivityEvent('session-a', 'settled');
     expect(useSessionOrderingStore.getState().rankById.has('session-a')).toBe(false);
+  });
+
+  test('promotes a restored session without synthesizing lifecycle activity', () => {
+    const restored = session('restored', 10);
+
+    promoteRestoredSessionOrdering(restored.id);
+    const restoredRank = useSessionOrderingStore.getState().rankById.get(restored.id);
+
+    expect(restored.time.updated).toBe(10);
+    expect(restoredRank).toBeGreaterThan(10);
+
+    observeSessionActivityEvent(restored.id, 'settled');
+    expect(useSessionOrderingStore.getState().rankById.get(restored.id)).toBe(restoredRank);
+  });
+
+  test('clears restored ordering promotion on runtime ordering reset', () => {
+    promoteRestoredSessionOrdering('restored');
+
+    resetSessionOrdering();
+
+    expect(useSessionOrderingStore.getState().rankById.has('restored')).toBe(false);
   });
 
   test('sorts each forest scope before flattening parent-first', () => {

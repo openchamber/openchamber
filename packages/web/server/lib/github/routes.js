@@ -781,14 +781,14 @@ export function registerGitHubRoutes(app) {
       // Determine the source remote for the head branch
       // Priority: 1) explicit headRemote, 2) tracking branch remote, 3) 'origin' if targeting non-origin
       let sourceRemote = headRemote;
-      const { getStatus, getRemotes } = await import('../git/index.js');
+      const { getTrackingBranch, getRemotes } = await import('../git/index.js');
       
       // If no explicit headRemote, check the branch's tracking info
       if (!sourceRemote) {
-        const status = await getStatus(directory).catch(() => null);
-        if (status?.tracking) {
+        const tracking = await getTrackingBranch(directory).catch(() => null);
+        if (tracking) {
           // tracking is like "gsxdsm/fix/multi-remote-branch-creation" or "origin/main"
-          const trackingRemote = status.tracking.split('/')[0];
+          const trackingRemote = tracking.split('/')[0];
           if (trackingRemote) {
             sourceRemote = trackingRemote;
           }
@@ -1513,7 +1513,7 @@ export function registerGitHubRoutes(app) {
           return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
         } catch (error) {
           console.error('Failed to search GitHub PRs:', error);
-          return res.json({ connected: true, repo, prs: [], page: effectivePage, hasMore: false });
+          throw error;
         }
       }
 
@@ -1532,7 +1532,7 @@ export function registerGitHubRoutes(app) {
           return { prs, hasMore };
         } catch (error) {
           console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
-          return { prs: [], hasMore: false };
+          throw error;
         }
       };
 

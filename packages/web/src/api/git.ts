@@ -23,6 +23,7 @@ export const createWebGitAPI = (): GitAPI => ({
   revertGitHunk: gitApiHttp.revertGitHunk,
   isLinkedWorktree: gitApiHttp.isLinkedWorktree,
   getGitBranches: gitApiHttp.getGitBranches,
+  getGitUnpushedBranchCounts: gitApiHttp.getGitUnpushedBranchCounts,
   deleteGitBranch: gitApiHttp.deleteGitBranch as GitAPI['deleteGitBranch'],
   deleteRemoteBranch: gitApiHttp.deleteRemoteBranch as GitAPI['deleteRemoteBranch'],
   removeRemote: gitApiHttp.removeRemote as GitAPI['removeRemote'],
@@ -53,6 +54,7 @@ export const createWebGitAPI = (): GitAPI => ({
     return gitApiHttp.getGitLog(directory, options);
   },
   getCommitFiles: gitApiHttp.getCommitFiles,
+  getGitCommitDiff: gitApiHttp.getGitCommitDiff,
   getCurrentGitIdentity: gitApiHttp.getCurrentGitIdentity,
   hasLocalIdentity: gitApiHttp.hasLocalIdentity,
   setGitIdentity: gitApiHttp.setGitIdentity,

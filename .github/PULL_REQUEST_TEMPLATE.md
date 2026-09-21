@@ -8,7 +8,17 @@
 
 ## Affected surfaces
 
-<!-- Name affected packages, runtimes, user-visible states, and persisted/external contracts. Explain why an apparently applicable runtime is unaffected. -->
+<!-- Name affected packages, user-visible states, and persisted/external contracts. -->
+
+<!-- Then one line per runtime: what this change does there. "Not applicable" is an answer; a blank row is not. If a runtime behaves differently on purpose, say so here. -->
+
+| Runtime | Behavior after this change |
+|---|---|
+| Web |  |
+| Desktop (Electron) |  |
+| VS Code |  |
+| Hosted mobile |  |
+| Capacitor mobile |  |
 
 ## Repository guidance
 
@@ -25,6 +35,8 @@
 | Check | Result |
 |---|---|
 |  |  |
+
+**Live run:** <!-- Did you run the built or running app and exercise the changed path? Name the runtime (web / desktop / VS Code / hosted mobile / Capacitor mobile), the OS, and what you saw. Required in addition to any screenshot or recording below, not instead of one. Not required when no user-reachable behavior changes. If you could not run it, say so and why. -->
 
 ## Visual evidence
 
