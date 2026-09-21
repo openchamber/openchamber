@@ -1,64 +1,29 @@
 import type { Session } from '@opencode-ai/sdk/v2';
-import { formatDirectoryName } from '@/lib/utils';
-import type { DirectoryOwner } from '../sessions/sessionOwnership';
 import type { SessionNode } from '../types';
-import { formatProjectLabel, normalizePath } from '../utils';
+import type { SidebarSessionLocation } from './sessionLocation';
 
-export type RecentSessionLocation = {
+type RecentSessionLocation = SidebarSessionLocation;
+
+type SidebarActivityItem = {
+  node: SessionNode;
   projectId: string | null;
   groupDirectory: string | null;
-  projectLabel: string | null;
-  branchLabel: string | null;
-};
-
-// Recent rows resolve their owner through the shared ownership index, not by
-// re-matching directory prefixes: the index already covers linked worktrees
-// and the canonical-project fallback for restored sessions whose worktree
-// directory no longer exists. The row keeps the session's own directory; only
-// display ownership comes from the index.
-export const buildRecentSessionLocations = (args: {
-  sessions: readonly Session[];
-  sessionOwners: ReadonlyMap<string, DirectoryOwner>;
-  projects: ReadonlyArray<{ id: string; normalizedPath: string; label?: string }>;
-  availableWorktreesByProject: ReadonlyMap<string, ReadonlyArray<{ path: string; branch?: string | null }>>;
-  gitBranches: ReadonlyMap<string, string | null>;
-  homeDirectory: string | null;
-}): Map<string, RecentSessionLocation> => {
-  const locations = new Map<string, RecentSessionLocation>();
-  const projectsById = new Map(args.projects.map((project) => [project.id, project]));
-  for (const session of args.sessions) {
-    const owner = args.sessionOwners.get(session.id);
-    if (!owner) continue;
-    const project = projectsById.get(owner.projectId);
-    if (!project) continue;
-    const directory = normalizePath(session.directory ?? null);
-    const worktree = directory
-      ? args.availableWorktreesByProject.get(owner.projectRoot)?.find((entry) => normalizePath(entry.path) === directory)
-      : undefined;
-    const projectLabel = formatProjectLabel(
-      project.label?.trim() || formatDirectoryName(project.normalizedPath, args.homeDirectory) || project.normalizedPath,
-    );
-    const branch = worktree?.branch?.trim()
-      || (directory ? args.gitBranches.get(directory)?.trim() : undefined)
-      || null;
-    locations.set(session.id, {
-      projectId: project.id,
-      groupDirectory: directory,
-      projectLabel,
-      branchLabel: branch && branch !== 'HEAD' && branch !== projectLabel ? branch : null,
-    });
-  }
-  return locations;
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
 };
 
 type RecentActivitySection = {
   key: 'active-now';
-  items: Array<{
-    node: SessionNode;
-    projectId: string | null;
-    groupDirectory: string | null;
-    secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
-  }>;
+  items: SidebarActivityItem[];
+};
+
+// Recent and Timeline filter their own lists with the sidebar's rule: an
+// exact `ses_` id, otherwise a case-insensitive title match.
+const matchesSidebarSessionQuery = (session: Session, query: string): boolean => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  if (normalizedQuery.startsWith('ses_')) return session.id.toLowerCase() === normalizedQuery;
+  const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
+  return title.includes(query);
 };
 
 const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -114,13 +79,7 @@ export const deriveRecentActivitySections = ({
 }): RecentActivitySection[] => [{
   key: 'active-now',
   items: sessions.flatMap((session) => {
-    const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
-    const normalizedQuery = query.trim().toLowerCase();
-    const isIdQuery = normalizedQuery.startsWith('ses_');
-    const matches = isIdQuery
-      ? session.id.toLowerCase() === normalizedQuery
-      : !query || title.includes(query);
-    if (!matches) return [];
+    if (!matchesSidebarSessionQuery(session, query)) return [];
     const location = getSessionLocation(session.id);
     return [{
       node: getSessionNode?.(session) ?? { session, children: [], worktree: null },
@@ -133,3 +92,30 @@ export const deriveRecentActivitySections = ({
     }];
   }),
 }];
+
+// Timeline lists every non-archived root project session as one flat zone.
+// Ordering, membership, and branch/project metadata are resolved by the
+// caller; this projection only applies the search filter and shapes rows.
+export const deriveTimelineActivityItems = ({
+  sessions,
+  getSessionLocation,
+  getSessionNode,
+  query,
+}: {
+  sessions: readonly Session[];
+  getSessionLocation: (sessionId: string) => SidebarSessionLocation | null;
+  getSessionNode: (session: Session) => SessionNode;
+  query: string;
+}): SidebarActivityItem[] => sessions.flatMap((session) => {
+  if (!matchesSidebarSessionQuery(session, query)) return [];
+  const location = getSessionLocation(session.id);
+  return [{
+    node: getSessionNode(session),
+    projectId: location?.projectId ?? null,
+    groupDirectory: location?.groupDirectory ?? session.directory ?? null,
+    secondaryMeta: {
+      projectLabel: location?.projectLabel ?? null,
+      branchLabel: location?.branchLabel ?? null,
+    },
+  }];
+});

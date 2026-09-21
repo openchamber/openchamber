@@ -56,7 +56,6 @@ import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
-import { getOutsideFileGrant, resolveOutsideFileReadOptions } from '@/lib/outsideFileGrants';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { DiagramEditor } from '@/components/diagram';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -872,7 +871,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [openPaths, selectedPath]);
   const selectedFile = React.useMemo(() => (effectiveSelectedPath ? toFileNode(effectiveSelectedPath) : null), [effectiveSelectedPath, toFileNode]);
   const selectedFilePath = selectedFile?.path ?? '';
-  const [, setOutsideFileGrantRevision] = React.useState(0);
 
   React.useEffect(() => {
     if (!root || !selectedPath) return;
@@ -884,23 +882,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [openPaths, root, selectedPath, setSelectedPath]);
 
   const selectedFileIsOutsideWorkspace = Boolean(root && selectedFilePath && !isPathWithinRoot(selectedFilePath, root));
-  const selectedOutsideFileGrant = selectedFileIsOutsideWorkspace ? getOutsideFileGrant(selectedFilePath) : undefined;
   const selectedFileReadOptions = React.useMemo(
     () => ({
-      allowOutsideWorkspace: mode === 'editor-only' && selectedFileIsOutsideWorkspace,
-      outsideFileGrant: selectedOutsideFileGrant,
+      allowOutsideWorkspace: selectedFileIsOutsideWorkspace,
       directory: root || undefined,
     }),
-    [mode, selectedFileIsOutsideWorkspace, selectedOutsideFileGrant, root],
+    [selectedFileIsOutsideWorkspace, root],
   );
-  const resolveFileReadOptions = React.useCallback(async (path: string) => {
-    const previousGrant = getOutsideFileGrant(path);
-    const readOptions = await resolveOutsideFileReadOptions(path, root, mode === 'editor-only');
-    if (readOptions.outsideFileGrant && readOptions.outsideFileGrant !== previousGrant) {
-      setOutsideFileGrantRevision((revision) => revision + 1);
-    }
-    return readOptions;
-  }, [mode, root]);
+  const resolveFileReadOptions = React.useCallback((path: string) => ({
+    allowOutsideWorkspace: Boolean(root && !isPathWithinRoot(path, root)),
+  }), [root]);
 
   // Editor tabs horizontal scroll fades
   const editorTabsScrollRef = React.useRef<HTMLDivElement>(null);
@@ -1585,7 +1576,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // `fresh` bypasses the content cache and HTTP cache so external-change polling
   // compares against the file on disk rather than a cached copy.
   const readFile = React.useCallback(async (path: string, cacheOptions?: { fresh?: boolean }): Promise<string> => {
-    const options = await resolveFileReadOptions(path);
+    const options = resolveFileReadOptions(path);
     if (files.readFile) {
       const result = await files.readFile(path, {
         ...options,
@@ -1599,15 +1590,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (options.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    if (options.outsideFileGrant) {
-      params.set('outsideFileGrant', options.outsideFileGrant);
-    }
     if (root) {
       params.set('directory', root);
     }
     const response = await runtimeFetch(
       `/api/fs/read?${params.toString()}`,
-      cacheOptions?.fresh ? { cache: 'no-store' } : undefined,
+      { cache: cacheOptions?.fresh ? 'no-store' : 'default', signal: AbortSignal.timeout(30_000) },
     );
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -1618,7 +1606,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const readFileStat = React.useCallback(async (path: string): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
-      const options = await resolveFileReadOptions(path);
+      const options = resolveFileReadOptions(path);
       const result = await files.statFile(path, { ...options, directory: root || undefined });
       return {
         path: result.path,
@@ -1639,7 +1627,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
     void Promise.all(paths.map(async (path) => {
       try {
-        const options = await resolveFileReadOptions(path);
+        const options = resolveFileReadOptions(path);
         const stat = await files.statFile?.(path, { ...options, directory: root || undefined });
         if (!cancelled && stat && !stat.isFile) {
           removeOpenPathsByPrefix(root, path);
@@ -1862,12 +1850,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setContentDetectedBinary(false);
     setFileLoading(true);
 
-    // Prime asset URLs; read and stat resolve again immediately before their calls.
-    await resolveFileReadOptions(node.path);
-    if (!isCurrentLoad()) {
-      return;
-    }
-
     const selectedIsImage = isImageFile(node.path);
     const isSvg = isSvgFile(node.path);
     const selectedIsPdf = isPdfFile(node.path);
@@ -1993,7 +1975,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           setFileLoading(false);
         }
       });
-  }, [applyLoadedTextContent, expandPaths, isMobile, loadDirectory, readFile, readFileStat, removeOpenPathsByPrefix, resolveFileReadOptions, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [applyLoadedTextContent, expandPaths, isMobile, loadDirectory, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!visible || !root) {
@@ -3062,8 +3044,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const pdfAssetAuthKey = selectedFile?.path
     && isSelectedPdf
-    && (!selectedFileReadOptions.allowOutsideWorkspace || selectedFileReadOptions.outsideFileGrant)
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}|${fileContentRevision}`
+    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${fileContentRevision}`
     : '';
 
   const htmlAssetAuthKey = selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
@@ -3089,7 +3070,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
-      outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
       directory: root || undefined,
     })
     : '';
@@ -3117,7 +3097,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
       setFileError(null);
 
-      const readOptions = await resolveFileReadOptions(selectedFile.path);
+      const readOptions = resolveFileReadOptions(selectedFile.path);
       if (cancelled) {
         return;
       }
@@ -3126,10 +3106,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         ? files.readFileBinary(selectedFile.path, readOptions).then((result) => result.dataUrl)
         : (async () => {
           const response = await runtimeFetch('/api/fs/raw', {
+            signal: AbortSignal.timeout(30_000),
             query: {
               path: selectedFile.path,
               allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
-              outsideFileGrant: readOptions.outsideFileGrant,
               directory: root || undefined,
             },
           });

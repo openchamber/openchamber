@@ -63,7 +63,7 @@ const SwitcherRow: React.FC<{
         <span
           className={cn(
             'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+            isStreaming ? 'bg-[var(--status-info)]' : 'bg-[var(--status-success)]',
           )}
           aria-hidden
         />

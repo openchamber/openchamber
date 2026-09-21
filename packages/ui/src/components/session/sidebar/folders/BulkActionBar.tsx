@@ -22,6 +22,7 @@ type Props = {
   onRemoveFromFolder: () => void;
   canRemoveFromFolder: boolean;
   onRestore: () => void;
+  onArchive: () => void;
   onDelete: () => void;
   onDone: () => void;
 };
@@ -36,19 +37,18 @@ export const BulkActionBar: React.FC<Props> = ({
   onRemoveFromFolder,
   canRemoveFromFolder,
   onRestore,
+  onArchive,
   onDelete,
   onDone,
 }) => {
   const { t } = useI18n();
-  const canMoveToFolder = Boolean(scopeKey) && !archivedBucket;
-  const destructiveLabel = archivedBucket
-    ? t('sessions.sidebar.bulkActions.delete')
-    : t('sessions.sidebar.bulkActions.archive');
-  const iconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  const destructiveIconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50';
+  const hasSelection = selectedCount > 0;
+  const canMoveToFolder = hasSelection && Boolean(scopeKey) && !archivedBucket;
+  const iconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
+  const destructiveIconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50 disabled:pointer-events-none disabled:opacity-40';
 
   return (
-    <div className="flex shrink-0 items-center gap-1 border-t border-border px-2.5 py-1.5">
+    <div className="flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-1.5">
       <span className="typography-ui-label text-muted-foreground whitespace-nowrap">
         {t('sessions.sidebar.bulkActions.selectedCount', { count: selectedCount })}
       </span>
@@ -68,7 +68,7 @@ export const BulkActionBar: React.FC<Props> = ({
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.moveToFolder')}</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.moveToFolder')}</p></TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" className="min-w-[180px]">
               {scopeFolders.length === 0 ? (
@@ -106,13 +106,31 @@ export const BulkActionBar: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={onRestore}
+                disabled={!hasSelection}
                 className={iconButtonClass}
                 aria-label={t('sessions.sidebar.bulkActions.restore')}
               >
                 <Icon name="inbox-unarchive" className="h-4 w-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.restore')}</p></TooltipContent>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.restore')}</p></TooltipContent>
+          </Tooltip>
+        ) : null}
+
+        {!archivedBucket ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onArchive}
+                disabled={!hasSelection}
+                className={iconButtonClass}
+                aria-label={t('sessions.sidebar.bulkActions.archive')}
+              >
+                <Icon name="archive" className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.archive')}</p></TooltipContent>
           </Tooltip>
         ) : null}
 
@@ -121,13 +139,14 @@ export const BulkActionBar: React.FC<Props> = ({
             <button
               type="button"
               onClick={onDelete}
+              disabled={!hasSelection}
               className={cn(destructiveIconButtonClass)}
-              aria-label={destructiveLabel}
+              aria-label={t('sessions.sidebar.bulkActions.delete')}
             >
               <Icon name="delete-bin" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={4}><p>{destructiveLabel}</p></TooltipContent>
+          <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.delete')}</p></TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -141,7 +160,7 @@ export const BulkActionBar: React.FC<Props> = ({
               <Icon name="close" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.header.actions.exitSelection')}</p></TooltipContent>
+          <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.exitSelection')}</p></TooltipContent>
         </Tooltip>
       </div>
     </div>

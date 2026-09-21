@@ -39,7 +39,7 @@ export function CollapsedActivityIndicator({
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        state === 'active' ? 'bg-primary' : 'bg-[var(--status-info)]',
+        state === 'active' ? 'bg-[var(--status-info)]' : 'bg-[var(--status-success)]',
         className,
       )}
       aria-label={label}

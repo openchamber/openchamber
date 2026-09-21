@@ -205,7 +205,7 @@ const createToolEntry = ({ name, description, definitions, parameters }) => Stri
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: ${JSON.stringify(name)} }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: ${JSON.stringify(name)} }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -358,7 +358,10 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     try {
-      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, options);
+      const contextSessionId = asNonEmptyString(payload.contextSessionId);
+      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, contextSessionId
+        ? { ...options, contextSessionId }
+        : options);
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({

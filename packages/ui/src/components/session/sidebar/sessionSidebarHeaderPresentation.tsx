@@ -2,17 +2,46 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
+
+const ACTIVITY_ICON = { chats: 'chat-4', 'active-now': 'history', timeline: 'folder' } as const;
+const ACTIVITY_TITLE_KEY = {
+  chats: 'sessions.sidebar.activity.chatsTitle',
+  'active-now': 'sessions.sidebar.activity.recentTitle',
+  timeline: 'sessions.sidebar.activity.timelineTitle',
+} as const;
 
 export const SessionSidebarActivityHeader: React.FC<{
-  activityKey: 'chats' | 'active-now';
+  activityKey: SessionSidebarActivityKey;
   collapsed: boolean;
   forceExpanded: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewChat: () => void;
-}> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
+  /** Timeline zones drop the leading icon and take a taller band; the
+      collapse chevron still appears on hover in the icon slot. */
+  timelineView?: boolean;
+}> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat, timelineView = false }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
+  if (timelineView) {
+    // Timeline zone header: no icon, text flush with the rows' left edge, and
+    // an always-visible chevron right after the title showing collapse state.
+    return <div className="relative group/chats -mr-2">
+      <button
+        type="button"
+        onClick={forceExpanded ? undefined : onToggle}
+        disabled={forceExpanded}
+        className={cn('group flex w-full items-center gap-1 py-2 pl-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', 'pr-3.5')}
+        aria-expanded={!collapsed}
+      >
+        <span className="typography-ui-label font-semibold lowercase text-foreground">
+          {t(ACTIVITY_TITLE_KEY[activityKey])}
+        </span>
+        {!forceExpanded ? <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5 text-muted-foreground" /> : null}
+      </button>
+    </div>;
+  }
   return <div className="relative group/chats -ml-2.5 -mr-2">
     <button
       type="button"
@@ -22,13 +51,13 @@ export const SessionSidebarActivityHeader: React.FC<{
       aria-expanded={!collapsed}
     >
       <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
-        <Icon name={chats ? 'chat-4' : 'history'} className={cn('h-3.5 w-3.5 text-muted-foreground/80', !forceExpanded && 'group-hover:hidden')} />
+        <Icon name={ACTIVITY_ICON[activityKey]} className={cn('h-3.5 w-3.5 text-muted-foreground/80', !forceExpanded && 'group-hover:hidden')} />
         {!forceExpanded ? <span className="hidden h-3.5 w-3.5 items-center justify-center text-muted-foreground group-hover:inline-flex">
           <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
         </span> : null}
       </span>
       <span className="typography-ui-label font-semibold lowercase text-foreground">
-        {t(chats ? 'sessions.sidebar.activity.chatsTitle' : 'sessions.sidebar.activity.recentTitle')}
+        {t(ACTIVITY_TITLE_KEY[activityKey])}
       </span>
     </button>
     {chats ? <button

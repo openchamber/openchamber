@@ -1190,6 +1190,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (id) {
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
+    } else {
+      setActiveSession("", "")
     }
   },
 
@@ -2262,6 +2264,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (authoritative !== get().currentSessionDirectory) {
       set({ currentSessionDirectory: authoritative })
     }
+    setActiveSession(authoritative, target)
     writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId: target, directory: authoritative })
   },
 
@@ -2274,6 +2277,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
     if (sessionId === get().currentSessionId) {
       set({ currentSessionDirectory: normalized })
+      setActiveSession(normalized ?? "", sessionId)
       writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId, directory: normalized })
     }
   },

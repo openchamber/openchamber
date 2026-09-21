@@ -484,12 +484,6 @@ const isDesktopFileGrantResult = (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 
-const desktopExistingFileGrantSchema = z.object({
-  path: z.string().min(1),
-  outsideFileGrant: z.string().min(1),
-  expiresAt: z.number().finite(),
-});
-
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
 ): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
@@ -528,36 +522,6 @@ export const requestFileAccess = async (
   }
 
   return { success: false, error: 'Native file picker not available' };
-};
-
-export const requestExistingFileAccess = async (
-  path: string
-): Promise<
-  | { success: true; path: string; outsideFileGrant: string; expiresAt: number }
-  | { success: false; error: string }
-> => {
-  const targetPath = typeof path === 'string' ? path.trim() : '';
-  if (!targetPath) {
-    return { success: false, error: 'Path is required' };
-  }
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return { success: false, error: 'Native file access not available' };
-  }
-
-  try {
-    const selected = await getDesktopBridge()?.grantFileAccess?.(targetPath);
-    const parsed = desktopExistingFileGrantSchema.safeParse(selected);
-    if (!parsed.success) {
-      return { success: false, error: 'File access was not granted' };
-    }
-    return {
-      success: true,
-      ...parsed.data,
-    };
-  } catch (error) {
-    console.warn('Failed to request existing file access', error);
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
 };
 
 export const startAccessingDirectory = async (

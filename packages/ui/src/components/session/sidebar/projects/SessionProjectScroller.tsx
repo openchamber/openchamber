@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 import {
   DndContext,
   KeyboardSensor,
@@ -87,6 +88,7 @@ type View = {
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   projectSortOrder: ProjectSortOrder;
+  timelineView: boolean;
 };
 
 type Actions = {
@@ -230,11 +232,26 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
           alwaysShowActions={view.alwaysShowActions}
-          onToggle={() => model.state.setCollapsedActivityKeys((current) => {
-            const next = new Set(current);
-            if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
-            return next;
-          })}
+          timelineView={view.timelineView}
+          onToggle={() => {
+            // Collapsing a zone forgets its Show more state: reopening it
+            // starts from the default reveal, like a group or project.
+            if (!row.collapsed) {
+              const containerKey = `activity:${row.activityKey}`;
+              actions.group.resetGroupSessionLimit(containerKey);
+              model.state.setVisibleActivityCountByKey((current) => {
+                if (!current.has(containerKey)) return current;
+                const next = new Map(current);
+                next.delete(containerKey);
+                return next;
+              });
+            }
+            model.state.setCollapsedActivityKeys((current) => {
+              const next = new Set(current);
+              if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
+              return next;
+            });
+          }}
           onNewChat={() => {
             useUIStore.getState().closeMainSurfaces();
             if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
@@ -358,7 +375,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       </div>;
     }
     if (row.kind === 'show-control') {
-      return <button type="button" className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline" onClick={() => {
+      // Timeline rows have no left gutter, so the control lines up with their
+      // text (10px) instead of the grouped view's gutter offset.
+      return <button type="button" className={cn('mt-0.5 flex items-center justify-start rounded-md pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline', view.timelineView ? 'pl-[10px]' : 'pl-[26px]')} onClick={() => {
         if (row.containerKey.startsWith('activity:')) {
           model.state.setVisibleActivityCountByKey((current) => {
             const next = new Map(current);
@@ -391,7 +410,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       scrollRef={scrollContainerRef}
     >
       <ScrollableOverlay
-        ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={96}
+        // Sticky zone headers replace the top shadow in the grouped view; the
+        // flat timeline has none, so it shows the shadow once there is content above.
+        ref={setScrollContainer} useScrollShadow hideTopScrollShadow={!view.timelineView} scrollShadowSize={40}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 pl-2.5 pr-2 [overflow-anchor:none]"
       >
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => {

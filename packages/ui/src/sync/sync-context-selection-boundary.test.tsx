@@ -5,6 +5,9 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2'
 import { SyncProvider, useChildStoreManager, useSyncDirectory } from './sync-context'
 import { usePrefetchSessionMessages } from './use-sync'
 import { installHookTestDom } from '../components/session/sidebar/test-utils/testDom'
+import { useSessionUIStore } from './session-ui-store'
+import { opencodeClient } from '@/lib/opencode/client'
+import type { Message, Part } from '@opencode-ai/sdk/v2'
 
 const createSdk = (respond?: (url: URL) => Response | undefined) => createOpencodeClient({
   baseUrl: 'https://sync.test',
@@ -27,8 +30,56 @@ const createSdk = (respond?: (url: URL) => Response | undefined) => createOpenco
 })
 
 describe('SyncProvider selection boundary', () => {
+  for (const mode of ['confirmed', 'adopted'] as const) {
+    test(`keeps the selected transcript whole after its directory is ${mode}`, async () => {
+      const dom = installHookTestDom()
+      const previousSurface = window.__OPENCHAMBER_SURFACE__
+      window.__OPENCHAMBER_SURFACE__ = 'desktop'
+      const root = createRoot(dom.container)
+      let manager: ReturnType<typeof useChildStoreManager> | undefined
+      const Probe = () => { manager = useChildStoreManager(); return null }
+      const sessionID = `selected-${mode}`
+      const directory = `/workspace/actual-${mode}`
+      try {
+        await act(async () => root.render(<SyncProvider sdk={createSdk()} directory="/workspace/guess"><Probe /></SyncProvider>))
+        if (!manager) throw new Error('Directory manager was not mounted')
+        const store = manager.ensureChild(directory, { bootstrap: false })
+        const messages: Message[] = Array.from({ length: 10 }, (_, index) => ({
+          id: `${sessionID}-${index}`, sessionID, role: 'user', time: { created: index },
+          agent: 'build', model: { providerID: 'test', modelID: 'test' },
+        }))
+        const parts: { [id: string]: Part[] } = Object.fromEntries(messages.map((message) => [message.id, [{
+          id: `part-${message.id}`, sessionID, messageID: message.id, type: 'text', text: 'prompt',
+        }]]))
+        await act(async () => {
+          opencodeClient.setDirectory('/workspace/guess')
+          useSessionUIStore.getState().setCurrentSession(sessionID, mode === 'confirmed' ? '/workspace/guess' : undefined)
+          store.setState({
+            session: [{ id: sessionID, slug: sessionID, projectID: 'project', directory, title: sessionID, version: '1', time: { created: 1, updated: 1 } }],
+            message: { [sessionID]: messages }, part: parts,
+          })
+          if (mode === 'confirmed') useSessionUIStore.getState().setSessionDirectory(sessionID, directory)
+          else useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
+          await Promise.resolve()
+        })
+        expect(useSessionUIStore.getState().currentSessionDirectory).toBe(directory)
+        expect(store.getState().message[sessionID]).toHaveLength(10)
+        // Leaving starts the idle grace; the transcript stays whole meanwhile.
+        await act(async () => { useSessionUIStore.getState().setCurrentSession(null); await Promise.resolve() })
+        expect(store.getState().message[sessionID]).toHaveLength(10)
+      } finally {
+        useSessionUIStore.getState().setCurrentSession(null)
+        await act(async () => root.unmount())
+        window.__OPENCHAMBER_SURFACE__ = previousSurface
+        dom.restore()
+      }
+    })
+  }
+
   test('bounds failed session-page retries and preserves the last directory snapshot', async () => {
     const dom = installHookTestDom()
+    const previousSurface = window.__OPENCHAMBER_SURFACE__
+    window.__OPENCHAMBER_SURFACE__ = 'desktop'
     const root = createRoot(dom.container)
     let manager: ReturnType<typeof useChildStoreManager> | undefined
     const Probe = () => {
@@ -74,12 +125,15 @@ describe('SyncProvider selection boundary', () => {
       expect(store.getState().session).toBe(cached)
     } finally {
       await act(async () => root.unmount())
+      window.__OPENCHAMBER_SURFACE__ = previousSurface
       dom.restore()
     }
   }, 15_000)
 
   test('does not rerender a stable prefetch consumer when only current directory changes', async () => {
     const dom = installHookTestDom()
+    const previousSurface = window.__OPENCHAMBER_SURFACE__
+    window.__OPENCHAMBER_SURFACE__ = 'desktop'
     const root = createRoot(dom.container)
     let runtimeRenders = 0
     let directoryRenders = 0
@@ -115,6 +169,7 @@ describe('SyncProvider selection boundary', () => {
       expect(directoryRenders).toBe(2)
     } finally {
       await act(async () => root.unmount())
+      window.__OPENCHAMBER_SURFACE__ = previousSurface
       dom.restore()
     }
   })

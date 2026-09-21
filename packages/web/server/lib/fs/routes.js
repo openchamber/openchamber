@@ -67,25 +67,6 @@ export const mintOutsideFileGrant = async (targetPath, {
   };
 };
 
-const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }) => {
-  pruneOutsideFileGrants();
-  if (typeof token !== 'string' || !token.trim()) {
-    return { ok: false, error: 'Outside workspace file access requires a grant' };
-  }
-  const grant = outsideFileGrants.get(token.trim());
-  if (!grant) {
-    return { ok: false, error: 'Outside workspace file grant is invalid or expired' };
-  }
-  if (!grant.scopes.has(scope)) {
-    return { ok: false, error: 'Outside workspace file grant does not allow this operation' };
-  }
-  const canonicalPath = await fsPromises.realpath(targetPath);
-  if (canonicalPath !== grant.canonicalPath) {
-    return { ok: false, error: 'Outside workspace file grant does not match requested path' };
-  }
-  return { ok: true, base: grant.base, resolved: canonicalPath, granted: true };
-};
-
 const createCommandTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw > 0) return raw;
@@ -450,19 +431,14 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
     const resolved = path.resolve(normalized);
-    return resolveOutsideFileGrant({
-      token: req.query?.outsideFileGrant,
-      targetPath: resolved,
-      scope,
-      fsPromises,
-    });
+    return { ok: true, base: path.dirname(resolved), resolved };
   }
 
   return resolveWorkspacePathFromContext({
@@ -1116,9 +1092,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
-      if (resolved.granted) {
-        res.setHeader('Referrer-Policy', 'no-referrer');
-      }
+      res.setHeader('Referrer-Policy', 'no-referrer');
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;

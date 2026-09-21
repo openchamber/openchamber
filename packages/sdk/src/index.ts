@@ -32,6 +32,11 @@ export {
   GUEST_FILESYSTEM_PATTERN_MAX,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   GUEST_SERVICE_PROVIDES,
+  GUEST_SURFACE_DOCKS,
+  GUEST_SURFACE_DOCK_DEFAULT,
+  GUEST_SURFACE_DOCK_SIZE_DEFAULT,
+  GUEST_SURFACE_DOCK_SIZE_MAX,
+  GUEST_SURFACE_DOCK_SIZE_MIN,
   HOST_LINEAR_API_ORIGIN,
   isGuestFilesystemPattern,
   hasGuestCapability,
@@ -50,6 +55,7 @@ export {
 } from './manifest.ts';
 export type {
   GuestServiceProvides,
+  GuestSurfaceDock,
   ServiceContribution,
   ServicePermissions,
   GuestActionContribution,
@@ -277,6 +283,7 @@ export type {
   BrowserNavigationData,
   BrowserOpenData,
   BrowserOpenParameters,
+  BrowserProviderContext,
   BrowserProviderData,
   BrowserProviderRequest,
   BrowserProviderResult,

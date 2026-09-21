@@ -57,11 +57,12 @@ project metadata only when that project's canonical worktree maps to a
 configured project root. This fallback changes display ownership, not the
 session's real directory used for routing. Records with no resolved owner have
 no guaranteed project group. VS Code keeps exact workspace-directory scope and
-does not use the fallback. The mobile sheet and the Recent projection use this
-same ownership resolver; Recent rows keep the session's own directory while
+does not use the fallback. The mobile sheet, Recent, and Timeline use this
+same ownership resolver; rows keep the session's own directory while
 taking display ownership (project id, labels) from the index.
 
-Web and desktop show managed Chats before optional Recent activity. Chats use
+Web and desktop show managed Chats before optional Recent activity (off by
+default since the timeline view exists; the display menu toggles it). Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
@@ -110,6 +111,41 @@ only for unmarked legacy sessions. Row memoization compares those same semantics
 so metadata-only membership changes update the menu. See
 `lib/multirun/DOCUMENTATION.md` for source selection and fork rules.
 
+## Timeline view
+
+`sidebarViewMode` (profile-scoped, per surface) switches the desktop and web
+sidebar between `projects` and `timeline`. VS Code has no switch and always
+renders `projects`.
+
+- Timeline keeps the managed Chats zone, with an initial reveal of 3 instead of
+  the usual Chats limit. Pinned chats are always shown and never spend that
+  limit, so Show more/Show fewer count only unpinned rows. Chats rows render
+  with `renderContext: 'timeline-chat'`: one line, no left gutter, pin and
+  status dot on the right beside the time. Collapsing a zone header resets its
+  Show more state.
+- Zone headers are sticky in the projects view and never in the timeline; there
+  is no user toggle. Timeline zone headers drop the leading icon and use a
+  taller band.
+- Below Chats it renders one `timeline` activity header (a sticky zone header
+  like `chats` and `active-now`) followed by every non-archived root project
+  session from all projects and worktrees in one flat list, in the shared
+  lifecycle order, with pinned sessions floating first. There is no reveal
+  limit: the list is virtualized.
+- Timeline rows carry `renderContext: 'timeline'`, depth 0 and empty children.
+  They never expand, show no chevron, no folders, no project headers, no
+  worktree groups and no Recent projection. Folders are not projected, so the
+  row menu hides `Move to folder`. Their archive/delete actions still
+  cover the full subtree, because `collectSessionSubtreeIds` resolves
+  descendants from the global cache at action time.
+- `recent/sessionLocation.ts` is the single owner of a session's project,
+  directory, worktree and branch label. It resolves the project through the
+  session ownership index first (managed worktrees live outside the project
+  path) and falls back to a path-prefix match. Recent hides a branch equal to the
+  project label; Timeline shows the branch on every row, using the live project
+  root branch for root-directory sessions and the worktree branch otherwise.
+- Search filters Timeline with the same rule as Recent (exact `ses_` id, else
+  title contains) and counts one match per listed row.
+
 ## Search
 
 Dedicated search fields in the sidebar, mobile session list, and archive submit
@@ -146,6 +182,13 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - The sidebar does not subscribe its whole tree to the cross-directory live-session aggregate. Global create/structural/lifecycle snapshots drive rendered session metadata; the cached sync index only fills sessions not yet present globally and provides refresh fallback data. Row activity continues to come from the session-keyed live status index.
 - Session selection does not invalidate the sidebar orchestration component. Each mounted row selects only whether its own session ID is active, while parent expansion, project selection memory, and neighbor prefetch run in small effect-only subscribers.
 - Parent expansion is exclusively manual. Selecting or navigating to a subsession never expands its parent automatically. Project/worktree and `recent` trees use independent persisted context keys and receive separate stable projections, so expansion changes in one context neither invalidate nor change the other. The persisted storage key remains `v3`; older state mixed contexts and is not migrated into this contract.
+- `SessionTreeItem` is memoized with a comparator over the props it actually
+  reads: the row list re-renders on every virtualizer frame while scrolling and
+  on every model rebuild, spreading a shared props bag and a fresh
+  `renderExtras` object onto each row, so identity comparison would never
+  match. Sessions and secondary metadata compare by value; a scroll therefore
+  renders only rows entering the viewport, and a model rebuild only rows whose
+  session changed.
 - The sidebar model flattens parent/child sessions into occurrence-keyed rows.
   `SessionTreeItem` renders one row with `renderChildren={false}`; it must never
   recursively mount descendants in the shared scroller. One preorder ID pool

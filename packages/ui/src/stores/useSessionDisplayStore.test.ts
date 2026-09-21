@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { migrateSessionDisplayState, useSessionDisplayStore } from './useSessionDisplayStore';
+import { defaultSidebarViewMode, migrateSessionDisplayState, useSessionDisplayStore } from './useSessionDisplayStore';
 
 describe('useSessionDisplayStore project sorting', () => {
   test('defaults to manual ordering', () => {
@@ -39,19 +39,43 @@ describe('useSessionDisplayStore project display', () => {
     expect(useSessionDisplayStore.getState().singleProjectId).toBeNull();
   });
 
-  test('stores the single-project mode independently from session grouping', () => {
+  test('stores the single-project mode independently from the view mode', () => {
     useSessionDisplayStore.getState().setProjectDisplayMode('single');
     useSessionDisplayStore.getState().setSingleProjectId('project-alpha');
-    useSessionDisplayStore.getState().setSessionGroupingMode('flat');
+    useSessionDisplayStore.getState().setSidebarViewMode('timeline');
 
     expect(useSessionDisplayStore.getState().projectDisplayMode).toBe('single');
     expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
-    expect(useSessionDisplayStore.getState().sessionGroupingMode).toBe('flat');
+    expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('timeline');
 
     useSessionDisplayStore.setState({
       projectDisplayMode: 'all',
       singleProjectId: null,
-      sessionGroupingMode: 'by-worktree',
+      sidebarViewMode: 'projects',
     });
+  });
+});
+
+describe('useSessionDisplayStore view mode', () => {
+  test('defaults to the grouped projects view outside the phone surface', () => {
+    expect(defaultSidebarViewMode()).toBe('projects');
+  });
+
+  test('v7→v8 turns the recent section off', () => {
+    const migrated = migrateSessionDisplayState({ showRecentSection: true, projectSortOrder: 'a-z' }, 7);
+
+    expect(migrated.showRecentSection).toBe(false);
+    expect(migrated.projectSortOrder).toBe('a-z');
+  });
+
+  test('v5→v6 drops the removed grouping key and keeps the rest', () => {
+    const migrated = migrateSessionDisplayState(
+      { sessionGroupingMode: 'flat', projectSortOrder: 'a-z', showRecentSection: false },
+      5,
+    );
+
+    expect('sessionGroupingMode' in migrated).toBe(false);
+    expect(migrated.projectSortOrder).toBe('a-z');
+    expect(migrated.showRecentSection).toBe(false);
   });
 });

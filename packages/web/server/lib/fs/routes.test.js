@@ -572,8 +572,7 @@ describe('fs read', () => {
     expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
   });
 
-  it('rejects outside workspace reads without a grant', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('reads outside workspace files without a grant', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
       readFile: vi.fn(async () => 'secret'),
@@ -582,10 +581,9 @@ describe('fs read', () => {
 
     const res = await callRead(handler, { path: '/etc/passwd', allowOutsideWorkspace: 'true' });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: 'Outside workspace file access requires a grant' });
-    expect(fsPromises.readFile).not.toHaveBeenCalled();
-    warn.mockRestore();
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('secret');
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/etc/passwd', 'utf8');
   });
 
   it('allows outside workspace reads with an exact-path grant', async () => {
@@ -611,7 +609,7 @@ describe('fs read', () => {
     expect(res.body).toBe('secret');
   });
 
-  it('rejects outside workspace grants for a different canonical path', async () => {
+  it('ignores legacy grants when reading another outside file', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
@@ -630,33 +628,56 @@ describe('fs read', () => {
       outsideFileGrant: grant.outsideFileGrant,
     });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: 'Outside workspace file grant does not match requested path' });
-    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('secret');
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/b.txt', 'utf8');
   });
 
-  it('sets no-referrer on raw responses served through outside file grants', async () => {
+  it('reads outside raw files without a grant and sets no-referrer', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
       readFile: vi.fn(async () => Buffer.from('secret')),
     };
-    const grant = await mintOutsideFileGrant('/outside/image.png', {
-      scopes: ['raw'],
-      fsPromises,
-      path: path.posix,
-      crypto: { randomUUID: () => 'grant-raw' },
-    });
     const handler = registerRaw(fsPromises);
 
     const res = await callRaw(handler, {
       path: '/outside/image.png',
       allowOutsideWorkspace: 'true',
-      outsideFileGrant: grant.outsideFileGrant,
     });
 
     expect(res.statusCode).toBe(200);
     expect(res.getHeader('referrer-policy')).toBe('no-referrer');
+  });
+
+  it('stats outside files without a grant', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      path: path.posix,
+      os: { homedir: () => '/home/user' },
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat: async () => ({ isFile: () => true, size: 100, mtimeMs: 123 }),
+      },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const res = await callRead(getRoute('GET', '/api/fs/stat'), { path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ path: '/tmp/plan.txt', isFile: true, size: 100, mtimeMs: 123 });
+  });
+
+  it.each([
+    ['ENOENT', 404, { error: 'File not found' }],
+    ['EACCES', 403, { error: 'Access to file denied', reason: 'os-permission' }],
+  ])('reports %s for outside files instead of requiring a grant', async (code, status, body) => {
+    const handler = registerRead({
+      realpath: async () => { throw Object.assign(new Error(code), { code }); },
+    });
+    const res = await callRead(handler, { path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' });
+    expect(res.statusCode).toBe(status);
+    expect(res.body).toEqual(body);
   });
 
   it('rejects outside workspace mkdir without a trusted directory grant', async () => {

@@ -105,6 +105,7 @@ export type SessionGroupSectionProps = {
   | 'startFolderRename'
   | 'setCopiedSessionId'
   | 'startSessionWorktreeMenuLoad'
+  | 'onEditProject'
 >;
 
 const CollapsedFolderActivity: React.FC<{

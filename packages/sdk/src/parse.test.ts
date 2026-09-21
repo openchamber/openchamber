@@ -980,19 +980,32 @@ describe('page-less extensions', () => {
     }))).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
-  test('a surface service needs no panel entry and refuses one', () => {
+  test('a surface service needs no panel entry; with one, panel.dock and panel.size place it', () => {
     const ok = withContributes({ service: { entry: 'service/main.js', runtime: 'host', surface: true } });
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.manifest.contributes.service?.surface).toBe(true);
 
-    const withPanel = parseManifest({
+    const withStrip = parseManifest({
       apiVersion: 1,
       contributes: {
-        panel: { ...pageless, entry: 'panel/index.html' },
+        panel: { ...pageless, entry: 'panel/index.html', dock: 'right', size: 240 },
         service: { entry: 'service/main.js', runtime: 'host', surface: true },
       },
     });
-    expect(withPanel).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withStrip.ok).toBe(true);
+    if (withStrip.ok) expect(withStrip.manifest.contributes.panel).toMatchObject({ dock: 'right', size: 240 });
+
+    expect(parseManifest({
+      apiVersion: 1,
+      contributes: { panel: { ...pageless, entry: 'panel/index.html', dock: 'bottom' } },
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    expect(parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: { ...pageless, entry: 'panel/index.html', size: 8 },
+        service: { entry: 'service/main.js', runtime: 'host', surface: true },
+      },
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
 
     expect(parseManifestJson(JSON.stringify({
       apiVersion: 1,

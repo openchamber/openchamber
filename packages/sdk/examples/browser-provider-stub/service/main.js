@@ -56,6 +56,14 @@ var BROWSER_CONTROL_ACTIONS = [
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
 var isBrowserControlAction = (value) => CONTROL_ACTIONS.has(value);
+var readContext = (wire) => {
+  const directory = wire?.directory;
+  const sessionId = wire?.sessionId;
+  return {
+    directory: String(directory) === directory && directory.length > 0 ? directory : null,
+    sessionId: String(sessionId) === sessionId && sessionId.length > 0 ? sessionId : null
+  };
+};
 var readBrowserProviderRequest = (body) => {
   let wire;
   try {
@@ -66,14 +74,14 @@ var readBrowserProviderRequest = (body) => {
   } catch {
     return null;
   }
-  const { requestId, action, parameters } = wire;
+  const { requestId, action, parameters, context } = wire;
   if (String(requestId) !== requestId || requestId.length === 0)
     return null;
   if (String(action) !== action || !isBrowserControlAction(action))
     return null;
   if (Object(parameters) !== parameters)
     return null;
-  return { requestId, action, parameters };
+  return { requestId, action, parameters, context: readContext(context) };
 };
 // packages/sdk/src/service-surface.ts
 var SURFACE_FRAME_PATH = "/surface/frame";
@@ -221,8 +229,10 @@ var navigate = (url) => {
   page.title = `Stub page for ${new URL(url).host}`;
   page.scrollY = 0;
 };
+var lastCaller = { directory: null, sessionId: null };
 var handle = (request) => {
   markAgentActive();
+  lastCaller = request.context;
   switch (request.action) {
     case "browser.open":
       navigate(request.parameters.url);
@@ -524,6 +534,28 @@ http.createServer((req, res) => {
     handleSurface(req, res, url).then((handled) => {
       if (!handled)
         json(res, 404, { ok: false, error: "not-found" });
+    });
+    return;
+  }
+  if (url.pathname === "/state" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller }));
+    return;
+  }
+  if (url.pathname === "/navigate" && req.method === "POST") {
+    readBody(req).then((body) => {
+      let target = "";
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && String(parsed.url) === parsed.url)
+          target = parsed.url;
+      } catch {}
+      if (!target) {
+        json(res, 400, { ok: false, error: "url is required" });
+        return;
+      }
+      navigate(target);
+      json(res, 200, { ok: true });
     });
     return;
   }

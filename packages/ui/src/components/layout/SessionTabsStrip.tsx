@@ -204,7 +204,7 @@ const SessionTabItem: React.FC<{
                       <span
                         className={cn(
                           'ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-                          isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+                          isStreaming ? 'bg-[var(--status-info)]' : 'bg-[var(--status-success)]',
                           !suppressControls && 'group-hover/session-tab:opacity-0',
                           overlayVisible && 'opacity-0',
                         )}

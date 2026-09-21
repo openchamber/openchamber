@@ -89,7 +89,7 @@ Parse rules:
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
 - `service.runtime` phase 1 accepts only `"host"`.
 - `service.provides` is optional: roles the service stands in for on the host. Only `"browser"` exists today (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself.
-- `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). It excludes `panel.entry`; the surface is the panel.
+- `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). With `panel.entry` too, that page is docked to one edge of the picture (`panel.dock`: `top`, `bottom`, `left`, or `right`, default `top`; `panel.size` in CSS px across that edge, 24 to 480, default 40); without it, the picture is the whole panel.
 - `service.permissions.sockets` and `service.permissions.exec` are shown to the user in the approval dialog. They describe intent and do not confine the process: a service runs with the user's full access. Declaring `contributes.service` adds the `service` capability to the package's request list; the user approves the whole list once when the package is installed (Settings → Extensions), and the first `serviceRequest` is refused with `NO_SERVICE` until then.
 - The catalog adds `service.socketBindings`: `{ id, candidates, resolved, override }` for this host. The user can override a path in Extensions. Override empty clears it and the next spawn re-resolves.
 - `contributes.integration` remains valid next to `service`. Cloud `request` and `serviceRequest` may both exist on one guest.
@@ -181,10 +181,19 @@ Lifecycle differs from a panel-driven service in two ways. The host starts the s
 `POST /browser-control` on the service loopback, same bearer as every request, JSON body:
 
 ```json
-{ "requestId": "browser-…", "action": "browser.click", "parameters": { "selector": "#save" } }
+{
+  "requestId": "browser-…",
+  "action": "browser.click",
+  "parameters": { "selector": "#save" },
+  "context": { "directory": "/Users/me/app", "sessionId": "ses_…" }
+}
 ```
 
-`readBrowserProviderRequest(body)` from `@openchamber/sdk` parses it (`null` → answer HTTP 400). The host validated `parameters` for the action before posting, so the service can trust the shape. Answer HTTP 200 with one of:
+`readBrowserProviderRequest(body)` from `@openchamber/sdk` parses it (`null` → answer HTTP 400). The host validated `parameters` for the action before posting, so the service can trust the shape.
+
+`context` says where the action came from: the project the agent works in and the chat it runs in. The host fills it from the tool call; the model never types it. A provider that keeps one browser per project or chat keys its targets on these; one that keeps a single browser ignores them. Either field is `null` when the host had none (an action sent from the CLI, for example); treat that as "unknown", not as a scope of its own. The shared surface is still one per service: if you keep several targets, choose which one the picture shows.
+
+Answer HTTP 200 with one of:
 
 ```json
 { "ok": true, "data": { … } }
@@ -233,4 +242,8 @@ Plain HTTP on the service loopback, same bearer as everything else:
 
 Input, control notices, resizes, and clipboard reads reach the service one at a time, in the order the viewer sent them, so a batch never overtakes the one before it. Copy and paste: the host sends `Ctrl/Cmd+C` as a `key` event and then, behind it, reads `/surface/clipboard`; it never sends the paste chord, it sends a `text` event with the pasted text instead. Every other key reaches you as pressed, including the host's own shortcuts, which stand down while the surface has focus.
 
-The types and paths are exported from `@openchamber/sdk` (`SURFACE_*`, `SurfaceInputEvent`, …). `examples/browser-provider-stub` also declares `surface: true` and paints its fake page with rectangles, so the viewer, the hand-off, and the input path can be seen working without a browser.
+### Your own controls beside the picture
+
+Declare `panel.entry` as well and the host docks that page to one edge of the surface: `panel.dock` picks the edge (`top` by default; `bottom` for an inspector, `left` or `right` for a tool column) and `panel.size` its thickness in CSS pixels across that edge (default 40). It is an ordinary sandboxed panel page: it talks to your service through `host.serviceRequest`, gets the theme and the current session like any panel, and stays mounted while the tab is hidden. Put an address field, tabs, a device picker, or a console toggle there; the picture, the input, and who is in control stay with the host. The page and the surface are independent: the page does not see frames, and the host does not route input through it.
+
+The types and paths are exported from `@openchamber/sdk` (`SURFACE_*`, `SurfaceInputEvent`, …). `examples/browser-provider-stub` also declares `surface: true` and paints its fake page with rectangles, so the viewer, the hand-off, and the input path can be seen working without a browser; its `panel/` is a one-line address bar docked above the picture.

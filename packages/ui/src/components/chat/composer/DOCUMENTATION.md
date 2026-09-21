@@ -360,8 +360,7 @@ none of them is verifiable outside a real device.** Change them only against
 hardware.
 
 `state/mobileComposerMorph.ts` plays the pill ↔ composer swap as a FLIP morph
-in the native iOS shell only, after t3code's resting-composer transition.
-The swap commits synchronously (`flushSync`); the glass box
+in the native iOS shell only. The swap commits synchronously (`flushSync`); the glass box
 (`data-composer-box`) is then frozen at its old height and animated to the
 new one (WAAPI) with its rows anchored to the bottom edge, so the footer and
 model/agent rows stay where the pill's rows were; the prompt

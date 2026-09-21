@@ -23,6 +23,12 @@ Background polling never supersedes an in-flight directory read. Explicit
 refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.
 
+Opening a file outside the workspace reads it directly through the active
+runtime, in both editor-only and full Files modes. Chat navigation and file
+loading do not request native file grants. Server-backed text reads and metadata
+requests have a 30-second deadline, including response-body reads, so a stalled
+request reaches the existing error handler instead of leaving loading pending.
+
 Sidebar root/runtime changes remount the scoped tree. Its bounded module cache
 provides continuity between mounts; request cancellation for collapsed paths
 stops queued batches, while already-started reads may populate the same-scope

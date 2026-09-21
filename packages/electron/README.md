@@ -10,13 +10,34 @@ Desktop starts the OpenChamber web server in the same Electron main process. The
 
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
-The foreground window loads its HTML splash before resolving the backend.
-Login-shell environment discovery runs asynchronously so the splash can paint
-while shell startup files run. Startup callers share one probe and await its
-result before reading shell-provided server flags or importing the backend.
-The probe tries interactive login, then login-only on failure, with a five-second
-timeout per attempt. Failure preserves the inherited process environment.
-Confirmed quit cancels an in-flight probe and waits for its process to exit.
+Electron loads `entry.mjs`, not `main.mjs`. Electron holds `ready` until the
+entry module's import graph has evaluated, and importing the server module
+graph blocks the main thread for a few hundred milliseconds, so the entry
+stays small: the configuration that must precede `ready`, the single-instance
+lock, and the first window. On `ready` it creates the main window on the HTML
+splash through `early-startup.mjs`, waits (bounded) until the splash is on
+screen, and only then imports `main.mjs`, which adopts that window through
+`takeEarlyWindow()` and attaches its listeners. With packaged UI the splash is
+served as `openchamber-ui://app/__splash` by the same scheme handler as the
+application, so the navigation to the application stays on one origin and
+Chromium keeps the splash frame until the application has painted; a splash on
+a `data:` URL is another origin and the process swap shows an empty frame. Deep links and second launches
+that arrive before `main.mjs` is loaded are buffered by the entry and replayed
+once startup has resolved. The frame colour, window state, splash markup and
+window options live in `early-startup.mjs` so the early window and any later
+main window are built from one definition; both bundles import that module at
+runtime rather than inlining it, or the handoff would see two copies.
+
+Login-shell environment discovery starts as soon as `main.mjs` runs and
+proceeds asynchronously, so shell startup files run while the window comes up.
+Startup callers share one probe and await its result before reading
+shell-provided server flags or importing the backend. The probe tries
+interactive login, then login-only on failure, with a five-second timeout per
+attempt. Failure preserves the inherited process environment. Confirmed quit
+cancels an in-flight probe and waits for its process to exit.
+
+`bun run profile:startup` measures a packaged build's launch in an isolated
+profile; see `scripts/perf/DOCUMENTATION.md`.
 
 Quit, relaunch, and update installation await the in-process server's `stop()`
 before exiting Electron. This lets the backend release its terminals, managed
@@ -41,6 +62,8 @@ The preload bridge exposes desktop-only APIs to the web UI through `window.__OPE
 
 | File | Purpose |
 |------|---------|
+| `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
+| `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
@@ -52,7 +75,7 @@ The preload bridge exposes desktop-only APIs to the web UI through `window.__OPE
 | `scripts/ensure-electron.mjs` | Verifies the installed Electron binary is complete and repairs it via the postinstall under Bun |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
 | `scripts/prepare-opencode-cli.mjs` | Downloads and stages the pinned OpenCode CLI into `resources/opencode-cli` |
-| `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
+| `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/{entry,main,early-startup}.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
 | `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
@@ -89,7 +112,7 @@ bun install
 bun run electron:dev
 ```
 
-`bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/main.mjs`. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
+`bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/entry.mjs`. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
@@ -111,6 +134,8 @@ bun run lint:electron
 
 `electron:dev:bundled` builds and uses packaged web assets instead of the HMR server. Use it when testing behavior closer to a packaged app.
 
+Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the one `prepare:opencode-cli` stages and packaged builds ship), not the `opencode` on PATH. `electron-dev.mjs` passes the directory to the backend as `OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR`; when the binary is missing it warns and falls back to PATH.
+
 ## Packaging
 
 Built-in SDK extensions are built by the web build into `@openchamber/web/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. This keeps both iframe assets and future Node service entries usable. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
@@ -125,7 +150,7 @@ That runs, in order:
 
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
-3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
+3. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
 4. `rebuild:native` to rebuild native modules for Electron.
 5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
 
@@ -191,6 +216,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 | `OPENCHAMBER_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
 | `OPENCHAMBER_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
 | `OPENCHAMBER_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
+| `OPENCHAMBER_DESKTOP_USER_DATA_DIR` | Test hook used by `profile:startup`: moves the Electron profile (single-instance lock, Chromium caches) so a measured launch does not share it with the installed app |
 | `OPENCODE_HOST` / `OPENCODE_PORT` / `OPENCODE_SKIP_START` | Connect Desktop to an external OpenCode server instead of starting one locally |
 
 ## Native Features Owned Here
@@ -248,7 +274,8 @@ Development builds use a separate user data directory named `OpenChamber Dev`, s
 
 - Keep desktop-specific code in this package. Do not move OpenCode feature backend logic into Electron.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
-- Keep `@openchamber/web`, `bun-pty`, `node-pty`, and native modules external in `bundle-main.mjs`; bundling them can break Electron startup.
+- Keep `@openchamber/web`, `bun-pty`, `node-pty`, and native modules external in `bundle-main.mjs`; bundling them can break Electron startup. Keep `early-startup.mjs` external too: the entry and main bundles must share its one instance.
+- Keep `entry.mjs` small. Anything imported there delays Electron's `ready`; everything else belongs behind the `main.mjs` import.
 - Rebuild native modules after dependency or Electron version changes.
 - Test both HMR dev mode and bundled UI mode when changing startup, preload, routing, or packaged asset behavior.
 

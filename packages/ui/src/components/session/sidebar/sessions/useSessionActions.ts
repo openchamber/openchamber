@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
+import { describeSessionActionError } from './sessionActionError';
 
 export type DeleteSessionSource = {
   archivedBucket?: boolean;
@@ -123,12 +124,22 @@ export const useSessionActions = (args: Args) => {
     if (!editingId) return;
     const trimmed = (titleOverride ?? editTitleRef.current).trim();
     if (trimmed) {
-      await updateSessionTitle(editingSessionId, trimmed);
+      try {
+        await updateSessionTitle(editingSessionId, trimmed);
+      } catch (error) {
+        // The form closes either way: a rename that silently stays open
+        // reads as "Enter does nothing". The toast says what OpenCode
+        // answered, with its log ref, so the failure can be looked up.
+        console.error('[session-actions] rename failed', error);
+        toast.error(t('sessions.sidebar.session.rename.error', {
+          detail: describeSessionActionError(error instanceof Error ? error : new Error(String(error)), t),
+        }));
+      }
     }
     setEditingId(null);
     setEditingRowKey(null);
     setEditTitle('');
-  }, [editingSessionId, setEditTitle, setEditingId, setEditingRowKey, updateSessionTitle]);
+  }, [editingSessionId, setEditTitle, setEditingId, setEditingRowKey, t, updateSessionTitle]);
 
   const handleCancelEdit = React.useCallback(() => {
     setEditingId(null);

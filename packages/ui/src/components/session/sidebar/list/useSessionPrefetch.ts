@@ -8,9 +8,10 @@ const SESSION_PREFETCH_HOVER_DELAY_MS = 180;
 const SESSION_PREFETCH_SETTLE_MS = 150;
 const SESSION_PREFETCH_CONCURRENCY = 2;
 const SESSION_PREFETCH_PENDING_LIMIT = 8;
-// Nearest first: the rows right next to the open session are the likeliest
+// Only the rows right next to the open session: each speculative load costs
+// a history request and a cache slot, and a second neighbor is rarely the
 // next click.
-const NEIGHBOR_PREFETCH_OFFSETS = [-1, 1, -2, 2];
+const NEIGHBOR_PREFETCH_OFFSETS = [-1, 1];
 
 type Args = {
   enabled?: boolean;

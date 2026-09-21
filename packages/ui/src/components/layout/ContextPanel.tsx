@@ -52,9 +52,19 @@ import {
   type EmbeddedSessionRuntimeBootstrap,
 } from './contextPanelEmbeddedChat';
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
+// How an extension page sits beside its shared surface: flex direction puts
+// the page first on top/left and last on bottom/right; the page's size is
+// fixed across the docked edge and the picture takes the rest.
+const DOCK_LAYOUT = {
+  top: { container: 'flex-col', page: 'border-b border-border', vertical: true },
+  bottom: { container: 'flex-col-reverse', page: 'border-t border-border', vertical: true },
+  left: { container: 'flex-row', page: 'border-r border-border', vertical: false },
+  right: { container: 'flex-row-reverse', page: 'border-l border-border', vertical: false },
+} as const;
+
 const GuestSurfacePane = React.lazy(() => import('./GuestSurfacePane').then((module) => ({ default: module.GuestSurfacePane })));
 import { useGuestsStore } from '@/lib/guests/store';
-import { guestHasSharedSurface } from '@/lib/guests/surfaces';
+import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } from '@/lib/guests/surfaces';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
@@ -1059,6 +1069,15 @@ export const ContextPanel: React.FC = () => {
     () => new Set(guests.filter(guestHasSharedSurface).map((guest) => guest.id)),
     [guests],
   );
+  // Surface extensions that also ship a page: it is docked to one edge of the picture.
+  const surfaceDockings = React.useMemo(() => {
+    const dockings = new Map<string, GuestSurfaceDocking>();
+    for (const guest of guests) {
+      const docking = guestSurfaceDocking(guest);
+      if (docking) dockings.set(guest.id, docking);
+    }
+    return dockings;
+  }, [guests]);
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
     [tabs],
@@ -1393,19 +1412,40 @@ export const ContextPanel: React.FC = () => {
         ) : null}
         {pluginTabs.map((tab) => {
           if (!isPluginContextPanelMode(tab.mode)) return null;
-          // A shared-surface extension has no iframe: the host draws its
-          // service's picture. Mounted only while shown, so an unwatched
-          // surface holds no socket and its service can idle out.
-          const sharedSurface = surfaceGuestIds.has(pluginIdFromMode(tab.mode));
+          // A shared-surface extension's picture is drawn by the host and
+          // mounted only while shown, so an unwatched surface holds no socket
+          // and its service can idle out. Its own page, when it has one, is
+          // docked to one edge of the picture and stays mounted like any
+          // panel iframe.
+          const guestId = pluginIdFromMode(tab.mode);
+          const sharedSurface = surfaceGuestIds.has(guestId);
+          const docking = surfaceDockings.get(guestId);
           const shown = activeTab?.id === tab.id;
-          if (sharedSurface && !(shown && isOpen)) return null;
+          const surfaceMounted = shown && isOpen;
+          if (sharedSurface && !docking && !surfaceMounted) return null;
           return (
             <div
               key={tab.id}
               className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
             >
               <React.Suspense fallback={null}>
-                {sharedSurface ? <GuestSurfacePane mode={tab.mode} /> : <PluginPane mode={tab.mode} />}
+                {!sharedSurface ? (
+                  <PluginPane mode={tab.mode} />
+                ) : !docking ? (
+                  <GuestSurfacePane mode={tab.mode} />
+                ) : (
+                  <div className={cn('flex h-full', DOCK_LAYOUT[docking.dock].container)}>
+                    <div
+                      className={cn('shrink-0', DOCK_LAYOUT[docking.dock].page)}
+                      style={DOCK_LAYOUT[docking.dock].vertical ? { height: docking.size } : { width: docking.size }}
+                    >
+                      <PluginPane mode={tab.mode} />
+                    </div>
+                    <div className="min-h-0 min-w-0 flex-1">
+                      {surfaceMounted ? <GuestSurfacePane mode={tab.mode} /> : null}
+                    </div>
+                  </div>
+                )}
               </React.Suspense>
             </div>
           );

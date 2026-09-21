@@ -122,7 +122,7 @@ export const MAX_DIR_STORES = 30
  */
 export const EVICTION_GRACE_MS = 30 * 1000
 export const DIR_IDLE_TTL_MS = 20 * 60 * 1000
-export const SESSION_CACHE_LIMIT = 40
+export const SESSION_CACHE_LIMIT = 20
 
 export const INITIAL_STATE: State = {
   project: "",

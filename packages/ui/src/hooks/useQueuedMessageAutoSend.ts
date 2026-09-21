@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { getMessageQueueKey, parseMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -221,11 +222,27 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const queuedSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const key of Object.keys(queuedMessages)) {
+      const target = parseMessageQueueKey(key);
+      if (target && target.runtimeKey === getRuntimeKey() && target.directory === currentDirectory) ids.add(target.sessionId);
+    }
+    return [...ids].sort();
+  }, [currentDirectory, queuedMessages]);
   // Message completion clears the in-flight fallback in
   // resolveQueuedSessionStatusType; subscribe so the queue drains the moment
   // the trailing assistant message completes even if status events were missed.
-  const sessionMessages = useDirectorySync((state) => state.message);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  // Only the trailing message of a queued session matters: selecting the whole
+  // message map would rerun this effect on every transcript change anywhere.
+  const trailingMessageSignature = useDirectorySync(useShallow((state) => queuedSessionIds.map((sessionId) => {
+    const messages = state.message[sessionId];
+    const last = messages?.[messages.length - 1];
+    if (!last) return '';
+    const completed = last.role !== 'assistant' || last.time.completed !== undefined;
+    return `${last.id}:${completed}`;
+  })));
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
@@ -362,5 +379,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, sessionMessages, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
+  }, [enabled, queuedMessages, sessionStatusRecord, trailingMessageSignature, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
 }

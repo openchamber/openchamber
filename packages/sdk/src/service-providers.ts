@@ -49,18 +49,31 @@ export type BrowserInspectParameters = { selector: string };
 export type BrowserCaptureParameters = { label?: string };
 export type BrowserResizeParameters = { viewport: BrowserViewportMode };
 
+/**
+ * Where an action came from: the project the agent works in and the chat it
+ * runs in. Filled by the host from the tool call, never typed by the model.
+ * A provider that keeps one browser per project or chat keys on these; one
+ * that keeps a single browser ignores them. Either is `null` when the host
+ * had none (a call from the CLI, for example): treat that as "unknown", not
+ * as a scope of its own.
+ */
+export type BrowserProviderContext = { directory: string | null; sessionId: string | null };
+
+type ProviderRequestEnvelope = { requestId: string; context: BrowserProviderContext };
+
 /** One action, as the host posts it. Parameters were validated by the host. */
-export type BrowserProviderRequest =
-  | { requestId: string; action: 'browser.open'; parameters: BrowserOpenParameters }
-  | { requestId: string; action: 'browser.snapshot'; parameters: BrowserSnapshotParameters }
-  | { requestId: string; action: 'browser.click'; parameters: BrowserClickParameters }
-  | { requestId: string; action: 'browser.type'; parameters: BrowserTypeParameters }
-  | { requestId: string; action: 'browser.scroll'; parameters: BrowserScrollParameters }
-  | { requestId: string; action: 'browser.back'; parameters: Record<never, never> }
-  | { requestId: string; action: 'browser.forward'; parameters: Record<never, never> }
-  | { requestId: string; action: 'browser.inspect'; parameters: BrowserInspectParameters }
-  | { requestId: string; action: 'browser.capture'; parameters: BrowserCaptureParameters }
-  | { requestId: string; action: 'browser.resize'; parameters: BrowserResizeParameters };
+export type BrowserProviderRequest = ProviderRequestEnvelope & (
+  | { action: 'browser.open'; parameters: BrowserOpenParameters }
+  | { action: 'browser.snapshot'; parameters: BrowserSnapshotParameters }
+  | { action: 'browser.click'; parameters: BrowserClickParameters }
+  | { action: 'browser.type'; parameters: BrowserTypeParameters }
+  | { action: 'browser.scroll'; parameters: BrowserScrollParameters }
+  | { action: 'browser.back'; parameters: Record<never, never> }
+  | { action: 'browser.forward'; parameters: Record<never, never> }
+  | { action: 'browser.inspect'; parameters: BrowserInspectParameters }
+  | { action: 'browser.capture'; parameters: BrowserCaptureParameters }
+  | { action: 'browser.resize'; parameters: BrowserResizeParameters }
+);
 
 export type BrowserViewportSummary = {
   mode: BrowserViewportMode | 'custom';
@@ -169,7 +182,18 @@ const CONTROL_ACTIONS: ReadonlySet<string> = new Set(BROWSER_CONTROL_ACTIONS);
 
 export const isBrowserControlAction = (value: string): value is BrowserControlAction => CONTROL_ACTIONS.has(value);
 
-type WireRequest = { requestId?: unknown; action?: unknown; parameters?: unknown };
+type WireContext = { directory?: unknown; sessionId?: unknown };
+type WireRequest = { requestId?: unknown; action?: unknown; parameters?: unknown; context?: WireContext };
+
+/** Hosts before the context field posted none; that reads as an unknown scope. */
+const readContext = (wire: WireContext | undefined): BrowserProviderContext => {
+  const directory = wire?.directory;
+  const sessionId = wire?.sessionId;
+  return {
+    directory: String(directory) === directory && directory.length > 0 ? directory : null,
+    sessionId: String(sessionId) === sessionId && sessionId.length > 0 ? sessionId : null,
+  };
+};
 
 /**
  * A provider's read of the body the host posted to `BROWSER_PROVIDER_PATH`.
@@ -187,11 +211,11 @@ export const readBrowserProviderRequest = (body: string): BrowserProviderRequest
   } catch {
     return null;
   }
-  const { requestId, action, parameters } = wire;
+  const { requestId, action, parameters, context } = wire;
   if (String(requestId) !== requestId || requestId.length === 0) return null;
   if (String(action) !== action || !isBrowserControlAction(action)) return null;
   if (Object(parameters) !== parameters) return null;
   // SAFETY: requestId, action, and the parameters object were checked above,
   // and the host validated the parameters for this action before posting.
-  return { requestId, action, parameters } as BrowserProviderRequest;
+  return { requestId, action, parameters, context: readContext(context) } as BrowserProviderRequest;
 };

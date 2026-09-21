@@ -6,7 +6,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { copyTextToClipboard as copyPlainTextToClipboard } from '@/lib/clipboard';
-import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory } from '@/sync/sync-refs';
+import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory, getDirectoryState } from '@/sync/sync-refs';
 import {
   describeSessionDirectorySources,
   resolveSessionDirectoryFromSources,
@@ -168,6 +168,12 @@ export const debugUtils = {
         return truncatedPart;
       }),
     }));
+  },
+
+  /** Cached message count per session in the current directory store; -1 when not cached. */
+  getCachedMessageCount(sessionId: string, directory?: string) {
+    const state = getDirectoryState(directory);
+    return state?.message[sessionId]?.length ?? -1;
   },
 
   getAllMessages(truncate: boolean = false) {

@@ -9,7 +9,10 @@
       "panel": {
         "id": "browser-provider-stub",
         "name": "Browser Provider Stub",
-        "icon": "window"
+        "icon": "window",
+        "entry": "panel/index.html",
+        "dock": "top",
+        "size": 40
       },
       "service": {
         "entry": "service/main.js",

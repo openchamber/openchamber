@@ -16,9 +16,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
-import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import {
   getCachedMarkdownBlocks,
@@ -450,10 +449,8 @@ const useFileReferenceInteractions = ({
 
         linkedCount += 1;
 
-        const canGrantOutsideFile = isDesktopShell()
-          && isDesktopLocalOriginActive()
-          && !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
-        const existsPromise = canGrantOutsideFile
+        const outsideWorkspace = !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
+        const existsPromise = outsideWorkspace
           ? Promise.resolve(true)
           : fileReferenceExists(resolved.resolvedPath, effectiveDirectory);
 
@@ -499,10 +496,6 @@ const useFileReferenceInteractions = ({
             : undefined,
         );
         return;
-      }
-
-      if (!isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory)) {
-        await ensureOutsideFileGrantForDesktop(resolved.resolvedPath, effectiveDirectory);
       }
 
       const uiStore = useUIStore.getState();

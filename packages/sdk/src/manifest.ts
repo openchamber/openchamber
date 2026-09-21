@@ -12,7 +12,25 @@ export type PanelContribution = {
   name: string;
   icon: string;
   entry?: string;
+  /**
+   * Beside a shared surface (`service.surface`), the panel page is docked to
+   * one edge of the host-drawn picture: a toolbar above it, an inspector
+   * below, a tool column beside it. `dock` is the edge (default
+   * `GUEST_SURFACE_DOCK_DEFAULT`) and `size` the page's thickness in CSS
+   * pixels across that edge (default `GUEST_SURFACE_DOCK_SIZE_DEFAULT`).
+   * Both only make sense with `entry` and `service.surface` together.
+   */
+  dock?: GuestSurfaceDock;
+  size?: number;
 };
+
+export const GUEST_SURFACE_DOCKS = ['top', 'bottom', 'left', 'right'] as const;
+export type GuestSurfaceDock = (typeof GUEST_SURFACE_DOCKS)[number];
+export const GUEST_SURFACE_DOCK_DEFAULT: GuestSurfaceDock = 'top';
+/** Thickness in CSS px of a docked `panel.entry` when the manifest names none. */
+export const GUEST_SURFACE_DOCK_SIZE_DEFAULT = 40;
+export const GUEST_SURFACE_DOCK_SIZE_MIN = 24;
+export const GUEST_SURFACE_DOCK_SIZE_MAX = 480;
 
 /** Sandboxed HTML loaded on demand for background actions and slash commands. */
 export type BackgroundContribution = {
@@ -290,8 +308,9 @@ export type ServiceContribution = {
   provides?: GuestServiceProvides[];
   /**
    * The service shows a live surface (frames out, input in) that the host
-   * draws in this extension's rail panel; see `service-surface.ts`. Excludes
-   * `panel.entry`: the panel is the surface.
+   * draws in this extension's rail panel; see `service-surface.ts`. With
+   * `panel.entry` too, that page is docked to one edge of the picture (see
+   * `PanelContribution.dock`); without it, the panel is the surface alone.
    */
   surface?: true;
 };

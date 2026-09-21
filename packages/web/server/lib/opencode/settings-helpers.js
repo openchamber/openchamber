@@ -64,7 +64,7 @@ export const createSettingsHelpers = (dependencies) => {
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
-  const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
+  const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
@@ -297,8 +297,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
       result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
     }
-    if (SIDEBAR_SESSION_GROUPING_MODE_VALUES.has(candidate.sidebarSessionGroupingMode)) {
-      result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+    if (SIDEBAR_VIEW_MODE_VALUES.has(candidate.sidebarViewMode)) {
+      result.sidebarViewMode = candidate.sidebarViewMode;
     }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
