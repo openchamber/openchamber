@@ -313,6 +313,25 @@ export const buildSessionWorktreeMenuTargets = (args: {
   return [...primaryTargets, ...linkedTargets];
 };
 
+// A restored session can keep a source directory whose worktree was deleted:
+// that path no longer matches any known worktree or configured project root,
+// so directory-based resolution fails. The session's worktree metadata still
+// records the owning project root in projectDirectory, so fall back to it
+// before giving up. Without an owner the menu cannot list sibling worktrees.
+export const resolveSessionWorktreeMenuProject = (
+  args: StartSessionWorktreeMenuLoadArgs,
+  deps: Pick<WorktreeTopologyRefreshDependencies, 'projects' | 'resolveProject'>,
+): ProjectRef | null => {
+  const projectById = args.projectId
+    ? deps.projects.find((candidate) => candidate.id === args.projectId) ?? null
+    : null;
+  if (projectById) return projectById;
+  const projectBySourceDirectory = args.sourceDirectory ? deps.resolveProject(args.sourceDirectory) : null;
+  if (projectBySourceDirectory) return projectBySourceDirectory;
+  const worktreeProjectDirectory = args.currentWorktree?.projectDirectory ?? null;
+  return worktreeProjectDirectory ? deps.resolveProject(worktreeProjectDirectory) : null;
+};
+
 export const startSessionWorktreeMenuLoad = (
   args: StartSessionWorktreeMenuLoadArgs,
   deps: StartSessionWorktreeMenuLoadDependencies,
@@ -324,10 +343,7 @@ export const startSessionWorktreeMenuLoad = (
     publishedWorktreesByProject,
     runtimeKey,
   });
-  const projectById = args.projectId
-    ? deps.projects.find((candidate) => candidate.id === args.projectId) ?? null
-    : null;
-  const project = projectById ?? (args.sourceDirectory ? deps.resolveProject(args.sourceDirectory) : null);
+  const project = resolveSessionWorktreeMenuProject(args, deps);
   const normalizedProjectPath = normalizePath(project?.path ?? null);
   const cachedTargets = buildSessionWorktreeMenuTargets({
     projectPath: normalizedProjectPath,

@@ -62,10 +62,14 @@ const isKnownActiveSessionDirectory = (
   knownDirectories: Set<string>,
   isVSCode: boolean,
 ): boolean => {
+  // The full app's global cache is authoritative for active-session retention.
+  // A deleted worktree is not a deletion event, so its record must reach the
+  // ownership resolver even when no current topology directory matches it.
+  if (!isVSCode) return true;
   if (session.time?.archived) return true;
   const directory = normalizePath(resolveGlobalSessionDirectory(session))?.toLowerCase();
-  if (!directory) return !isVSCode;
-  if (knownDirectories.size === 0) return !isVSCode;
+  if (!directory) return false;
+  if (knownDirectories.size === 0) return false;
   return knownDirectories.has(directory);
 };
 

@@ -12,6 +12,7 @@ import { ProjectSessionSelectionEffect } from '../projects/useProjectSessionSele
 import type { WorktreeMetadata } from '@/types/worktree';
 import { buildActiveSessionNode, useRecentSessionCollection, useSessionProjectCollection } from './sessionCollection';
 import { useChildStoreManager } from '@/sync/sync-context';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
 import { useProjectSessionLists } from '../projects/useProjectSessionLists';
 import { useSessionSidebarSections } from '../projects/useSessionSidebarSections';
@@ -137,6 +138,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const projectView = view.projectView;
   const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject } = projectViewActions;
   const collection = useSessionProjectCollection({ knownDirectories: topology.knownDirectories, isVSCode: topology.isVSCode, isVisible: true });
+  const authoritativeProjects = useGlobalSyncStore((state) => state.projects);
+  const ownership = React.useMemo(
+    () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions, authoritativeProjects),
+    [authoritativeProjects, collection.archivedSessions, collection.sessions, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
+  );
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
   const [collapsedActivityKeys, setCollapsedActivityKeys] = React.useState<Set<string>>(new Set());
   const [visibleActivityCountByKey, setVisibleActivityCountByKey] = React.useState<Map<string, number>>(new Map());
@@ -193,11 +199,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     sessionOrderRanks: collection.sessionOrderRanks,
     gitBranches: topology.gitBranches,
     isVSCode: topology.isVSCode,
+    sessionOwners: ownership.bySessionId,
   });
-  const ownership = React.useMemo(
-    () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions),
-    [collection.archivedSessions, collection.sessions, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
-  );
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({ ownership });
   // Built before the sections hook runs, because that hook owns the search data
   // for every group the sidebar renders — the chats group included. A group the
