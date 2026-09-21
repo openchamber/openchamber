@@ -1,8 +1,8 @@
 import React from 'react';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
-import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
@@ -63,10 +63,7 @@ const SwitcherRow: React.FC<{
       {isStreaming || showUnreadDot ? (
         <SessionActivityIndicator
           state={isStreaming ? 'running' : 'unread'}
-          label={isStreaming
-            ? t('sessions.sidebar.session.status.active')
-            : t('sessions.sidebar.session.status.unread')}
-          className="shrink-0"
+          label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
         />
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it

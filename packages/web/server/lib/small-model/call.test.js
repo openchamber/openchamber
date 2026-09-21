@@ -483,6 +483,38 @@ describe('callSmallModel — custom provider config', () => {
   });
 
   describe('catalog-based base URL (no config override)', () => {
+    it('identifies standalone OpenCode Go generations without an active session', async () => {
+      readConfig.mockReturnValue({});
+      const message = JSON.stringify({ subject: 'fix: handle missing session', highlights: [] });
+      fetchMock.mockResolvedValue(ok(message));
+      const request = {
+        auth: { 'opencode-go': { type: 'api', key: 'go-key' } },
+        catalog: {
+          'opencode-go': {
+            id: 'opencode-go',
+            api: 'https://opencode.ai/zen/go/v1',
+            models: { utility: { id: 'utility' } },
+          },
+        },
+        workingDirectory: '/proj',
+        providerID: 'opencode-go',
+        modelID: 'utility',
+        prompt: 'Generate a commit message for the selected changes',
+      };
+
+      expect(await callSmallModel(request)).toBe(message);
+      const first = lastCall(fetchMock);
+      expect(first.url).toBe('https://opencode.ai/zen/go/v1/chat/completions');
+      expect(first.init.headers['x-opencode-session']).toEqual(expect.any(String));
+      expect(first.init.headers['x-opencode-session'].trim()).not.toBe('');
+
+      await callSmallModel(request);
+      const second = lastCall(fetchMock);
+      expect(second.init.headers['x-opencode-session']).toEqual(expect.any(String));
+      expect(second.init.headers['x-opencode-session'].trim()).not.toBe('');
+      expect(second.init.headers['x-opencode-session']).not.toBe(first.init.headers['x-opencode-session']);
+    });
+
     it('identifies OpenCode Go requests with the owning conversation', async () => {
       readConfig.mockReturnValue({});
       fetchMock.mockResolvedValue(ok('ok'));

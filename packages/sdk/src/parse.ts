@@ -33,6 +33,9 @@ import {
   type ParseManifestResult,
   type ParseManifestSuccess,
   type SocketBinding,
+  GUEST_SURFACE_DOCKS,
+  GUEST_SURFACE_DOCK_SIZE_MAX,
+  GUEST_SURFACE_DOCK_SIZE_MIN,
 } from './manifest.ts';
 
 const isPanelIcon = (value: string): boolean => (
@@ -89,6 +92,8 @@ const panelSchema = z.object({
   name: z.string().trim().min(1),
   icon: z.string().trim().refine(isPanelIcon),
   entry: z.string().trim().refine(isSafeAssetPath).optional(),
+  dock: z.enum(GUEST_SURFACE_DOCKS).optional(),
+  size: z.number().int().min(GUEST_SURFACE_DOCK_SIZE_MIN).max(GUEST_SURFACE_DOCK_SIZE_MAX).optional(),
 });
 
 const integrationSettingSchema = z.object({
@@ -295,10 +300,12 @@ export const openChamberManifestSchema = z.object({
     openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
   }).strict().optional(),
   contributes: contributesSchema.superRefine((contributes, ctx) => {
-    if (contributes.service?.surface && hasGuestPage(contributes)) {
+    // Docking only means something for a page beside a shared surface.
+    const docked = contributes.panel.dock !== undefined || contributes.panel.size !== undefined;
+    if (docked && !(contributes.service?.surface && hasGuestPage(contributes))) {
       ctx.addIssue({
-        code: 'custom', path: ['service', 'surface'],
-        message: 'service.surface draws the panel itself; drop panel.entry.',
+        code: 'custom', path: ['panel', 'dock'],
+        message: 'panel.dock and panel.size place panel.entry beside service.surface; they need both.',
       });
       return;
     }
@@ -384,6 +391,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       return fail('invalid-panel-icon', 'panel.icon must be a Remixicon name or a package .svg path.');
     case 'contributes.panel.entry':
       return fail('invalid-panel-entry', 'panel.entry must be a relative path inside the package.');
+    case 'contributes.panel.dock':
+      return fail('invalid-panel', issue.code === 'custom'
+        ? issue.message
+        : `panel.dock is one of ${GUEST_SURFACE_DOCKS.join(', ')}.`);
+    case 'contributes.panel.size':
+      return fail('invalid-panel', `panel.size is a whole number of CSS pixels from ${GUEST_SURFACE_DOCK_SIZE_MIN} to ${GUEST_SURFACE_DOCK_SIZE_MAX}.`);
     case 'contributes.capabilities':
       return fail('invalid-capabilities', 'contributes.capabilities may list "prompt", "sessions", and "files".');
     default:
@@ -435,7 +448,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     );
   }
   if (path.startsWith('contributes.service')) {
-    return fail('invalid-service', 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser"), and optional surface (true, without panel.entry).');
+    return fail('invalid-service', 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser"), and optional surface (true).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

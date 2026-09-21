@@ -158,6 +158,7 @@ describe('bounded history loading', () => {
     } });
     const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: 'test' });
     const target = { sessionID: 'session', directory: '/project' };
+    const release = loader.retainSessionHistory(target);
     try {
       const turns = await loadSessionTitleTurns({
         loader, target, signal: new AbortController().signal,
@@ -169,7 +170,7 @@ describe('bounded history loading', () => {
       expect(turns).toHaveLength(3);
       expect(requests).toBe(2);
       expect(loader.getSnapshot(target).complete).toBe(false);
-    } finally { loader.dispose(); childStores.disposeAll(); }
+    } finally { release(); loader.dispose(); childStores.disposeAll(); }
   });
 
   test('does not use cached partial turns when the authoritative loader failed', async () => {

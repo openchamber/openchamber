@@ -83,8 +83,13 @@ const navigate = (url: string): void => {
   page.scrollY = 0;
 };
 
+// The last chat that drove the page, shown in the strip. A real provider
+// with one browser per project or chat would key its targets on this.
+let lastCaller: BrowserProviderRequest['context'] = { directory: null, sessionId: null };
+
 const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
   markAgentActive();
+  lastCaller = request.context;
   switch (request.action) {
     case 'browser.open':
       navigate(request.parameters.url);
@@ -408,6 +413,31 @@ http.createServer((req, res) => {
   if (url.pathname.startsWith('/surface/')) {
     void handleSurface(req, res, url).then((handled) => {
       if (!handled) json(res, 404, { ok: false, error: 'not-found' });
+    });
+    return;
+  }
+  // The strip above the surface (panel/main.ts) reads and drives the page
+  // through these; the host proxies them with the same bearer token.
+  if (url.pathname === '/state' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller }));
+    return;
+  }
+  if (url.pathname === '/navigate' && req.method === 'POST') {
+    void readBody(req).then((body) => {
+      let target = '';
+      try {
+        const parsed: { url?: unknown } | null = JSON.parse(body);
+        if (parsed && String(parsed.url) === parsed.url) target = parsed.url;
+      } catch {
+        // not JSON; refused below
+      }
+      if (!target) {
+        json(res, 400, { ok: false, error: 'url is required' });
+        return;
+      }
+      navigate(target);
+      json(res, 200, { ok: true });
     });
     return;
   }

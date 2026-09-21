@@ -1,3 +1,4 @@
+import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -366,7 +367,7 @@ export const selectRowBadgeVisibilityClass = (input: {
 export const resolveMenuOpenSessionId = (
   nodes: SessionNode[],
   menuKey: string | null,
-  renderContext: 'project' | 'recent',
+  renderContext: SessionSidebarRenderContext,
   archivedBucket: boolean,
 ): string | null => {
   if (!menuKey) return null;

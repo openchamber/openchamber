@@ -1,5 +1,7 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
+import { takeSessionActionFailure } from '@/sync/session-action-failures';
+import { describeSessionActionError } from './sessionActionError';
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionUIState } from '@/sync/session-ui-store';
@@ -64,6 +66,12 @@ export const collectSessionSubtreeIds = (
  * the same: a lone session keeps the singular copy, a subtree reports counts,
  * and a partial failure says how many sessions were left behind.
  */
+// The first recorded server answer for the failed ids, as a toast description.
+const failureDescription = (ids: readonly string[], t: Translate): { description: string } | undefined => {
+  const error = takeSessionActionFailure(ids);
+  return error ? { description: describeSessionActionError(error, t) } : undefined;
+};
+
 export const runSessionSubtreeAction = async (
   action: SessionSubtreeAction,
   session: Session,
@@ -84,7 +92,7 @@ export const runSessionSubtreeAction = async (
     }
     toast.error(hardDelete
       ? t('sessions.sidebar.session.delete.error')
-      : t('sessions.sidebar.session.archive.error'));
+      : t('sessions.sidebar.session.archive.error'), failureDescription([session.id], t));
     return { succeededIds: [], failedIds: [session.id] };
   }
 
@@ -100,7 +108,7 @@ export const runSessionSubtreeAction = async (
         ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
         : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));
     } else {
-      toast.error(t('sessions.sidebar.session.delete.error'));
+      toast.error(t('sessions.sidebar.session.delete.error'), failureDescription(failedIds, t));
     }
     return { succeededIds: deletedIds, failedIds };
   }
@@ -114,7 +122,7 @@ export const runSessionSubtreeAction = async (
   if (failedIds.length > 0) {
     toast.error(failedIds.length === 1
       ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-      : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
+      : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }), failureDescription(failedIds, t));
   }
   return { succeededIds: archivedIds, failedIds };
 };

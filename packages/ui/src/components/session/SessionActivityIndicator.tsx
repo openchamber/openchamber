@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
  * Live-activity marker for one session row or aggregate: 'running' while the
  * turn streams (busy/retry), 'unread' while finished-but-unseen.
  *
- * The default is a static dot (primary while running, info while unread) —
+ * The default is a static dot (info while running, success while unread) —
  * the cheapest possible indicator; motion lives in the 1 Hz elapsed counter
  * (see faa9c243). The opt-in `animatedActivityIndicators` preference swaps
  * the running dot for a `loader-4` spinner stepped to 20 fps
@@ -33,7 +33,7 @@ export const SessionActivityIndicator: React.FC<{
         title={label}
         data-session-activity-indicator={state}
       >
-        <Icon name="loader-4" className="activity-spinner h-3 w-3 text-primary" />
+        <Icon name="loader-4" className="activity-spinner h-3 w-3 text-status-info" />
       </span>
     );
   }
@@ -42,7 +42,7 @@ export const SessionActivityIndicator: React.FC<{
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        state === 'running' ? cn('bg-primary', runningDotClassName) : 'bg-[var(--status-info)]',
+        state === 'running' ? cn('bg-[var(--status-info)]', runningDotClassName) : 'bg-[var(--status-success)]',
         className,
       )}
       aria-label={label}

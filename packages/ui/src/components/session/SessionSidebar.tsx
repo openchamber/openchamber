@@ -19,7 +19,6 @@ import { useProjectRepoStatus } from './sidebar/projects/useProjectRepoStatus';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { SidebarHeader } from './sidebar/shell/SidebarHeader';
-import { SidebarNav } from './sidebar/shell/SidebarNav';
 import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
@@ -453,7 +452,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
-  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  const rawSidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
 
   const sidebarRenderSources = {
@@ -517,11 +516,14 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   // Web/desktop route archived sessions to the Archive page; only the VS Code
   // compact webview keeps inline archived buckets behind its toggle.
   const showInlineArchived = isVSCode && showArchivedSessions;
-  // 'by-worktree' renders the worktree-grouped sections (parallel-work
-  // overview); 'flat' renders the merged per-project list. VS Code has no
-  // worktree groups, so both resolve to the same shape — use flat there.
-  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
-  const useGroupedSections = sessionGroupingMode === 'by-worktree' && !isVSCode;
+  // The projects view always groups by worktree (parallel-work overview).
+  // VS Code has no worktree groups, so it renders the merged per-project list.
+  const useGroupedSections = !isVSCode;
+  // VS Code keeps the projects view only; the mode switch is hidden there.
+  const sidebarViewMode = isVSCode ? 'projects' : rawSidebarViewMode;
+  // Zone headers pin themselves in the grouped view, where a project can
+  // scroll for a long time; the flat timeline reads better without them.
+  const stickyZoneHeaders = sidebarViewMode === 'projects';
   const desktopHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed';
   const mobileHeaderActionButtonClass =
@@ -605,14 +607,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     });
   }, [isVSCode, worktreeRefreshDependencies]);
 
-  const handleOpenNewSessionDraftFromHeader = React.useCallback(() => {
-    useUIStore.getState().closeMainSurfaces();
-    if (mobileVariant) {
-      setSessionSwitcherOpen(false);
-    }
-    openNewSessionDraft();
-  }, [mobileVariant, openNewSessionDraft, setSessionSwitcherOpen]);
-
   return (
     // One shared tooltip provider for the whole sidebar, matching the opencode
     // sidebar feel: 400ms before the first tooltip opens, instant close on
@@ -627,10 +621,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         mobileVariant ? '' : 'bg-transparent',
       )}
     >
-      {!hideDirectoryControls && !isVSCode ? (
-        <SidebarNav onNewSession={handleOpenNewSessionDraftFromHeader} />
-      ) : null}
-
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
         showProjectDisplayControls={!isVSCode}
@@ -685,6 +675,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           isDesktopShellRuntime,
           stickyZoneHeaders,
           projectSortOrder,
+          sidebarViewMode,
           emptyState,
           searchEmptyState,
           isSessionsLoading,

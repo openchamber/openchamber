@@ -2,6 +2,7 @@ import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import { z } from "zod";
+import { OpencodeRequestError, toUpstreamErrorDetail, upstreamErrorPayloadSchema } from "./upstreamError";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -79,9 +80,10 @@ const directoryProbeErrorSchema = z.object({ reason: z.string().optional(), isDi
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
   if (result.error) {
     const status = result.response?.status;
-    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
-    if (status !== undefined) error.status = status;
-    throw error;
+    throw new OpencodeRequestError(
+      `${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`,
+      toUpstreamErrorDetail(upstreamErrorPayloadSchema.safeParse(result.error).data, status),
+    );
   }
   if (result.data === undefined || result.data === null) {
     throw new Error(`${operation} failed: empty response`);
@@ -92,9 +94,10 @@ function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
 function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | undefined {
   if (result.error) {
     const status = result.response?.status;
-    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
-    if (status !== undefined) error.status = status;
-    throw error;
+    throw new OpencodeRequestError(
+      `${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`,
+      toUpstreamErrorDetail(upstreamErrorPayloadSchema.safeParse(result.error).data, status),
+    );
   }
   return result.data;
 }

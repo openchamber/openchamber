@@ -90,9 +90,9 @@ button,
   color: var(--interactive-selection-foreground);
 }
 
-/* Keep the quoted fragment highlighted while the comment input owns focus. */
+/* These rectangles sit above glyphs, so the fill must remain translucent. */
 .oc-chat-comment-rect {
-  background-color: var(--interactive-selection);
+  background-color: color-mix(in srgb, var(--interactive-selection) 35%, transparent);
 }
 
 .pierre-diff-wrapper {

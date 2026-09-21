@@ -1,6 +1,7 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
+import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
@@ -14,6 +15,14 @@ export type SessionSidebarActivityItem = {
   groupDirectory: string | null;
   secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
 };
+
+export type SessionSidebarActivityKey = 'chats' | 'active-now' | 'timeline';
+
+// 'timeline-chat' is a Chats row inside the timeline view: one line, no left
+// gutter, status and pin on the right like the three-line timeline rows.
+export type SessionSidebarRenderContext = 'project' | 'recent' | 'timeline' | 'timeline-chat';
+
+export type SessionSidebarViewMode = 'projects' | 'timeline';
 
 export type SessionSidebarActivitySection = {
   key: 'active-now';
@@ -34,11 +43,11 @@ export type SessionSidebarOwnerAuthority = {
 type RowBase = { key: string; estimateSize: number };
 
 export type SessionSidebarRow =
-  | (RowBase & { kind: 'activity-header'; activityKey: 'chats' | 'active-now'; collapsed: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; allSessions: readonly Session[] })
   | (RowBase & { kind: 'folder-header'; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; forceExpanded: boolean; deleteSessions: readonly Session[]; subFolderCount: number; dropEnabled: boolean })
-  | (RowBase & { kind: 'session'; node: SessionNode; depth: number; projectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: 'project' | 'recent'; secondaryMeta: SessionSidebarActivityItem['secondaryMeta'] })
+  | (RowBase & { kind: 'session'; node: SessionNode; depth: number; projectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta'] })
   | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'group' | 'archived'; group?: SessionGroup })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string })
   | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number });
@@ -71,10 +80,17 @@ export type SessionSidebarRowModel = {
 
 export type SessionSidebarRowModelArgs = {
   mode: 'normal' | 'search';
+  /**
+   * Projects renders the project/worktree tree. Timeline replaces it with the
+   * managed Chats zone plus one flat, lifecycle-ordered list of every
+   * non-archived root project session.
+   */
+  viewMode?: SessionSidebarViewMode;
   sections: readonly ProjectSection[];
   authoritativeSections: readonly ProjectSection[];
   chatGroup: SessionGroup | null;
   recentSections: readonly SessionSidebarActivitySection[];
+  timelineItems?: readonly SessionSidebarActivityItem[];
   showRecentSection: boolean;
   foldersMap: SessionFoldersMap;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
@@ -99,6 +115,9 @@ export type SessionSidebarRowModelArgs = {
 
 const EMPTY_FOLDERS: readonly SessionFolder[] = [];
 const SESSION_ESTIMATE = 32;
+const TIMELINE_SESSION_ESTIMATE = 64;
+const TIMELINE_CHATS_INITIAL_LIMIT = 3;
+const TIMELINE_CHATS_INCREMENT = 7;
 const HEADER_ESTIMATE = 32;
 const STATUS_ESTIMATE = 28;
 
@@ -161,7 +180,7 @@ const indexNodes = (roots: readonly SessionNode[]): IndexedSessionNodes => {
   return { byId, sessionsById, preorderIds: Object.freeze(preorderIds), subtreeRangeByNode };
 };
 
-const expandedKey = (renderContext: 'project' | 'recent', archived: boolean, id: string): string => (
+const expandedKey = (renderContext: SessionSidebarRenderContext, archived: boolean, id: string): string => (
   `${renderContext}:${archived ? 'archived' : 'active'}:${id}`
 );
 
@@ -217,7 +236,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     ownerKey: string | null;
     selectionScopeKey: string | null;
     archived: boolean;
-    renderContext: 'project' | 'recent';
+    renderContext: SessionSidebarRenderContext;
     secondaryMeta?: SessionSidebarActivityItem['secondaryMeta'];
     indexedNodes?: IndexedSessionNodes;
     selectionPoolOffset?: number;
@@ -232,7 +251,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       push({
         kind: 'session',
         key: rowKey,
-        estimateSize: SESSION_ESTIMATE,
+        estimateSize: options.renderContext === 'timeline' ? TIMELINE_SESSION_ESTIMATE : SESSION_ESTIMATE,
         node: current.node,
         depth: current.depth,
         projectId: options.projectId,
@@ -265,7 +284,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  const appendGroup = (group: SessionGroup, groupKey: string, projectId: string | null, hideHeader: boolean): void => {
+  const appendGroup = (
+    group: SessionGroup,
+    groupKey: string,
+    projectId: string | null,
+    hideHeader: boolean,
+    limits?: { initial: number; increment: number; pinnedAlwaysVisible: boolean; renderContext: SessionSidebarRenderContext },
+  ): void => {
     const searchData = args.groupSearchDataByGroup.get(group);
     if (search && searchData?.hasMatch !== true) return;
     if (search && searchData) {
@@ -376,16 +401,30 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const folder of roots) appendFolder(folder, '');
 
     const sessionBatchSize = projectId ? args.sessionBatchSize : undefined;
-    const initialLimit = sessionBatchSize ?? (args.hideDirectoryControls ? 10 : 5);
-    const increment = sessionBatchSize ?? 7;
+    const initialLimit = limits?.initial ?? sessionBatchSize ?? (args.hideDirectoryControls ? 10 : 5);
+    const increment = limits?.increment ?? sessionBatchSize ?? 7;
     const requested = Math.max(initialLimit, args.visibleCountByContainer.get(groupKey) ?? initialLimit);
-    const visibleUngrouped = group.isArchivedBucket || search ? ungrouped : ungrouped.slice(0, requested);
-    appendSessions({ nodes: visibleUngrouped, containerKey: groupKey, projectId, groupDirectory: group.directory, ownerKey, selectionScopeKey: ownerKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset });
+    // Pinned sessions are the user's own always-on shortlist: they stay
+    // visible whatever the reveal limit is, and they do not spend it.
+    const isPinnedNode = (node: SessionNode): boolean => limits?.pinnedAlwaysVisible === true
+      && isSessionPinned(pinned, node.session.directory ?? group.directory, node.session.id);
+    const limitedNodes = ungrouped.filter((node) => !isPinnedNode(node));
+    let budget = requested;
+    const visibleUngrouped = group.isArchivedBucket || search
+      ? ungrouped
+      : ungrouped.filter((node) => {
+        if (isPinnedNode(node)) return true;
+        if (budget <= 0) return false;
+        budget -= 1;
+        return true;
+      });
+    appendSessions({ nodes: visibleUngrouped, containerKey: groupKey, projectId, groupDirectory: group.directory, ownerKey, selectionScopeKey: ownerKey, archived: group.isArchivedBucket === true, renderContext: limits?.renderContext ?? 'project', indexedNodes: indexed, selectionPoolOffset });
     const remaining = ungrouped.length - visibleUngrouped.length;
+    const limitedVisibleCount = requested - budget;
     if (!search && !group.isArchivedBucket && remaining > 0) {
-      push({ kind: 'show-control', key: `${groupKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey: groupKey, currentCount: visibleUngrouped.length, increment });
-    } else if (!search && !group.isArchivedBucket && ungrouped.length > initialLimit && remaining === 0) {
-      push({ kind: 'show-control', key: `${groupKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey: groupKey, currentCount: visibleUngrouped.length, increment });
+      push({ kind: 'show-control', key: `${groupKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey: groupKey, currentCount: limitedVisibleCount, increment });
+    } else if (!search && !group.isArchivedBucket && limitedNodes.length > initialLimit && remaining === 0) {
+      push({ kind: 'show-control', key: `${groupKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey: groupKey, currentCount: limitedVisibleCount, increment });
     }
 
     const status = args.groupStatusByKey.get(groupKey);
@@ -397,7 +436,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  const appendActivityHeader = (activityKey: 'chats' | 'active-now'): boolean => {
+  const appendActivityHeader = (activityKey: SessionSidebarActivityKey): boolean => {
     const collapsed = !search && args.collapsedActivities.has(activityKey);
     const rowIndex = rows.length;
     push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: HEADER_ESTIMATE, activityKey, collapsed, forceExpanded: search });
@@ -405,15 +444,44 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     return collapsed;
   };
 
+  const timelineMode = args.viewMode === 'timeline';
+
   if (args.chatGroup) {
     const chatSearchData = args.groupSearchDataByGroup.get(args.chatGroup);
     if (!search || chatSearchData?.hasMatch === true) {
       const collapsed = appendActivityHeader('chats');
-      if (!collapsed) appendGroup(args.chatGroup, 'activity:chats', null, true);
+      if (!collapsed) {
+        appendGroup(args.chatGroup, 'activity:chats', null, true, timelineMode
+          ? { initial: TIMELINE_CHATS_INITIAL_LIMIT, increment: TIMELINE_CHATS_INCREMENT, pinnedAlwaysVisible: true, renderContext: 'timeline-chat' }
+          : undefined);
+      }
     }
   }
 
-  if (args.showRecentSection) {
+  if (timelineMode) {
+    const timelineItems = args.timelineItems ?? [];
+    if (timelineItems.length > 0) {
+      const collapsed = appendActivityHeader('timeline');
+      if (!collapsed) {
+        const containerKey = 'activity:timeline';
+        for (const item of timelineItems) {
+          const indexed = indexNodes([item.node]);
+          const selectionPoolOffset = selectionDescendantIds.length;
+          selectionDescendantIds.push(...indexed.preorderIds);
+          const ownerKey = getSessionFolderOwnerKey(item.projectId, item.groupDirectory);
+          appendSessions({
+            nodes: [item.node], containerKey, projectId: item.projectId, groupDirectory: item.groupDirectory,
+            // One flat list: selection spans projects, so it carries no scope.
+            ownerKey, selectionScopeKey: null, archived: false, renderContext: 'timeline',
+            secondaryMeta: item.secondaryMeta, indexedNodes: indexed, selectionPoolOffset,
+          });
+          if (search) searchMatchCount += 1;
+        }
+      }
+    }
+  }
+
+  if (!timelineMode && args.showRecentSection) {
     for (const section of args.recentSections) {
       if (section.items.length === 0) continue;
       const collapsed = appendActivityHeader('active-now');
@@ -435,7 +503,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   }
 
-  let projectSections = args.singleProjectMode
+  let projectSections = timelineMode ? [] : args.singleProjectMode
     ? args.sections.filter((section) => section.project.id === args.singleProjectId)
     : [...args.sections];
   if (args.showOnlyMainWorkspace) {

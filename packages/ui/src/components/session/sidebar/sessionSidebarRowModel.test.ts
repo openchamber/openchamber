@@ -2,7 +2,24 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+
+const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
+  node: { session: session(id), children: [], worktree: null },
+  projectId: 'project-a',
+  groupDirectory: '/repo',
+  secondaryMeta: { projectLabel: 'repo', branchLabel: 'main' },
+  ...overrides,
+});
+
+const pinnedIds = (...ids: string[]): Set<string> => new Set(
+  ids.flatMap((id) => {
+    const key = getPinnedSessionKey(getRuntimeKey(), '/repo', id);
+    return key ? [key] : [];
+  }),
+);
 
 // SAFETY: the row model only reads the supplied session identity, title, directory, parent, and lifecycle fields.
 const session = (id: string, parentID?: string): Session => ({
@@ -228,6 +245,57 @@ describe('buildSessionSidebarRowModel', () => {
 
     expect(secondHeader).toBeDefined();
     expect(resolveSessionSidebarStickyHeader(model.stickyHeaders, secondHeader?.rowIndex ?? 0)?.id).toBe('project-b');
+  });
+
+  test('timeline mode lists every root session flat, without children or project rows', () => {
+    const input = args([project([group([node('project-session', [node('child')])])])]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('a'), timelineItem('b')];
+
+    const model = buildSessionSidebarRowModel(input);
+    const sessions = model.rows.filter((row) => row.kind === 'session');
+
+    expect(model.rows.some((row) => row.kind === 'project-header')).toBe(false);
+    expect(model.rows.some((row) => row.kind === 'group-header')).toBe(false);
+    expect(model.rows.find((row) => row.kind === 'activity-header')).toMatchObject({ activityKey: 'timeline' });
+    expect(model.stickyHeaders.map((header) => header.id)).toEqual(['timeline']);
+    expect(sessions.map((row) => row.node.session.id)).toEqual(['a', 'b']);
+    expect(sessions.every((row) => row.renderContext === 'timeline' && row.depth === 0)).toBe(true);
+    expect(model.rows.some((row) => row.kind === 'show-control')).toBe(false);
+  });
+
+  test('timeline mode reveals three chats and never counts pinned chats against that limit', () => {
+    const chats = [node('pinned-1'), node('pinned-2'), ...Array.from({ length: 6 }, (_, index) => node(`chat-${index}`))];
+    const input = args([]);
+    input.viewMode = 'timeline';
+    input.chatGroup = group(chats, { id: 'managed-chats' });
+    input.pinnedSessionIds = pinnedIds('pinned-1', 'pinned-2');
+
+    const model = buildSessionSidebarRowModel(input);
+    const shown = model.rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id);
+
+    expect(shown).toContain('pinned-1');
+    expect(shown).toContain('pinned-2');
+    expect(shown.filter((id) => id.startsWith('chat-'))).toHaveLength(3);
+    const control = model.rows.find((row) => row.kind === 'show-control');
+    expect(control).toMatchObject({ control: 'more', currentCount: 3, increment: 7 });
+  });
+
+  test('timeline search counts one match per listed session', () => {
+    const input = args([]);
+    input.viewMode = 'timeline';
+    input.mode = 'search';
+    input.normalizedQuery = 'a';
+    input.timelineItems = [timelineItem('a'), timelineItem('b')];
+
+    expect(buildSessionSidebarRowModel(input).searchMatchCount).toBe(2);
+  });
+
+  test('timeline mode shows the sidebar empty row when nothing is listed', () => {
+    const input = args([project([group([node('hidden-by-mode')])])]);
+    input.viewMode = 'timeline';
+
+    expect(buildSessionSidebarRowModel(input).rows).toMatchObject([{ kind: 'empty', emptyKind: 'sidebar' }]);
   });
 
   test('retains current session authority when presentation filters the row out', () => {

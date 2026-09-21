@@ -315,4 +315,16 @@ describe('browser capture', () => {
     await service.execute('browser.capture', { label: 'before' }, directory);
     expect(request).toHaveBeenCalledWith('browser.capture', { label: 'before' }, expect.anything());
   });
+
+  it('tells the browser which project and chat the action came from', async () => {
+    const { service, directory, request } = await createBrowserService({ base64: pixel, mime: 'image/png' });
+    await service.execute('browser.capture', {}, directory, { contextSessionId: 'ses_1' });
+    expect(request).toHaveBeenCalledWith('browser.capture', {}, expect.objectContaining({
+      context: { directory, sessionId: 'ses_1' },
+    }));
+    await service.execute('browser.capture', {}, directory);
+    expect(request).toHaveBeenLastCalledWith('browser.capture', {}, expect.objectContaining({
+      context: { directory, sessionId: null },
+    }));
+  });
 });

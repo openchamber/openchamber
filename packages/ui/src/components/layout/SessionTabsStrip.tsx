@@ -1,4 +1,5 @@
 import React from 'react';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import {
   DndContext,
   MouseSensor,
@@ -36,7 +37,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
-import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
@@ -205,11 +205,7 @@ const SessionTabItem: React.FC<{
                       <SessionActivityIndicator
                         state={isStreaming ? 'running' : 'unread'}
                         label={dotLabel}
-                        className={cn(
-                          'ml-1.5 shrink-0',
-                          !suppressControls && 'group-hover/session-tab:opacity-0',
-                          overlayVisible && 'opacity-0',
-                        )}
+                        className={cn('ml-1.5 shrink-0', !suppressControls && 'group-hover/session-tab:opacity-0', overlayVisible && 'opacity-0')}
                       />
                     ) : null}
                   </div>

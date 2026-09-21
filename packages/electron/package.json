@@ -5,7 +5,7 @@
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
   "type": "module",
-  "main": "./dist-bundle/main.mjs",
+  "main": "./dist-bundle/entry.mjs",
   "dependencies": {
     "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
@@ -49,7 +49,7 @@
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
+    "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
@@ -59,7 +59,9 @@
       "node_modules/@openchamber/web/server/built-in-extensions/**/*"
     ],
     "files": [
+      "dist-bundle/entry.mjs",
       "dist-bundle/main.mjs",
+      "dist-bundle/early-startup.mjs",
       "preload.mjs"
     ],
     "extraResources": [

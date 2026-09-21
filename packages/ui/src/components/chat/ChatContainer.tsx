@@ -64,6 +64,7 @@ import {
     useSessionMessageCount,
     useSessionMessageRecords,
     useSessionMessageLoadState,
+    useSessionMessageLoader,
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
@@ -75,7 +76,6 @@ import {
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
@@ -768,9 +768,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
+    const messageLoader = useSessionMessageLoader();
     const currentSessionKey = currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
         : null;
+    // A deferred switch can keep the previous transcript on screen after the
+    // selected session changes. Protect what is actually rendered until commit.
+    React.useLayoutEffect(() => {
+        if (!currentSessionKey || !currentSessionId || !effectiveSessionDirectory) return;
+        return messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'rendered');
+    }, [currentSessionKey, currentSessionId, effectiveSessionDirectory, messageLoader]);
     // One gate per opened session; the scroll hook holds it until the
     // viewport is pinned to the end so the first visible frame is already
     // at the bottom.
@@ -1188,10 +1195,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         goToBottom('instant');
     }, [goToBottom]);
 
-    // Mobile loads older history via an explicit top button instead of a
-    // scroll-position trigger (see handleHistoryScroll in the controller).
-    const showLoadOlderButton = isMobileSurfaceRuntime()
-        && timelineController.historySignals.canLoadEarlier;
+    // A window too short to scroll must stay manually pageable on every runtime.
+    const showLoadOlderButton = timelineController.historySignals.canLoadEarlier;
     const timelineLoadEarlier = timelineController.loadEarlier;
     const handleLoadOlderClick = React.useCallback(() => {
         // Loading older history is an explicit move INTO the past: release

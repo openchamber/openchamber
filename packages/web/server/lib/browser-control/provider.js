@@ -41,6 +41,9 @@ const BUILTIN_BROWSER_PROVIDER = 'builtin';
  * the Settings dropdown offers: enabled, fully approved, and declaring the
  * role. The `service` grant is implied by full approval.
  */
+/** The control service builds the caller's scope; a caller without one (tests, CLI) means unknown. */
+const UNKNOWN_CONTEXT = Object.freeze({ directory: null, sessionId: null });
+
 export const isBrowserProviderGuest = (guest) => (
   Boolean(guest)
   && guest.enabled !== false
@@ -100,7 +103,7 @@ export const createBrowserControlRouter = ({
     emitProviderReset({ guestId, guestName });
   };
 
-  const requestFromProvider = async (guest, action, parameters, { signal, timeoutMs }) => {
+  const requestFromProvider = async (guest, action, parameters, { signal, timeoutMs, context }) => {
     if (surfaceControl.userControls(guest.id)) {
       // Read by the agent: the page is being used by a person right now.
       throw new BrowserControlError(
@@ -122,7 +125,7 @@ export const createBrowserControlRouter = ({
         persistPath,
         method: 'POST',
         path: BROWSER_PROVIDER_PATH,
-        body: JSON.stringify({ requestId, action, parameters }),
+        body: JSON.stringify({ requestId, action, parameters, context: context ?? UNKNOWN_CONTEXT }),
         timeoutMs: timeoutMs ?? (action === 'browser.open' ? BROWSER_PROVIDER_OPEN_TIMEOUT_MS : BROWSER_PROVIDER_ACTION_TIMEOUT_MS),
         responseMax: BROWSER_PROVIDER_RESPONSE_MAX,
         idleStopMs: BROWSER_PROVIDER_IDLE_MS,

@@ -197,6 +197,12 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.entry) {
     guest.entry = panel.entry;
   }
+  if (panel.dock !== undefined) {
+    guest.entryDock = panel.dock;
+  }
+  if (panel.size !== undefined) {
+    guest.entrySize = panel.size;
+  }
   const backgroundEntry = parsed.manifest.contributes.background?.entry;
   if (backgroundEntry) {
     if (!await resolveGuestAssetPath(packageRoot, backgroundEntry)) {
@@ -292,6 +298,12 @@ export const toPublicGuest = (guest) => {
   };
   if (guest.entry) {
     row.entry = guest.entry;
+  }
+  if (guest.entryDock) {
+    row.entryDock = guest.entryDock;
+  }
+  if (typeof guest.entrySize === 'number') {
+    row.entrySize = guest.entrySize;
   }
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;

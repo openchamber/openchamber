@@ -76,6 +76,7 @@ describe('deriveRecentActivitySections', () => {
         groupDirectory: '/workspace/app/worktrees/release',
         projectLabel: 'App',
         branchLabel: 'release',
+        worktree: null,
       } : null,
       query: 'deploy',
     });

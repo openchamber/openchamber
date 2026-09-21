@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -7,7 +6,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { SessionActivityIndicator } from './SessionActivityIndicator';
 
-const sessionTabsStripSource = readFileSync(new URL('../layout/SessionTabsStrip.tsx', import.meta.url), 'utf8');
 
 describe('SessionActivityIndicator', () => {
   let windowInstance: Window;
@@ -53,7 +51,7 @@ describe('SessionActivityIndicator', () => {
     }
   });
 
-  test('renders a non-shrinking primary running dot when animated indicators are off', async () => {
+  test('renders a non-shrinking info running dot when animated indicators are off', async () => {
     useSessionDisplayStore.setState({ animatedActivityIndicators: false });
 
     const markup = await renderIndicator(
@@ -62,7 +60,7 @@ describe('SessionActivityIndicator', () => {
     const indicator = host.querySelector<HTMLElement>('[data-session-activity-indicator="running"]');
 
     expect(indicator).not.toBeNull();
-    expect(indicator?.classList).toContain('bg-primary');
+    expect(indicator?.classList).toContain('bg-[var(--status-info)]');
     expect(indicator?.classList).toContain('running-dot-class');
     expect(indicator?.classList).toContain('shrink-0');
     expect(markup).not.toContain('activity-spinner');
@@ -90,20 +88,25 @@ describe('SessionActivityIndicator', () => {
     expect(indicator.classList).toContain('shrink-0');
   });
 
-  test('renders a non-shrinking static info dot for unread state when animated indicators are enabled', async () => {
+  test('renders a non-shrinking static success dot for unread state when animated indicators are enabled', async () => {
     useSessionDisplayStore.setState({ animatedActivityIndicators: true });
 
     const markup = await renderIndicator({ state: 'unread', label: 'Unread' });
     const indicator = host.querySelector<HTMLElement>('[data-session-activity-indicator="unread"]');
 
     expect(indicator).not.toBeNull();
-    expect(indicator?.classList).toContain('bg-[var(--status-info)]');
+    expect(indicator?.classList).toContain('bg-[var(--status-success)]');
     expect(indicator?.classList).toContain('shrink-0');
     expect(markup).not.toContain('activity-spinner');
   });
 
-  test('is used by header session tabs for running and unread activity', () => {
-    expect(sessionTabsStripSource).toContain('<SessionActivityIndicator');
-    expect(sessionTabsStripSource).toContain("state={isStreaming ? 'running' : 'unread'}");
+  test('switches a mounted running indicator immediately and restores the dot', async () => {
+    useSessionDisplayStore.setState({ animatedActivityIndicators: false });
+    await renderIndicator({ state: 'running', label: 'Running' });
+    await act(async () => useSessionDisplayStore.getState().setAnimatedActivityIndicators(true));
+    expect(host.querySelector('.activity-spinner')?.classList).toContain('text-status-info');
+    await act(async () => useSessionDisplayStore.getState().setAnimatedActivityIndicators(false));
+    expect(host.querySelector('.activity-spinner')).toBeNull();
+    expect(host.querySelector('[data-session-activity-indicator]')?.classList).toContain('bg-[var(--status-info)]');
   });
 });

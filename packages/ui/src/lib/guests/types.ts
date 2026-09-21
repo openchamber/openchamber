@@ -2,6 +2,7 @@ import type {
   AttachContribution,
   GuestActionContribution,
   GuestCommandContribution,
+  GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
   PublicGuestCapabilities,
@@ -16,6 +17,9 @@ export type InstalledGuest = {
   icon: string;
   /** Visible panel page. Absent for background-only and tools-only extensions. */
   entry?: string;
+  /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
+  entryDock?: GuestSurfaceDock;
+  entrySize?: number;
   /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
   backgroundEntry?: string;
   /** npm package.json version when the package declared one. */

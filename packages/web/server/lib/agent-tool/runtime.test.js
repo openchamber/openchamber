@@ -261,6 +261,7 @@ describe('managed agent tool runtime', () => {
     const result = await runtime.execute({
       input: { action: 'read', title: 'Uses bun' },
       contextDirectory: '/work/project',
+      contextSessionId: 'ses_1',
       tool: 'openchamber_memory',
     });
 
@@ -270,7 +271,7 @@ describe('managed agent tool runtime', () => {
       'memory.read',
       { action: 'memory.read', title: 'Uses bun' },
       '/work/project',
-      {},
+      { contextSessionId: 'ses_1' },
     );
   });
 

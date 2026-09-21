@@ -86,7 +86,7 @@ describe('settings runtime', () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     const preferences = {
       sidebarProjectDisplayMode: 'single',
-      sidebarSessionGroupingMode: 'flat',
+      sidebarViewMode: 'timeline',
       sidebarProjectSortOrder: 'date-added',
       sidebarShowRecentSection: false,
     };
