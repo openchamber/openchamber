@@ -143,6 +143,7 @@ export const createOpenChamberControlService = (dependencies) => {
     waitForOpenCodeReady,
     sessionService,
     scheduledTaskService,
+    visionService,
     browserControl = null,
     agentMemoryActions = null,
     createClient = createOpencodeClient,
@@ -476,6 +477,17 @@ export const createOpenChamberControlService = (dependencies) => {
           throw new OpenChamberControlError('The in-app browser is not available on this server', 503);
         }
         return browserAction(action, input, options.signal, contextDirectory, options.contextSessionId);
+      }
+      if (action === 'vision.run') {
+        if (typeof visionService?.execute !== 'function') {
+          throw new OpenChamberControlError('Vision tool is unavailable', 500);
+        }
+        return visionService.execute({
+          imagePath: asNonEmptyString(input.imagePath),
+          question: asNonEmptyString(input.question) || undefined,
+          directory: asNonEmptyString(contextDirectory) || undefined,
+          signal: options.signal,
+        });
       }
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'models.list') return models();

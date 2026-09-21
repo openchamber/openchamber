@@ -100,6 +100,7 @@ const MOBILE_SETTINGS_PAGES = [
   'providers',
   'usage',
   'voice',
+  'vision',
   'integrations',
   'about',
 ] as const;

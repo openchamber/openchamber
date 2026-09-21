@@ -125,6 +125,7 @@ import { createOpenChamberSessionService } from './lib/openchamber-sessions/rout
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
+import { createVisionRuntime } from './lib/agent-capabilities/vision.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 
 // Background CLI launches enter here in a fresh process, without CLI defaults.
@@ -1473,6 +1474,11 @@ const browserControlRouter = createBrowserControlRouter({
   },
 });
 
+const visionService = createVisionRuntime({
+  readSettingsFromDiskMigrated,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1489,6 +1495,7 @@ const openChamberControlService = createOpenChamberControlService({
     isAgentMemoryEnabled,
     resolveProjectId: resolveMemoryProjectId,
   }),
+  visionService,
 });
 
 const ensureGlobalWatcherStarted = async () => {

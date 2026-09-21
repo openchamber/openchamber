@@ -188,6 +188,25 @@ const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSc
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
 
+const VISION_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const VISION_PROMPT_MAX_LENGTH = 4000;
+
+type VisionSettingsValue = { model: string; prompt?: string };
+
+// The server re-validates the same shape in `sanitizeVisionConfig`
+// (settings-helpers.js). Keeping the parser here too means the registry, the
+// typed settings document, and the server's persistable-key gate all agree on
+// what a vision config is, and an invalid value can never reach a store.
+const parseVisionConfig: SettingsParser<VisionSettingsValue> = mapParser(
+  fromSchema(z.object({ model: z.string(), prompt: z.string().optional() }).passthrough()),
+  (value) => {
+    const model = value.model.trim();
+    if (!VISION_MODEL_PATTERN.test(model)) return undefined;
+    const prompt = (value.prompt ?? '').trim().slice(0, VISION_PROMPT_MAX_LENGTH);
+    return { model, ...(prompt ? { prompt } : {}) };
+  },
+);
+
 /**
  * Removing a built-in starter must stay a durable choice, so the list is only
  * patched with the built-ins when the corresponding marker says they were
@@ -277,6 +296,11 @@ export const SETTINGS_REGISTRY = {
   sttModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttModel') }),
   sttLocalModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttLocalModel') }),
   sttLanguage: field({ scope: 'profile', parse: parseTrimmedStringUpTo(64), ui: configField('sttLanguage') }),
+
+  // Vision tool config: the model + prompt `vision.run` uses to describe images
+  // for text-only models. The Vision settings page reads and writes it through
+  // `/api/openchamber/vision`; no live store copy, so no `ui` binding.
+  vision: field({ scope: 'profile', parse: parseVisionConfig }),
 
   // ── Tunnels (instance) ──
   tunnelProvider: field({ scope: 'instance', parse: mapParser(parseNonEmptyTrimmedString, (value) => value.toLowerCase()) }),

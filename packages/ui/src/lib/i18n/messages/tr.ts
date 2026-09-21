@@ -2444,6 +2444,8 @@ export const dict = {
   'chat.toolPart.copiedOutput': 'Çıktı kopyalandı',
   'chat.toolPart.copyOutputFailed': 'Çıktı kopyalanamadı',
   'chat.toolPart.openSubtask': '{type} alt görevini aç',
+  'chat.toolPart.vision.modelLabel': '{model} tarafından tanımlandı',
+  'chat.toolPart.vision.imageAlt': 'Görüntü aracı tarafından tanımlanan resim',
   'chat.todo.total': 'Toplam',
   'chat.todo.inProgress': 'Devam Ediyor',
   'chat.todo.pending': 'Beklemede',

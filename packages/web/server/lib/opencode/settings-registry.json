@@ -176,6 +176,9 @@
     "sttLanguage": {
       "scope": "profile"
     },
+    "vision": {
+      "scope": "profile"
+    },
     "tunnelProvider": {
       "scope": "instance"
     },

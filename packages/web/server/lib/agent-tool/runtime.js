@@ -91,6 +91,8 @@ const ALL_PARAMETER_PROPERTIES = {
   scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global is about the user and applies everywhere; project is about this codebase. both is only valid for memory.list' },
   memoryId: { type: 'string', description: 'Memory ID from a memory.list or memory.read result' },
   type: { type: 'string', enum: ['fact', 'preference', 'reference'], description: 'fact is something true, preference is how the user wants work done, reference points at a resource that is hard to find again' },
+  imagePath: { type: 'string', description: 'Absolute or directory-relative path to an image file to describe; required for vision.run' },
+  question: { type: 'string', description: 'Optional focused question about the image; appended to the configured vision prompt' },
 };
 
 const pickParameters = (names) => Object.fromEntries(
