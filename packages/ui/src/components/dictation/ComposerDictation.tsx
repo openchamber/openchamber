@@ -276,27 +276,46 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         // inside the overlay, so its scrollHeight tracks the composer's own
         // height — feeding that back would creep a few px on every transcript
         // update instead of stepping per wrapped line.
+        const firstReport = !hasReportedHeightRef.current;
+        let followEnd = firstReport
+            || area.scrollHeight - area.scrollTop - area.clientHeight <= 24;
+        const trackScroll = () => {
+            followEnd = area.scrollHeight - area.scrollTop - area.clientHeight <= 24;
+        };
+        area.addEventListener('scroll', trackScroll, { passive: true });
         const reportHeight = () => {
             const style = window.getComputedStyle(area);
             const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-            const firstReport = !hasReportedHeightRef.current;
-            // Follow the newest words only while the reader is already at the
-            // end. A re-report (rotation, rewrap) must not yank a user who
-            // scrolled up back down — reading and copying earlier salvage text
-            // is the recovery path this overlay exists for.
-            const atEnd = area.scrollHeight - area.scrollTop - area.clientHeight <= 24;
+            // Keep the reader's position through rewraps. The first host cap
+            // is committed after this report, so follow again when the area
+            // shrinks, unless the reader has scrolled away from the end.
             hasReportedHeightRef.current = true;
             onContentHeightChangeRef.current?.(content.offsetHeight + padding);
-            if (firstReport || atEnd) {
+            if (followEnd) {
                 area.scrollTop = area.scrollHeight;
             }
         };
         reportHeight();
-        if (!window.ResizeObserver) return;
+        // The parent applies its measured cap in a second layout commit. Follow
+        // once after that commit, before paint, rather than scrolling the old
+        // unbounded area where there was no overflow yet.
+        const initialFollowFrame = firstReport ? window.requestAnimationFrame(() => {
+            area.scrollTop = area.scrollHeight;
+            followEnd = true;
+        }) : null;
+        const cleanupScroll = () => {
+            area.removeEventListener('scroll', trackScroll);
+            if (initialFollowFrame !== null) window.cancelAnimationFrame(initialFollowFrame);
+        };
+        if (!window.ResizeObserver) return cleanupScroll;
         const observer = new window.ResizeObserver(reportHeight);
         // Re-report after rotation or any other width change rewraps the text.
         observer.observe(content);
-        return () => observer.disconnect();
+        observer.observe(area);
+        return () => {
+            observer.disconnect();
+            cleanupScroll();
+        };
     }, [hasSalvageText, partialTranscript]);
     React.useEffect(() => () => {
         if (hasReportedHeightRef.current) {
