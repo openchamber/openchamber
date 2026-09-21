@@ -203,7 +203,10 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
 
     return (
-        <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
+        <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? (open) => {
+            if (open) setIsDropdownOpen(true);
+            else closePicker();
+        } : undefined}>
             <DropdownMenuTrigger asChild>
                 <div
                     className={cn(
