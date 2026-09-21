@@ -10,6 +10,7 @@ import { buildResult } from '../utils/index.js';
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
+import * as commandCode from './command-code.js';
 import * as copilot from './copilot.js';
 import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
@@ -48,6 +49,12 @@ const registry = {
     providerName: codex.providerName,
     isConfigured: codex.isConfigured,
     fetchQuota: codex.fetchQuota
+  },
+  'command-code': {
+    providerId: commandCode.providerId,
+    providerName: commandCode.providerName,
+    isConfigured: commandCode.isConfigured,
+    fetchQuota: commandCode.fetchQuota
   },
   cursor: {
     providerId: cursor.providerId,
@@ -167,6 +174,12 @@ const registry = {
 
 const pendingFetches = new Map();
 
+const normalizeQuotaProviderId = (providerId) => {
+  if (typeof providerId !== 'string') return providerId;
+  return ['command-code', 'commandcode', 'command_code', 'command code'].includes(providerId.trim().toLowerCase())
+    ? 'command-code'
+    : providerId;
+};
 
 export const listConfiguredQuotaProviders = () => {
   const configured = [];
@@ -211,13 +224,14 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
 };
 
 export const fetchQuotaForProvider = (providerId) => {
-  const existing = pendingFetches.get(providerId);
+  const normalizedProviderId = normalizeQuotaProviderId(providerId);
+  const existing = pendingFetches.get(normalizedProviderId);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
-    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
+  const pending = fetchQuotaForProviderUncoalesced(normalizedProviderId).finally(() => {
+    if (pendingFetches.get(normalizedProviderId) === pending) pendingFetches.delete(normalizedProviderId);
   });
-  pendingFetches.set(providerId, pending);
+  pendingFetches.set(normalizedProviderId, pending);
   return pending;
 };
 
