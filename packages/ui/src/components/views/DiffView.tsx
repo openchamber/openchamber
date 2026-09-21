@@ -38,6 +38,7 @@ import type { DiffViewMode } from '@/components/chat/message/types';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { PierreDiffViewer, type ContextExpansionRequest, type DiffHunkActions } from './PierreDiffViewer';
 import { HunkActions, type HunkBusyState, type HunkDiffAction } from './git/HunkActions';
+import { describeChange } from './git/changeStatus';
 import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
@@ -46,7 +47,6 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor } from './diffScrollAnchor';
 import { useI18n } from '@/lib/i18n';
-import type { I18nKey } from '@/lib/i18n/store';
 import { fileDiffFromPatch, isBinaryPatch, extractHunkPatch, haveMatchingPatchVersions, getPatchHunkAnchors } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
@@ -125,38 +125,6 @@ const BinaryDiffPlaceholder = React.memo(() => {
         </div>
     );
 });
-
-type ChangeDescriptor = {
-    code: string;
-    color: string;
-    descriptionKey: I18nKey;
-};
-
-const CHANGE_DESCRIPTORS: Record<string, ChangeDescriptor> = {
-    '?': { code: '?', color: 'var(--status-info)', descriptionKey: 'diffView.change.untracked' },
-    A: { code: 'A', color: 'var(--status-success)', descriptionKey: 'diffView.change.new' },
-    D: { code: 'D', color: 'var(--status-error)', descriptionKey: 'diffView.change.deleted' },
-    R: { code: 'R', color: 'var(--status-info)', descriptionKey: 'diffView.change.renamed' },
-    C: { code: 'C', color: 'var(--status-info)', descriptionKey: 'diffView.change.copied' },
-    M: { code: 'M', color: 'var(--status-warning)', descriptionKey: 'diffView.change.modified' },
-};
-
-const DEFAULT_CHANGE_DESCRIPTOR = CHANGE_DESCRIPTORS.M;
-
-const getChangeSymbol = (file: GitStatus['files'][number]): string => {
-    const indexCode = file.index?.trim();
-    const workingCode = file.working_dir?.trim();
-
-    if (indexCode && indexCode !== '?') return indexCode.charAt(0);
-    if (workingCode) return workingCode.charAt(0);
-
-    return indexCode?.charAt(0) || workingCode?.charAt(0) || 'M';
-};
-
-const describeChange = (file: GitStatus['files'][number]): ChangeDescriptor => {
-    const symbol = getChangeSymbol(file);
-    return CHANGE_DESCRIPTORS[symbol] ?? DEFAULT_CHANGE_DESCRIPTOR;
-};
 
 const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
     const { index, working_dir: workingDir } = file;

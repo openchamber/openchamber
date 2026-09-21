@@ -3578,6 +3578,7 @@ export async function pull(directory, options = {}) {
       branch = String(status.current || '').trim();
     }
 
+    const headBefore = (await git.revparse(['HEAD']).catch(() => '')).trim();
     const result = await git.pull(
       remote || 'origin',
       branch || undefined,
@@ -3587,14 +3588,33 @@ export async function pull(directory, options = {}) {
     return {
       success: true,
       summary: result.summary,
-      files: result.files,
+      files: result.files.length > 0 ? result.files : await listFilesChangedSince(git, headBefore),
       insertions: result.insertions,
       deletions: result.deletions
     };
   } catch (error) {
+    const conflictFiles = await listConflictedFiles(git);
+    if (conflictFiles.length > 0) {
+      return { success: false, conflict: true, conflictFiles };
+    }
+
     console.error('Failed to pull:', error);
     throw error;
   }
+}
+
+/** A rebase pull prints no diffstat, so simple-git reports no files even when HEAD moved. */
+async function listFilesChangedSince(git, headBefore) {
+  if (!headBefore) return [];
+  const headAfter = (await git.revparse(['HEAD']).catch(() => '')).trim();
+  if (!headAfter || headAfter === headBefore) return [];
+  const output = await git.diff(['--name-only', headBefore, headAfter]).catch(() => '');
+  return output.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+async function listConflictedFiles(git) {
+  const status = await git.status().catch(() => null);
+  return status?.conflicted ?? [];
 }
 
 export async function listStashes(directory) {
@@ -5805,33 +5825,23 @@ export async function getConflictDetails(directory) {
     // Get current diff
     const diff = await git.raw(['diff']).catch(() => '');
 
-    // Detect operation type and get head info
+    // simple-git resolves a quiet `rev-parse --verify` miss with empty output instead of rejecting.
     let operation = 'merge';
     let headInfo = '';
 
-    // Check for MERGE_HEAD (merge in progress)
-    const mergeHeadExists = await git
-      .raw(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'])
-      .then(() => true)
-      .catch(() => false);
+    const mergeHead = (await git.raw(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']).catch(() => '')).trim();
 
-    if (mergeHeadExists) {
+    if (mergeHead) {
       operation = 'merge';
-      const mergeHead = await git.raw(['rev-parse', 'MERGE_HEAD']).catch(() => '');
       const mergeMsgPath = await resolveGitInternalPath(repoRoot, git, 'MERGE_MSG').catch(() => '');
       const mergeMsg = mergeMsgPath ? await fsp.readFile(mergeMsgPath, 'utf8').catch(() => '') : '';
-      headInfo = `MERGE_HEAD: ${mergeHead.trim()}\n${mergeMsg}`;
+      headInfo = `MERGE_HEAD: ${mergeHead}\n${mergeMsg}`;
     } else {
-      // Check for REBASE_HEAD (rebase in progress)
-      const rebaseHeadExists = await git
-        .raw(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'])
-        .then(() => true)
-        .catch(() => false);
+      const rebaseHead = (await git.raw(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD']).catch(() => '')).trim();
 
-      if (rebaseHeadExists) {
+      if (rebaseHead) {
         operation = 'rebase';
-        const rebaseHead = await git.raw(['rev-parse', 'REBASE_HEAD']).catch(() => '');
-        headInfo = `REBASE_HEAD: ${rebaseHead.trim()}`;
+        headInfo = `REBASE_HEAD: ${rebaseHead}`;
       }
     }
 
