@@ -99,6 +99,10 @@ export const areSessionListsEquivalent = (left: Session[], right: Session[]): bo
   }
 
   for (let index = 0; index < left.length; index += 1) {
+    if (left[index].model?.id !== right[index].model?.id
+      || left[index].model?.providerID !== right[index].model?.providerID) {
+      return false
+    }
     if (getSessionSignature(left[index]) !== getSessionSignature(right[index])) {
       return false
     }
