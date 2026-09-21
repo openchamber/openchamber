@@ -65,6 +65,11 @@ both settings are `false`.
 - The tool description frames intent: created sessions and scheduled tasks are
   user-facing work the user follows up with, never a channel for the agent to
   delegate parts of its own current task.
+- `git.push`, `git.pull` and `git.fetch` exist so the agent has a transfer that
+  goes through the repository binding instead of a shell `git push` that runs
+  with the person's ambient credentials. Their descriptions say to use them
+  instead of the shell command, because a model that does not know the managed
+  path takes the one it already knows.
 - Optional behavior switches (`worktree`, `goal`, `agent`, `variant`, `wait`)
   state their default and an explicit "only when the user asks" rule so agents
   do not invent worktrees, goal mode, or waits the user never requested.
@@ -80,15 +85,24 @@ both settings are `false`.
   equal to that address: the OS sources a local connection to `<ip>` from
   `<ip>`. A wildcard bind keeps the loopback-only rule, and another machine on
   the network always arrives with its own address.
+  `callback-address.js` owns this rule; the Git shell boundary and the agent
+  credential helper (`lib/git/`) hand their child the same kind of callback and
+  share it.
 - The token is never persisted, logged, returned to the UI, or written into
   the materialized plugin.
 - The plugin adds the callback host to `NO_PROXY`/`no_proxy` inside the managed
   child when it loads. Without that, an `HTTP_PROXY` in the child's environment
   would receive a non-loopback callback, token included, because `fetch` has no
-  per-request way to skip the environment proxy.
+  per-request way to skip the environment proxy. The shell-boundary callback
+  is exempted the same way.
 - Inputs map to a fixed action and parameter allowlist. There is no arbitrary
   CLI, shell, route, or URL forwarding.
 - Session/worktree deletion and project-path registration are not exposed.
+- Git transfers carry no credentials of their own. The binding decides the
+  account and transport, and anything needing a person's decision — an unbound
+  repository, a stale grant, an unacknowledged System Git transport, a branch
+  with no upstream — is refused with what to do instead, never decided for
+  them.
 - An aborted tool request propagates an abort signal into the shared service.
 
 ## Result contract

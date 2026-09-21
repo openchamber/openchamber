@@ -32,7 +32,8 @@ while previewing, so same-length edits in the middle invalidate cached output.
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`
 and the selection owned by `usePullRequestComparison`. PR mode reads GitHub's
-published patch through `/api/walkthrough/pr-diff`. It includes no local edits
+published patch through `/api/walkthrough/pr-diff`, always through the checkout's
+bound GitHub context; without one, PR mode is not offered and reads nothing. It includes no local edits
 or unpushed commits. `lib/diff/pullRequestDiff.ts` splits the response once;
 `useGitComparison` serves file patches from that same snapshot. Snapshot revisions
 invalidate the view's patch cache atomically, including edits with unchanged
@@ -40,12 +41,14 @@ file names and line counts. Opening a file adds no network request.
 
 PR comparisons retain completed snapshots across panel and mode switches.
 `pullRequestSnapshotCache.ts` belongs to the retained view and deduplicates
-in-flight reads. It keeps at most eight completed snapshots with a 32 MiB
+in-flight reads. The bound context is part of each snapshot's identity, so a
+rebind never serves a snapshot read under the previous binding. It keeps at most eight completed snapshots with a 32 MiB
 text target, allowing one oversized PR to remain complete. Eviction drops cache
 ownership only, never mounted content or pending requests.
 
-The HTTP Git adapter emits `gitPushEvents` only after a successful push, with
-the runtime captured at request start. Matching runtime/directory snapshots are
+`gitPushEvents` fires only after a confirmed push, with the runtime captured at
+request start. The HTTP Git adapter emits it, and so do the managed network
+operations the Git panel pushes through: publish, sync, and contributor pushes. Matching runtime/directory snapshots are
 invalidated synchronously. A visible PR comparison refreshes immediately; a
 hidden one waits until activation. Old pre-push reads cannot overwrite the new
 snapshot. Explicit Refresh always reads again. Terminal and external-client

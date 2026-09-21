@@ -37,6 +37,7 @@ const runtimeApis: RuntimeAPIs = {
   get permissions() { return unavailable(); },
   get notifications() { return unavailable(); },
   get tools() { return unavailable(); },
+  get sourceControl() { return unavailable(); },
 };
 const sdk = createOpencodeClient({
   baseUrl: 'http://localhost',

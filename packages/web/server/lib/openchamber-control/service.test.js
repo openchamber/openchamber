@@ -48,6 +48,24 @@ const createService = (overrides = {}) => {
 };
 
 describe('OpenChamber control service', () => {
+  it('routes git actions to managed transfers, scoped to the calling session directory', async () => {
+    const execute = vi.fn(async () => ({ operation: 'push', remote: 'origin', transport: 'managed', state: 'succeeded', completedSteps: [] }));
+    const { service } = createService({ getGitAgentOperations: () => ({ execute }) });
+    await expect(service.execute('git.push', {}, '/repo')).resolves.toEqual({
+      operation: 'push', remote: 'origin', transport: 'managed', state: 'succeeded', completedSteps: [],
+    });
+    expect(execute).toHaveBeenCalledWith('push', { directory: '/repo', remote: '' });
+    await service.execute('git.fetch', { directory: '/other', remote: 'mirror' }, '/repo');
+    expect(execute).toHaveBeenLastCalledWith('fetch', { directory: '/other', remote: 'mirror' });
+  });
+
+  it('says managed transfers are unavailable rather than falling back to an ambient git', async () => {
+    const { service } = createService();
+    await expect(service.execute('git.push', {}, '/repo')).rejects.toThrow(/not available/);
+    const { service: withoutDirectory } = createService({ getGitAgentOperations: () => ({ execute: vi.fn() }) });
+    await expect(withoutDirectory.execute('git.push', {})).rejects.toThrow(/directory is required/);
+  });
+
   it('serves project and model projections without an HTTP or CLI round trip', async () => {
     const { service } = createService();
     await expect(service.execute('projects.list')).resolves.toEqual({

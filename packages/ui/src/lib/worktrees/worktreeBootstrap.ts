@@ -159,6 +159,25 @@ const createFailedStatus = (error: string): GitWorktreeBootstrapStatus => ({
   updatedAt: Date.now(),
 });
 
+const bootstrapFailureDescription = (status: GitWorktreeBootstrapStatus): string => {
+  switch (status.errorCode) {
+    case 'AUTHENTICATION_REQUIRED':
+      return t('worktree.bootstrap.toast.authorizationRequired');
+    case 'GIT_LFS_CLIENT_MISSING':
+      return t('worktree.bootstrap.toast.lfsClientMissing');
+    case 'INVALID_REQUEST':
+      return t('worktree.bootstrap.toast.invalidConfiguration');
+    case 'CANCELLED':
+      return t('worktree.bootstrap.toast.cancelled');
+    case 'TIMEOUT':
+      return t('worktree.bootstrap.toast.timeoutDescription');
+    case 'TRANSPORT_FAILED':
+      return t('worktree.bootstrap.toast.transportFailed');
+    default:
+      return status.error || t('worktree.bootstrap.toast.failedDescription');
+  }
+};
+
 const markBootstrapFailed = (
   directory: string,
   error: string,
@@ -236,7 +255,7 @@ const pollWorktreeBootstrapInBackground = async (
     if (current.status === 'failed') {
       onFailed?.(current);
       toast.error(t('worktree.bootstrap.toast.failed'), {
-        description: current.error || t('worktree.bootstrap.toast.failedDescription'),
+        description: bootstrapFailureDescription(current),
       });
       return;
     }

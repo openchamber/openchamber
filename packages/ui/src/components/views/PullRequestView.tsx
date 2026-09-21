@@ -9,8 +9,6 @@ import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { useGitStatus, useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useShallow } from 'zustand/react/shallow';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
-import { getRuntimeKey } from '@/lib/runtime-switch';
-import type { GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -18,6 +16,7 @@ import { PullRequestSection } from './git/PullRequestSection';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from './git/NestedRepoPicker';
 import { deriveBaseBranch } from './git/baseBranch';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -26,10 +25,6 @@ const normalizePath = (value?: string | null): string =>
 // a remount pick the same PR-status key immediately instead of flashing
 // through the remote-less "checking status" state while remotes reload.
 // Runtime-scoped so a backend switch never serves another runtime's remotes.
-const remotesCacheByDirectory = new Map<string, GitRemote[]>();
-const remoteUrlCacheByDirectory = new Map<string, string | null>();
-const remoteCacheKey = (directory: string): string => `${getRuntimeKey()}::${directory}`;
-
 /**
  * Standalone pull-request surface: resolves the same repository context
  * GitView does (branch, base branch, remotes) from the shared git stores and
@@ -37,7 +32,7 @@ const remoteCacheKey = (directory: string): string => `${getRuntimeKey()}::${dir
  */
 export const PullRequestView: React.FC = () => {
   const { t } = useI18n();
-  const { git } = useRuntimeAPIs();
+  const { git, sourceControl } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
   // When the root is not itself a repository, the pull-request workflow
   // operates on the resolved nested repository instead.
@@ -45,6 +40,8 @@ export const PullRequestView: React.FC = () => {
   const status = useGitStatus(gitDirectory ?? null);
   const branches = useGitBranches(gitDirectory ?? null);
   const isGitRepo = useIsGitRepo(gitDirectory ?? null);
+  // The binding follows the repository actually in view.
+  const binding = useRepositoryBinding(gitDirectory, sourceControl);
   const { ensureAll, ensureNestedRepos, selectNestedRepo } = useGitStore(useShallow((state) => ({
     ensureAll: state.ensureAll,
     ensureNestedRepos: state.ensureNestedRepos,
@@ -132,54 +129,6 @@ export const PullRequestView: React.FC = () => {
     };
   }, [authoritativeProjectRoot, worktreeMetadata?.projectDirectory]);
 
-  const [remotes, setRemotes] = React.useState<GitRemote[]>(() =>
-    (gitDirectory ? remotesCacheByDirectory.get(remoteCacheKey(gitDirectory)) : undefined) ?? []
-  );
-  const [remoteUrl, setRemoteUrl] = React.useState<string | null>(() =>
-    (gitDirectory ? remoteUrlCacheByDirectory.get(remoteCacheKey(gitDirectory)) : undefined) ?? null
-  );
-  React.useEffect(() => {
-    if (!gitDirectory || !git?.getRemotes) {
-      setRemotes([]);
-      return;
-    }
-
-    setRemotes(remotesCacheByDirectory.get(remoteCacheKey(gitDirectory)) ?? []);
-    let cancelled = false;
-    void git.getRemotes(gitDirectory)
-      .then((remoteList) => {
-        if (cancelled) return;
-        remotesCacheByDirectory.set(remoteCacheKey(gitDirectory), remoteList ?? []);
-        setRemotes(remoteList ?? []);
-      })
-      .catch(() => { if (!cancelled) setRemotes(remotesCacheByDirectory.get(remoteCacheKey(gitDirectory)) ?? []); });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [gitDirectory, git]);
-
-  React.useEffect(() => {
-    if (!gitDirectory || !git?.getRemoteUrl) {
-      setRemoteUrl(null);
-      return;
-    }
-
-    setRemoteUrl(remoteUrlCacheByDirectory.get(remoteCacheKey(gitDirectory)) ?? null);
-    let cancelled = false;
-    void git.getRemoteUrl(gitDirectory)
-      .then((url) => {
-        if (cancelled) return;
-        remoteUrlCacheByDirectory.set(remoteCacheKey(gitDirectory), url);
-        setRemoteUrl(url);
-      })
-      .catch(() => { if (!cancelled) setRemoteUrl(remoteUrlCacheByDirectory.get(remoteCacheKey(gitDirectory)) ?? null); });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [gitDirectory, git]);
-
   const localBranches = React.useMemo(() => {
     if (!branches?.all) return [];
     return branches.all
@@ -195,57 +144,30 @@ export const PullRequestView: React.FC = () => {
       .sort();
   }, [branches]);
 
-  const effectiveRemotes = React.useMemo<GitRemote[]>(() => {
-    if (remotes.length > 0) {
-      return remotes;
-    }
-
-    const inferredNames = new Set<string>();
-    const tracking = status?.tracking?.trim();
-    if (tracking && tracking.includes('/')) {
-      inferredNames.add(tracking.split('/')[0]);
-    }
-
-    for (const branchName of remoteBranches) {
-      const slashIndex = branchName.indexOf('/');
-      if (slashIndex > 0) {
-        inferredNames.add(branchName.slice(0, slashIndex));
-      }
-    }
-
-    if (inferredNames.size === 0 && remoteUrl) {
-      inferredNames.add('origin');
-    }
-
-    return Array.from(inferredNames).map((name) => ({
-      name,
-      fetchUrl: remoteUrl ?? '',
-      pushUrl: remoteUrl ?? '',
-    }));
-  }, [remotes, remoteBranches, remoteUrl, status?.tracking]);
-
   const currentBranch = status?.current ?? null;
 
   // A pull request opened against a branch that does not exist is worse than a
   // broken walkthrough, so this surface reads the repository's default branch
   // too rather than guessing at main/master/develop.
   const defaultBranch = React.useMemo(() => {
-    const trackingRemote = status?.tracking?.trim().split('/')[0];
-    return (trackingRemote && branches?.defaultBranches?.[trackingRemote])
-      ?? branches?.defaultBranches?.origin;
-  }, [branches, status?.tracking]);
+    const primaryRemote = binding.contexts[0]?.primaryRemote;
+    return primaryRemote ? branches?.defaultBranches?.[primaryRemote] : undefined;
+  }, [binding.contexts, branches]);
 
   const baseBranch = React.useMemo(() => deriveBaseBranch({
-    remoteNames: new Set(effectiveRemotes.map((remote) => remote.name)),
+    remoteNames: new Set(binding.contexts[0]?.primaryRemote ? [binding.contexts[0].primaryRemote] : []),
+    knownRemoteNames: new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
     localBranches,
     worktreeCreatedFromBranch: worktreeMetadata?.createdFromBranch,
     rootBranchHint,
     defaultBranch,
     headBranch: currentBranch,
+    fallbackToConventional: false,
   }), [
     currentBranch,
     defaultBranch,
-    effectiveRemotes,
+    binding.contexts,
+    binding.read,
     localBranches,
     rootBranchHint,
     worktreeMetadata?.createdFromBranch,
@@ -318,7 +240,6 @@ export const PullRequestView: React.FC = () => {
           branch={currentBranch}
           baseBranch={baseBranch}
           trackingBranch={status?.tracking ?? undefined}
-          remotes={remotes}
           remoteBranches={remoteBranches}
         />
       </ScrollableOverlay>

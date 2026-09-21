@@ -40,6 +40,7 @@ const runtimeApis: RuntimeAPIs = {
     runtime: { platform: 'web', isDesktop: false, isVSCode: false },
     get terminal() { return unavailable(); },
     get git() { return unavailable(); },
+    get sourceControl() { return unavailable(); },
     get files() { return unavailable(); },
     get settings() { return unavailable(); },
     get permissions() { return unavailable(); },

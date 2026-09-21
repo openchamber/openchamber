@@ -2,75 +2,85 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import type { GitHubAuthStatus } from '@/lib/api/types';
-import { useDeviceInfo } from '@/lib/device';
-import { cn } from '@/lib/utils';
+import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import type { SourceControlDeviceFlowStart } from '@/lib/api/types';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { Icon } from "@/components/icon/Icon";
-import { SettingsSection, SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
+import { SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
+import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { SourceControlAccountList } from './SourceControlAccountList';
+import { DeviceFlowCode } from './DeviceFlowCode';
 
-type GitHubUser = {
-  login: string;
-  id?: number;
-  avatarUrl?: string;
-  name?: string;
-  email?: string;
-};
-
-type DeviceFlowStartResponse = {
-  deviceCode: string;
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete?: string;
-  expiresIn: number;
-  interval: number;
-  scope?: string;
-};
-
-type DeviceFlowCompleteResponse =
-  | { connected: true; user: GitHubUser; scope?: string }
-  | { connected: false; status?: string; error?: string };
-
+/**
+ * Body of the GitHub card in Settings → Integrations. The card row already
+ * names the provider and shows the connection pill, so this renders only the
+ * accounts, the sign-in flow, and the CLI fallback.
+ */
 type GitHubSettingsProps = {
-  /** Rendered inside the Integrations card: no section chrome of its own. */
+  /** The Integrations card is the only host today; the flag is its contract and changes nothing here. */
   embedded?: boolean;
 };
 
-export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false }) => {
+export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
-  const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
-  const status = useGitHubAuthStore((state) => state.status);
-  const isLoading = useGitHubAuthStore((state) => state.isLoading);
-  const hasChecked = useGitHubAuthStore((state) => state.hasChecked);
-  const refreshStatus = useGitHubAuthStore((state) => state.refreshStatus);
-  const setStatus = useGitHubAuthStore((state) => state.setStatus);
+  const sourceControl = getRegisteredRuntimeAPIs()?.sourceControl;
+  const authKey = getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY);
+  const authEntry = useSourceControlAuthStore((state) => state.entries[authKey]);
+  const status = authEntry?.status ?? null;
+  const isLoading = authEntry?.isLoading ?? false;
+  const hasChecked = authEntry?.hasChecked ?? false;
+  const refreshStatus = useSourceControlAuthStore((state) => state.refreshStatus);
+  const refreshInstances = useSourceControlAuthStore((state) => state.refreshInstances);
 
   const openExternal = React.useCallback(async (url: string) => {
     await openExternalUrl(url);
   }, []);
 
   const [isBusy, setIsBusy] = React.useState(false);
-  const [flow, setFlow] = React.useState<DeviceFlowStartResponse | null>(null);
+  const [flow, setFlow] = React.useState<SourceControlDeviceFlowStart | null>(null);
   const [pollIntervalMs, setPollIntervalMs] = React.useState<number | null>(null);
+  const [pollAttempt, setPollAttempt] = React.useState(0);
   const pollTimerRef = React.useRef<number | null>(null);
+  const flowRuntimeKeyRef = React.useRef('');
+  const runtimeGenerationRef = React.useRef(0);
+  const captureRuntime = React.useCallback(() => {
+    const runtimeKey = getRuntimeKey();
+    const generation = runtimeGenerationRef.current;
+    return () => generation === runtimeGenerationRef.current && runtimeKey === getRuntimeKey();
+  }, []);
 
   const stopPolling = React.useCallback(() => {
     if (pollTimerRef.current != null) {
-      window.clearInterval(pollTimerRef.current);
+      window.clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
     setPollIntervalMs(null);
   }, []);
 
+  const stopFlow = React.useCallback(() => {
+    flowRuntimeKeyRef.current = '';
+    setFlow(null);
+    stopPolling();
+  }, [stopPolling]);
+
+  React.useEffect(() => {
+    const unsubscribe = subscribeRuntimeEndpointWillChange(() => {
+      runtimeGenerationRef.current += 1;
+      setIsBusy(false);
+      stopFlow();
+    });
+    return () => {
+      runtimeGenerationRef.current += 1;
+      unsubscribe();
+    };
+  }, [stopFlow]);
+
   React.useEffect(() => {
     (async () => {
       try {
-        if (!hasChecked) {
-          await refreshStatus(runtimeGitHub);
+        if (!hasChecked && sourceControl) {
+          await refreshStatus(sourceControl, GITHUB_SOURCE_CONTROL_IDENTITY);
         }
       } catch (error) {
         console.warn('Failed to load GitHub auth status:', error);
@@ -79,461 +89,237 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false
     return () => {
       stopPolling();
     };
-  }, [hasChecked, refreshStatus, runtimeGitHub, stopPolling]);
+  }, [hasChecked, refreshStatus, sourceControl, stopPolling]);
 
   const startConnect = React.useCallback(async () => {
+    const isCurrentRuntime = captureRuntime();
     setIsBusy(true);
     try {
-      const payload = runtimeGitHub
-        ? await runtimeGitHub.authStart()
-        : await (async () => {
-            const response = await runtimeFetch('/api/github/auth/start', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-              },
-              body: JSON.stringify({}),
-            });
-            const body = (await response.json().catch(() => null)) as DeviceFlowStartResponse | { error?: string } | null;
-            if (!response.ok || !body || !('deviceCode' in body)) {
-              throw new Error((body as { error?: string } | null)?.error || response.statusText);
-            }
-            return body;
-          })();
+      if (!sourceControl) return;
+      const payload = await sourceControl.authStart(GITHUB_SOURCE_CONTROL_IDENTITY);
+      if (!isCurrentRuntime()) return;
 
+      flowRuntimeKeyRef.current = getRuntimeKey();
       setFlow(payload);
+      setPollAttempt(0);
       setPollIntervalMs(Math.max(1, payload.interval) * 1000);
 
       const url = payload.verificationUriComplete || payload.verificationUri;
       void openExternal(url);
     } catch (error) {
-      console.error('Failed to start GitHub connect:', error);
-      toast.error(t('settings.github.page.toast.startConnectFailed'));
+      if (isCurrentRuntime()) {
+        console.error('Failed to start GitHub connect:', error);
+        toast.error(t('settings.github.page.toast.startConnectFailed'));
+      }
     } finally {
-      setIsBusy(false);
+      if (isCurrentRuntime()) setIsBusy(false);
     }
-  }, [openExternal, runtimeGitHub, t]);
-
-  const pollOnce = React.useCallback(async (deviceCode: string) => {
-    if (runtimeGitHub) {
-      return runtimeGitHub.authComplete(deviceCode) as Promise<DeviceFlowCompleteResponse>;
-    }
-
-    const response = await runtimeFetch('/api/github/auth/complete', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({ deviceCode }),
-    });
-
-    const payload = (await response.json().catch(() => null)) as DeviceFlowCompleteResponse | { error?: string } | null;
-    if (!response.ok || !payload) {
-      throw new Error((payload as { error?: string } | null)?.error || response.statusText);
-    }
-    return payload as DeviceFlowCompleteResponse;
-  }, [runtimeGitHub]);
+  }, [captureRuntime, openExternal, sourceControl, t]);
 
   React.useEffect(() => {
-    if (!flow?.deviceCode || !pollIntervalMs) {
+    if (!flow?.flowId || !pollIntervalMs) {
       return;
     }
     if (pollTimerRef.current != null) {
       return;
     }
 
-    pollTimerRef.current = window.setInterval(() => {
-      void (async () => {
-        try {
-          const result = await pollOnce(flow.deviceCode);
-            if (result.connected) {
-              toast.success(t('settings.github.page.toast.connected'));
-              setFlow(null);
-              stopPolling();
-              await refreshStatus(runtimeGitHub, { force: true });
-              return;
-            }
+    const poll = async () => {
+      const isCurrentRuntime = captureRuntime();
+      if (flowRuntimeKeyRef.current !== getRuntimeKey()) {
+        stopFlow();
+        return;
+      }
 
-          if (result.status === 'slow_down') {
-            setPollIntervalMs((prev) => (prev ? prev + 5000 : 5000));
-          }
-
-          if (result.status === 'expired_token' || result.status === 'access_denied') {
-            toast.error(result.error || t('settings.github.page.toast.authorizationFailed'));
-            setFlow(null);
-            stopPolling();
-          }
-        } catch (error) {
-          console.warn('GitHub polling failed:', error);
+      try {
+        if (!sourceControl) throw new Error('Source control runtime API unavailable');
+        const result = await sourceControl.authComplete(GITHUB_SOURCE_CONTROL_IDENTITY, flow.flowId);
+        if (!isCurrentRuntime() || flowRuntimeKeyRef.current !== getRuntimeKey()) return;
+        if (result.status === 'connected') {
+          stopFlow();
+          await refreshStatus(sourceControl, GITHUB_SOURCE_CONTROL_IDENTITY, { force: true });
+          if (!isCurrentRuntime()) return;
+          await refreshInstances(sourceControl, { force: true });
+          if (!isCurrentRuntime()) return;
+          toast.success(t('settings.github.page.toast.connected'));
+          return;
         }
-      })();
+
+        if (result.status === 'pending' && result.slowDown) {
+          setPollIntervalMs((prev) => (prev ? prev + 5000 : 5000));
+        }
+        if (result.status === 'pending') setPollAttempt((attempt) => attempt + 1);
+
+        if (result.status === 'error') {
+          toast.error(result.message || t('settings.github.page.toast.authorizationFailed'));
+          stopFlow();
+        }
+      } catch (error) {
+        if (isCurrentRuntime() && flowRuntimeKeyRef.current === getRuntimeKey()) {
+          console.warn('GitHub polling failed:', error);
+          setPollAttempt((attempt) => attempt + 1);
+        }
+      }
+    };
+
+    pollTimerRef.current = window.setTimeout(() => {
+      void poll();
     }, pollIntervalMs);
 
     return () => {
       if (pollTimerRef.current != null) {
-        window.clearInterval(pollTimerRef.current);
+        window.clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
       }
     };
-  }, [flow, pollIntervalMs, pollOnce, refreshStatus, runtimeGitHub, stopPolling, t]);
+  }, [captureRuntime, flow, pollAttempt, pollIntervalMs, refreshInstances, refreshStatus, sourceControl, stopFlow, t]);
 
   const toggleGhCli = React.useCallback(async (disabled: boolean) => {
+    const isCurrentRuntime = captureRuntime();
     setIsBusy(true);
     try {
-      if (runtimeGitHub) {
-        await runtimeGitHub.authSetGhCliDisabled(disabled);
-      } else {
-        const response = await runtimeFetch('/api/github/auth/gh-cli', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ disabled }),
-        });
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        if (!response.ok) throw new Error(body?.error || response.statusText);
-      }
+      if (!sourceControl) return;
+      await sourceControl.authSetCliDisabled(GITHUB_SOURCE_CONTROL_IDENTITY, disabled);
+      if (!isCurrentRuntime()) return;
+      await refreshStatus(sourceControl, GITHUB_SOURCE_CONTROL_IDENTITY, { force: true });
+      if (!isCurrentRuntime()) return;
       toast.success(disabled ? t('settings.github.page.toast.ghCliDisabled') : t('settings.github.page.toast.ghCliEnabled'));
-      await refreshStatus(runtimeGitHub, { force: true });
     } catch (error) {
-      console.error('Failed to update gh CLI setting:', error);
-      toast.error(t('settings.github.page.toast.ghCliUpdateFailed'));
-    } finally {
-      setIsBusy(false);
-    }
-  }, [refreshStatus, runtimeGitHub, t]);
-
-  const disconnect = React.useCallback(async () => {
-    setIsBusy(true);
-    try {
-      stopPolling();
-      setFlow(null);
-      if (runtimeGitHub) {
-        await runtimeGitHub.authDisconnect();
-      } else {
-        const response = await runtimeFetch('/api/github/auth', {
-          method: 'DELETE',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
-          throw new Error(response.statusText);
-        }
+      if (isCurrentRuntime()) {
+        console.error('Failed to update gh CLI setting:', error);
+        toast.error(t('settings.github.page.toast.ghCliUpdateFailed'));
       }
-      toast.success(t('settings.github.page.toast.disconnected'));
-      await refreshStatus(runtimeGitHub, { force: true });
-    } catch (error) {
-      console.error('Failed to disconnect GitHub:', error);
-      toast.error(t('settings.github.page.toast.disconnectFailed'));
     } finally {
-      setIsBusy(false);
+      if (isCurrentRuntime()) setIsBusy(false);
     }
-  }, [refreshStatus, runtimeGitHub, stopPolling, t]);
+  }, [captureRuntime, refreshStatus, sourceControl, t]);
 
-  const activateAccount = React.useCallback(async (accountId: string) => {
-    if (!accountId) return;
+  const removeAccount = React.useCallback(async (accountId: string) => {
+    const isCurrentRuntime = captureRuntime();
     setIsBusy(true);
     try {
-      const payload = runtimeGitHub
-        ? await runtimeGitHub.authActivate(accountId)
-        : await (async () => {
-            const response = await runtimeFetch('/api/github/auth/activate', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-              },
-              body: JSON.stringify({ accountId }),
-            });
-            const body = (await response.json().catch(() => null)) as GitHubAuthStatus | { error?: string } | null;
-            if (!response.ok || !body) {
-              throw new Error((body as { error?: string } | null)?.error || response.statusText);
-            }
-            return body as GitHubAuthStatus;
-          })();
-
-      setStatus(payload);
-      toast.success(t('settings.github.page.toast.accountSwitched'));
+      stopFlow();
+      if (!sourceControl) return;
+      await sourceControl.authDisconnect(GITHUB_SOURCE_CONTROL_IDENTITY, accountId);
+      if (!isCurrentRuntime()) return;
+      await refreshStatus(sourceControl, GITHUB_SOURCE_CONTROL_IDENTITY, { force: true });
+      if (!isCurrentRuntime()) return;
+      await refreshInstances(sourceControl, { force: true });
+      if (!isCurrentRuntime()) return;
+      toast.success(t('settings.github.page.toast.disconnected'));
     } catch (error) {
-      console.error('Failed to switch GitHub account:', error);
-      toast.error(t('settings.github.page.toast.accountSwitchFailed'));
+      if (isCurrentRuntime()) {
+        console.error('Failed to remove GitHub account:', error);
+        toast.error(t('settings.github.page.toast.disconnectFailed'));
+      }
     } finally {
-      setIsBusy(false);
+      if (isCurrentRuntime()) setIsBusy(false);
     }
-  }, [runtimeGitHub, setStatus, t]);
+  }, [captureRuntime, refreshInstances, refreshStatus, sourceControl, stopFlow, t]);
 
   if (isLoading && !hasChecked) {
     return null;
   }
 
-  const connected = Boolean(status?.connected);
-  const user = status?.user;
   const accounts = status?.accounts ?? [];
-  const otherAccounts = accounts.filter((account) => !account.current);
-  const ghCli = status?.ghCli ?? null;
-  const activeAccountSourceLabel = ghCli?.active
-    ? t('settings.github.page.accountSource.cli')
-    : t('settings.github.page.accountSource.oauth');
+  const ghCli = status?.cli ?? null;
+  const refreshError = status?.status === 'unreachable' || status?.status === 'temporarily-unavailable'
+    ? status.message || t('sessionAuth.error.networkRetry')
+    : null;
+  const showCliFallback = Boolean(ghCli?.available && !ghCli.active && (!ghCli.user || ghCli.disabled));
 
-  const accountSection = (
-    <>
-      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        {connected ? (
-          <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
-            <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
-              {user?.avatarUrl ? (
-                <img
-                  src={user.avatarUrl}
-                  alt={user.login ? t('settings.github.page.avatarAlt.withLogin', { login: user.login }) : t('settings.github.page.avatarAlt.fallback')}
-                  className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]" />
-              )}
-
-              <div className="min-w-0 flex-1">
-                <div className="typography-ui-label text-foreground">
-                  {user?.name?.trim() || user?.login || 'GitHub'}
-                </div>
-                <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
-                  <Icon name="github-fill" className="h-3.5 w-3.5 shrink-0" />
-                  <span className="font-mono">{user?.login || t('settings.github.page.label.unknownUser')}</span>
-                  {user?.email && <span className="opacity-50">•</span>}
-                  {user?.email && <span>{user.email}</span>}
-                  <span className="opacity-50">•</span>
-                  <span>{activeAccountSourceLabel}</span>
-                </div>
-                {status?.scope && (
-                  <div className="typography-micro text-muted-foreground/70 mt-0.5">
-                    {t('settings.github.page.label.scopes', { value: status.scope })}
-                  </div>
-                )}
-                {ghCli?.active && (
-                  <div className="typography-micro text-muted-foreground/70 mt-0.5">
-                    {t('settings.github.page.ghCli.activeDescription')}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {ghCli?.active ? (
-              <Button size="sm" variant="outline" onClick={() => toggleGhCli(true)} disabled={isBusy} className={cn(isMobile ? "w-full" : undefined)}>
-                {t('settings.github.page.ghCli.actions.disable')}
-              </Button>
-            ) : (
-              <Button size="sm" variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
-                {t('settings.github.page.actions.disconnect')}
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-4 px-4 py-4">
-            <div className="flex min-w-0 flex-col">
-              <span className="typography-ui-label text-foreground">{t('settings.github.page.status.notConnected')}</span>
-            </div>
-            <Button size="sm" variant="default" onClick={startConnect} disabled={isBusy}>
-              {t('settings.github.page.actions.connect')}
-            </Button>
-          </div>
-        )}
-
-        {otherAccounts.length > 0 && (
-          <div className="mt-2 border-t border-[var(--surface-subtle)] pt-2 px-2 pb-1">
-            <div className="typography-micro text-muted-foreground mb-2 px-1">
-              {t('settings.github.page.label.otherAccounts')}
-            </div>
-            <div className="space-y-1">
-              {otherAccounts.map((account) => {
-                const accountUser = account.user;
-                const sourceLabel = account.source === 'gh-cli'
-                  ? t('settings.github.page.accountSource.cli')
-                  : t('settings.github.page.accountSource.oauth');
-                return (
-                  <div
-                    key={account.id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-[var(--surface-subtle)] bg-[var(--surface-muted)] px-3 py-2"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      {accountUser?.avatarUrl ? (
-                        <img
-                          src={accountUser.avatarUrl}
-                          alt={accountUser.login ? t('settings.github.page.avatarAlt.withLogin', { login: accountUser.login }) : t('settings.github.page.avatarAlt.fallback')}
-                          className="h-6 w-6 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-                          <Icon name="github-fill" className="h-3 w-3 text-muted-foreground" />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex flex-col">
-                        <span className="typography-ui-label text-foreground truncate">
-                          {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
-                        </span>
-                        {accountUser?.login && (
-                          <span className="typography-micro text-muted-foreground truncate">
-                            <span className="font-mono">{accountUser.login}</span>
-                            <span className="mx-1 opacity-50">·</span>
-                            <span>{sourceLabel}</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <Button size="sm"
-                      variant="ghost"
-                      onClick={() => activateAccount(account.id)}
-                      disabled={isBusy}
-                    >
-                      {t('settings.github.page.actions.switchTo')}
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-      </div>
-
-      {connected && (
-        <div className="mt-2 px-2 pb-2">
-          <Button size="sm"
+  return (
+    <div className="space-y-3" data-settings-item="git.github-account">
+      {refreshError && (
+        <SettingsFieldRow label={t('sessionAuth.error.networkTitle')} description={refreshError}>
+          <Button
+            size="sm"
             variant="outline"
+            disabled={isBusy || isLoading || !sourceControl}
+            onClick={() => {
+              if (sourceControl) void refreshStatus(sourceControl, GITHUB_SOURCE_CONTROL_IDENTITY, { force: true });
+            }}
+          >
+            {t('sessionAuth.error.retry')}
+          </Button>
+        </SettingsFieldRow>
+      )}
+      {accounts.length === 0 ? (
+        !refreshError && <p className="typography-meta text-muted-foreground">{t('settings.github.page.status.notConnected')}</p>
+      ) : (
+        <SourceControlAccountList
+          accounts={accounts}
+          avatarAlt={(username) => t('settings.github.page.avatarAlt.withLogin', { login: username })}
+          currentLabel={t('settings.sourceControl.accounts.inUse')}
+          sourceLabel={(account) => account.source === 'cli'
+            ? t('settings.github.page.accountSource.cli')
+            : t('settings.github.page.accountSource.oauth')}
+          statusLabel={(account) => account.status === 'valid'
+            ? t('settings.sourceControl.accounts.available')
+            : t('settings.sourceControl.accounts.needsAuthentication')}
+          renderActions={(account) => (
+            <>
+              {account.status === 'invalid' ? (
+                <Button size="sm" variant="outline" onClick={startConnect} disabled={isBusy}>
+                  {t('settings.sourceControl.actions.reauthenticate')}
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => account.source === 'cli' ? toggleGhCli(true) : removeAccount(account.id)}
+                disabled={isBusy}
+              >
+                {account.source === 'cli' ? t('settings.github.page.ghCli.actions.disable') : t('settings.sourceControl.actions.remove')}
+              </Button>
+            </>
+          )}
+        />
+      )}
+
+      {flow ? (
+        <DeviceFlowCode
+          code={flow.userCode}
+          description={t('settings.github.page.flow.description')}
+          openLabel={t('settings.github.page.actions.openGithub')}
+          onOpen={() => void openExternal(flow.verificationUriComplete || flow.verificationUri)}
+          onCancel={stopFlow}
+          disabled={isBusy}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            data-settings-item="git.github-connect"
+            size="sm"
+            variant={accounts.length > 0 ? 'outline' : 'default'}
             onClick={startConnect}
             disabled={isBusy}
-            className={cn(isMobile ? 'w-full' : undefined)}
           >
-            {t('settings.github.page.actions.addAccount')}
+            {accounts.length > 0 ? t('settings.github.page.actions.addAccount') : t('settings.github.page.actions.connect')}
           </Button>
         </div>
       )}
 
-      {flow && (
-        <div className="mt-4 rounded-lg bg-[var(--surface-elevated)]/70 p-4 border border-[var(--interactive-border)]">
-          <div className="space-y-1">
-            <SettingsGroupTitle>{t('settings.github.page.flow.title')}</SettingsGroupTitle>
-            <p className="typography-meta text-muted-foreground">
-              {t('settings.github.page.flow.description')}
-            </p>
-          </div>
-          <div className="flex items-center justify-between gap-3 mt-4">
-            <div className="font-mono text-xl tracking-widest text-foreground bg-[var(--surface-muted)] px-3 py-1.5 rounded-md border border-[var(--interactive-border)]">{flow.userCode}</div>
-            <Button size="sm" asChild>
-              <a
-                href={flow.verificationUriComplete || flow.verificationUri}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t('settings.github.page.actions.openGithub')}
-              </a>
-            </Button>
-          </div>
-          <div className="mt-4 flex items-center justify-between">
-            <span className="typography-micro text-muted-foreground animate-pulse">
-              {t('settings.github.page.flow.waiting')}
-            </span>
-            <Button size="sm" variant="ghost" disabled={isBusy} onClick={() => {
-              stopPolling();
-              setFlow(null);
-            }}>
-              {t('settings.common.actions.cancel')}
-            </Button>
-          </div>
-        </div>
-      )}
-
-    </>
-  );
-
-  const ghCliSection = ghCli?.available && !ghCli?.active && (!ghCli.user || ghCli.disabled)
-    ? (
-      <>
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
-            <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
-              <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
-                {ghCli.user?.avatarUrl ? (
-                  <img
-                    src={ghCli.user.avatarUrl}
-                    alt={ghCli.user.login ? t('settings.github.page.avatarAlt.withLogin', { login: ghCli.user.login }) : t('settings.github.page.avatarAlt.fallback')}
-                    className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-                    <Icon name="github-fill" className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  {!ghCli.disabled && ghCli.user && (
-                    <div className="typography-ui-label text-foreground truncate">
-                      {ghCli.user.name?.trim() || ghCli.user.login || 'GitHub'}
-                    </div>
-                  )}
-                  {!ghCli.disabled && ghCli.user?.login && (
-                    <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
-                      <Icon name="github-fill" className="h-3.5 w-3.5 shrink-0" />
-                      <span className="font-mono">{ghCli.user.login}</span>
-                      {ghCli.user.email && <span className="opacity-50">•</span>}
-                      {ghCli.user.email && <span>{ghCli.user.email}</span>}
-                    </div>
-                  )}
-                  <div className={cn("typography-meta text-muted-foreground", ghCli.disabled ? "opacity-60" : undefined)}>
-                    {ghCli.disabled
-                      ? t('settings.github.page.ghCli.disabledDescription')
-                      : t('settings.github.page.ghCli.fallbackDescription')}
-                  </div>
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => toggleGhCli(!ghCli.disabled)}
-                disabled={isBusy}
-                className={cn(isMobile ? "w-full" : undefined)}
-              >
-                {ghCli.disabled
-                  ? t('settings.github.page.ghCli.actions.enable')
-                  : t('settings.github.page.ghCli.actions.disable')}
-              </Button>
-            </div>
-          </div>
-      </>
-    )
-    : null;
-
-  if (embedded) {
-    return (
-      <div className="space-y-4">
-        {accountSection}
-        {ghCliSection ? (
-          <div className="space-y-2">
-            <SettingsGroupTitle>{t('settings.github.page.ghCli.title')}</SettingsGroupTitle>
-            {ghCliSection}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <SettingsSection
-        title={t('settings.github.page.oauth.title')}
-        divider={false}
-        settingsItem="git.github-account"
-        info={t('settings.github.page.tooltip.connectAccount')}
-      >
-        {accountSection}
-      </SettingsSection>
-
-      {ghCliSection ? (
-        <SettingsSection title={t('settings.github.page.ghCli.title')}>
-          {ghCliSection}
-        </SettingsSection>
+      {showCliFallback && ghCli ? (
+        <SettingsFieldRow
+          label={t('settings.github.page.ghCli.title')}
+          description={ghCli.disabled
+            ? t('settings.github.page.ghCli.disabledDescription')
+            : t('settings.github.page.ghCli.fallbackDescription')}
+          className="border-t border-[var(--surface-subtle)] pt-3"
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => toggleGhCli(!ghCli.disabled)}
+            disabled={isBusy}
+          >
+            {ghCli.disabled
+              ? t('settings.github.page.ghCli.actions.enable')
+              : t('settings.github.page.ghCli.actions.disable')}
+          </Button>
+        </SettingsFieldRow>
       ) : null}
-    </>
+    </div>
   );
 };

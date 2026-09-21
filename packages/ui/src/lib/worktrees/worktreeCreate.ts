@@ -95,6 +95,7 @@ const withWorktreeUpstreamDefaults = async (
   args: CreateWorktreeArgs,
   options?: { resolvedRootTrackingRemote?: string | null }
 ): Promise<CreateWorktreeArgs> => {
+  if (args.changeRequestSource) return args;
   const localBranch = resolveLocalBranchName(args);
   const resolvedRemote = options?.resolvedRootTrackingRemote;
   const defaults = resolvedRemote === undefined

@@ -4,7 +4,8 @@ import { Icon } from '@/components/icon/Icon';
 import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
+import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 
 /**
  * The GitHub row of Settings → Integrations → Built-in integrations: a
@@ -14,16 +15,25 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
  */
 export const GitHubIntegration: React.FC = () => {
   const { t } = useI18n();
-  const status = useGitHubAuthStore((state) => state.status);
-  const isLoading = useGitHubAuthStore((state) => state.isLoading);
-  const hasChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const entry = useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY);
+  const status = entry?.status ?? null;
+  const isLoading = entry?.isLoading ?? false;
+  const hasChecked = entry?.hasChecked ?? false;
   const [open, setOpen] = React.useState(false);
 
   const connected = status?.connected === true;
+  const accounts = status?.accounts ?? [];
+  // One account reads best as its own name. Several would make a single name
+  // look like the only one, so the collapsed row reports how many there are
+  // and the expanded body names them.
+  const currentName = (accounts.find((account) => account.current) ?? accounts[0])?.user.username.trim()
+    ?? (status?.status === 'connected' ? status.user.username.trim() : '');
   const statusLabel = isLoading && !hasChecked
     ? t('common.loading')
     : connected
-      ? (status?.user?.login?.trim() || t('settings.github.page.status.active'))
+      ? accounts.length > 1
+        ? t('settings.sourceControl.accounts.connectedCount', { count: accounts.length })
+        : currentName || t('settings.github.page.status.active')
       : t('settings.integrations.github.status.notConnected');
   const statusClassName = connected
     ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'

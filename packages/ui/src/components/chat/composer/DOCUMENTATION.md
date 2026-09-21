@@ -216,7 +216,7 @@ and the send path reading the same grammar.
   context drafts and linked references into OpenCode's one-primary-plus-parts
   shape. The oldest queued message becomes primary. **Every attached context
   item (inline comments, terminal selections, browser annotations, PR context,
-  linked issue/PR) becomes its own synthetic text part carrying structured
+  linked issue/change request) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
   The same module's `buildComposerContext` captures that context when a message

@@ -79,6 +79,8 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { getToolDescriptionFallback } from './toolRenderUtils';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
+import ShellBoundaryIndicator from './ShellBoundaryIndicator';
+import { getShellOperationBoundary, shellCommandInputSchema } from './shellOperationBoundary';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1774,6 +1776,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    const parsedShellInput = shellCommandInputSchema.safeParse(input);
+    const shellCommand = parsedShellInput.success ? parsedShellInput.data.command?.trim() ?? null : null;
+    const shellOperation = getShellOperationBoundary(normalizedPartTool, 'agent', shellCommand);
     // The registry sees the full name OpenCode reported (`mcp.jira.search`);
     // the built-in switches below keep the normalized one.
     const presentation = useGuestToolPresentation(part.tool);
@@ -2250,6 +2255,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 >
                                     {displayName}
                                 </MinDurationShineText>
+                                {shellOperation ? <ShellBoundaryIndicator operation={shellOperation} /> : null}
                                 {quickOpenTarget ? (
                                     <button
                                         type="button"

@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { createCallbackAddress } from './callback-address.js';
 import { appendManagedPlugin } from '../opencode/managed-plugin-config.js';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
@@ -129,26 +130,6 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
   ...(Number.isInteger(exitCode) ? { exitCode } : {}),
 });
 
-// Node reports an IPv4 peer on a dual-stack socket as `::ffff:<ipv4>`.
-const normalizeAddress = (value) => {
-  const address = (asNonEmptyString(value) || '').toLowerCase();
-  return address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
-};
-
-const isLoopbackAddress = (value) => {
-  const address = normalizeAddress(value);
-  return address === '127.0.0.1' || address === '::1';
-};
-
-const WILDCARD_ADDRESSES = new Set(['0.0.0.0', '::']);
-
-// A wildcard listener answers on loopback. A listener bound to one concrete
-// address answers only there, so that address is the only way back in.
-const resolveConcreteBoundAddress = (value) => {
-  const address = normalizeAddress(value);
-  return address && !WILDCARD_ADDRESSES.has(address) ? address : null;
-};
-
 /**
  * One template, one entry per enabled capability.
  *
@@ -233,6 +214,40 @@ const createToolEntry = ({ name, description, definitions, parameters }) => Stri
     },
 `;
 
+/**
+ * Raw Git transfers in the agent's shell, refused where a managed action exists.
+ *
+ * `tool.execute.before` can only deny, so this asks OpenChamber and throws with
+ * what to use instead. The name test is deliberately coarse: it decides only
+ * whether to ask, and OpenChamber decides whether to refuse. Anything that goes
+ * wrong here allows the command, because a guard that fails closed on its own
+ * plumbing would strand an agent that has done nothing wrong.
+ */
+const SHELL_BOUNDARY_HOOK_SOURCE = `const SHELL_TOOLS = new Set(["bash", "shell", "cmd", "terminal", "shell_command"])
+const MENTIONS_GIT = /(^|[^\\w-])(git|gh|glab|hub)([^\\w-]|$)/
+
+const shellBoundaryGuard = async (input, output) => {
+  if (!SHELL_TOOLS.has(String(input?.tool ?? "").toLowerCase())) return
+  const command = output?.args?.command
+  if (typeof command !== "string" || !MENTIONS_GIT.test(command)) return
+  const endpoint = process.env.OPENCHAMBER_SHELL_BOUNDARY_URL
+  const token = process.env.OPENCHAMBER_SHELL_BOUNDARY_TOKEN
+  if (!endpoint || !token) return
+  let decision = null
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ command, directory: input?.directory ?? process.cwd() }),
+    })
+    if (response.ok) decision = await response.json()
+  } catch {
+    return
+  }
+  if (decision?.blocked === true) throw new Error(decision.reason)
+}
+`;
+
 const createPluginSource = ({ includeControl, includeWeb, includeMemory }) => {
   const entries = [];
   if (includeControl) {
@@ -260,26 +275,29 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory }) => {
     }));
   }
 
-  // The callback carries the per-child token over plain HTTP. With a proxy in
-  // the child's environment, fetch would hand a non-loopback callback, token
+  // The callbacks carry per-child tokens over plain HTTP. With a proxy in the
+  // child's environment, fetch would hand a non-loopback callback, token
   // included, to that proxy, and no per-request option turns that off. The
   // exemption is added inside the child because only there is the final
   // NO_PROXY, merged from the shell and server environments, visible.
-  return `const exemptCallbackFromProxy = () => {
-  const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
-  if (!endpoint || !URL.canParse(endpoint)) return
-  const host = new URL(endpoint).hostname.replace(/^\\[|\\]$/g, "")
-  for (const key of ["NO_PROXY", "no_proxy"]) {
-    const entries = (process.env[key] || "").split(",").map((entry) => entry.trim()).filter(Boolean)
-    if (!entries.includes(host)) process.env[key] = [...entries, host].join(",")
+  return `const exemptCallbacksFromProxy = () => {
+  for (const endpoint of [process.env.OPENCHAMBER_AGENT_TOOL_URL, process.env.OPENCHAMBER_SHELL_BOUNDARY_URL]) {
+    if (!endpoint || !URL.canParse(endpoint)) continue
+    const host = new URL(endpoint).hostname.replace(/^\\[|\\]$/g, "")
+    for (const key of ["NO_PROXY", "no_proxy"]) {
+      const entries = (process.env[key] || "").split(",").map((entry) => entry.trim()).filter(Boolean)
+      if (!entries.includes(host)) process.env[key] = [...entries, host].join(",")
+    }
   }
 }
 
+${SHELL_BOUNDARY_HOOK_SOURCE}
 export const OpenChamberPlugin = async () => {
-  exemptCallbackFromProxy()
+  exemptCallbacksFromProxy()
   return {
     tool: {
 ${entries.join('')}    },
+    "tool.execute.before": shellBoundaryGuard,
   }
 }
 `;
@@ -300,7 +318,7 @@ export const createAgentToolRuntime = (dependencies) => {
   const pluginPath = path.join(pluginDirectory, 'openchamber-plugin.js');
   let activeToken = null;
 
-  const getConcreteBoundAddress = () => resolveConcreteBoundAddress(getActiveHost());
+  const { callbackHost, isSameMachineAddress } = createCallbackAddress(getActiveHost);
 
   const prepareManagedOpenCodeEnv = async ({ includeControl = true, includeWeb = true, includeMemory = true } = {}) => {
     const port = getActivePort();
@@ -314,22 +332,11 @@ export const createAgentToolRuntime = (dependencies) => {
     await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory }), { mode: 0o600 });
     activeToken = crypto.randomBytes(32).toString('base64url');
     const pluginUrl = pathToFileURL(pluginPath).href;
-    const callbackAddress = getConcreteBoundAddress() || '127.0.0.1';
-    const callbackHost = callbackAddress.includes(':') ? `[${callbackAddress}]` : callbackAddress;
     return {
       OPENCODE_CONFIG_CONTENT: appendManagedPlugin(env.OPENCODE_CONFIG_CONTENT, pluginUrl, 'managed tool'),
-      OPENCHAMBER_AGENT_TOOL_URL: `http://${callbackHost}:${port}/api/openchamber/agent-tool`,
+      OPENCHAMBER_AGENT_TOOL_URL: `http://${callbackHost()}:${port}/api/openchamber/agent-tool`,
       OPENCHAMBER_AGENT_TOOL_TOKEN: activeToken,
     };
-  };
-
-  // The managed child runs on this machine. Reaching a listener bound to one
-  // concrete address makes the OS source the connection from that same address,
-  // so it stands in for loopback there; any other machine arrives as itself.
-  const isSameMachineAddress = (value) => {
-    if (isLoopbackAddress(value)) return true;
-    const boundAddress = getConcreteBoundAddress();
-    return boundAddress !== null && normalizeAddress(value) === boundAddress;
   };
 
   const authorize = (req) => {

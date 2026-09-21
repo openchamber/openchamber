@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SettingsCheckboxRow, SETTINGS_FIELD_LABEL_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsCheckboxRow, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { toast } from '@/components/ui';
 import {
@@ -14,9 +14,35 @@ import {
 } from '@/components/ui/dialog';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
-import { useGitIdentitiesStore, type GitIdentityProfile, type GitIdentityAuthType } from '@/stores/useGitIdentitiesStore';
+import { useGitIdentitiesStore, type GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
+import { ManagedSshCredentials } from '@/components/sections/openchamber/ManagedSshCredentials';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { buildManagedAccountOptions, getManagedCredentialSourceLabelKey } from '@/lib/source-control/identity';
+import type { GitIdentityTransport } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+
+/** Select value for an identity that answers to no connected account. */
+const NO_ACCOUNT = '__none__';
+
+/**
+ * How an identity authenticates. OAuth and Token are both the account's own
+ * credential; the chip decides which of the connected credentials may be picked.
+ */
+type AuthMethod = 'oauth' | 'token' | 'ssh' | 'anonymous';
+const AUTH_METHODS = [
+  { method: 'oauth', icon: 'user-3', labelKey: 'settings.gitIdentities.editor.auth.oauth', hintKey: 'settings.gitIdentities.editor.auth.oauthHint' },
+  { method: 'token', icon: 'shield', labelKey: 'settings.gitIdentities.editor.auth.token', hintKey: 'settings.gitIdentities.editor.auth.tokenHint' },
+  { method: 'ssh', icon: 'lock', labelKey: 'settings.gitIdentities.editor.auth.ssh', hintKey: null },
+  { method: 'anonymous', icon: 'global', labelKey: 'settings.gitIdentities.editor.auth.anonymous', hintKey: 'settings.gitIdentities.editor.auth.anonymousHint' },
+] as const satisfies ReadonlyArray<{ method: AuthMethod; icon: IconName; labelKey: string; hintKey: string | null }>;
+const transportOf = (method: AuthMethod): GitIdentityTransport =>
+  method === 'ssh' ? 'ssh' : method === 'anonymous' ? 'anonymous' : 'account';
+/** The credential source a method admits; null admits every account. */
+const sourceOf = (method: AuthMethod): 'oauth' | 'pat' | null =>
+  method === 'oauth' ? 'oauth' : method === 'token' ? 'pat' : null;
 
 const PROFILE_COLORS = [
   { key: 'keyword', label: 'Green', cssVar: 'var(--syntax-keyword)' },
@@ -32,6 +58,8 @@ const PROFILE_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
   { key: 'house', Icon: 'home', label: 'Personal' },
   { key: 'graduation', Icon: 'graduation-cap', label: 'School' },
   { key: 'code', Icon: 'code', label: 'Code' },
+  { key: 'github', Icon: 'github', label: 'GitHub' },
+  { key: 'gitlab', Icon: 'gitlab-fill', label: 'GitLab' },
 ];
 
 interface GitIdentityEditorDialogProps {
@@ -39,15 +67,12 @@ interface GitIdentityEditorDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Profile ID to edit, 'new' for creation, or null */
   profileId: string | null;
-  /** Pre-fill data for importing a discovered credential */
-  importData?: { host: string; username: string } | null;
 }
 
 export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = ({
   open,
   onOpenChange,
   profileId,
-  importData,
 }) => {
   const { t } = useI18n();
   const getProfileById = useGitIdentitiesStore((s) => s.getProfileById);
@@ -56,108 +81,132 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   const deleteProfile = useGitIdentitiesStore((s) => s.deleteProfile);
 
   const selectedProfile = React.useMemo(() =>
-    profileId && profileId !== 'new' && !importData ? getProfileById(profileId) : null,
-    [profileId, getProfileById, importData]
+    profileId && profileId !== 'new' ? getProfileById(profileId) : null,
+    [profileId, getProfileById]
   );
-  const isNewProfile = profileId === 'new' || importData != null;
+  const isNewProfile = profileId === 'new';
   const isGlobalProfile = profileId === 'global';
 
   const [name, setName] = React.useState('');
   const [userName, setUserName] = React.useState('');
   const [userEmail, setUserEmail] = React.useState('');
-  const [authType, setAuthType] = React.useState<GitIdentityAuthType>('ssh');
-  const [sshKey, setSshKey] = React.useState('');
   const [signCommits, setSignCommits] = React.useState(false);
   const [signingKey, setSigningKey] = React.useState('');
-  const [host, setHost] = React.useState('');
   const [color, setColor] = React.useState('keyword');
   const [icon, setIcon] = React.useState('branch');
+  const [accountKey, setAccountKey] = React.useState(NO_ACCOUNT);
+  const [method, setMethod] = React.useState<AuthMethod>('oauth');
+  const [sshCredentialId, setSshCredentialId] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
 
+  const { sourceControl } = useRuntimeAPIs();
+  const identities = useSourceControlAuthStore((state) => state.identities);
+  const authEntries = useSourceControlAuthStore((state) => state.entries);
+  const refreshAccounts = useSourceControlAuthStore((state) => state.refreshAll);
+  React.useEffect(() => {
+    if (open && !isGlobalProfile) void refreshAccounts(sourceControl);
+  }, [open, isGlobalProfile, refreshAccounts, sourceControl]);
+
+  // Every connected account, whichever provider or instance it belongs to: an
+  // identity picks one, and the transport picks up its credential from there.
+  const accountOptions = React.useMemo(() => identities.flatMap((identity) => {
+    const entry = authEntries[getSourceControlAuthKey(identity)];
+    if (!entry?.hasChecked || entry.status?.status !== 'connected') return [];
+    return buildManagedAccountOptions(identity, entry.status.accounts, (account) => t(getManagedCredentialSourceLabelKey(account.source)));
+  }), [authEntries, identities, t]);
+  const selectedAccount = accountOptions.find((option) => option.key === accountKey) ?? null;
+  const transport = transportOf(method);
+  // An identity loaded as "the account's credential" shows the chip its account
+  // actually is, once the connected accounts have arrived.
+  React.useEffect(() => {
+    if (transport !== 'account' || !selectedAccount) return;
+    if (selectedAccount.source === 'pat' && method !== 'token') setMethod('token');
+    if (selectedAccount.source === 'oauth' && method !== 'oauth') setMethod('oauth');
+  }, [method, selectedAccount, transport]);
+  const offeredAccounts = accountOptions.filter((option) => {
+    const source = sourceOf(method);
+    return source === null || option.source === source;
+  });
+
   React.useEffect(() => {
     if (!open) return;
-    if (importData) {
-      const parts = importData.host.split('/');
-      const displayName = parts.length >= 3 ? parts[parts.length - 1] : importData.host;
-      setName(displayName);
-      setUserName(importData.username);
-      setUserEmail('');
-      setAuthType('token');
-      setSshKey('');
-      setSignCommits(false);
-      setSigningKey('');
-      setHost(importData.host);
-      setColor('string');
-      setIcon('code');
-    } else if (isNewProfile) {
+    if (isNewProfile) {
       setName('');
       setUserName('');
       setUserEmail('');
-      setAuthType('ssh');
-      setSshKey('');
       setSignCommits(false);
       setSigningKey('');
-      setHost('');
       setColor('keyword');
       setIcon('branch');
+      setAccountKey(NO_ACCOUNT);
+      setMethod('oauth');
+      setSshCredentialId('');
     } else if (selectedProfile) {
       setName(selectedProfile.name);
       setUserName(selectedProfile.userName);
       setUserEmail(selectedProfile.userEmail);
-      setAuthType(selectedProfile.authType || 'ssh');
-      setSshKey(selectedProfile.sshKey || '');
       setSignCommits(selectedProfile.signCommits === true);
       setSigningKey(selectedProfile.signingKey || '');
-      setHost(selectedProfile.host || '');
       setColor(selectedProfile.color || 'keyword');
       setIcon(selectedProfile.icon || 'branch');
+      setAccountKey(selectedProfile.account
+        ? JSON.stringify([selectedProfile.account.provider, selectedProfile.account.instance, selectedProfile.account.accountId])
+        : NO_ACCOUNT);
+      // OAuth or Token is read off the account once the accounts are known.
+      setMethod(selectedProfile.transport === 'ssh' ? 'ssh' : selectedProfile.transport === 'anonymous' ? 'anonymous' : 'oauth');
+      setSshCredentialId(selectedProfile.sshCredentialId ?? '');
     } else if (isGlobalProfile) {
       const global = getProfileById('global');
       if (global) {
         setName(global.name);
         setUserName(global.userName);
         setUserEmail(global.userEmail);
-        setAuthType(global.authType || 'ssh');
-        setSshKey(global.sshKey || '');
         setSignCommits(false);
         setSigningKey('');
-        setHost(global.host || '');
         setColor(global.color || 'keyword');
         setIcon(global.icon || 'branch');
       }
     }
-  }, [open, profileId, selectedProfile, isNewProfile, importData, isGlobalProfile, getProfileById]);
+  }, [open, profileId, selectedProfile, isNewProfile, isGlobalProfile, getProfileById]);
 
   const handleSave = async () => {
     if (!userName.trim() || !userEmail.trim()) {
       toast.error(t('settings.gitIdentities.editor.toast.userNameEmailRequired'));
       return;
     }
-    if (authType === 'token' && !host.trim()) {
-      toast.error(t('settings.gitIdentities.editor.toast.hostRequiredForToken'));
-      return;
-    }
     if (signCommits && !signingKey.trim()) {
       toast.error(t('settings.gitIdentities.editor.toast.signingKeyRequired'));
+      return;
+    }
+    // An identity without an account is not one, whichever way it authenticates.
+    if (!selectedAccount) {
+      toast.error(t('settings.gitIdentities.editor.toast.accountRequired'));
+      return;
+    }
+    if (transport === 'ssh' && !sshCredentialId.trim()) {
+      toast.error(t('settings.gitIdentities.editor.toast.sshKeyRequired'));
       return;
     }
 
     setIsSaving(true);
     try {
+      // The server owns any private migration fields; editors send only the public author DTO.
       const profileData: Omit<GitIdentityProfile, 'id'> & { id?: string } = {
         name: name.trim() || userName.trim(),
         userName: userName.trim(),
         userEmail: userEmail.trim(),
-        authType,
-        sshKey: authType === 'ssh' ? (sshKey.trim() || null) : null,
+        account: selectedAccount?.reference ?? null,
+        transport,
         signCommits,
         signingKey: signingKey.trim() || null,
-        host: authType === 'token' ? (host.trim() || null) : null,
         color,
         icon,
       };
+      // Only an SSH transport names a managed key, so the field is absent
+      // rather than empty when another transport is chosen.
+      if (transport === 'ssh') profileData.sshCredentialId = sshCredentialId.trim();
 
       let success: boolean;
       if (isNewProfile) {
@@ -207,9 +256,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
     return colorConfig?.cssVar || 'var(--syntax-keyword)';
   }, [color]);
 
-  const title = importData
-    ? t('settings.gitIdentities.editor.title.importCredential')
-    : isNewProfile
+  const title = isNewProfile
     ? t('settings.gitIdentities.editor.title.newIdentity')
     : isGlobalProfile
     ? t('settings.gitIdentities.editor.title.globalIdentity')
@@ -340,93 +387,89 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
               </div>
             </div>
 
-            {/* Authentication */}
+            {/* An identity is an account, a transport and a signature: the
+                three answers a repository needs, given once and named. */}
             {!isGlobalProfile && (
               <>
                 <div className="border-t border-border/40" />
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.authMethod')}</span>
-                    <div className="flex items-center gap-1">
-                      <Button size="sm"
-                        type="button"
-                        variant="chip"
-                        aria-pressed={authType === 'ssh'}
-                        onClick={() => setAuthType('ssh')}
-                      >
-                        <Icon name="lock-2" className="w-3.5 h-3.5 mr-1" /> SSH
-                      </Button>
-                      <Button size="sm"
-                        type="button"
-                        variant="chip"
-                        aria-pressed={authType === 'token'}
-                        onClick={() => setAuthType('token')}
-                      >
-                        <Icon name="key" className="w-3.5 h-3.5 mr-1" /> {t('settings.gitIdentities.editor.field.authToken')}
-                      </Button>
+
+                  <div>
+                    <label className={`${SETTINGS_FIELD_LABEL_CLASS} block mb-1.5`}>
+                      {t('settings.gitIdentities.editor.field.account')}
+                    </label>
+                    <Select
+                      value={accountKey}
+                      onValueChange={setAccountKey}
+                    >
+                      <SelectTrigger className="w-full" aria-label={t('settings.gitIdentities.editor.field.account')}>
+                        <SelectValue>{selectedAccount?.label ?? t('settings.gitIdentities.editor.field.accountNone')}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {offeredAccounts.map((option) => (
+                          <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
+                        ))}
+                        <SelectItem value={NO_ACCOUNT}>{t('settings.gitIdentities.editor.field.accountNone')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className={`${SETTINGS_FIELD_LABEL_CLASS} block mb-1.5`}>{t('settings.gitIdentities.editor.auth.label')}</label>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {AUTH_METHODS.map((entry) => (
+                        <Button key={entry.method} size="sm" type="button" variant="chip"
+                          aria-pressed={method === entry.method}
+                          onClick={() => {
+                            setMethod(entry.method);
+                            if (entry.method !== 'ssh') setSshCredentialId('');
+                            // A credential of the other kind cannot stay chosen under this chip.
+                            const source = sourceOf(entry.method);
+                            if (source && selectedAccount && selectedAccount.source !== source) setAccountKey(NO_ACCOUNT);
+                          }}
+                        >
+                          <Icon name={entry.icon} className="w-3.5 h-3.5 mr-1" /> {t(entry.labelKey)}
+                        </Button>
+                      ))}
                     </div>
                   </div>
 
-                  {authType === 'ssh' && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.sshKeyPath')}</label>
-                        <SettingsInfoHint contentClassName="max-w-xs">
-                          {t('settings.gitIdentities.editor.field.sshKeyPathTooltip')}
-                        </SettingsInfoHint>
-                      </div>
-                      <Input
-                        value={sshKey}
-                        onChange={(e) => setSshKey(e.target.value)}
-                        placeholder={t('settings.gitIdentities.editor.field.sshKeyPathPlaceholder')}
-                        className="h-8 font-mono text-xs"
-                      />
-                    </div>
+                  {transport === 'ssh' ? (
+                    <ManagedSshCredentials selection={{ value: sshCredentialId, onChange: setSshCredentialId }} />
+                  ) : (
+                    <p className={SETTINGS_HELPER_CLASS}>{t(AUTH_METHODS.find((entry) => entry.method === method)?.hintKey ?? 'settings.gitIdentities.editor.auth.oauthHint')}</p>
                   )}
+                </div>
+              </>
+            )}
 
-                  <div className="border-t border-border/40 pt-3 space-y-3">
-                    <SettingsCheckboxRow
-                      checked={signCommits}
-                      onChange={setSignCommits}
-                      label={t('settings.gitIdentities.editor.field.signCommits')}
-                      info={t('settings.gitIdentities.editor.section.commitSigning')}
-                      ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
+            {/* Commit signing is independent of transport authentication. */}
+            {!isGlobalProfile && (
+              <>
+                <div className="border-t border-border/40" />
+                <div className="space-y-3">
+                  <SettingsCheckboxRow
+                    checked={signCommits}
+                    onChange={setSignCommits}
+                    label={t('settings.gitIdentities.editor.field.signCommits')}
+                    info={t('settings.gitIdentities.editor.section.commitSigning')}
+                    ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
+                  />
+
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <label className={SETTINGS_FIELD_LABEL_CLASS}>
+                        {t('settings.gitIdentities.editor.field.signingKey')}
+                      </label>
+                    </div>
+                    <Input
+                      value={signingKey}
+                      onChange={(e) => setSigningKey(e.target.value)}
+                      placeholder={t('settings.gitIdentities.editor.field.signingKeyPlaceholder')}
+                      disabled={!signCommits}
+                      className="h-8 font-mono text-xs"
                     />
-
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className={SETTINGS_FIELD_LABEL_CLASS}>
-                          {t('settings.gitIdentities.editor.field.signingKey')}
-                        </label>
-                      </div>
-                      <Input
-                        value={signingKey}
-                        onChange={(e) => setSigningKey(e.target.value)}
-                        placeholder={t('settings.gitIdentities.editor.field.signingKeyPlaceholder')}
-                        disabled={!signCommits}
-                        className="h-8 font-mono text-xs"
-                      />
-                    </div>
                   </div>
-
-                  {authType === 'token' && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.host')}</label>
-                        <span className="text-[var(--status-error)] text-xs">*</span>
-                        <SettingsInfoHint contentClassName="max-w-xs">
-                          {t('settings.gitIdentities.editor.field.hostTooltip')}
-                        </SettingsInfoHint>
-                      </div>
-                      <Input
-                        value={host}
-                        onChange={(e) => setHost(e.target.value)}
-                        placeholder={t('settings.gitIdentities.editor.field.hostPlaceholder')}
-                        required
-                        className="h-8 font-mono text-xs"
-                      />
-                    </div>
-                  )}
                 </div>
               </>
             )}
@@ -468,7 +511,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
+            <Button size="sm" variant="ghost" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
               {t('settings.common.actions.cancel')}
             </Button>
             <Button size="sm" variant="destructive" onClick={() => void handleConfirmDelete()} disabled={isDeleting}>

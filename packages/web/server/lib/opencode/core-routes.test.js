@@ -30,6 +30,43 @@ describe('core-routes', () => {
     expect(shutdownOpts).toEqual({ exitProcess: true });
   });
 
+  it('lets the agent credential helper past the UI session guard, and nothing else', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(), handleSessionCreate: vi.fn(), handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(), handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(), handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(), handlePasskeyRevoke: vi.fn(), handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+    // Registered after the guard, exactly as the git feature routes are.
+    app.post('/api/git/agent-credential', (_req, res) => res.json({ mode: 'none' }));
+    app.post('/api/git/shell-boundary', (_req, res) => res.json({ decision: 'allow' }));
+    app.post('/api/git/identities', (_req, res) => res.json({ reached: true }));
+
+    // Neither has a UI session or can get one; their own bearer tokens and
+    // loopback checks are what protect them.
+    await request(app).post('/api/git/agent-credential').send({}).expect(200, { mode: 'none' });
+    await request(app).post('/api/git/shell-boundary').send({}).expect(200, { decision: 'allow' });
+    expect(requireAuth).not.toHaveBeenCalled();
+
+    await request(app).post('/api/git/identities').send({}).expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(1);
+  });
+
   it('should require UI auth before /api/system/shutdown when auth is configured', async () => {
     const app = express();
     const dependencies = {
