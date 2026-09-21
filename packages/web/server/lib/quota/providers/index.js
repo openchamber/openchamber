@@ -7,11 +7,15 @@
 
 import { buildResult } from '../utils/index.js';
 
-import * as claude from './claude.js';
+import * as claude from './claude/index.js';
+import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
 import * as cursor from './cursor.js';
+import * as deepseek from './deepseek.js';
+import * as exeDev from './exe-dev.js';
 import * as google from './google/index.js';
+import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
@@ -20,8 +24,11 @@ import * as zai from './zai.js';
 import * as zhipuaiCodingPlan from './zhipuai-coding-plan.js';
 import * as minimaxCodingPlan from './minimax-coding-plan.js';
 import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
+import * as neuralwatt from './neuralwatt.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
+import * as opencodeGo from './opencode-go.js';
+import * as xai from './xai.js';
 
 const registry = {
   claude: {
@@ -29,6 +36,12 @@ const registry = {
     providerName: claude.providerName,
     isConfigured: claude.isConfigured,
     fetchQuota: claude.fetchQuota
+  },
+  'cline-pass': {
+    providerId: clinePass.providerId,
+    providerName: clinePass.providerName,
+    isConfigured: clinePass.isConfigured,
+    fetchQuota: clinePass.fetchQuota
   },
   codex: {
     providerId: codex.providerId,
@@ -42,11 +55,29 @@ const registry = {
     isConfigured: cursor.isConfigured,
     fetchQuota: cursor.fetchQuota
   },
+  deepseek: {
+    providerId: deepseek.providerId,
+    providerName: deepseek.providerName,
+    isConfigured: deepseek.isConfigured,
+    fetchQuota: deepseek.fetchQuota
+  },
+  'exe-dev': {
+    providerId: exeDev.providerId,
+    providerName: exeDev.providerName,
+    isConfigured: exeDev.isConfigured,
+    fetchQuota: exeDev.fetchQuota
+  },
   google: {
     providerId: google.providerId,
     providerName: google.providerName,
     isConfigured: google.isConfigured,
     fetchQuota: google.fetchGoogleQuota
+  },
+  hyper: {
+    providerId: hyper.providerId,
+    providerName: hyper.providerName,
+    isConfigured: hyper.isConfigured,
+    fetchQuota: hyper.fetchQuota
   },
   'zai-coding-plan': {
     providerId: zai.providerId,
@@ -113,8 +144,29 @@ const registry = {
     providerName: wafer.providerName,
     isConfigured: wafer.isConfigured,
     fetchQuota: wafer.fetchQuota
+  },
+  'opencode-go': {
+    providerId: opencodeGo.providerId,
+    providerName: opencodeGo.providerName,
+    isConfigured: opencodeGo.isConfigured,
+    fetchQuota: opencodeGo.fetchQuota
+  },
+  neuralwatt: {
+    providerId: neuralwatt.providerId,
+    providerName: neuralwatt.providerName,
+    isConfigured: neuralwatt.isConfigured,
+    fetchQuota: neuralwatt.fetchQuota
+  },
+  xai: {
+    providerId: xai.providerId,
+    providerName: xai.providerName,
+    isConfigured: xai.isConfigured,
+    fetchQuota: xai.fetchQuota
   }
 };
+
+const pendingFetches = new Map();
+
 
 export const listConfiguredQuotaProviders = () => {
   const configured = [];
@@ -132,7 +184,7 @@ export const listConfiguredQuotaProviders = () => {
   return configured;
 };
 
-export const fetchQuotaForProvider = async (providerId) => {
+const fetchQuotaForProviderUncoalesced = async (providerId) => {
   const provider = registry[providerId];
 
   if (!provider) {
@@ -158,11 +210,24 @@ export const fetchQuotaForProvider = async (providerId) => {
   }
 };
 
+export const fetchQuotaForProvider = (providerId) => {
+  const existing = pendingFetches.get(providerId);
+  if (existing) return existing;
+
+  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
+    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
+  });
+  pendingFetches.set(providerId, pending);
+  return pending;
+};
+
 export const fetchClaudeQuota = claude.fetchQuota;
 export const fetchOpenaiQuota = openai.fetchQuota;
 export const fetchGoogleQuota = google.fetchGoogleQuota;
 export const fetchCodexQuota = codex.fetchQuota;
 export const fetchCursorQuota = cursor.fetchQuota;
+export const fetchDeepseekQuota = deepseek.fetchQuota;
+export const fetchHyperQuota = hyper.fetchQuota;
 export const fetchCopilotQuota = copilot.fetchQuota;
 export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;

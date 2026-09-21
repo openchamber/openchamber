@@ -40,27 +40,20 @@ const parseSuffix = (
 export const parseMultiRunSessionTitle = (title?: string | null): ParsedMultiRunTitle | null => {
   if (!title) return null;
   const segments = title.split('/');
-  if (segments.length < 3 || segments.length > 5) return null;
-
-  const [groupSlug] = segments;
-
-  if (segments.length === 3) {
-    return parseSuffix(groupSlug, undefined, segments[1], segments[2], undefined);
-  }
-
-  if (segments.length === 4) {
-    const [, second, third, fourth] = segments;
-    if (RUN_GROUP_PATTERN.test(second)) {
-      return parseSuffix(groupSlug, second, third, fourth, undefined);
-    }
-    return parseSuffix(groupSlug, undefined, second, third, fourth);
-  }
-
-  const [, runGroup, providerID, modelID, suffix] = segments;
-  if (runGroup === '') {
-    return parseSuffix(groupSlug, undefined, providerID, modelID, suffix);
-  }
-  return parseSuffix(groupSlug, runGroup, providerID, modelID, suffix);
+  if (segments.length < 3) return null;
+  const [groupSlug, second] = segments;
+  const grouped = segments.length >= 4 && RUN_GROUP_PATTERN.test(second);
+  const emptyGroup = segments.length >= 5 && second === '';
+  const providerOffset = grouped || emptyGroup ? 2 : 1;
+  const modelParts = segments.slice(providerOffset + 1);
+  if (modelParts.some((part) => !part || part !== part.trim())) return null;
+  const last = modelParts.at(-1);
+  // Old titles cannot distinguish model IDs ending in /2 or /fusion from
+  // suffixes. Preserve that interpretation only for these legacy records.
+  const suffix = modelParts.length > 1 && (last === 'fusion' || /^\d+$/.test(last ?? ''))
+    ? modelParts.pop()
+    : undefined;
+  return parseSuffix(groupSlug, grouped ? second : undefined, segments[providerOffset], modelParts.join('/'), suffix);
 };
 
 export const getMultiRunSessionTitle = (parts: {

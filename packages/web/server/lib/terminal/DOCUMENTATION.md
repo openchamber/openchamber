@@ -1,76 +1,75 @@
-# Terminal Module Documentation
+# Terminal Subsystem
 
-## Purpose
-This module provides WebSocket transport utilities for terminal input and output in the web server runtime, including message normalization, control frame parsing, rate limiting, pathname resolution, and short-lived output replay buffering for terminal WebSocket connections.
+## Ownership
 
-## Entrypoints and structure
-- `packages/web/server/lib/terminal/`: Terminal module directory.
-  - `index.js`: Stable module entrypoint that re-exports protocol helpers and replay-buffer helpers.
-  - `runtime.js`: Runtime module that owns terminal session state, WS server setup, and `/api/terminal/*` route registration.
-  - `terminal-ws-protocol.js`: Single-file module containing terminal WebSocket protocol utilities.
-  - `output-replay-buffer.js`: Helper module for buffering recent terminal output so late subscribers can receive startup prompt data.
-- `packages/web/server/lib/terminal/terminal-ws-protocol.test.js`: Test file for protocol utilities.
-- `packages/web/server/lib/terminal/output-replay-buffer.test.js`: Test file for replay buffer helpers.
+`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.js` owns bounded runtime-wide process cleanup. `shells.js` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
-Public API entry point: imported by `packages/web/server/index.js` from `./lib/terminal/index.js`.
+## Protocol
 
-## Public exports
+`/api/terminal/ws` is the only terminal data transport. It uses v3 binary JSON control frames and is opened through `openRuntimeWebSocket`, preserving direct, Electron proxy, URL-token authentication, and private-relay routing.
 
-### Constants
-- `TERMINAL_WS_PATH`: Primary WebSocket endpoint path (`/api/terminal/ws`).
-- `TERMINAL_WS_CONTROL_TAG_JSON`: Control frame tag byte (`0x01`) indicating JSON payload.
-- `TERMINAL_WS_MAX_PAYLOAD_BYTES`: Maximum inbound WebSocket payload size (64KB).
-- `TERMINAL_OUTPUT_REPLAY_MAX_BYTES`: Maximum buffered terminal output retained for replay (64KB).
+- `attach` registers a connection for one terminal. One socket may attach to many terminals.
+- Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears.
+- A current socket that closes or errors before its initial `open` invalidates its URL-scoped auth token before retrying, so retries mint a fresh token instead of backing off against a rejected upgrade. Hidden or offline clients wait 60 seconds and wake promptly on visibility/online recovery.
+- `output`, `exit`, and `restarted` carry monotonically increasing per-terminal sequences. Output carries raw live bytes plus replay-safe bytes with terminal query exchanges removed.
+- Attach registers before capturing the snapshot, buffers concurrent events, drops events represented by the snapshot sequence, then enters live delivery.
+- `write` always includes the terminal ID; sockets never have mutable single-terminal binding state.
+- `detach` removes only that attachment.
+- Creation carries the active UI appearance. The PTY sets `COLORFGBG` and answers OSC 10, OSC 11, Mode 2031, and primary-device-attribute queries immediately, including queries emitted before a WebSocket attachment exists. The DA1 fallback prevents Fish from waiting ten seconds for a renderer that cannot observe or answer its startup query. Subscribed TUIs receive a Mode 2031 notification when the appearance changes.
 
-### Request Parsing
-- `parseRequestPathname(requestUrl)`: Extracts pathname from request URL string. Returns empty string for invalid inputs.
-- `isTerminalWsPathname(pathname)`: Returns whether a pathname matches a supported terminal WebSocket route.
+HTTP remains the authenticated command plane for create, resize, appearance updates, restart, close, and force-kill. There is no SSE output or HTTP input compatibility path.
 
-### Message Normalization
-- `normalizeTerminalWsMessageToBuffer(rawData)`: Normalizes various data types (Buffer, Uint8Array, ArrayBuffer, string, chunk arrays) to a single Buffer.
-- `normalizeTerminalWsMessageToText(rawData)`: Normalizes data to UTF-8 text string.
+`GET /api/terminal/sessions` enumerates live sessions (optionally filtered by resolved `cwd`) so clients can adopt terminals their local tab projection does not know about — another device, a new browser tab, or cleared storage. Listings include the effective launch mode and the normalized purpose, but never the command text. `POST /api/terminal/touch` refreshes `lastActivity` for the listed session ids; open clients call it periodically so background tabs, which hold no WebSocket attachment, are not idle-reaped while a client still shows them.
 
-### Control Frame Handling
-- `readTerminalWsControlFrame(rawData)`: Parses WebSocket message as control frame. Returns parsed JSON object or null if invalid or malformed.
-- `createTerminalWsControlFrame(payload)`: Creates a control frame with JSON payload and prepends the control tag byte.
+## PTY Lifecycle
 
-### Replay Buffer Helpers
-- `createTerminalOutputReplayBuffer()`: Creates mutable state for recent terminal output replay.
-- `appendTerminalOutputReplayChunk(bufferState, data, maxBytes?)`: Appends a chunk, trimming older buffered data to stay within the configured byte budget.
-- `listTerminalOutputReplayChunksSince(bufferState, lastSeenId)`: Returns buffered chunks newer than the provided replay cursor.
-- `getLatestTerminalOutputReplayChunkId(bufferState)`: Returns the latest chunk id in the replay buffer, or `0` when empty.
+- IDs are client-provided or generated with `randomUUID()`.
+- Create defaults to interactive mode. Command mode requires a non-empty trimmed command no longer than the terminal input limit and launches the shell so the PTY exits when that command exits. Each session also carries a normalized purpose. Omitted purpose means `{ type: 'terminal' }`. Project actions use `{ type: 'project-action', actionId, executionId }`, and the server validates both IDs as non-empty bounded strings. Create responses and attach snapshots echo the effective mode and purpose.
+- Concurrent creates for one ID are single-flight only when working directory, shell preference, login mode, launch mode, and session purpose match. Command-mode creates must also match the command text, unless the purpose is a project action that is already running for the same resolved `(cwd, actionId)` pair. In that case the runtime returns the existing session and its existing execution identity, even when another client requested a different session ID. Existing IDs cannot be reused for another working directory or another purpose.
+- Dimensions are bounded to 1-1000 columns and 1-500 rows; input is capped at 64 KiB.
+- A client may create before its renderer has mounted. It derives an initial size from the container and font metrics (falling back to 80x24 when unavailable), then sends a resize once Ghostty reports its final dimensions. This allows shell startup and renderer initialization to overlap.
+- PTY children never inherit `NODE_CHANNEL_FD`; daemon IPC descriptors are host-private and invalid after PTY descriptor cleanup, and an inherited value (even empty) makes Node CLIs such as opencode print `Failed to parse IPC channel number` on exit.
+- PTY children also strip AppImage `ARGV0` (and other host-private shell vars such as `ELECTRON_RUN_AS_NODE`, `BASH_ENV`, `ENV`, `BASH_XTRACEFD`). An exported `ARGV0` makes zsh rewrite argv[0] for every external command, which breaks Python venv detection and other argv[0]/$0 consumers while leaving `/proc/self/exe` correct. On POSIX, PTY spawn is wrapped with `env -u ARGV0 -u NODE_CHANNEL_FD` (`resolvePosixPtyLaunch`) because `bun-pty` merges the native OS environ and would otherwise reintroduce both after a JS-only delete.
+- `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Interactive shells still launch as before. Command-mode launches reuse the same environment and login support, but switch argv by shell family: POSIX and Fish use interactive `-c`, Nushell uses `-c`, PowerShell uses `-Command`, and cmd uses `/d /s /c`. Preference changes affect new sessions and explicit restarts, not running PTYs.
+- PTY data and exit callbacks enter one FIFO queue. The runtime wires those listeners in the same synchronous turn that receives the PTY object. `node-pty` and `bun-pty` both expose the PTY before dispatching registered callbacks. If a backend emitted exit before listener registration, this layer could not recover it, so the wiring stays adjacent to PTY creation.
+- Scrollback is retained on the server and capped at 512 KiB with UTF-8-safe trimming. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.
+- Exited sessions remain attachable until explicit close, idle cleanup, or a successful replacement of the same project action. Creating a replacement retires only exited records for the same resolved directory and action, after the new PTY starts. Failed creation preserves the old record and output. These replaced records do not exhaust the terminal capacity limit.
+- Deduplicated create responses may describe another client's execution. Cancellation cleanup closes only the terminal ID allocated for the cancelled request; it never closes an adopted peer execution.
+- Create and restart validate the working directory with a real `stat` and answer HTTP 400 `Invalid working directory` when it is not a directory. When the path does not exist at all (`ENOENT`/`ENOTDIR`, a worktree deleted outside OpenChamber) the body also carries `code: "TERMINAL_CWD_MISSING"`. The client shows the failure without moving the session. The runtime never substitutes a parent directory on its own.
+- Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID. Command-mode sessions reject restart with HTTP 400 instead of silently turning into interactive shells with stale action metadata.
+- A restart rechecks session ownership before and after PTY creation. Close, force-kill, idle removal, or shutdown can invalidate it while spawn is pending. A late replacement is terminated instead of being attached to a retired session.
+- A delete that arrives while create is still pending leaves a cancellation tombstone. When the PTY arrives, the runtime terminates it immediately, never inserts the session into the live map, and returns a create error while the delete still succeeds.
+- Close uses SIGTERM with bounded SIGKILL escalation. Force-kill and idle cleanup terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
+- Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
+- On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
 
-### Rate Limiting
-- `pruneRebindTimestamps(timestamps, now, windowMs)`: Filters timestamps to keep only those within the active time window.
-- `isRebindRateLimited(timestamps, maxPerWindow)`: Checks if rebind operations have exceeded the configured threshold.
+## Security And Relay
 
-## Usage in web server
-The terminal helpers are used by `packages/web/server/index.js` for:
-- WebSocket endpoint path definition and matching
-- Message normalization for terminal input payloads
-- Control frame parsing for session binding, keepalive, and exit signaling
-- Rate limiting for session rebind operations
-- Request pathname parsing for WebSocket routing
-- Replaying startup output such as shell prompts when the client binds after the PTY already emitted data
+The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOWED_WS_PATHS`. The client must use `getRuntimeUrlResolver().websocket()` and `openRuntimeWebSocket`; direct local URLs or raw browser WebSockets break relay and URL-token authentication.
 
-The web server combines these utilities with `bun-pty` or `node-pty` to drive full-duplex PTY sessions.
+## Verification
 
-## Notes for contributors
-- Keep control frames backward-compatible when possible; use explicit `v` values for protocol changes.
-- Always normalize incoming WebSocket messages before processing them.
-- Keep replay buffering small and memory-only; it exists to cover startup races, not to implement persistent scrollback.
-- Add tests for new control frame types, websocket path changes, malformed payload handling, and replay trimming semantics.
-- Keep HTTP input and SSE output fallbacks functional unless the rollout explicitly removes them.
+Run:
 
-## Verification notes
-### Manual verification
-1. Start the web server and create a terminal session via `/api/terminal/create`.
-2. Wait briefly before binding the client to ensure the shell emits its prompt first.
-3. Connect to `/api/terminal/ws` WebSocket and bind to the session.
-4. Verify the startup prompt and early shell output are replayed before interactive input begins.
-5. Verify `/api/terminal/input-ws` is rejected with `404 Not Found` and `/api/terminal/:sessionId/stream` still works as a fallback path.
+```sh
+bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js
+bun run --cwd packages/web test server/lib/terminal/shutdown.test.js
+bun test packages/web/server/lib/ui-auth/ui-auth.test.js packages/web/server/lib/relay/cross-compat.test.js
+```
 
-### Automated verification
-- Run `bun test packages/web/server/lib/terminal/terminal-ws-protocol.test.js`
-- Run `bun test packages/web/server/lib/terminal/output-replay-buffer.test.js`
-- Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing changes.
+The #3389 macOS ARM64 reproduction used real Electron 43.7.0 PTYs and HTTP
+servers with signal handlers that took 15 seconds to finish cleanup. On the
+baseline, File > Restart and Quit sent SIGKILL to the exec'ed server within
+3–4 ms; a foreground child in another process group received SIGHUP and outlived
+Electron. After the fix, both workloads completed after SIGTERM before Electron
+exited, in bundled and HMR runs. A noncooperative workload was killed after the
+shared 20-second deadline.
+
+Packaged test builds 1.24.90 and 1.24.91 exercised the real macOS Squirrel install
+with a loopback feed, isolated app identity/profile, and a shared test signing
+requirement. Both the normal update and closing the window during cleanup
+installed and relaunched N+1 after the terminal workloads finished. The installed
+ASAR matched N+1, and OpenCode remained bundled after its own restart. A rejected
+signature also reached the installer error handler after the 15-second cleanup.
+Linux ARM64 process regressions pass without `ps` installed. Native Windows
+ConPTY and Linux Electron installer behavior were not exercised for this fix.

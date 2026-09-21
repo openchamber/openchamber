@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 
@@ -48,7 +48,39 @@ describe('buildRuntimeFetchUrl', () => {
   });
 });
 
+describe('addRuntimeProxyHeaders', () => {
+  test('bypasses the ngrok browser interstitial for official ngrok hosts', () => {
+    const headers = addRuntimeProxyHeaders('https://demo.ngrok-free.app/health', new Headers());
+
+    expect(headers.get('ngrok-skip-browser-warning')).toBe('openchamber');
+  });
+
+  test('does not add proxy headers to non-ngrok or lookalike hosts', () => {
+    expect(addRuntimeProxyHeaders('https://runtime.example/health', new Headers()).has('ngrok-skip-browser-warning')).toBe(false);
+    expect(addRuntimeProxyHeaders('https://ngrok-free.app.evil.example/health', new Headers()).has('ngrok-skip-browser-warning')).toBe(false);
+  });
+});
+
 describe('runtimeFetch transport contract', () => {
+  test('adds the ngrok bypass header to runtime requests', async () => {
+    const previous = getRuntimeUrlResolver();
+    let capturedHeaders = new Headers();
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://demo.ngrok-free.app' });
+      globalThis.fetch = async (_input, init) => {
+        capturedHeaders = new Headers(init?.headers);
+        return new Response(null, { status: 204 });
+      };
+
+      await runtimeFetch('/health');
+
+      expect(capturedHeaders.get('ngrok-skip-browser-warning')).toBe('openchamber');
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('preserves bodies from actual SDK mutation requests on same-origin runtimes', async () => {
     const previous = getRuntimeUrlResolver();
     const originalWindow = globalThis.window;

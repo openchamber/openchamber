@@ -5,7 +5,7 @@ declare global {
     __OPENCHAMBER_HOME__?: string;
     __OPENCHAMBER_MACOS_MAJOR__?: number;
     __OPENCHAMBER_LOCAL_ORIGIN__?: string;
-    __OPENCHAMBER_ELECTRON__?: { runtime?: string; macVibrancy?: boolean; macVibrancySupported?: boolean };
+    __OPENCHAMBER_ELECTRON__?: { runtime?: string; arch?: string; trayEnabled?: boolean };
     __OPENCHAMBER_PLATFORM__?: string;
     __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
   }
@@ -14,11 +14,20 @@ declare global {
     loadURL(url: string): void;
     goBack(): void;
     goForward(): void;
+    canGoBack(): boolean;
+    canGoForward(): boolean;
     reload(): void;
+    reloadIgnoringCache(): void;
+    getZoomLevel(): number;
+    setZoomLevel(level: number): void;
+    stop(): void;
     getURL(): string;
     getTitle(): string;
     isLoading(): boolean;
     getWebContentsId(): number;
+    openDevTools(): void;
+    closeDevTools(): void;
+    isDevToolsOpened(): boolean;
     executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
   }
 

@@ -1,0 +1,84 @@
+---
+title: Sihirli İstemler
+description: OpenChamber'ın otomatik akışlarının arkasındaki yerleşik istemleri özelleştirin.
+---
+
+# Sihirli İstemler
+
+OpenChamber bir şeyi otomatik yaptığında arka planda yerleşik istemler kullanır. Commit mesajı yazmak, PR taslağı hazırlamak, issue incelemek, çakışmayı çözmek, bir oturumu özetlemek gibi. Magic Prompts, bu istemleri okuduğunuz ve yeniden yazdığınız yerdir. **Settings → Magic Prompts** bölümünden açın.
+
+Normal kullanım için bu sayfaya ihtiyacınız yok. Bir akışın farklı davranmasını istediğinizde buraya bakın. Mesela commit mesajlarının belirli bir stilde olmasını istiyorsanız.
+
+## Bir istemi düzenleme
+
+1. **Settings → Magic Prompts** bölümünü açın.
+2. Kenar çubuğundaki gruplardan bir istem seçin. Git, GitHub, Planning ve Session.
+3. Metni düzenleyin ve kaydedin.
+
+Bazı istemlerin görünen bir kısmı vardır. Bu, sizin göreceğiniz mesajdır. Bir de agent için gizli yönerge kısmı vardır. İstemler `{{placeholders}}` içerebilir. OpenChamber bunları doldurur. Mesela diff ya da issue başlığı gibi. Bunları olduğu gibi bırakın.
+
+## Sıfırlama
+
+Fikrinizi mi değiştirdiniz? Her istemde **reset to default** vardır. Her şeyi baştan başlatmak isterseniz bir de **reset all** bulunur.
+
+## Her istem nerede kullanılır
+
+Aşağıdaki her istem, nerede çalıştığını ve ne zaman tetiklendiğini listeler. Düzenlemeden önce tetikleyiciyi kontrol edin. Böylece hangi akışı değiştirdiğinizi bilirsiniz.
+
+### Git
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| Commit generation | Git görünümündeki commit kutusunun generate düğmesi ve mobil Changes ekranı | Bir commit mesajı üretirsiniz. Seçili dosyalar ve branch'in son commit subject'leri doldurulur, böylece subject repo'nuzun mevcut stiline uyar. |
+| PR generation | Git görünümündeki PR sekmesindeki create-pull-request formu | Bir PR başlığı ve gövdesi üretirsiniz. Base ve head branch'ler, aralarındaki commit'ler ve değişen dosyalar, ek bağlamınız ve varsa repo'nun PR template'i ile doldurulur. |
+| Merge/rebase conflict resolution | Git görünümündeki conflicts iletişim kutusu, bir merge ya da rebase çakışmada durduğunda | "Resolve in current session" ya da "Resolve in new session" seçersiniz. Agent çakışan dosyaları okur, dosya başına bir çözüm stratejisi önerir ve düzenleme, stage etme ya da işlemi sürdürmeden önce onayınızı bekler. |
+| Cherry-pick conflict resolution | Bir worktree oturumu için "Re-integrate commits" bölümü | Oturumun commit'lerini hedef branch'e taşırken bir çakışma olur ve bunu agent'a verirsiniz. Agent geçici worktree içinde çözer, düzeltilen dosyaları stage eder ve cherry-pick'e devam eder. |
+
+### GitHub
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| PR review | Composer'daki attach menüsünün "Link GitHub PR" seçicisi ve yeni worktree iletişim kutusu | İki tetikleyici vardır. Bir PR'ı bağlam olarak eklediğinizde yönergeler görünür ve sonraki mesajınızla birlikte gider. Bir PR'dan worktree oturumu başlatmak, prompt'u o oturumun açılış mesajı yapar ve tam PR bağlamı eklenir. |
+| Issue review | Worktree'yi bir issue'dan başlattığınızda yeni worktree iletişim kutusu | Yeni oturumun açılış mesajı issue'yu inceler, body'si ve comments'i bağlam olarak eklenir. |
+| PR failed checks / PR comments / single PR comment | — | Bugün hiçbir akış tarafından gönderilmez. PR görünümü bunları eskiden tek tıkla review eylemlerinden tetiklerdi. Failed checks ve comments şimdi bunun yerine chat-context draft'ı olarak sabitleniyor. Düzenlenebilir kalırlar, böylece mevcut overrides çalışmaya devam eder. |
+
+### Planning
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| Todo planning | Proje kenar çubuğundaki Todos paneli | Bir todo'yu bir oturuma ya da yeni bir worktree oturumuna gönderirsiniz. Todo metni görünen mesaj olur. Yönergeler onu doğrudan uygulamaya geçmek yerine soru-cevap odaklı bir planlama diyaloğuna dönüştürür. |
+| Improve plan | Plans görünümündeki kayıtlı bir plan üzerinde "Improve" eylemi | Kayıtlı bir planı improve akışına gönderirsiniz. Agent önce plan dosyasını okur, sonra geçerli repo durumuna dayalı değişiklikler önerir ve aynı dosyayı düzenlemeyi teklif eder. |
+| Implement plan | Kayıtlı bir plan üzerindeki "Implement" eylemi | Kayıtlı bir planı implement akışına gönderirsiniz. Agent plan dosyasını okur ve kapsamı büyütmeden baştan sona uygular. Planın kendisi yanlış çıkarsa plan düzeltmelerini dosyaya geri kaydeder. |
+
+### Session
+
+Bunların çoğu composer'a yazılan slash komutlarını güçlendirir. Çoğu ayrıca yeni oturum taslağında başlangıç kartı olarak görünür.
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| Codebase tour | `/explore` | Kod tabanına üst düzey bir giriş istediğinizde. |
+| Session summary | `/summary`, isteğe bağlı olarak `/summary <topic>` | Sohbeti şimdiye kadar özetlersiniz. Yeni bir oturuma devretmek için kullanışlıdır. Mevcut bir oturum gerekir. |
+| Workspace review | `/workspace-review` | Agent'tan mevcut workspace diff'ini amaç, doğruluk ve güvenlik açısından incelemesini istediğinizde. |
+| Feature planning | `/plan-feature` | Belirsiz bir özellik fikrini yönlendirmeli bir soru-cevap diyaloğu ile uygulama planına dönüştürürsünüz. |
+| Goal crafting | `/craft-goal`, isteğe bağlı olarak `/craft-goal <idea>` | Bir fikri Goal dialog'u için doğrulanabilir bir Goal hedefine dönüştürürsünüz. |
+| Catch up | `/catch-up` | Bir projeye geri dönersiniz ve işlerin nerede kaldığını, sonra neye bakmanız gerektiğini sorarsınız. |
+| Debugging | `/debug` | Bir hatayı incelersiniz. Agent hipotez kurar, kök nedeni koddan doğrular ve ancak sonra bir fix önerir. |
+| Weigh options | `/weigh` | Ne inşa etmek istediğinizi bilirsiniz ama nasıl olacağını bilmezsiniz. Agent iki ya da üç yaklaşımı karşılaştırır ve birini önerir. |
+| Fusion | Çoklu çalıştırma grubundaki "Run fusion" eylemi | Birden fazla çalıştırmanın çıktısını tek yanıtta birleştirirsiniz. Çalıştırma çıktıları yönergelerin sonuna eklenir. |
+
+### Ayar girişi olmayan istemler
+
+Birkaç istem otomatik tetiklenir ve Settings içinde düzenlenebilir bir sayfaları yoktur:
+
+| Prompt | When it fires |
+| --- | --- |
+| Scheduled task | `/schedule-task`, isteğe bağlı olarak ilk fikirle. Zamanlanmış bir görevi tanımlayan diyaloğu yönlendirir. |
+| Review handoff | `/handoff-review` ya da handoff etkinken diff görünümündeki Review düğmesi. Handoff'u çalışan oturumda oluşturur. |
+| Review session starter | Üretilen review oturumunun açılış mesajı. Handoff üretilmişse onunla birlikte, değilse onsuz. |
+| Review feedback / implementation response | İki oturum arasında shuttle mesajları: reviewer geri bildirimi implementing oturuma gider, implementer'ın yanıtı review oturumuna döner. |
+
+## İlgili
+
+- [Git & GitHub Workflows](/git/) — bu istemlerin çoğu git akışlarını güçlendirir
+- [Notes, Todos & Plans](/notes-todos-plans/) — Planning istemlerinin arkasındaki todos ve planlar
+- [Multi-run](/multi-run/) — run grupları ve fusion

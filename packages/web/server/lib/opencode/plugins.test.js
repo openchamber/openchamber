@@ -121,6 +121,24 @@ describe('opencode plugins data layer', () => {
     expect(readJson(userConfigPath)).toEqual({});
   });
 
+  test('lists user plugins when a project layer is unparseable', () => {
+    const partialProject = [
+      '{',
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  plugin: ["broken-project-plugin"],',
+      '}',
+      '',
+    ].join('\n');
+    writeJson(userConfigPath, { plugin: ['user-plugin'] });
+    const projectFile = path.join(projectDir, '.opencode', 'opencode.jsonc');
+    fs.mkdirSync(path.dirname(projectFile), { recursive: true });
+    fs.writeFileSync(projectFile, partialProject, 'utf8');
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => entry.spec)).toEqual(['user-plugin']);
+    expect(fs.readFileSync(projectFile, 'utf8')).toBe(partialProject);
+    expect(fs.existsSync(`${projectFile}.openchamber.backup`)).toBe(false);
+  });
+
   test('lists entries from user and project layers with scopes and parsed kinds', () => {
     writeJson(userConfigPath, { plugin: ['npm-plugin', '/abs/plugin.js', '@scope/pkg@1.0.0'] });
     writeJson(path.join(projectDir, '.opencode', 'opencode.json'), { plugin: ['./local-plugin.js'] });

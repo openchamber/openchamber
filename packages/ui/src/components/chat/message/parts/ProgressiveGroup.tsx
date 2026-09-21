@@ -1,9 +1,9 @@
 import React from 'react';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase } from '../types';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import ToolPart from './ToolPart';
 import { MinDurationShineText } from './MinDurationShineText';
@@ -14,12 +14,12 @@ import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
+import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
-import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
@@ -39,7 +39,6 @@ interface ProgressiveGroupProps {
     expandedTools: Set<string>;
     onToggleTool: (toolId: string) => void;
     onShowPopup: (content: ToolPopupContent) => void;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     streamPhase: StreamPhase;
     showHeader: boolean;
     animateRows?: boolean;
@@ -375,9 +374,7 @@ interface ExpandableToolRowProps {
     isMobile: boolean;
     onToggleTool: (toolId: string) => void;
     onShowPopup: (content: ToolPopupContent) => void;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     animateTailText: boolean;
-    animateRows: boolean;
 }
 
 const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
@@ -386,9 +383,7 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
     isMobile,
     onToggleTool,
     onShowPopup,
-    onContentChange,
     animateTailText,
-    animateRows,
 }) => {
     const handleToggle = React.useCallback(() => {
         onToggleTool(activity.id);
@@ -400,23 +395,22 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
             isExpanded={isExpanded}
             onToggle={handleToggle}
             isMobile={isMobile}
-            onContentChange={onContentChange}
             onShowPopup={onShowPopup}
             animateTailText={animateTailText}
         />
     );
 
-    const maybeWrapped = animateTailText ? (
-        <ToolRevealOnMount animate={true} wipe>
-            {content}
-        </ToolRevealOnMount>
-    ) : content;
-
-    if (!animateRows) {
-        return maybeWrapped;
-    }
-
-    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
+    // Wrappers are unconditional: a conditional wrapper changes the element
+    // type at this position when animateTailText/animateRows flip (message
+    // completion), remounting the tool subtree and replaying the reveal wipe.
+    // Both wrappers are inert with animation off.
+    return (
+        <FadeInOnReveal>
+            <ToolRevealOnMount animate={animateTailText} wipe>
+                {content}
+            </ToolRevealOnMount>
+        </FadeInOnReveal>
+    );
 };
 
 const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
@@ -424,9 +418,7 @@ const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
         && prev.isMobile === next.isMobile
         && prev.onToggleTool === next.onToggleTool
         && prev.onShowPopup === next.onShowPopup
-        && prev.onContentChange === next.onContentChange
         && prev.animateTailText === next.animateTailText
-        && prev.animateRows === next.animateRows
         && prev.activity.id === next.activity.id
         && prev.activity.kind === next.activity.kind
         && prev.activity.endedAt === next.activity.endedAt
@@ -437,14 +429,12 @@ interface StaticGroupedToolRowProps {
     toolName: string;
     activities: TurnActivityPart[];
     animateTailText: boolean;
-    animateRows: boolean;
 }
 
 const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
     toolName,
     activities,
     animateTailText,
-    animateRows,
 }) => {
     const content = (
         <StaticToolRow
@@ -454,23 +444,22 @@ const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
         />
     );
 
-    const maybeWrapped = animateTailText ? (
-        <ToolRevealOnMount animate={true} wipe>
-            {content}
-        </ToolRevealOnMount>
-    ) : content;
-
-    if (!animateRows) {
-        return maybeWrapped;
-    }
-
-    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
+    // Wrappers are unconditional: a conditional wrapper changes the element
+    // type at this position when animateTailText/animateRows flip (message
+    // completion), remounting the tool subtree and replaying the reveal wipe.
+    // Both wrappers are inert with animation off.
+    return (
+        <FadeInOnReveal>
+            <ToolRevealOnMount animate={animateTailText} wipe>
+                {content}
+            </ToolRevealOnMount>
+        </FadeInOnReveal>
+    );
 };
 
 const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) => {
     return prev.toolName === next.toolName
         && prev.animateTailText === next.animateTailText
-        && prev.animateRows === next.animateRows
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
@@ -569,10 +558,15 @@ const StaticToolRowInner: React.FC<{
     animateTailText: boolean;
 }> = ({ toolName, activities, animateTailText }) => {
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
-    const displayName = getToolMetadata(toolName).displayName;
-    const icon = getToolIcon(toolName);
+    // Grouped rows share one normalized name; the registry wants the full
+    // name OpenCode reported, which every activity in the group carries.
+    const firstPart = activities[0]?.part;
+    const presentation = useGuestToolPresentation(firstPart?.type === 'tool' ? firstPart.tool : null);
+    const displayName = presentation?.name ?? getToolMetadata(toolName).displayName;
+    const icon = getToolIcon(toolName, presentation);
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
+    const mobileActions = useMobileAppActions();
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
     const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
@@ -623,7 +617,7 @@ const StaticToolRowInner: React.FC<{
         return entries;
     }, [activities, currentDirectory, isReadGroup]);
 
-    const handleReadFileClick = React.useCallback((filePath: string, offset?: number) => {
+    const handleFileClick = React.useCallback((filePath: string, offset?: number) => {
         const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
         if (!absolutePath) {
             return;
@@ -634,16 +628,29 @@ const StaticToolRowInner: React.FC<{
             return;
         }
 
-        if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
-            void ensureOutsideFileGrantForDesktop(absolutePath, currentDirectory).then(() => {
-                const uiStore = useUIStore.getState();
-                const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
-                if (offset && Number.isFinite(offset)) {
-                    uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
-                    return;
-                }
+        // Dedicated mobile app: stage the same pending file focus/navigation
+        // desktop uses, then surface the Files pane (workspace drawer tab),
+        // which consumes it.
+        if (mobileActions) {
+            const uiStore = useUIStore.getState();
+            const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+            if (offset && Number.isFinite(offset)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+            } else {
                 uiStore.openContextFile(contextDirectory, absolutePath);
-            });
+            }
+            mobileActions.openFiles();
+            return;
+        }
+
+        if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
+            const uiStore = useUIStore.getState();
+            const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+            if (offset && Number.isFinite(offset)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+                return;
+            }
+            uiStore.openContextFile(contextDirectory, absolutePath);
             return;
         }
 
@@ -654,15 +661,7 @@ const StaticToolRowInner: React.FC<{
             return;
         }
         uiStore.openContextFile(contextDirectory, absolutePath);
-    }, [currentDirectory, runtime]);
-
-    const handleSkillClick = React.useCallback((skillPath: string) => {
-        if (!skillPath) {
-            return;
-        }
-        const uiStore = useUIStore.getState();
-        uiStore.openContextFile(currentDirectory || getDirectoryForFilePath('', skillPath), skillPath);
-    }, [currentDirectory]);
+    }, [currentDirectory, mobileActions, runtime]);
 
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
@@ -675,8 +674,11 @@ const StaticToolRowInner: React.FC<{
 
     return (
         <div
+            // oc-static-tool-row: on touch devices mobile.css raises this to the
+            // same 36px floor the [role="button"] expandable/reasoning rows get,
+            // so static and expandable rows have identical rhythm.
             className={cn(
-                'flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
+                'oc-static-tool-row flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
             )}
         >
             <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
@@ -699,7 +701,7 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleReadFileClick(entry.path, entry.offset);
+                            handleFileClick(entry.path, entry.offset);
                         }}
                         className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}
@@ -751,7 +753,7 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleSkillClick(entry.path);
+                            handleFileClick(entry.path);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}
@@ -783,9 +785,8 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhase }: {
+const InlineReasoningBlock = React.memo(({ activity, streamPhase }: {
     activity: TurnActivityPart;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     streamPhase: StreamPhase;
 }) => {
     return (
@@ -793,7 +794,6 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhas
             part={activity.part}
             messageId={activity.messageId}
             streamPhase={streamPhase}
-            onContentChange={onContentChange}
         />
     );
 });
@@ -801,16 +801,14 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhas
 /**
  * Inline justification text block — rendered as normal assistant text between tools.
  */
-const InlineJustificationBlock = React.memo(({ activity, onContentChange, actions }: {
+const InlineJustificationBlock = React.memo(({ activity, actions }: {
     activity: TurnActivityPart;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     actions?: React.ReactNode;
 }) => {
     return (
         <JustificationBlock
             part={activity.part}
             messageId={activity.messageId}
-            onContentChange={onContentChange}
             actions={actions}
         />
     );
@@ -825,7 +823,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     expandedTools,
     onToggleTool,
     onShowPopup,
-    onContentChange,
     streamPhase,
     showHeader,
     animateRows = true,
@@ -886,7 +883,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         <InlineReasoningBlock
                             activity={row.activity}
                             streamPhase={streamPhase}
-                            onContentChange={onContentChange}
                         />
                     </>
                 );
@@ -897,7 +893,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                     <>
                         <InlineJustificationBlock
                             activity={row.activity}
-                            onContentChange={onContentChange}
                             actions={renderJustificationActions?.(row.activity)}
                         />
                     </>
@@ -912,9 +907,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
-                        onContentChange={onContentChange}
                         animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        animateRows={animateRows}
                     />
                 );
 
@@ -925,7 +918,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         toolName={row.toolName}
                         activities={row.activities}
                         animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
-                        animateRows={animateRows}
                     />
                 );
 
@@ -938,9 +930,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
-                        onContentChange={onContentChange}
                         animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        animateRows={animateRows}
                     />
                 );
 
@@ -955,7 +945,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     if (!showHeader) {
         return (
             <FadeInOnReveal>
-                <div className="mt-1 mb-2 space-y-1.5">{renderedRows}</div>
+                <div className="mt-1 mb-2">{renderedRows}</div>
             </FadeInOnReveal>
         );
     }
@@ -998,7 +988,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                                 +{previewHiddenCount} more...
                             </button>
                         ) : null}
-                        <div className="space-y-1.5">{renderedRows}</div>
+                        {/* No gap between rows: each row carries its own padding, and
+                            the live timeline stacks the same rows with nothing between
+                            them, so the sorted view keeps the identical rhythm. */}
+                        <div>{renderedRows}</div>
                     </div>
                 ) : null}
             </div>

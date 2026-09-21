@@ -17,13 +17,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     scheduledTasksRuntime,
     getOpenChamberEventClients,
     writeSseEvent,
+    scheduledTaskService = createScheduledTaskService(dependencies),
   } = dependencies;
-
-  const findProjectByID = async (projectID) => {
-    const settings = await readSettingsFromDiskMigrated();
-    const projects = sanitizeProjects(settings?.projects || []);
-    return projects.find((project) => project.id === projectID) || null;
-  };
 
   app.get('/api/projects/:projectId/scheduled-tasks', async (req, res) => {
     const projectID = parseProjectID(req);
@@ -32,14 +27,10 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
 
     try {
-      const project = await findProjectByID(projectID);
-      if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+      const tasks = await scheduledTaskService.list(projectID);
       return res.json({ tasks });
     } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
       console.error('[ScheduledTasks] failed to load tasks:', error);
       return res.status(500).json({ error: 'Failed to load scheduled tasks' });
     }
@@ -57,22 +48,9 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
 
     try {
-      const project = await findProjectByID(projectID);
-      if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const upserted = await projectConfigRuntime.upsertScheduledTask(projectID, taskInput);
-      await scheduledTasksRuntime.syncProject(projectID);
-      const freshTasks = await projectConfigRuntime.listScheduledTasks(projectID);
-      const freshTask = freshTasks.find((task) => task.id === upserted.task.id) || upserted.task;
-
-      return res.json({
-        tasks: freshTasks,
-        task: freshTask,
-        created: upserted.created,
-      });
+      return res.json(await scheduledTaskService.upsert(projectID, taskInput));
     } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
       const message = error instanceof Error ? error.message : 'Failed to save scheduled task';
       const statusCode = message.toLowerCase().includes('required') || message.toLowerCase().includes('invalid')
         ? 400
@@ -95,21 +73,40 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
 
     try {
-      const project = await findProjectByID(projectID);
-      if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const result = await projectConfigRuntime.deleteScheduledTask(projectID, taskID);
-      if (!result.deleted) {
-        return res.status(404).json({ error: 'Task not found' });
-      }
-      await scheduledTasksRuntime.syncProject(projectID);
-      const freshTasks = await projectConfigRuntime.listScheduledTasks(projectID);
-      return res.json({ tasks: freshTasks });
+      return res.json({ tasks: await scheduledTaskService.remove(projectID, taskID) });
     } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
       console.error('[ScheduledTasks] failed to delete task:', error);
       return res.status(500).json({ error: 'Failed to delete scheduled task' });
+    }
+  });
+
+  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      const task = await scheduledTaskService.setLoopEnabled(projectID, taskID, req.body?.enabled);
+      return res.json({ task });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to update loop file:', error);
+      return res.status(500).json({ error: 'Failed to update loop file' });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json({ tasks: await scheduledTaskService.removeLoopFile(projectID, taskID) });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to delete loop file:', error);
+      return res.status(500).json({ error: 'Failed to delete loop file' });
     }
   });
 
@@ -124,31 +121,9 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
 
     try {
-      const project = await findProjectByID(projectID);
-      if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const result = await scheduledTasksRuntime.runNow(projectID, taskID);
-      if (result.running || result.queued) {
-        return res.status(409).json({ error: result.error || 'Task already running' });
-      }
-      if (result.skipped) {
-        return res.status(404).json({ error: 'Task not found or disabled' });
-      }
-      if (!result.ok) {
-        return res.status(500).json({
-          error: result.error || 'Task run failed',
-          task: result.task,
-        });
-      }
-
-      return res.json({
-        ok: true,
-        task: result.task,
-        sessionId: result.sessionID,
-      });
+      return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
     } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.task ? { task: error.task } : {}) });
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(500).json({ error: 'Failed to run scheduled task' });
     }
@@ -156,37 +131,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/scheduled-tasks/status', async (_req, res) => {
     try {
-      if (typeof scheduledTasksRuntime.getStatus === 'function') {
-        return res.json(scheduledTasksRuntime.getStatus());
-      }
-
-      const settings = await readSettingsFromDiskMigrated();
-      const projects = sanitizeProjects(settings?.projects || []);
-
-      let enabledCount = 0;
-      let runningCount = 0;
-
-      for (const project of projects) {
-        try {
-          const tasks = await projectConfigRuntime.listScheduledTasks(project.id);
-          for (const task of tasks) {
-            if (task?.enabled) {
-              enabledCount += 1;
-            }
-            if (task?.state?.lastStatus === 'running') {
-              runningCount += 1;
-            }
-          }
-        } catch {
-        }
-      }
-
-      return res.json({
-        hasEnabledScheduledTasks: enabledCount > 0,
-        hasRunningScheduledTasks: runningCount > 0,
-        enabledScheduledTasksCount: enabledCount,
-        runningScheduledTasksCount: runningCount,
-      });
+      return res.json(await scheduledTaskService.status());
     } catch (error) {
       console.error('[ScheduledTasks] failed to resolve scheduled task status:', error);
       return res.status(500).json({ error: 'Failed to resolve scheduled task status' });
@@ -199,6 +144,12 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
+
+    // Whether a client can drive a browser view is a property of that client,
+    // not of this server: a desktop shell and a browser tab can be connected to
+    // the same server at once. Recording it on the connection keeps the answer
+    // current without any enable/disable setting to go stale.
+    res.openchamberBrowserCapable = req.query?.browser === '1';
 
     const clients = getOpenChamberEventClients();
     clients.add(res);
@@ -233,3 +184,4 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     });
   });
 };
+import { createScheduledTaskService } from './service.js';

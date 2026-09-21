@@ -23,6 +23,7 @@ type OnboardingScreenProps = {
   onEnterLocalSetup?: () => void;
   /** Callback when user wants to switch to remote (first-launch only) */
   onChooseRemote?: () => void;
+  localAvailable?: boolean;
 };
 
 export function OnboardingScreen({
@@ -33,6 +34,7 @@ export function OnboardingScreen({
   recoveryHostUrl,
   recoveryHostLabel,
   onEnterLocalSetup,
+  localAvailable = true,
 }: OnboardingScreenProps) {
   const [showRecoveryRemoteForm, setShowRecoveryRemoteForm] = React.useState(false);
   const [recoveryEnteredLocalSetup, setRecoveryEnteredLocalSetup] = React.useState(false);
@@ -55,6 +57,7 @@ export function OnboardingScreen({
         variant={recoveryVariant}
         hostUrl={recoveryHostUrl}
         hostLabel={recoveryHostLabel}
+        onChooseRemote={() => setShowRecoveryRemoteForm(true)}
         showRemoteForm={showRecoveryRemoteForm}
         onCloseRemoteForm={() => setShowRecoveryRemoteForm(false)}
         onSwitchToLocalFromRemote={() => {
@@ -65,6 +68,7 @@ export function OnboardingScreen({
           setRecoveryEnteredLocalSetup(true);
           onEnterLocalSetup?.();
         }}
+        localAvailable={localAvailable}
       />
     );
   }
@@ -91,6 +95,7 @@ export function OnboardingScreen({
   return (
     <ChooserScreen
       onCliAvailable={onCliAvailable}
+      localAvailable={localAvailable}
     />
   );
 }

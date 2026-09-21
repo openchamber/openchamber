@@ -76,20 +76,11 @@ const output = {};
 
 const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml');
 const winArm64 = await read('latest-yml-aarch64-pc-windows-msvc', 'latest.yml');
-if (winX64 || winArm64) {
-  const base = winArm64 || winX64;
-  output['latest.yml'] = serialize({
-    version: base.version,
-    files: [...(winArm64?.files || []), ...(winX64?.files || [])],
-    releaseDate: base.releaseDate,
-  });
+if (!winX64 || !winArm64) {
+  throw new Error('Both x64 and arm64 Windows update manifests are required');
 }
-
-const linuxX64 = await read('latest-yml-x86_64-unknown-linux-gnu', 'latest-linux.yml');
-if (linuxX64) output['latest-linux.yml'] = serialize(linuxX64);
-
-const linuxArm64 = await read('latest-yml-aarch64-unknown-linux-gnu', 'latest-linux-arm64.yml');
-if (linuxArm64) output['latest-linux-arm64.yml'] = serialize(linuxArm64);
+output['latest.yml'] = serialize(winX64);
+output['latest-arm64.yml'] = serialize(winArm64);
 
 const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml');
 const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml');

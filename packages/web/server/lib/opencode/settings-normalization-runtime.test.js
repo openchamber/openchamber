@@ -52,6 +52,27 @@ describe('settings normalization runtime - symlink resolution', () => {
       const result = runtime.normalizePathForPersistence('/some/path');
       expect(result).toBe('/some/path');
     });
+
+    it('preserves lowercase colon-prefixed paths on non-Windows platforms', () => {
+      const runtime = createTestRuntime({ realpathSync: undefined });
+
+      expect(runtime.normalizePathForPersistence('c:project')).toBe('c:project');
+    });
+
+    it('uppercases Windows drive letter before and after realpath resolution', () => {
+      const runtime = createTestRuntime({
+        processLike: { platform: 'win32', env: {} },
+        realpathSync: (p) => {
+          // Simulate safeRealpathSync returning a lowercase drive letter
+          if (p === 'C:\\Users\\me\\project') return 'c:\\real\\project';
+          return p;
+        },
+      });
+
+      const result = runtime.normalizePathForPersistence('c:\\Users\\me\\project');
+      // Drive letter uppercased on input AND after realpath
+      expect(result).toBe('C:\\real\\project');
+    });
   });
 
   describe('sanitizeProjects', () => {
@@ -83,6 +104,35 @@ describe('settings normalization runtime - symlink resolution', () => {
 
       const result = runtime.sanitizeProjects(projects);
       expect(result[0].path).toBe('/resolved/missing/path');
+    });
+
+    it('keeps a default thinking level next to its model and drops it alone', () => {
+      const runtime = createTestRuntime({
+        realpathSync: (p) => p,
+        path: { resolve: (p) => p, sep: '/', dirname: (p) => p.split('/').slice(0, -1).join('/') || '/' },
+      });
+
+      const projects = [
+        { id: 'proj1', path: '/a', defaultModel: 'anthropic/claude-opus-5', defaultVariant: 'high' },
+        { id: 'proj2', path: '/b', defaultVariant: 'high' },
+      ];
+
+      const result = runtime.sanitizeProjects(projects);
+      expect(result[0].defaultVariant).toBe('high');
+      expect(result[1].defaultVariant).toBe(undefined);
+    });
+
+    it('keeps a project default agent', () => {
+      const runtime = createTestRuntime({
+        realpathSync: (p) => p,
+        path: { resolve: (p) => p, sep: '/', dirname: (p) => p.split('/').slice(0, -1).join('/') || '/' },
+      });
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', defaultAgent: 'plan' },
+      ]);
+
+      expect(result[0].defaultAgent).toBe('plan');
     });
 
     it('deduplicates projects that resolve to the same realpath', () => {

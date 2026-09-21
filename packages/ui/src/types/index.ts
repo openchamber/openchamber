@@ -13,6 +13,13 @@ export interface ModelMetadata {
   reasoning?: boolean;
   temperature?: boolean;
   attachment?: boolean;
+  /**
+   * Whether the model can be constrained to a JSON schema. Tri-state on
+   * purpose: `undefined` means the catalog does not say — common for
+   * aggregators and proxies — and must be treated as "worth trying", never as
+   * unsupported.
+   */
+  structured_output?: boolean;
   modalities?: {
     input?: string[];
     output?: string[];

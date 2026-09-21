@@ -1,0 +1,39 @@
+---
+title: Befehle & Snippets
+description: Wiederverwendbare Slash-Befehle und Text-Snippets für den Chat erstellen.
+---
+
+# Befehle & Snippets
+
+Sowohl Befehle als auch Snippets ersparen dir das wiederholte Tippen derselben Dinge. Befehle sind ganze Prompts, die du mit `/` aufrufst; Snippets sind Textbausteine, die du mit `#` in eine Nachricht einfügst.
+
+## Befehle
+
+Ein Befehl ist ein gespeicherter Prompt, den du mit einem Slash aufrufst, etwa `/review`. Du verwaltest ihn unter **Einstellungen → Befehle**.
+
+1. Öffne **Einstellungen → Befehle** und erstelle einen Befehl.
+2. Gib ihm einen Namen, eine Beschreibung und den Prompt-Text, den er senden soll.
+3. Optional kannst du ihn an einen bestimmten Agenten oder ein Modell binden.
+4. Wähle den Geltungsbereich: persönlich oder projektbezogen.
+
+Gib im Chat als **erstes** Zeichen der Nachricht `/` ein, um Befehle anzuzeigen, und wähle dann einen aus. Dein Text kann Platzhalter verwenden:
+
+- `$ARGUMENTS` — alles, was du nach dem Befehl eingibst
+- `@filename` — fügt den Inhalt einer Datei ein
+- `` !`command` `` — fügt die Ausgabe eines Shell-Befehls ein
+
+Die eingebauten Befehle `init` und `review` können zurückgesetzt, aber nicht gelöscht werden.
+
+## Snippets
+
+Ein Snippet ist wiederverwendbarer Text, auf den du inline mit einer Raute verweist, zum Beispiel `#signoff`. Du verwaltest ihn unter **Einstellungen → Snippets**.
+
+1. Öffne **Einstellungen → Snippets** und erstelle ein Snippet.
+2. Gib ihm einen Namen und den Text, für den es steht. Füge Aliase hinzu, wenn du mehr als einen Auslöser möchtest.
+3. Wähle den persönlichen oder projektbezogenen Geltungsbereich.
+
+Gib im Chat `#` ein und wähle ein Snippet aus. OpenChamber ersetzt es vor dem Senden durch den vollständigen Text.
+
+## Weiterführend
+
+- [Skills](/skills/) — größere Anweisungssätze bei Bedarf laden

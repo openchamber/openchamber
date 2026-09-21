@@ -1,6 +1,5 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,17 +12,22 @@ import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
+import { NestedRepoPicker } from './NestedRepoPicker';
 import type {
   GitStatus,
   GitIdentityProfile,
   GitRemote,
   GitRemoteComparison,
+  GitHubPullRequest,
+  GitHubChecksSummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 
 interface GitHeaderProps {
+  directory: string;
   status: GitStatus | null;
   localBranches: string[];
   remoteBranches: string[];
@@ -45,9 +49,18 @@ interface GitHeaderProps {
   onOpenHistory?: () => void;
   onOpenGraph?: () => void;
   onOpenStashes?: () => void;
-  actionTabItems?: SortableTabsStripItem[];
-  activeActionTab?: string;
-  onSelectActionTab?: (tabID: string) => void;
+  onOpenUpdateBranch?: () => void;
+  onOpenReintegrateCommits?: () => void;
+  pullRequest?: GitHubPullRequest | null;
+  prChecks?: GitHubChecksSummary | null;
+  onOpenPullRequest?: () => void;
+  // Nested repository picker: shown when the Git tab operates on a repository
+  // nested inside a non-repository root. Options are absolute repository
+  // paths; `repositoryRoot` is the root those paths are relative to.
+  repositoryOptions?: string[];
+  selectedRepository?: string | null;
+  onSelectRepository?: (repository: string) => void;
+  repositoryRoot?: string;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -58,6 +71,7 @@ const IDENTITY_ICON_MAP: Record<string, IconName> = {
   code: 'code',
   heart: 'heart',
   user: 'user-3',
+  fingerprint: 'fingerprint',
 };
 
 const IDENTITY_COLOR_MAP: Record<string, string> = {
@@ -228,6 +242,7 @@ const UpstreamStatusPill: React.FC<UpstreamStatusPillProps> = ({
 };
 
 export const GitHeader: React.FC<GitHeaderProps> = ({
+  directory,
   status,
   localBranches,
   remoteBranches,
@@ -249,18 +264,27 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onOpenHistory,
   onOpenGraph,
   onOpenStashes,
-  actionTabItems,
-  activeActionTab,
-  onSelectActionTab,
+  onOpenUpdateBranch,
+  onOpenReintegrateCommits,
+  pullRequest,
+  prChecks,
+  onOpenPullRequest,
+  repositoryOptions,
+  selectedRepository,
+  onSelectRepository,
+  repositoryRoot,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   if (!status) {
     return null;
   }
 
+  const repositoryOptionsForPicker = (repositoryOptions ?? []).filter(Boolean);
+
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenHistory || onOpenGraph || onOpenStashes ? (
+      {onOpenHistory || onOpenGraph || onOpenStashes || onOpenUpdateBranch ? (
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -271,7 +295,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
                   className="h-8 w-8 px-0"
                   aria-label={t('gitView.header.repositoryViews')}
                 >
-                  <Icon name="git-repository" className="size-4" />
+                  <Icon name="more-fill" className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
@@ -286,7 +310,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
             ) : null}
             {onOpenGraph ? (
               <DropdownMenuItem onSelect={onOpenGraph}>
-                <Icon name="git-merge" className="size-4" />
+                <Icon name="git-branch" className="size-4" />
                 {t('gitView.graph.title')}
               </DropdownMenuItem>
             ) : null}
@@ -296,11 +320,74 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
                 {t('gitView.stashes.title')}
               </DropdownMenuItem>
             ) : null}
+            {onOpenUpdateBranch ? (
+              <DropdownMenuItem onSelect={onOpenUpdateBranch}>
+                <Icon name="git-merge" className="size-4" />
+                {t('gitView.header.updateBranch')}
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenReintegrateCommits ? (
+              <DropdownMenuItem onSelect={onOpenReintegrateCommits}>
+                <Icon name="split-cells-horizontal" className="size-4" />
+                {t('gitView.integrate.title')}
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
     </div>
   );
+
+  const prChecksColor = prChecks
+    ? prChecks.state === 'success'
+      ? 'var(--status-success)'
+      : prChecks.state === 'failure'
+        ? 'var(--status-error)'
+        : 'var(--status-warning)'
+    : null;
+
+  const prVisualState = pullRequest
+    ? pullRequest.state === 'merged'
+      ? 'merged'
+      : pullRequest.state === 'closed'
+        ? 'closed'
+        : pullRequest.draft
+          ? 'draft'
+          : prChecks?.state === 'failure'
+            || pullRequest.mergeable === false
+            || pullRequest.mergeableState === 'blocked'
+            || pullRequest.mergeableState === 'dirty'
+            ? 'blocked'
+            : 'open'
+    : null;
+
+  const prChip = pullRequest && onOpenPullRequest ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenPullRequest}
+          className="h-8 gap-1.5 px-2 typography-micro"
+        >
+          <Icon
+            name="git-pull-request"
+            className="size-3.5"
+            style={{ color: `var(--pr-${prVisualState})` }}
+          />
+          <span className="tabular-nums text-foreground/80">{t('gitView.pr.numberLabel', { number: pullRequest.number })}</span>
+          {prChecksColor ? (
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: prChecksColor }}
+            />
+          ) : null}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={8}>{t('gitView.header.openPullRequest')}</TooltipContent>
+    </Tooltip>
+  ) : null;
 
   const syncButtons = (
     <SyncActions
@@ -341,50 +428,49 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   return (
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="min-w-0 flex-1">
-          {isWorktreeMode ? (
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {isWorktreeMode && !isMobile ? (
             <WorktreeBranchDisplay
               currentBranch={status.current}
               onRename={onRenameBranch}
             />
           ) : (
             <BranchSelector
+              directory={directory}
               currentBranch={status.current}
               localBranches={localBranches}
               remoteBranches={remoteBranches}
               branchInfo={branchInfo}
+              currentBranchAhead={status.ahead}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
               remotes={remotes}
+              switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
             />
           )}
+          {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (
+            <NestedRepoPicker
+              repositories={repositoryOptionsForPicker}
+              selectedRepository={selectedRepository ?? null}
+              onSelectRepository={onSelectRepository}
+              repositoryRoot={repositoryRoot}
+            />
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {managementButtons}
           {identityControl}
         </div>
       </div>
 
-      {actionTabItems && activeActionTab && onSelectActionTab ? (
-        <div className="mt-3 flex h-8 min-w-0 items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <SortableTabsStrip
-              items={actionTabItems}
-              activeId={activeActionTab}
-              onSelect={onSelectActionTab}
-              layoutMode="fit"
-              variant="active-pill"
-              iconOnlyActiveTab={true}
-              activePillButtonClassName="h-7"
-              className="h-full"
-            />
-          </div>
-          {upstreamStatusPill ? (
-            <div className="min-w-0 shrink">{upstreamStatusPill}</div>
-          ) : null}
-          <div className="shrink-0">{syncButtons}</div>
-        </div>
-      ) : null}
+      <div className="mt-3 flex h-8 min-w-0 items-center gap-2">
+        {prChip ? <div className="shrink-0">{prChip}</div> : null}
+        <div className="min-w-0 flex-1" />
+        {upstreamStatusPill ? (
+          <div className="min-w-0 shrink">{upstreamStatusPill}</div>
+        ) : null}
+        {managementButtons}
+        <div className="shrink-0">{syncButtons}</div>
+      </div>
     </header>
   );
 };

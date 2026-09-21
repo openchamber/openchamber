@@ -14,6 +14,20 @@ export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
 const aliases = ['kimi-for-coding', 'kimi'];
 
+// Kimi's weekly `usage` block reports `used`; its rate-limit `limits[].detail`
+// blocks report `remaining` instead. Neither field is guaranteed present, so
+// derive usedPercent from whichever one the API actually returned.
+const computeUsedPercent = (total, used, remaining) => {
+  if (!total) return null;
+  if (used !== null) {
+    return Math.max(0, Math.min(100, (used / total) * 100));
+  }
+  if (remaining !== null) {
+    return Math.max(0, Math.min(100, 100 - (remaining / total) * 100));
+  }
+  return null;
+};
+
 export const isConfigured = () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
@@ -59,10 +73,9 @@ export const fetchQuota = async () => {
     const usage = payload?.usage ?? null;
     if (usage) {
       const limit = toNumber(usage.limit);
+      const used = toNumber(usage.used);
       const remaining = toNumber(usage.remaining);
-      const usedPercent = limit && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / limit) * 100))
-        : null;
+      const usedPercent = computeUsedPercent(limit, used, remaining);
       windows.weekly = toUsageWindow({
         usedPercent,
         windowSeconds: null,
@@ -78,10 +91,9 @@ export const fetchQuota = async () => {
       const windowSeconds = durationToSeconds(window?.duration, window?.timeUnit);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
+      const used = toNumber(detail?.used);
       const remaining = toNumber(detail?.remaining);
-      const usedPercent = total && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / total) * 100))
-        : null;
+      const usedPercent = computeUsedPercent(total, used, remaining);
       windows[label] = toUsageWindow({
         usedPercent,
         windowSeconds,

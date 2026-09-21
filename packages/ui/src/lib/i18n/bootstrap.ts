@@ -209,12 +209,51 @@ const JA_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `データを読み込み中 (${providersText}, ${agentsText})…`,
 };
 
+const DE_MESSAGES: BootstrapMessages = {
+  startingApi: 'OpenCode API wird gestartet…',
+  initializing: 'Initialisierung…',
+  connecting: 'Verbindung wird hergestellt…',
+  connected: 'Verbunden!',
+  connectionError: 'Verbindungsfehler',
+  disconnected: 'Verbindung getrennt',
+  reconnecting: 'Verbindung wird wiederhergestellt…',
+  initialDataLoadFailed: 'OpenCode ist verbunden, aber die Anfangsdaten konnten nicht geladen werden.',
+  cliNotFound: 'OpenCode CLI wurde nicht gefunden. Installieren Sie es zuerst.',
+  providersReady: '✓ Anbieter',
+  providersLoading: '… Anbieter',
+  agentsReady: '✓ Agents',
+  agentsLoading: '… Agents',
+  startingDevServer: (hostLabel) => `Webview-Entwicklungsserver wird gestartet (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `Warten auf den Webview-Entwicklungsserver (${hostLabel})... Versuch ${attempt}`,
+  loadingData: (providersText, agentsText) => `Daten werden geladen (${providersText}, ${agentsText})…`,
+};
+
+const TR_MESSAGES: BootstrapMessages = {
+  startingApi: 'OpenCode API başlatılıyor…',
+  initializing: 'Başlatılıyor…',
+  connecting: 'Bağlanıyor…',
+  connected: 'Bağlandı!',
+  connectionError: 'Bağlantı hatası',
+  disconnected: 'Bağlantı kesildi',
+  reconnecting: 'Yeniden bağlanıyor…',
+  initialDataLoadFailed: 'OpenCode bağlandı ancak ilk veri yükleme başarısız oldu.',
+  cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
+  providersReady: '✓ Sağlayıcılar',
+  providersLoading: '… Sağlayıcılar',
+  agentsReady: '✓ Agent\'ler',
+  agentsLoading: '… Agent\'ler',
+  startingDevServer: (hostLabel) => `Webview dev sunucusu başlatılıyor (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `Webview dev sunucusu bekleniyor (${hostLabel})... deneme ${attempt}`,
+  loadingData: (providersText, agentsText) => `Veriler yükleniyor (${providersText}, ${agentsText})…`,
+};
+
 export const getBootstrapMessages = (locale: Locale): BootstrapMessages => {
   return BOOTSTRAP_MESSAGES[locale];
 };
 
 const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   en: EN_MESSAGES,
+  de: DE_MESSAGES,
   fr: FR_MESSAGES,
   'zh-CN': ZH_CN_MESSAGES,
   'zh-TW': ZH_TW_MESSAGES,
@@ -224,6 +263,7 @@ const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   ko: KO_MESSAGES,
   pl: PL_MESSAGES,
   ja: JA_MESSAGES,
+  tr: TR_MESSAGES,
 };
 
 export const readStoredLocaleForBootstrap = (): Locale => {

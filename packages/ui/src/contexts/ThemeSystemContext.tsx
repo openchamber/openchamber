@@ -2,15 +2,16 @@ import React, {
   useEffect,
   useMemo,
   useCallback,
+  useRef,
   useState,
 } from 'react';
 import { flushSync } from 'react-dom';
+import { z } from 'zod';
 import type { Theme, ThemeMode } from '@/types/theme';
-import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 import {
   themes,
   getThemeById,
@@ -18,12 +19,27 @@ import {
   DEFAULT_LIGHT_THEME_ID,
   DEFAULT_DARK_THEME_ID,
 } from '@/lib/theme/themes';
+import { withPrColors } from '@/lib/theme/themes/prColors';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getInitialSystemPreference, readEmbeddedThemeSearchParams } from './theme-embedded-bootstrap';
-import { isValidTheme } from './theme-validation';
+import {
+  getInitialSystemPreference,
+  publishEmbeddedThemeBootstrap,
+  readEmbeddedThemeBootstrap,
+  readEmbeddedThemeSearchParams,
+} from './theme-embedded-bootstrap';
+import { themeSchema, themeListSchema, type ThemeDefinition } from '@/lib/theme/definition';
+import { ThemeImportError } from '@/lib/theme/importErrors';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+  adoptThemePreferencesForRuntime,
+  resolveThemePreferencesForRuntime,
+  resolveThemePreferencesFromSettingsSync,
+  resolveThemePreferencesFromStorageEvent,
+  writeThemePreferencesForRuntime,
+} from './theme-storage';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -42,17 +58,7 @@ const DEFAULT_LIGHT_ID = DEFAULT_LIGHT_THEME_ID;
 const DEFAULT_DARK_ID = DEFAULT_DARK_THEME_ID;
 
 const readEmbeddedCurrentTheme = (): Theme | null => {
-  const raw = readEmbeddedThemeSearchParams()?.get('currentTheme');
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    return isValidTheme(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  return readEmbeddedThemeBootstrap();
 };
 
 const fallbackThemeForVariant = (variant: 'light' | 'dark'): Theme =>
@@ -90,46 +96,27 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
     const embeddedMode = embeddedParams?.get('themeMode');
     const embeddedLightId = embeddedParams?.get('lightThemeId');
     const embeddedDarkId = embeddedParams?.get('darkThemeId');
-    const storedMode = localStorage.getItem('themeMode');
-    const storedLightId = localStorage.getItem('lightThemeId');
-    const storedDarkId = localStorage.getItem('darkThemeId');
-    const legacyUseSystem = localStorage.getItem('useSystemTheme');
-    const legacyThemeId = localStorage.getItem('selectedThemeId');
-    const legacyVariant = localStorage.getItem('selectedThemeVariant');
+    // Scoped entry when present; otherwise a one-time seed from the superseded
+    // global keys (see resolveThemePreferencesForRuntime), so the first scoped
+    // write carries the last-known theme instead of defaults.
+    const resolvedPreferences = resolveThemePreferencesForRuntime(getRuntimeKey());
 
     if (embeddedMode === 'light' || embeddedMode === 'dark' || embeddedMode === 'system') {
       themeMode = embeddedMode;
-    } else if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
-      themeMode = storedMode;
-    } else if (legacyUseSystem !== null) {
-      const useSystem = legacyUseSystem === 'true';
-      if (useSystem) {
-        themeMode = 'system';
-      } else if (legacyThemeId) {
-        const legacyTheme = getThemeById(legacyThemeId);
-        if (legacyTheme) {
-          themeMode = legacyTheme.metadata.variant === 'dark' ? 'dark' : 'light';
-          if (legacyTheme.metadata.variant === 'dark') {
-            darkThemeId = legacyTheme.metadata.id;
-          } else {
-            lightThemeId = legacyTheme.metadata.id;
-          }
-        }
-      }
-    } else if (legacyVariant === 'light' || legacyVariant === 'dark') {
-      themeMode = legacyVariant;
+    } else {
+      themeMode = resolvedPreferences.themeMode;
     }
 
     if (typeof embeddedLightId === 'string' && embeddedLightId.trim().length > 0) {
       lightThemeId = embeddedLightId.trim();
-    } else if (typeof storedLightId === 'string' && storedLightId.trim().length > 0) {
-      lightThemeId = storedLightId.trim();
+    } else {
+      lightThemeId = resolvedPreferences.lightThemeId;
     }
 
     if (typeof embeddedDarkId === 'string' && embeddedDarkId.trim().length > 0) {
       darkThemeId = embeddedDarkId.trim();
-    } else if (typeof storedDarkId === 'string' && storedDarkId.trim().length > 0) {
-      darkThemeId = storedDarkId.trim();
+    } else {
+      darkThemeId = resolvedPreferences.darkThemeId;
     }
   }
 
@@ -161,6 +148,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const [preferences, setPreferences] = useState<ThemePreferences>(() => buildInitialPreferences(defaultThemeId));
   const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getInitialSystemPreference());
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
+  const [developmentThemes, setDevelopmentThemes] = useState<Theme[]>([]);
   const [embeddedBootstrapTheme] = useState<Theme | null>(() => readEmbeddedCurrentTheme());
   const [embeddedSyncedTheme, setEmbeddedSyncedTheme] = useState<Theme | null>(null);
   const [customThemesLoading, setCustomThemesLoading] = useState(false);
@@ -172,8 +160,17 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     return existing || null;
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
-  const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
+  const customThemesRequestRef = useRef(0);
+  const themeImportRequestRef = useRef(0);
+  const themeRuntimeGenerationRef = useRef(0);
+  const missingThemeReloadRef = useRef('');
+  // Set only by the handlers a person reaches through the UI. The persist
+  // effect below writes to the server only while this is raised, so a mount,
+  // a runtime switch, an OS light/dark flip, or a settings sync adopting
+  // another window's theme never produce a write (see the 2026-08-30 theme
+  // flip-flop: a fresh client used to PUT its default theme on load).
+  const themeWriteIntentRef = useRef(false);
   const receivesParentThemeSync = useMemo(() => {
     if (typeof window === 'undefined') {
       return false;
@@ -196,6 +193,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       add(vscodeTheme);
     }
 
+    // Live-synced theme wins over bootstrap theme when IDs match (add is first-wins).
     if (embeddedSyncedTheme) {
       add(embeddedSyncedTheme);
     }
@@ -206,10 +204,33 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     // Custom themes first so they can override built-ins with the same id.
     customThemes.forEach(add);
+    // Vite publishes valid built-in JSON edits through this development-only
+    // runtime channel, avoiding a full page reload for theme work.
+    developmentThemes.forEach(add);
     themes.forEach(add);
 
     return merged;
-  }, [customThemes, embeddedBootstrapTheme, embeddedSyncedTheme, isVSCode, vscodeTheme]);
+  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme, isVSCode, vscodeTheme]);
+
+  useEffect(() => {
+    const handleThemeHmr = (event: Event) => {
+      const parsedTheme = themeSchema.safeParse((event as CustomEvent<unknown>).detail);
+      if (!parsedTheme.success) return;
+      const theme = parsedTheme.data;
+
+      const nextTheme = withPrColors(theme);
+      setDevelopmentThemes((previous) => {
+        const index = previous.findIndex((candidate) => candidate.metadata.id === nextTheme.metadata.id);
+        if (index < 0) return [...previous, nextTheme];
+        const next = [...previous];
+        next[index] = nextTheme;
+        return next;
+      });
+    };
+
+    window.addEventListener('openchamber:theme-hmr', handleThemeHmr);
+    return () => window.removeEventListener('openchamber:theme-hmr', handleThemeHmr);
+  }, []);
 
   const getThemeByIdFromAvailable = useCallback(
     (themeId: string): Theme | undefined => availableThemes.find((theme) => theme.metadata.id === themeId),
@@ -249,11 +270,13 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    const runtimeKey = getRuntimeKey();
+    const request = ++customThemesRequestRef.current;
     setCustomThemesLoading(true);
     try {
       const res = await runtimeFetch('/api/config/themes', {
         method: 'GET',
-        credentials: isLocalDesktopOrigin ? 'omit' : 'include',
+        credentials: isDesktopLocalOriginActive() ? 'omit' : 'include',
         headers: {
           Accept: 'application/json',
         },
@@ -269,19 +292,50 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       }
 
       const payload = await res.json();
-      const incoming = Array.isArray(payload?.themes) ? payload.themes : [];
-      const normalized = incoming.filter(isValidTheme);
+      if (request !== customThemesRequestRef.current || runtimeKey !== getRuntimeKey()) return;
+      const normalized = themeListSchema.parse(payload?.themes);
       setCustomThemes(normalized);
     } catch {
       // ignore
     } finally {
-      setCustomThemesLoading(false);
+      if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+        setCustomThemesLoading(false);
+      }
     }
-  }, [isLocalDesktopOrigin, isVSCode]);
+  }, [isVSCode]);
 
   useEffect(() => {
     void reloadCustomThemes();
   }, [reloadCustomThemes]);
+
+  useEffect(() => {
+    if (isVSCode || receivesParentThemeSync || customThemesLoading) return;
+    const missing = [preferences.lightThemeId, preferences.darkThemeId]
+      .filter((id) => !availableThemes.some((theme) => theme.metadata.id === id));
+    if (!missing.length) {
+      missingThemeReloadRef.current = '';
+      return;
+    }
+    // Another window may select a newly imported server theme. Fetch once per
+    // missing selection, without polling forever for a deleted or invalid ID.
+    const key = JSON.stringify([getRuntimeKey(), missing]);
+    if (missingThemeReloadRef.current === key) return;
+    missingThemeReloadRef.current = key;
+    void reloadCustomThemes();
+  }, [availableThemes, customThemesLoading, isVSCode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync, reloadCustomThemes]);
+
+  useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey || isVSCode) return;
+    themeWriteIntentRef.current = false;
+    customThemesRequestRef.current += 1;
+    themeRuntimeGenerationRef.current += 1;
+    setCustomThemes([]);
+    setCustomThemesLoading(false);
+    // Adopt the new instance's last-known theme immediately; the incoming
+    // settings sync refines it with the server's authoritative value.
+    setPreferences((prev) => adoptThemePreferencesForRuntime(detail.runtimeKey, prev));
+    void reloadCustomThemes();
+  }), [isVSCode, reloadCustomThemes]);
 
   useEffect(() => {
     if (!isVSCode) {
@@ -312,9 +366,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof document === 'undefined') {
       return;
     }
-    const hasMacVibrancy = document.documentElement.hasAttribute('data-oc-vibrancy')
-      || window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
-    const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
+    const chromeColor = theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
 
@@ -355,6 +407,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     }
     const restoreTransitions = suppressTransitionsForThemeSwitch();
     cssGenerator.apply(currentTheme);
+    if (!receivesParentThemeSync) {
+      publishEmbeddedThemeBootstrap(currentTheme);
+    }
     applyVSCodeRuntimeClass(isVSCode);
     updateBrowserChrome(currentTheme);
 
@@ -389,6 +444,17 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    writeThemePreferencesForRuntime(getRuntimeKey(), {
+      themeMode: preferences.themeMode,
+      lightThemeId: preferences.lightThemeId,
+      darkThemeId: preferences.darkThemeId,
+    });
+
+    // Cosmetic last-writer-wins hints for the pre-React splash shells
+    // (packages/web/index.html, mobile.html, mini-chat.html) and the Android
+    // status bar, which run before the scoped key can be read. Not part of the
+    // app's theme authority — the scoped entry and the per-instance server
+    // settings own that.
     localStorage.setItem('themeMode', preferences.themeMode);
     localStorage.setItem('lightThemeId', preferences.lightThemeId);
     localStorage.setItem('darkThemeId', preferences.darkThemeId);
@@ -399,8 +465,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
     );
 
-    // Splash screen (packages/web/index.html) runs before the theme CSS vars load.
-    // Persist just enough to theme it on next boot.
     const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
     const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
 
@@ -424,37 +488,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         return;
       }
 
-      if (event.key !== 'themeMode' && event.key !== 'lightThemeId' && event.key !== 'darkThemeId') {
-        return;
-      }
-
-      setPreferences((prev) => {
-        const nextModeRaw = localStorage.getItem('themeMode');
-        const nextMode: ThemeMode =
-          nextModeRaw === 'light' || nextModeRaw === 'dark' || nextModeRaw === 'system'
-            ? nextModeRaw
-            : prev.themeMode;
-
-        const nextLightRaw = localStorage.getItem('lightThemeId');
-        const nextLight = typeof nextLightRaw === 'string' && nextLightRaw.trim().length > 0
-          ? nextLightRaw.trim()
-          : prev.lightThemeId;
-
-        const nextDarkRaw = localStorage.getItem('darkThemeId');
-        const nextDark = typeof nextDarkRaw === 'string' && nextDarkRaw.trim().length > 0
-          ? nextDarkRaw.trim()
-          : prev.darkThemeId;
-
-        if (nextMode === prev.themeMode && nextLight === prev.lightThemeId && nextDark === prev.darkThemeId) {
-          return prev;
-        }
-
-        return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromStorageEvent(event.key, getRuntimeKey(), prev) ?? prev);
     };
 
     window.addEventListener('storage', handleStorage);
@@ -513,12 +547,16 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     scopedWindow.__openchamberApplyThemeSync = applyIncomingThemeSync;
 
+    if (receivesParentThemeSync && window.parent !== window) {
+      window.parent.postMessage({ type: 'openchamber:theme-sync-request' }, window.location.origin);
+    }
+
     return () => {
       if (scopedWindow.__openchamberApplyThemeSync === applyIncomingThemeSync) {
         delete scopedWindow.__openchamberApplyThemeSync;
       }
     };
-  }, [applyIncomingThemeSync]);
+  }, [applyIncomingThemeSync, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -547,12 +585,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [applyIncomingThemeSync]);
 
   useEffect(() => {
-    if (receivesParentThemeSync) {
+    if (receivesParentThemeSync || !themeWriteIntentRef.current) {
       return;
     }
-
-    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
-    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
+    themeWriteIntentRef.current = false;
 
     void updateDesktopSettings({
       themeId: currentTheme.metadata.id,
@@ -560,73 +596,46 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       useSystemTheme: preferences.themeMode === 'system',
       lightThemeId: preferences.lightThemeId,
       darkThemeId: preferences.darkThemeId,
-      splashBgLight: lightTheme.colors.surface.background,
-      splashFgLight: lightTheme.colors.surface.foreground,
-      splashBgDark: darkTheme.colors.surface.background,
-      splashFgDark: darkTheme.colors.surface.foreground,
     });
-  }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
+  }, [currentTheme.metadata.id, currentTheme.metadata.variant, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
 
   useEffect(() => {
     if (receivesParentThemeSync || !isDesktopShell) {
       return;
     }
 
+    // The shell paints the next startup splash from these; they are this
+    // install's cosmetics, so they go to main directly, not to the server.
+    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
+    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
     void (async () => {
-      await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant);
+      await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant, {
+        bgLight: lightTheme.colors.surface.background,
+        fgLight: lightTheme.colors.surface.foreground,
+        bgDark: darkTheme.colors.surface.background,
+        fgDark: darkTheme.colors.surface.foreground,
+      });
     })();
-  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync]);
+  }, [currentTheme.metadata.variant, ensureThemeById, isDesktopShell, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || receivesParentThemeSync) {
       return;
     }
     const handleSettingsSynced = (event: Event) => {
-      const detail = (event as CustomEvent<DesktopSettings>).detail;
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings
+        ? (event as CustomEvent<SettingsSyncedDetail>).detail
+        : null;
       if (!detail) {
         return;
       }
 
-      setPreferences((prev) => {
-        let nextMode = prev.themeMode;
-        if (detail.useSystemTheme === true) {
-          nextMode = 'system';
-        } else if (detail.useSystemTheme === false) {
-          if (detail.themeVariant === 'dark' || detail.themeVariant === 'light') {
-            nextMode = detail.themeVariant;
-          }
-        }
-
-        let nextLight = prev.lightThemeId;
-        if (typeof detail.lightThemeId === 'string' && detail.lightThemeId.length > 0) {
-          nextLight = detail.lightThemeId.trim();
-        }
-
-        let nextDark = prev.darkThemeId;
-        if (typeof detail.darkThemeId === 'string' && detail.darkThemeId.length > 0) {
-          nextDark = detail.darkThemeId.trim();
-        }
-
-        const same =
-          nextMode === prev.themeMode &&
-          nextLight === prev.lightThemeId &&
-          nextDark === prev.darkThemeId;
-
-        if (same) {
-          return prev;
-        }
-
-        return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromSettingsSync(detail, prev) ?? prev);
     };
 
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
     return () => window.removeEventListener('openchamber:settings-synced', handleSettingsSynced);
-  }, []);
+  }, [receivesParentThemeSync]);
 
   const setTheme = useCallback(
     (themeId: string) => {
@@ -640,6 +649,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
           if (prev.darkThemeId === theme.metadata.id && prev.themeMode === 'dark') {
             return prev;
           }
+          themeWriteIntentRef.current = true;
           return {
             ...prev,
             darkThemeId: theme.metadata.id,
@@ -651,6 +661,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
           return prev;
         }
 
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           lightThemeId: theme.metadata.id,
@@ -662,16 +673,16 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   );
 
   const setThemeModeHandler = useCallback((mode: ThemeMode) => {
-    setPreferences((prev) => {
-      if (prev.themeMode === mode) {
-        return prev;
-      }
-      return {
-        ...prev,
-        themeMode: mode,
-      };
-    });
-  }, []);
+    if (preferences.themeMode === mode) {
+      return;
+    }
+
+    themeWriteIntentRef.current = true;
+    setPreferences((prev) => ({
+      ...prev,
+      themeMode: mode,
+    }));
+  }, [preferences.themeMode]);
 
   const setSystemPreferenceHandler = useCallback(
     (use: boolean) => {
@@ -680,6 +691,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
           if (prev.themeMode === 'system') {
             return prev;
           }
+          themeWriteIntentRef.current = true;
           return {
             ...prev,
             themeMode: 'system',
@@ -694,6 +706,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         if (prev.themeMode === fallbackMode) {
           return prev;
         }
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           themeMode: fallbackMode,
@@ -717,6 +730,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         if (prev.lightThemeId === theme.metadata.id) {
           return prev;
         }
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           lightThemeId: theme.metadata.id,
@@ -740,6 +754,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         if (prev.darkThemeId === theme.metadata.id) {
           return prev;
         }
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           darkThemeId: theme.metadata.id,
@@ -749,12 +764,76 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     [availableThemes],
   );
 
+  const importTheme = useCallback(async (definition: ThemeDefinition, { activate = true }: { activate?: boolean } = {}): Promise<Theme> => {
+    if (isVSCode) throw new ThemeImportError('unsupported');
+    const runtimeKey = getRuntimeKey();
+    const initialPreferences = preferences;
+    const runtimeGeneration = themeRuntimeGenerationRef.current;
+    const importRequest = ++themeImportRequestRef.current;
+    let theme: Theme;
+    try {
+      const response = await runtimeFetch('/api/config/themes', {
+        method: 'POST',
+        credentials: isDesktopLocalOriginActive() ? 'omit' : 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ theme: definition }),
+      });
+      if (!response.ok) throw new ThemeImportError(response.status === 409 ? 'conflict' : response.status === 413 ? 'size' : 'save');
+      const payload = await response.json();
+      theme = themeSchema.parse(payload?.theme);
+    } catch (error) {
+      if (error instanceof ThemeImportError) throw error;
+      throw new ThemeImportError('save');
+    }
+    if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
+    // A reload started before the save must not erase the new authoritative item.
+    customThemesRequestRef.current += 1;
+    setCustomThemesLoading(false);
+    setCustomThemes((current) => [...current.filter((item) => item.metadata.id !== theme.metadata.id), theme]);
+    setPreferences((current) => {
+      // A choice made while the upload was pending takes precedence.
+      if (!activate || current !== initialPreferences || importRequest !== themeImportRequestRef.current) return current;
+      themeWriteIntentRef.current = true;
+      return {
+        ...current,
+        themeMode: theme.metadata.variant,
+        ...(theme.metadata.variant === 'dark' ? { darkThemeId: theme.metadata.id } : { lightThemeId: theme.metadata.id }),
+      };
+    });
+    return theme;
+  }, [isVSCode, preferences]);
+
+  const deleteImportedTheme = useCallback(async (themeId: string): Promise<void> => {
+    if (isVSCode || !customThemes.some((theme) => theme.metadata.id === themeId)) throw new Error('unsupported');
+    const runtimeKey = getRuntimeKey();
+    const runtimeGeneration = themeRuntimeGenerationRef.current;
+    const response = await runtimeFetch(`/api/config/themes/${encodeURIComponent(themeId)}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error('delete');
+    z.object({ success: z.literal(true) }).parse(await response.json());
+    if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
+    customThemesRequestRef.current += 1;
+    setCustomThemesLoading(false);
+    setCustomThemes((current) => current.filter((theme) => theme.metadata.id !== themeId));
+    setPreferences((current) => {
+      if (current.lightThemeId !== themeId && current.darkThemeId !== themeId) return current;
+      themeWriteIntentRef.current = true;
+      return {
+        ...current,
+        lightThemeId: current.lightThemeId === themeId ? fallbackThemeForVariant('light').metadata.id : current.lightThemeId,
+        darkThemeId: current.darkThemeId === themeId ? fallbackThemeForVariant('dark').metadata.id : current.darkThemeId,
+      };
+    });
+  }, [customThemes, isVSCode]);
+
   const value: ThemeContextValue = {
     currentTheme,
     availableThemes,
+    customThemeIds: customThemes.map((theme) => theme.metadata.id),
     setTheme,
     customThemesLoading,
     reloadCustomThemes,
+    importTheme,
+    deleteImportedTheme,
     isSystemPreference: preferences.themeMode === 'system',
     setSystemPreference: setSystemPreferenceHandler,
     themeMode: preferences.themeMode,

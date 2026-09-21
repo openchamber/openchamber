@@ -2,8 +2,8 @@ import React from 'react';
 
 /**
  * Strip at the top of the desktop left sidebar that reserves room for the
- * persistent {@link TitlebarLeftControls} overlay (sidebar toggle + project
- * actions), so the session list starts below them. Its height tracks the
+ * persistent {@link TitlebarLeftControls} overlay (sidebar toggle), so the
+ * session list starts below it. Its height tracks the
  * header via `--oc-header-height`.
  *
  * Split into two regions so the strip stays a window drag area while the

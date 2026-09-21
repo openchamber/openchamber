@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 
 const runtimeFetchMock = vi.fn();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 vi.mock('@openchamber/ui/lib/runtime-fetch', () => ({
   runtimeFetch: runtimeFetchMock,
@@ -17,6 +21,7 @@ const toUrl = (path: string, query?: RuntimeUrlQuery): string => {
 const urls: RuntimeUrlResolver = {
   api: toUrl,
   authenticatedAsset: toUrl,
+  assetWithUrlToken: (path: string, _token: string, query?: RuntimeUrlQuery) => toUrl(path, query),
   auth: toUrl,
   health: (query?: RuntimeUrlQuery) => toUrl('/health', query),
   rawFile: (path: string) => toUrl('/api/fs/raw', new URLSearchParams({ path })),
@@ -25,6 +30,34 @@ const urls: RuntimeUrlResolver = {
 };
 
 describe('createWebFilesAPI', () => {
+  it('preserves the directory permission failure contract', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Access to directory denied', reason: 'os-permission' },
+      { status: 403 },
+    ));
+
+    const error = await api.listDirectory('/protected').catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      name: 'FilesystemError',
+      reason: 'os-permission',
+      status: 403,
+      message: 'Access to directory denied',
+    });
+  });
+
+  it('rejects malformed successful directory listings', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/workspace' }));
+
+    await expect(api.listDirectory('/workspace')).rejects.toMatchObject({
+      reason: 'invalid-response',
+    });
+  });
+
   it('uses per-call workspace directory for stat and read requests', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });
@@ -34,6 +67,7 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      signal: expect.any(AbortSignal),
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
 
@@ -42,7 +76,18 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      signal: expect.any(AbortSignal),
       cache: 'default',
+      headers: { 'x-opencode-directory': '/worktree-a' },
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(new Response('fresh content'));
+    await api.readFile?.('/worktree-b/file.txt', { directory: '/worktree-a', fresh: true });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      cache: 'no-store',
+      signal: expect.any(AbortSignal),
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
   });
@@ -58,5 +103,89 @@ describe('createWebFilesAPI', () => {
       query: { path: '/current-workspace/file.txt', download: true },
       headers: { 'x-opencode-directory': '/current-workspace' },
     });
+  });
+
+  it('reads an outside file directly without a grant', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const content = Array.from({ length: 100 }, (_, line) => `Line ${line + 1}`).join('\n');
+    runtimeFetchMock.mockResolvedValueOnce(new Response(content));
+
+    await expect(api.readFile?.('/tmp/plan.txt', { allowOutsideWorkspace: true }))
+      .resolves.toEqual({ path: '/tmp/plan.txt', content });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' }),
+      cache: 'default',
+      signal: expect.any(AbortSignal),
+      headers: { 'x-opencode-directory': '/workspace' },
+    });
+  });
+
+  it('rejects a stalled file read when its deadline expires', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    runtimeFetchMock.mockImplementationOnce((_path: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+    }));
+    try {
+      const pending = api.readFile?.('/tmp/plan.txt', { allowOutsideWorkspace: true });
+      const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      controller.abort(new DOMException('The operation timed out', 'TimeoutError'));
+      await rejected;
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('uploads binary file contents to the active workspace', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const file = new Blob([new Uint8Array([0, 1, 255])]);
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: '/workspace/image.bin' }));
+
+    await api.uploadFile?.('/workspace/image.bin', file, { directory: '/workspace' });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/upload', {
+      method: 'POST',
+      query: { path: '/workspace/image.bin', overwrite: undefined },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'x-opencode-directory': '/workspace',
+      },
+      body: file,
+    });
+  });
+
+  it('preserves upload conflict details for explicit overwrite handling', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'File already exists', reason: 'already-exists' },
+      { status: 409 },
+    ));
+
+    await expect(api.uploadFile?.('/workspace/file.txt', new Blob(['new']))).rejects.toMatchObject({
+      reason: 'already-exists',
+      status: 409,
+    });
+  });
+
+  it('opens the native share sheet for downloads in the Capacitor app', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('navigator', {});
+    Object.defineProperty(window, 'Capacitor', { configurable: true, value: { isNativePlatform: () => true } });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+    runtimeFetchMock.mockResolvedValueOnce(new Response('hello', { headers: { 'Content-Type': 'text/plain' } }));
+
+    await api.downloadFile?.('/workspace/hello.txt');
+
+    expect(share).toHaveBeenCalledWith({ files: [expect.objectContaining({ name: 'hello.txt', type: 'text/plain' })] });
   });
 });

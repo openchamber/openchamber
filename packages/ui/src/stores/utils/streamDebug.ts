@@ -42,6 +42,11 @@ export type StreamPerfSnapshot = {
 declare global {
     interface Window {
         __openchamberStreamPerfState?: StreamPerfState;
+        __openchamberStreamPerformance?: {
+            setEnabled: (enabled: boolean) => void;
+            reset: () => void;
+            getSnapshot: () => StreamPerfSnapshot;
+        };
         __openchamberVsCodeStreamPerfState?: {
             counters: Map<string, PerfCounter>;
             lastReportAt?: number;
@@ -52,13 +57,27 @@ declare global {
     }
 }
 
-const streamPerfEnabled = (): boolean => {
+const readInitialStreamPerfEnabled = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
         return window.localStorage.getItem(STREAM_PERF_STORAGE_KEY) === '1';
     } catch {
         return false;
     }
+};
+
+let streamPerfProfileEnabled = readInitialStreamPerfEnabled();
+let streamPerfMemoryDebugEnabled = false;
+
+const isStreamPerfEnabled = (): boolean => streamPerfProfileEnabled || streamPerfMemoryDebugEnabled;
+
+const clearStreamPerfStateIfDisabled = (): void => {
+    if (isStreamPerfEnabled() || !globalThis.window) {
+        return;
+    }
+
+    delete window.__openchamberStreamPerfState;
+    delete window.__openchamberVsCodeStreamPerfState;
 };
 
 const nowMs = (): number => {
@@ -69,7 +88,7 @@ const nowMs = (): number => {
 };
 
 const ensureStreamPerfState = (): StreamPerfState | null => {
-    if (!streamPerfEnabled() || typeof window === 'undefined') {
+    if (!isStreamPerfEnabled() || typeof window === 'undefined') {
         return null;
     }
 
@@ -114,6 +133,7 @@ const updatePerfCounter = (metric: string, amount: number): void => {
 };
 
 export const setStreamPerfEnabled = (enabled: boolean): void => {
+    streamPerfProfileEnabled = enabled;
     if (typeof window === 'undefined') {
         return;
     }
@@ -130,11 +150,24 @@ export const setStreamPerfEnabled = (enabled: boolean): void => {
         }
 
         window.localStorage.removeItem(STREAM_PERF_STORAGE_KEY);
-        delete window.__openchamberStreamPerfState;
-        delete window.__openchamberVsCodeStreamPerfState;
+        clearStreamPerfStateIfDisabled();
     } catch {
         // ignore storage failures in debug helper
     }
+};
+
+export const setStreamPerfMemoryDebugEnabled = (enabled: boolean): void => {
+    streamPerfMemoryDebugEnabled = enabled;
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    if (enabled) {
+        ensureStreamPerfState();
+        return;
+    }
+
+    clearStreamPerfStateIfDisabled();
 };
 
 export const resetStreamPerf = (): void => {
@@ -142,7 +175,7 @@ export const resetStreamPerf = (): void => {
         return;
     }
 
-    if (streamPerfEnabled()) {
+    if (isStreamPerfEnabled()) {
         window.__openchamberStreamPerfState = {
             counters: new Map<string, PerfCounter>(),
             startedAt: Date.now(),
@@ -172,7 +205,7 @@ export const getStreamPerfSnapshot = (): StreamPerfSnapshot => {
     }
 
     const state = window.__openchamberStreamPerfState;
-    if (!streamPerfEnabled() || !state) {
+    if (!isStreamPerfEnabled() || !state) {
         return {
             enabled: false,
             startedAt: null,
@@ -203,7 +236,7 @@ export const getVsCodeStreamPerfSnapshot = (): StreamPerfSnapshot => {
     }
 
     const state = window.__openchamberVsCodeStreamPerfState;
-    if (!streamPerfEnabled() || !state) {
+    if (!isStreamPerfEnabled() || !state) {
         return {
             enabled: false,
             startedAt: null,
@@ -232,8 +265,15 @@ export const streamPerfObserve = (metric: string, value: number): void => {
     updatePerfCounter(metric, value);
 };
 
+export const streamPerfMark = (metric: string): void => {
+    if (!isStreamPerfEnabled() || typeof performance === 'undefined' || typeof performance.mark !== 'function') {
+        return;
+    }
+    performance.mark(`openchamber.${metric}`);
+};
+
 export const streamPerfMeasure = <T>(metric: string, fn: () => T): T => {
-    if (!streamPerfEnabled()) {
+    if (!isStreamPerfEnabled()) {
         return fn();
     }
 
@@ -244,3 +284,11 @@ export const streamPerfMeasure = <T>(metric: string, fn: () => T): T => {
         updatePerfCounter(metric, nowMs() - start);
     }
 };
+
+if (typeof window !== 'undefined') {
+    window.__openchamberStreamPerformance = {
+        setEnabled: setStreamPerfEnabled,
+        reset: resetStreamPerf,
+        getSnapshot: getStreamPerfSnapshot,
+    };
+}

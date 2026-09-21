@@ -25,13 +25,20 @@ Once a password is set, you can add passkeys (Face ID, Touch ID, a security key)
 
 Passkeys are tied to the current password. If you change or remove the password, saved passkeys are cleared and you'll add them again.
 
+## Device tokens
+
+Devices paired through [Connect a Device](/connect-devices/) authenticate with their own per-device tokens, not the UI password. Pairing links are single-use and expire if unused; every paired device is listed at **Settings → Remote Instances → Connect to this server**, where you can revoke any of them at any time. Away-from-home connections go through the [Private Relay](/private-relay/), which is end-to-end encrypted and cannot read your traffic.
+
 ## Before you expose it
 
 - By default OpenChamber only listens on your own machine (`127.0.0.1`). It takes a deliberate change to listen more widely, and you should set a password first.
-- Prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
+- For your own devices, prefer [pairing](/connect-devices/) with the [Private Relay](/private-relay/) — nothing is exposed publicly at all.
+- If you need a public URL, prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
 - If you put OpenChamber behind your own HTTPS server, see [Reverse Proxy](/reverse-proxy/).
 
 ## Related
 
-- [Tunnels](/tunnels/) — the recommended way to reach an instance remotely
+- [Connect a Device](/connect-devices/) — one-time pairing and per-device tokens
+- [Private Relay](/private-relay/) — end-to-end encrypted access from anywhere
+- [Tunnels](/tunnels/) — expose a public URL when you need one
 - [Reverse Proxy](/reverse-proxy/) — run OpenChamber behind your own server

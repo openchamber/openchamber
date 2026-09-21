@@ -26,6 +26,7 @@ export function hasPendingBlockingRequests(state: State | undefined): boolean {
 export function pickDirectoriesToEvict(input: EvictPlan) {
   const overflow = Math.max(0, input.stores.length - input.max)
   let pendingOverflow = overflow
+  const graceMs = input.graceMs ?? 0
   const sorted = input.stores
     .filter((dir) => !input.pins.has(dir))
     .filter((dir) => !input.hasPendingBlockingRequests?.(dir))
@@ -34,8 +35,14 @@ export function pickDirectoriesToEvict(input: EvictPlan) {
   const output: string[] = []
   for (const dir of sorted) {
     const last = input.state.get(dir)?.lastAccessAt ?? 0
-    const idle = input.now - last >= input.ttl
+    const age = input.now - last
+    const idle = age >= input.ttl
     if (!idle && pendingOverflow <= 0) continue
+    // A directory touched moments ago is almost certainly still mounted and
+    // merely waiting for its pin effect to run. Evicting it starts the
+    // recreate/bootstrap loop this grace window exists to prevent; going over
+    // the limit for a while is the cheaper failure.
+    if (!idle && age < graceMs) continue
     output.push(dir)
     if (pendingOverflow > 0) pendingOverflow -= 1
   }

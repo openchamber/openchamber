@@ -32,6 +32,7 @@ import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 import {
     useDraftStarters,
     type ResolvedStarter,
@@ -40,8 +41,8 @@ import {
 } from './useDraftStarters';
 
 type DraftPresetChipsProps = {
-    /** Called with the resolved text (command or skill invocation) when a chip is clicked. */
-    onSubmit: (text: string) => void;
+    /** Called with the resolved starter invocation when a chip is clicked. */
+    onSubmit: (starter: ResolvedStarter) => void;
     /** Extra classes for the wrapper (e.g. width/spacing per surface). */
     className?: string;
 };
@@ -65,11 +66,13 @@ const PICKER_SECTIONS: { key: PinnableSection; headingKey: 'chat.draftStarters.s
 
 const SortableChip: React.FC<{
     item: ResolvedStarter;
-    onSubmit: (text: string) => void;
+    onSubmit: (starter: ResolvedStarter) => void;
     onRemove: () => void;
+    /** Project chips only: move the starter into the team's shared file, or back out of it. */
+    onToggleShared?: () => void;
     /** Hide the per-chip hover "x" (mobile uses the trash drop-zone instead). */
     hideRemove?: boolean;
-}> = ({ item, onSubmit, onRemove, hideRemove }) => {
+}> = ({ item, onSubmit, onRemove, onToggleShared, hideRemove }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
@@ -90,14 +93,28 @@ const SortableChip: React.FC<{
                 type="button"
                 {...attributes}
                 {...listeners}
-                onClick={() => onSubmit(item.submitText)}
-                className="group inline-flex touch-none select-none items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
+                onClick={() => onSubmit(item)}
+                className="group inline-flex touch-none select-none items-center gap-1.5 rounded-full border px-3 py-1.5 typography-ui-label text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
                 style={chipStyle}
+                title={item.shared ? t('chat.draftStarters.sharedTitle') : undefined}
             >
                 <Icon name={item.icon} className="h-3.5 w-3.5 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
                 <span className="whitespace-nowrap">{item.label}</span>
             </button>
-            {hideRemove ? null : (
+            {onToggleShared && !hideRemove ? (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onToggleShared(); }}
+                    aria-label={t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}
+                    title={t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}
+                    className="absolute -left-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border text-muted-foreground shadow-sm hover:text-foreground group-hover/chip:flex"
+                    style={chipStyle}
+                >
+                    <Icon name={item.shared ? 'user' : 'team'} className="h-2.5 w-2.5" />
+                </button>
+            ) : null}
+            {/* A shared starter is the team's: it leaves only through the repo file. */}
+            {hideRemove || item.shared ? null : (
                 <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onRemove(); }}
@@ -115,10 +132,11 @@ const SortableChip: React.FC<{
 
 const StarterGroup: React.FC<{
     items: ResolvedStarter[];
-    onSubmit: (text: string) => void;
+    onSubmit: (starter: ResolvedStarter) => void;
     onRemove: (item: ResolvedStarter) => void;
+    onToggleShared?: (item: ResolvedStarter) => void;
     hideRemove?: boolean;
-}> = ({ items, onSubmit, onRemove, hideRemove }) => (
+}> = ({ items, onSubmit, onRemove, onToggleShared, hideRemove }) => (
     <SortableContext items={items.map((i) => i.id)} strategy={rectSortingStrategy}>
         {items.map((item) => (
             <SortableChip
@@ -126,6 +144,7 @@ const StarterGroup: React.FC<{
                 item={item}
                 onSubmit={onSubmit}
                 onRemove={() => onRemove(item)}
+                onToggleShared={onToggleShared ? () => onToggleShared(item) : undefined}
                 hideRemove={hideRemove}
             />
         ))}
@@ -254,8 +273,8 @@ const AddStarterPicker: React.FC<{
  * Reorder is constrained to within a chip's own group; cross-group hovers are
  * ignored.
  */
-export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
-    const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder } = useDraftStarters();
+const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
+    const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder, shareStarter, unshareStarter } = useDraftStarters();
     const { isMobile } = useDeviceInfo();
     const [isDragging, setIsDragging] = React.useState(false);
 
@@ -319,6 +338,7 @@ export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
                         items={project}
                         onSubmit={onSubmit}
                         onRemove={(item) => removeStarter('project', item.ref)}
+                        onToggleShared={(item) => (item.shared ? unshareStarter(item.ref) : shareStarter(item.ref))}
                         hideRemove={isMobile}
                     />
                 ) : null}
@@ -330,4 +350,9 @@ export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
             </div>
         </DndContext>
     );
+};
+
+export const DraftPresetChips: React.FC<DraftPresetChipsProps> = (props) => {
+    const visible = useUIStore((state) => state.draftStartersVisible);
+    return visible ? <DraftPresetChipsContent {...props} /> : null;
 };

@@ -18,7 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -26,6 +27,7 @@ import { SettingsProjectSelector } from '@/components/sections/shared/SettingsPr
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface SkillsSidebarProps {
   onItemSelect?: () => void;
@@ -34,6 +36,9 @@ interface SkillsSidebarProps {
 const BUILT_IN_SKILL_LOCATION = '<built-in>';
 
 const isBuiltInSkill = (skill: DiscoveredSkill | null | undefined): boolean => skill?.path === BUILT_IN_SKILL_LOCATION;
+const isRenamableSkill = (skill: DiscoveredSkill | null | undefined): boolean => (
+  !!skill && !isBuiltInSkill(skill) && skill.renamable === true
+);
 
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
@@ -45,23 +50,29 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
   const {
     selectedSkillName,
-    skills,
     setSelectedSkill,
     setSkillDraft,
-    createSkill,
     deleteSkill,
+    renameSkill,
     getSkillDetail,
   } = useSkillsStore(useShallow((s) => ({
     selectedSkillName: s.selectedSkillName,
-    skills: s.skills,
     setSelectedSkill: s.setSelectedSkill,
     setSkillDraft: s.setSkillDraft,
-    createSkill: s.createSkill,
     deleteSkill: s.deleteSkill,
+    renameSkill: s.renameSkill,
     getSkillDetail: s.getSkillDetail,
   })));
 
-  // Skills are loaded by the Settings shell when this page is active.
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
+  const loadSkills = useSkillsStore((state) => state.loadSkills);
+
+  React.useEffect(() => {
+    void loadSkills(settingsDirectory);
+  }, [loadSkills, settingsDirectory]);
 
   const bgClass = 'bg-background';
 
@@ -97,7 +108,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     setIsDeletePending(true);
-    const success = await deleteSkill(deleteDialogSkill.name);
+    const success = await deleteSkill(deleteDialogSkill.name, settingsDirectory);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillDeleted', { name: deleteDialogSkill.name }));
       setDeleteDialogSkill(null);
@@ -120,7 +131,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     // Get full skill detail to copy
-    const detail = await getSkillDetail(skill.name);
+    const detail = await getSkillDetail(skill.name, settingsDirectory);
     if (!detail) {
       toast.error(t('settings.skills.sidebar.toast.duplicateLoadFailed'));
       return;
@@ -139,14 +150,14 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleOpenRenameDialog = (skill: DiscoveredSkill) => {
-    if (isBuiltInSkill(skill)) return;
+    if (!isRenamableSkill(skill)) return;
     setRenameNewName(skill.name);
     setRenameDialogSkill(skill);
   };
 
   const handleRenameSkill = async () => {
     if (!renameDialogSkill) return;
-    if (isBuiltInSkill(renameDialogSkill)) {
+    if (!isRenamableSkill(renameDialogSkill)) {
       setRenameDialogSkill(null);
       return;
     }
@@ -168,31 +179,11 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // Get full detail to copy
-    const detail = await getSkillDetail(renameDialogSkill.name);
-    if (!detail) {
-      toast.error(t('settings.skills.sidebar.toast.renameLoadFailed'));
-      setRenameDialogSkill(null);
-      return;
-    }
-
-    // Create new skill with new name
-    const success = await createSkill({
-      name: sanitizedName,
-      description: 'Renamed skill', // Will need proper description
-      scope: renameDialogSkill.scope,
-      source: renameDialogSkill.source,
-    });
-
+    // Rename in place on disk so SKILL.md body and supporting files are preserved.
+    const success = await renameSkill(renameDialogSkill.name, sanitizedName, settingsDirectory);
     if (success) {
-      // Delete old skill
-      const deleteSuccess = await deleteSkill(renameDialogSkill.name);
-      if (deleteSuccess) {
-        toast.success(`Skill renamed to "${sanitizedName}"`);
-        setSelectedSkill(sanitizedName);
-      } else {
-        toast.error(t('settings.skills.sidebar.toast.removeOldAfterRenameFailed'));
-      }
+      toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
+      setSelectedSkill(sanitizedName);
     } else {
       toast.error(t('settings.skills.sidebar.toast.renameFailed'));
     }
@@ -232,7 +223,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.skills.sidebar.title')}</h2>
+        <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.skills.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.skills.sidebar.total', { count: skills.length })}</span>
@@ -455,20 +446,17 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = isMobileDeviceViaCSS();
-  const sourceLabel = skill.source === 'claude'
-    ? t('settings.skills.sidebar.badge.claude')
-    : skill.source === 'agents'
-      ? t('settings.skills.sidebar.badge.agents')
-      : t('settings.skills.sidebar.badge.opencode');
-  const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
   const isBuiltIn = isBuiltInSkill(skill);
+  const canRename = isRenamableSkill(skill);
   const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
   const renderMenuItems = (Item: React.ElementType) => (
     <>
-      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
-        <Icon name="edit" className="h-4 w-4 mr-px" />
-        {t('settings.common.actions.rename')}
-      </Item>
+      {canRename ? (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
+          <Icon name="edit" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.rename')}
+        </Item>
+      ) : null}
       <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDuplicate(); }}>
         <Icon name="file-copy" className="h-4 w-4 mr-px" />
         {t('settings.common.actions.duplicate')}
@@ -485,17 +473,13 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
-          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           tabIndex={0}
         >
           <div className="flex items-center gap-1.5">
             <span className="typography-ui-label font-normal truncate text-foreground">
               {skill.name}
             </span>
-            <span className={badgeClassName}>
-              {skill.scope}
-            </span>
-            <span className={badgeClassName}>{sourceLabel}</span>
           </div>
         </button>
 

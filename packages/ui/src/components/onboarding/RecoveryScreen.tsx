@@ -27,6 +27,7 @@ type RecoveryScreenProps = {
   onEnterLocalSetup?: () => void;
   /** Whether retry action is in progress */
   isRetrying?: boolean;
+  localAvailable?: boolean;
 };
 
 export function RecoveryScreen({
@@ -40,6 +41,7 @@ export function RecoveryScreen({
   onSwitchToLocalFromRemote,
   onEnterLocalSetup,
   isRetrying = false,
+  localAvailable = true,
 }: RecoveryScreenProps) {
   // Persist the user's first choice (local or remote)
   const persistFirstChoice = React.useCallback(async (choice: 'local' | 'remote') => {
@@ -103,7 +105,8 @@ export function RecoveryScreen({
         initialUrl={prefillUrl}
         initialLabel={prefillLabel}
         isRecoveryMode={true}
-        onSwitchToLocal={onSwitchToLocalFromRemote || (() => {
+        showInstancePicker={!localAvailable}
+        onSwitchToLocal={localAvailable ? (onSwitchToLocalFromRemote || (() => {
           persistFirstChoice('local').then(() => {
             if (isDesktopShell()) {
               restartDesktopApp();
@@ -111,7 +114,7 @@ export function RecoveryScreen({
               onEnterLocalSetup?.();
             }
           });
-        })}
+        })) : undefined}
       />
     );
   }
@@ -122,7 +125,7 @@ export function RecoveryScreen({
       hostLabel={hostLabel}
       hostUrl={hostUrl}
       onRetry={handleRecoveryRetry}
-      onUseLocal={handleRecoveryUseLocal}
+      onUseLocal={localAvailable ? handleRecoveryUseLocal : undefined}
       onUseRemote={handleRecoveryUseRemote}
       isRetrying={isRetrying}
     />

@@ -1,0 +1,71 @@
+---
+title: Parcours des modifications
+description: Lisez un diff dans l’ordre qui a du sens, pas dans l’ordre alphabétique.
+---
+
+# Parcours des modifications
+
+Un diff est trié par chemin de fichier, ce qui n’est presque jamais l’ordre dans lequel la modification prend son sens. Le parcours le réorganise : les changements liés sont regroupés en **étapes**, chaque étape explique ce que le code fait désormais différemment, et les étapes s’enchaînent pour que chacune s’appuie sur la précédente.
+
+Il explique et ordonne. Il ne juge pas votre code et ne rend aucun verdict — c’est le rôle de [Review](/git/).
+
+Ouvrez-le par l’icône **Parcours** dans la barre de droite, ou par le bouton **Parcours IA** dans les panneaux des modifications et de la pull request. Les deux se contentent d’ouvrir le panneau ; rien n’est généré tant que vous n’appuyez pas sur **Générer le parcours**.
+
+## Ce qu’il peut parcourir
+
+| Portée | Ce qu’elle couvre |
+| --- | --- |
+| Tout non validé | Tout ce qui n’est pas encore dans un commit : indexé, non indexé et nouveaux fichiers |
+| Indexées | Uniquement ce qui partirait dans un commit maintenant |
+| Non indexées | Copie de travail et nouveaux fichiers |
+| Cette branche | Tous les commits de la branche absents de sa base |
+| Pull request | La modification telle qu’elle existe sur GitHub |
+
+**Cette branche** ne veut pas dire « commits non poussés » : c’est tout ce que la branche ajoute à sa base, poussé ou non. Après un commit mais avant un push, elle et la pull request diffèrent donc volontairement : l’une montre ce que vous avez fait, l’autre ce que voient les relecteurs.
+
+Chaque portée est stockée séparément : passer de l’une à l’autre ne perd jamais rien.
+
+## Choisir le modèle
+
+Les parcours utilisent votre petit modèle par défaut. Choisissez-en un autre dans **Paramètres → Sessions → Modèle du parcours des modifications**, ou pour une seule relecture depuis l’en-tête du panneau — utile quand une modification est assez risquée pour mériter un modèle plus solide.
+
+Le sélecteur ne propose que des modèles capables de sortie structurée, sans laquelle le parcours ne peut pas être assemblé. Si un modèle est trop petit pour le diff, la génération est refusée avec une explication plutôt que de tronquer l’entrée en silence : un parcours écrit sur la moitié d’un diff sonne assuré et se trompe.
+
+En rouvrant le panneau, vous voyez le modèle qui a produit ce que vous avez sous les yeux ; **Régénérer** reprend donc le même tant que vous n’en changez pas.
+
+## Choisir la langue
+
+Les parcours sont rédigés dans la langue de votre interface par défaut. Le sélecteur de langue dans l’en-tête du panneau démarre là, et vous pouvez choisir n’importe quelle autre langue dans laquelle OpenChamber est traduit pour une seule relecture : une explication guidée ne sert que dans une langue que vous lisez à l’aise.
+
+Seule la prose est traduite. Les identifiants, les chemins de fichiers et les noms d’API restent exactement tels qu’ils apparaissent dans votre code, si bien que ce qu’une étape nomme reste ce que vous pouvez rechercher.
+
+Si rien n’a encore été généré dans la langue choisie, le panneau ne se vide pas : il continue d’afficher le parcours qu’il a et le signale. Appuyez sur **Générer le parcours** pour l’obtenir dans la nouvelle langue.
+
+## Coût et cache
+
+Rien ne se génère tout seul. La génération ne démarre que sur votre demande, et la régénération est manuelle elle aussi.
+
+Les résultats sont mis en cache d’après le contenu exact du diff. Ramenez la copie de travail à un état antérieur et le parcours d’alors revient gratuitement, sans appel au modèle. La langue et le modèle font partie de cette clé, donc chaque combinaison est conservée séparément : dès qu’un diff a un parcours en deux langues, passer de l’une à l’autre est instantané et gratuit.
+
+La génération tourne sur le serveur OpenChamber, pas dans votre onglet. Rechargez la page ou fermez le panneau : le travail continue et le résultat vous attend. Seul **Annuler** l’interrompt.
+
+## Rester honnête sur l’obsolescence
+
+Chaque étape est ancrée au contenu exact du code qu’elle décrit, ce qui permet au panneau de signaler quand ce code a bougé :
+
+- **Étapes obsolètes** — le code décrit par une étape a changé ou disparu. Le parcours reste affiché, marqué, pour que vous décidiez s’il faut régénérer.
+- **Non traité** — des modifications du diff actuel qu’aucune étape ne décrit. On y trouve les changements faits après la génération, ceux que le parcours a jugés courants, ainsi que les fichiers de verrouillage et autres sorties générées, délibérément tenus hors du modèle. Tout est listé à la fin pour que rien ne disparaisse en silence.
+
+Régénérer ne rapièce pas, cela réécrit : le parcours précédent est fourni au modèle comme contexte, ce qui reste vrai est conservé, et tout est réancré sur le code actuel.
+
+## Notes
+
+- Vous pouvez commenter n’importe quelle ligne comme dans la vue diff ; les commentaires se rattachent au champ du chat.
+- Disponible sur ordinateur et sur les largeurs de tablette. Non proposé dans l’extension VS Code ni dans l’application mobile.
+- Parcourir une pull request exige un compte GitHub connecté — voir [Issues et PR GitHub](/github/).
+
+## Voir aussi
+
+- [Git et GitHub](/git/) — le panneau des modifications qu’il lit, et l’action Review qui, elle, juge le code
+- [Issues et PR GitHub](/github/) — connectez GitHub pour parcourir les pull requests
+- [Fournisseurs, modèles et agents](/providers/) — d’où vient le petit modèle

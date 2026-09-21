@@ -1,0 +1,47 @@
+---
+title: Remote-Zugriff
+description: Beheben Sie Tunnel, Remote-Instanzen und den Zugriff auf OpenChamber von einem anderen Gerät aus.
+---
+
+# Remote-Zugriff
+
+Wenn Sie OpenChamber von Ihrem Telefon oder einem anderen Rechner aus nicht erreichen, hängt die Lösung davon ab, wie Sie sich verbinden.
+
+## Prüfen Sie zuerst die Grundlagen
+
+- öffnen Sie zuerst `http://localhost:3000` auf demselben Computer — wenn das fehlschlägt, ist es kein Remote-Problem; sehen Sie unter [OpenCode-Verbindung](/troubleshooting/opencode-connection/) nach
+- bestätigen Sie mit `openchamber status`, dass der Server läuft
+
+## Gekoppeltes Gerät verbindet sich nicht
+
+- der QR-Code / Pairing-Link ist **nur einmal nutzbar** — wenn er bereits gescannt wurde (oder abgelaufen ist), erstellen Sie über **Gerät hinzufügen** einen neuen
+- wenn das Gerät mit **Nur Heimnetzwerk** gekoppelt wurde, kann es sich von außerhalb dieses Netzwerks nicht verbinden — koppeln Sie es erneut mit **Überall**
+- prüfen Sie bei **Überall**-Pairing auf dem Server **Einstellungen → Remote-Instanzen → OpenChamber Relay**: Dort sollte **Verbunden** stehen; wenn nicht, deaktivieren und reaktivieren Sie es
+- wenn ein Gerät **widerrufen** wurde, ist sein Token endgültig weg — koppeln Sie es mit einem neuen QR-Code erneut
+
+Wie diese Verbindungen funktionieren, steht unter [Ein Gerät verbinden](/connect-devices/) und [Private Relay](/private-relay/).
+
+## Tunnel-Link funktioniert nicht
+
+- führen Sie `openchamber tunnel status --all` aus
+- starten Sie den Tunnel von derselben Instanz und demselben Port neu
+- erzeugen Sie den Connect-Link neu, wenn der vorherige bereits verwendet wurde
+
+Die vollständige Einrichtung steht unter [Tunnel](/tunnels/).
+
+## Remote-Instanz verbindet sich nicht (Desktop)
+
+Wenn eine [Remote-Instanz](/remote-instances/) hängen bleibt, nennt OpenChamber den fehlgeschlagenen Schritt:
+
+- **auth** — Ihr SSH- oder UI-Passwort wurde abgelehnt; geben Sie es erneut ein
+- **install / start** — OpenChamber konnte den Server auf dem entfernten Rechner nicht einrichten oder starten; prüfen Sie die Anforderungen dieses Rechners
+- **forwarding** — die Verbindung steht, aber der Port erreicht Sie nicht; versuchen Sie einen anderen lokalen Port
+
+## Hinter Ihrem eigenen Server
+
+Wenn Sie OpenChamber hinter einen Reverse Proxy setzen und es seltsam lädt oder keine Verbindung herstellt, sehen Sie sich [Reverse Proxy](/reverse-proxy/) an.
+
+## Verwandt
+
+- [Ein Gerät verbinden](/connect-devices/) · [Private Relay](/private-relay/) · [Tunnel](/tunnels/) · [Remote-Instanzen](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
+- [Sicherheit](/security/) — schützen Sie die UI, bevor Sie sie freigeben

@@ -25,13 +25,20 @@ Uma vez definida uma senha, você pode adicionar passkeys (Face ID, Touch ID, um
 
 As passkeys estão vinculadas à senha atual. Se você alterar ou remover a senha, as passkeys salvas são apagadas e você precisará adicioná-las novamente.
 
+## Tokens de dispositivo
+
+Os dispositivos pareados por [Conectar um Dispositivo](/pt-br/connect-devices/) se autenticam com os próprios tokens por dispositivo, não com a senha de UI. Os links de pareamento são de uso único e expiram se não forem usados; cada dispositivo pareado é listado em **Settings → Remote Instances → Conectar a este servidor**, onde você pode revogar qualquer um deles a qualquer momento. As conexões fora de casa passam pelo [Private Relay](/pt-br/private-relay/), que é criptografado de ponta a ponta e não consegue ler o seu tráfego.
+
 ## Antes de expô-lo
 
 - Por padrão, o OpenChamber só escuta na sua própria máquina (`127.0.0.1`). É preciso uma mudança deliberada para escutar mais amplamente, e você deve definir uma senha primeiro.
-- Prefira um [túnel](/pt-br/tunnels/) ou uma rede privada (como uma VPN) a abrir uma porta para a internet.
+- Para os seus próprios dispositivos, prefira o [pareamento](/pt-br/connect-devices/) com o [Private Relay](/pt-br/private-relay/) — nada fica exposto publicamente.
+- Se você precisa de uma URL pública, prefira um [túnel](/pt-br/tunnels/) ou uma rede privada (como uma VPN) a abrir uma porta para a internet.
 - Se você colocar o OpenChamber atrás do seu próprio servidor HTTPS, veja [Reverse Proxy](/pt-br/reverse-proxy/).
 
 ## Relacionado
 
-- [Túneis](/pt-br/tunnels/) — a forma recomendada de alcançar uma instância remotamente
+- [Conectar um Dispositivo](/pt-br/connect-devices/) — pareamento de uso único e tokens por dispositivo
+- [Private Relay](/pt-br/private-relay/) — acesso criptografado de ponta a ponta de qualquer lugar
+- [Túneis](/pt-br/tunnels/) — exponha uma URL pública quando precisar de uma
 - [Reverse Proxy](/pt-br/reverse-proxy/) — execute o OpenChamber atrás do seu próprio servidor

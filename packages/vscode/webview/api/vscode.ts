@@ -15,8 +15,16 @@ export const createVSCodeActionsAPI = (): VSCodeAPI => ({
     await openVSCodeExternalUrl(url);
   },
 
-  async pickFiles(): Promise<unknown> {
-    return sendBridgeMessage('api:files/pick');
+  async addWorkspaceFolder(path: string): Promise<Array<{ name: string; path: string }>> {
+    const result = await sendBridgeMessage<{ workspaceFolders: Array<{ name: string; path: string }> }>(
+      'api:workspace:addFolder',
+      { path },
+    );
+    return Array.isArray(result?.workspaceFolders) ? result.workspaceFolders : [];
+  },
+
+  async pickFiles(options): Promise<unknown> {
+    return sendBridgeMessage('api:files/pick', options);
   },
 
   async saveImage(payload: unknown): Promise<unknown> {

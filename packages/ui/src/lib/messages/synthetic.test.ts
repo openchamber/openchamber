@@ -120,4 +120,26 @@ describe("filterSyntheticParts", () => {
     ]
     expect(filterSyntheticParts(parts)).toEqual(parts)
   })
+
+  test("keeps synthetic parts carrying user context metadata alongside user text", () => {
+    const userPart = createTextPart("1", "user prompt")
+    const contextPart = {
+      ...createTextPart("2", "Comment on `x.ts` lines 1-2:\n```ts\ncode\n```\n\nfix", true),
+      metadata: {
+        openchamberContext: {
+          kind: "code-comment",
+          source: "diff",
+          fileLabel: "x.ts",
+          startLine: 1,
+          endLine: 2,
+          language: "ts",
+          code: "code",
+          text: "fix",
+        },
+      },
+    }
+    const plainSynthetic = createTextPart("3", "instructions", true)
+    expect(filterSyntheticParts([userPart, contextPart, plainSynthetic]))
+      .toEqual([userPart, contextPart])
+  })
 })

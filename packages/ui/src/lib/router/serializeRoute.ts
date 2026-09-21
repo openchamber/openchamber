@@ -1,4 +1,4 @@
-import type { MainTab } from '@/stores/useUIStore';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { ROUTE_PARAMS } from './types';
 
 /**
@@ -6,16 +6,9 @@ import { ROUTE_PARAMS } from './types';
  */
 export interface AppRouteState {
   sessionId: string | null;
-  tab: MainTab;
   isSettingsOpen: boolean;
   settingsPath: string;
-  diffFile: string | null;
 }
-
-/**
- * Default tab when none is specified.
- */
-const DEFAULT_TAB: MainTab = 'chat';
 
 /**
  * Serialize application state to URL search parameters.
@@ -37,15 +30,6 @@ function serializeRoute(state: AppRouteState): URLSearchParams {
     return params;
   }
 
-  // Tab - only include if not the default
-  if (state.tab !== DEFAULT_TAB) {
-    params.set(ROUTE_PARAMS.TAB, state.tab);
-  }
-
-  // Diff file - only include when on diff tab
-  if (state.tab === 'diff' && state.diffFile && state.diffFile.trim().length > 0) {
-    params.set(ROUTE_PARAMS.FILE, state.diffFile);
-  }
 
   return params;
 }
@@ -100,7 +84,8 @@ function routeMatchesURL(state: AppRouteState): boolean {
 
 /**
  * Update the browser URL using pushState or replaceState.
- * Does nothing if URL already matches or in VS Code context.
+ * Does nothing if URL already matches, in VS Code context, or in the
+ * embedded session-chat iframe (whose URL identity is fixed at mount).
  */
 export function updateBrowserURL(
   state: AppRouteState,
@@ -110,8 +95,10 @@ export function updateBrowserURL(
     return;
   }
 
-  // Skip URL updates in VS Code webview
-  if (isVSCodeContext()) {
+  // Both VS Code webviews and embedded session-chat iframes carry session
+  // identity outside the route params (`__VSCODE_CONFIG__` / `?ocPanel=…`).
+  // Rebuilding the URL here would strip those params, so skip entirely.
+  if (isVSCodeContext() || isEmbeddedSessionChat()) {
     return;
   }
 

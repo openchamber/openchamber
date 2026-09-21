@@ -1,26 +1,11 @@
-import { homedir } from 'os';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import { buildResult, toUsageWindow, toNumber } from '../utils/index.js';
-
-const COOKIE_PATH = join(homedir(), '.config', 'ollama-quota', 'cookie');
+import { readManagedCredential } from '../credentials/providers.js';
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
 const aliases = ['ollama-cloud', 'ollamacloud'];
 
-const readCookieFile = () => {
-  try {
-    if (!existsSync(COOKIE_PATH)) return null;
-    const content = readFileSync(COOKIE_PATH, 'utf-8');
-    const trimmed = content.trim();
-    return trimmed || null;
-  } catch {
-    return null;
-  }
-};
-
-const parseOllamaSettingsHtml = (html) => {
+export const parseOllamaSettingsHtml = (html) => {
   const windows = {};
   const sessionMatch = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
   if (sessionMatch) {
@@ -50,18 +35,64 @@ const parseOllamaSettingsHtml = (html) => {
       valueLabel: `${used ?? 0} / ${total ?? 0}`
     });
   }
+  // Cost-based plans render "Monthly usage" with a dollar amount instead of
+  // session/weekly/premium windows; support both page shapes.
+  const monthlyMatch = html.match(/Monthly\s+usage[\s\S]{0,200}?\$([0-9][0-9,.]*)\s+of\s+\$([0-9][0-9,.]*)/i);
+  if (monthlyMatch) {
+    const used = toNumber(monthlyMatch[1].replace(/,/g, ''));
+    const total = toNumber(monthlyMatch[2].replace(/,/g, ''));
+    const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
+    windows.monthly = toUsageWindow({
+      usedPercent,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: `$${monthlyMatch[1]} / $${monthlyMatch[2]}`
+    });
+  }
+  // "Extra usage" credits block (visible when credits/auto-reload is enabled):
+  // a balance, not a percent. Anchor on "Balance remaining" — nearby "Add $5"
+  // and auto-reload copy also contain dollar amounts. Surfaced with the
+  // credits_balance key and OpenAI-style plain money label (the UI renders
+  // it as "Credits Balance"); a $0 balance is omitted rather than shown.
+  const balanceMatch = html.match(/Balance\s+remaining[\s\S]{0,200}?\$([0-9][0-9,.]*)/i);
+  if (balanceMatch) {
+    const balance = toNumber(balanceMatch[1].replace(/,/g, ''));
+    if (balance !== 0) {
+      windows.credits_balance = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${balanceMatch[1]}`
+      });
+    }
+  }
   return windows;
 };
 
 export const isConfigured = () => {
-  const cookie = readCookieFile();
-  return Boolean(cookie);
+  return Boolean(readManagedCredential(providerId));
+};
+
+export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
+  const response = await fetchImpl('https://ollama.com/settings', {
+    method: 'GET',
+    headers: { Cookie: credential.cookie, 'User-Agent': 'OpenChamber quota provider' },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
+    throw new Error('Ollama Cloud authentication failed');
+  }
+  if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+  const windows = parseOllamaSettingsHtml(await response.text());
+  if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
+  return windows;
 };
 
 export const fetchQuota = async () => {
-  const cookie = readCookieFile();
+  const credential = readManagedCredential(providerId);
 
-  if (!cookie) {
+  if (!credential) {
     return buildResult({
       providerId,
       providerName,
@@ -72,26 +103,7 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const response = await fetch('https://ollama.com/settings', {
-      method: 'GET',
-      headers: {
-        Cookie: cookie,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-      }
-    });
-
-    if (!response.ok) {
-      return buildResult({
-        providerId,
-        providerName,
-        ok: false,
-        configured: true,
-        error: `API error: ${response.status}`
-      });
-    }
-
-    const html = await response.text();
-    const windows = parseOllamaSettingsHtml(html);
+    const windows = await fetchOllamaCloudUsage(credential);
 
     return buildResult({
       providerId,

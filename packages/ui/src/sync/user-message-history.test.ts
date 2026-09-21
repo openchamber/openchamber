@@ -4,11 +4,11 @@ import type { State } from './types';
 
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot } from './user-message-history';
 
-const message = (id: string, role: 'user' | 'assistant'): Message => ({
+const message = (id: string, role: 'user' | 'assistant', created = 1): Message => ({
   id,
   role,
   sessionID: 'ses_1',
-  time: { created: 1 },
+  time: { created },
 } as Message);
 
 const textPart = (id: string, text: string): Part => ({
@@ -27,6 +27,23 @@ const state = (partial: Partial<State>): Pick<State, 'session' | 'message' | 'pa
 describe('buildUserMessageHistorySnapshot', () => {
   test('returns a shared empty snapshot without a session id', () => {
     expect(buildUserMessageHistorySnapshot(state({}), '')).toBe(EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT);
+  });
+
+  test('lists user prompts oldest first with their creation time', () => {
+    const first = message('user_1', 'user', 10);
+    const second = message('user_2', 'user', 20);
+    const snapshot = buildUserMessageHistorySnapshot(
+      state({
+        message: { ses_1: [first, message('assistant_1', 'assistant', 15), second] },
+        part: { user_1: [textPart('p1', 'first')], user_2: [textPart('p2', 'second')] },
+      }),
+      'ses_1',
+    );
+
+    expect(snapshot.history).toEqual([
+      { text: 'first', createdAt: 10 },
+      { text: 'second', createdAt: 20 },
+    ]);
   });
 
   test('keeps history stable when assistant parts change', () => {
@@ -51,7 +68,7 @@ describe('buildUserMessageHistorySnapshot', () => {
     );
 
     expect(second).toBe(first);
-    expect(second.history).toEqual(['hello']);
+    expect(second.history.map((prompt) => prompt.text)).toEqual(['hello']);
   });
 
   test('updates history when a user part changes', () => {
@@ -74,25 +91,25 @@ describe('buildUserMessageHistorySnapshot', () => {
     );
 
     expect(second).not.toBe(first);
-    expect(second.history).toEqual(['updated']);
+    expect(second.history.map((prompt) => prompt.text)).toEqual(['updated']);
   });
 
   test('excludes user messages hidden by session revert state', () => {
-    const beforeRevert = message('user_1', 'user');
-    const reverted = message('user_2', 'user');
+    const beforeRevert = message('msg_ffffffffffffBefore', 'user');
+    const reverted = message('msg_000000000000Reverted', 'user');
 
     const snapshot = buildUserMessageHistorySnapshot(
       state({
-        session: [{ id: 'ses_1', revert: { messageID: 'user_2' } } as State['session'][number]],
+        session: [{ id: 'ses_1', revert: { messageID: reverted.id } } as State['session'][number]],
         message: { ses_1: [beforeRevert, reverted] },
         part: {
-          user_1: [textPart('part_user_1', 'kept')],
-          user_2: [textPart('part_user_2', 'reverted')],
+          [beforeRevert.id]: [textPart('part_user_1', 'kept')],
+          [reverted.id]: [textPart('part_user_2', 'reverted')],
         },
       }),
       'ses_1',
     );
 
-    expect(snapshot.history).toEqual(['kept']);
+    expect(snapshot.history.map((prompt) => prompt.text)).toEqual(['kept']);
   });
 });

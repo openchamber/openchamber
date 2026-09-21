@@ -1,0 +1,48 @@
+---
+title: SSH ana bilgisayarları ve proxyleme
+description: Kaydedilmiş SSH ana bilgisayarlarını içe aktarın ve masaüstü uygulamasında ek SSH port yönlendirmeleri ekleyin.
+---
+
+# SSH ana bilgisayarları ve proxyleme
+
+Kaydedilmiş SSH ana bilgisayarlarını içe aktarmak, uzak bir makineye bağlanmak ve aynı SSH bağlantısı üzerinden ek portları erişilebilir yapmak için masaüstü uygulamasında **Ayarlar → Uzak örnekler** bölümünü kullanın.
+
+> SSH ana bilgisayarları ve SSH proxyleme **yalnızca masaüstü** özellikleridir. Bilgisayarınızdaki SSH istemcisini kullanırlar.
+
+## SSH ana bilgisayarını içe aktarma
+
+OpenChamber, yerel SSH yapılandırmanızdaki host'ları okuyabilir. Bu, `ssh work-server` gibi komutların kullandığı yerdir.
+
+1. **Ayarlar → Uzak örnekler** bölümünü açın.
+2. **Saved SSH hosts** altından bir host seçin.
+3. Host bir kalıpsa gerçek hedefi girin, örneğin `deploy@app.example.com`.
+4. Kaydedin ve bağlanın.
+
+OpenChamber o SSH komutunu kullanarak bir uzak örnek oluşturur. **ready** noktasına geldiğinde uzak OpenChamber arayüzü masaüstü uygulamasında açılır.
+
+## Ek port yönlendirmeleri ekleme
+
+Her uzak örneğin bir **Port Forwards** bölümü vardır. SSH bağlantısının bir tarafındaki bir şeyin diğer taraftaki bir porta ulaşması gerektiğinde kullanın.
+
+OpenChamber üç yönlendirme tipini destekler:
+
+- **Local (-L)** — bilgisayarınızda, uzak makinedeki bir şeye bağlanan bir port açar.
+- **Remote (-R)** — uzak makinede, bilgisayarınıza geri bağlanan bir port açar.
+- **Dynamic (-D)** — SSH bağlantısı üzerinden yerel bir SOCKS proxy açar.
+
+Uzak makinede çalışan çoğu uygulama önizlemesi ve panel için **Local (-L)** kullanın.
+
+## SOCKS proxy'yi kullanma
+
+Bilgisayarınızdaki diğer araçların uzak makine üzerinden gezmesini istiyorsanız **Dynamic (-D)** seçin. OpenChamber, o SSH bağlantısı için yerel bir SOCKS proxy portu açar.
+
+Bağlantı hazır olduktan sonra yönlendirme satırındaki yerel proxy adresini kopyalayın ya da kullanın. Tarayıcınızı ya da aracınızı SOCKS5 proxy olarak onu kullanacak şekilde ayarlayın.
+
+## Gizli tutun
+
+Yönlendirilen porta ağınızdaki başka cihazlar bilerek ulaşsın istemiyorsanız yerel bağlama adresi olarak `127.0.0.1` ya da `localhost` kullanın.
+
+## İlgili
+
+- [Uzak örnekler](/remote-instances/) — masaüstü uygulamasını başka bir makinedeki OpenChamber'a bağlayın
+- [Uzak erişim](/troubleshooting/remote-access/) — SSH ya da uzak erişim bağlanmadığında

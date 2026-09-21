@@ -1,0 +1,35 @@
+---
+title: Worktrees & Git
+description: Häufige Probleme mit Worktrees und Git beheben.
+---
+
+# Worktrees & Git
+
+Probleme, die bei [Worktree-Sitzungen](/worktrees/) und der [Git-Ansicht](/git/) auftreten, und wie Sie sie beheben.
+
+## Ein Worktree braucht Aufmerksamkeit
+
+OpenChamber markiert einen Worktree, wenn etwas nicht stimmt:
+
+- **Ordner fehlt** — der Ordner des Worktrees wurde gelöscht oder außerhalb von OpenChamber verschoben; entfernen Sie die Sitzung und erstellen Sie einen frischen Worktree
+- **abgetrennter oder noch nicht angelegter Branch** — der Worktree liegt nicht auf einem normalen Branch; checken Sie ihn auf einen aus
+- **Merge, Rebase oder Cherry-Pick läuft noch** — eine Operation wurde halb fertig gelassen; beenden oder abbrechen Sie sie in der Git-Ansicht
+
+## Worktree lässt sich nicht erstellen
+
+- **Branch existiert bereits** — wählen Sie einen anderen Branchnamen oder verwenden Sie die Option für einen bestehenden Branch
+- **Name bereits vergeben** — wählen Sie einen anderen Worktree-Namen
+
+## Commit- oder PR-Erstellung schlägt fehl
+
+Das Erzeugen einer Commit-Nachricht oder einer PR-Beschreibung läuft in Ihrer aktiven Sitzung, daher brauchen Sie eine geöffnete Sitzung mit ausgewähltem Arbeitsmodell. Öffnen oder wählen Sie eine Sitzung und versuchen Sie es erneut.
+
+## SSH- oder Windows-Pfadprobleme
+
+- stellen Sie sicher, dass der SSH-Schlüssel, den das Repo verwendet, derselbe ist, den Sie in Ihrer [Git-Identität](/git-identities/) gesetzt haben
+- unter Windows verwendet Git Unix-ähnliche Pfade (wie `/c/Users/...`) — OpenChamber handhabt das, aber benutzerdefinierte SSH-Schlüsselpfade sollten dieselbe Form haben
+
+## Verwandt
+
+- [Worktree-Sitzungen](/worktrees/) — wie Worktrees erstellt und entfernt werden
+- [Git-Identitäten](/git-identities/) — für jedes Repo den richtigen Schlüssel und die richtige Identität setzen

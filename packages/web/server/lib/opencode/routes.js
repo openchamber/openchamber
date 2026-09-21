@@ -1,13 +1,19 @@
+import express from 'express';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import {
+  buildDeferredRestartResponse,
+} from './config-mutation-response.js';
+import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { settingsSurfaceOf } from './settings-files.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
-    clientReloadDelayMs,
     getOpenCodeResolutionSnapshot,
+    getOpenCodeUpgradeCapability,
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,
@@ -17,9 +23,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     resolveProjectDirectory,
     getProviderSources,
     removeProviderConfig,
+    upsertProviderConfig,
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    fsPromises = fs.promises,
   } = dependencies;
 
   let authLibrary = null;
@@ -39,6 +47,59 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
     const trimmed = value.trim();
     return trimmed || null;
+  };
+
+  const escapeHtml = (value) => String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  // Self-contained page for the OAuth return leg: the system browser has no UI
+  // session, so it cannot load the SPA behind the auth gate — everything it
+  // needs ships inline. `openchamber://focus/mcp-auth` raises the desktop app;
+  // the link stays visible because some browsers only follow custom-protocol
+  // URLs from a user gesture.
+  const renderMcpOAuthCallbackPage = ({ title, message, desktopReturn }) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)} — OpenChamber</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: Canvas; color: CanvasText; }
+  main { max-width: 34rem; padding: 2.5rem 2rem; text-align: center; }
+  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+  p { margin: 0; line-height: 1.5; opacity: 0.85; }
+  a.return { display: inline-block; margin-top: 1.5rem; padding: 0.5rem 1.25rem; border-radius: 0.5rem;
+             border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); color: inherit; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+<h1>${escapeHtml(title)}</h1>
+<p>${escapeHtml(message)}</p>
+${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return to OpenChamber</a>
+<script>window.location.href = 'openchamber://focus/mcp-auth';</script>` : ''}
+</main>
+</body>
+</html>`;
+
+  const readOpenCodeCurrentVersion = async () => {
+    const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+    });
+    const health = await healthResponse.json().catch(() => null);
+    if (!healthResponse.ok) {
+      return { ok: false, status: healthResponse.status, error: health?.error || healthResponse.statusText };
+    }
+    const currentVersion = typeof health?.version === 'string' ? health.version.replace(/^v/, '') : null;
+    return { ok: true, currentVersion };
   };
 
   const parseVersionForComparison = (value) => {
@@ -104,6 +165,41 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return versions.sort((left, right) => compareVersions(right, left))[0];
   };
 
+  // OpenCode's `/global/upgrade` requires an explicit semver target and rejects
+  // a bodyless call, so "update to the latest" has to name the version. The
+  // release lookup is the same one the upgrade-status check already uses to
+  // decide there is anything to offer.
+  const resolveOpenCodeUpgradeTarget = async (requestedTarget) => {
+    if (typeof requestedTarget === 'string' && requestedTarget.trim().length > 0) {
+      return { resolved: true, target: requestedTarget.trim() };
+    }
+    try {
+      const latest = await fetchLatestOpenCodeVersion();
+      if (!latest) {
+        return { resolved: false, reason: 'The latest OpenCode version could not be determined.' };
+      }
+      return { resolved: true, target: latest };
+    } catch (error) {
+      return {
+        resolved: false,
+        reason: error instanceof Error ? error.message : 'The latest OpenCode version could not be determined.',
+      };
+    }
+  };
+
+  // OpenCode reports a rejected upgrade as `{ name, data: { message, kind } }`,
+  // which carries no `error` field. Reading only `error` left the user with the
+  // bare HTTP status text ("Bad Request") and nothing to act on.
+  const readOpenCodeUpgradeErrorMessage = (payload, response) => {
+    const candidates = [payload?.error, payload?.data?.message, payload?.message];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+    return response.statusText || 'Failed to upgrade OpenCode';
+  };
+
   const pruneExpiredPendingMcpAuthContexts = () => {
     const now = Date.now();
     for (const [state, entry] of pendingMcpAuthContextByState.entries()) {
@@ -113,9 +209,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   };
 
-  app.get('/api/config/settings', async (_req, res) => {
+  app.get('/api/config/settings', async (req, res) => {
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      // The surface kind resolves the per-surface profile keys; absent means base.
+      const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
       res.json(formatSettingsResponse(settings));
     } catch (error) {
       console.error('Failed to read settings:', error);
@@ -134,41 +231,97 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
+  let openCodeUpgradePromise = null;
+
   app.post('/api/opencode/upgrade', async (req, res) => {
     try {
-      const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
-        ? req.body.target.trim()
-        : undefined;
-      const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        body: JSON.stringify(target ? { target } : {}),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        return res.status(response.status).json({
+      const capability = getOpenCodeUpgradeCapability();
+      if (!capability.supported) {
+        return res.status(409).json({
           success: false,
-          error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
+          code: capability.reason === 'bundled'
+            ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
+            : 'OPENCODE_UPGRADE_UNSUPPORTED',
+          error: capability.reason === 'bundled'
+            ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
+            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
         });
       }
+      if (openCodeUpgradePromise) {
+        return res.status(409).json({
+          success: false,
+          code: 'OPENCODE_UPGRADE_IN_PROGRESS',
+          error: 'An OpenCode upgrade is already in progress.',
+        });
+      }
+
+      const requestedTarget = req.body?.target;
+      // The target lookup reaches the network, so it runs inside the operation:
+      // the in-flight lock is taken synchronously above, and a second click
+      // cannot slip past while the release version is being resolved.
+      const upgradeOperation = (async () => {
+        const targetResolution = await resolveOpenCodeUpgradeTarget(requestedTarget);
+        if (!targetResolution.resolved) {
+          return {
+            status: 502,
+            body: {
+              success: false,
+              code: 'OPENCODE_UPGRADE_TARGET_UNRESOLVED',
+              error: `Could not determine which OpenCode version to install: ${targetResolution.reason}`,
+            },
+          };
+        }
+
+        const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          body: JSON.stringify({ target: targetResolution.target }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          return {
+            status: response.status,
+            body: {
+              success: false,
+              error: readOpenCodeUpgradeErrorMessage(payload, response),
+            },
+          };
+        }
+
+        try {
+          await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
+        } catch (restartError) {
+          return {
+            status: 500,
+            body: {
+              success: false,
+              upgraded: true,
+              error: restartError instanceof Error
+                ? `OpenCode upgraded, but restart failed: ${restartError.message}`
+                : 'OpenCode upgraded, but restart failed',
+            },
+          };
+        }
+
+        return {
+          status: 200,
+          body: { ...(payload ?? { success: true }), restarted: true },
+        };
+      })();
+      openCodeUpgradePromise = upgradeOperation;
 
       try {
-        await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
-      } catch (restartError) {
-        return res.status(500).json({
-          success: false,
-          upgraded: true,
-          error: restartError instanceof Error
-            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
-            : 'OpenCode upgraded, but restart failed',
-        });
+        const result = await upgradeOperation;
+        return res.status(result.status).json(result.body);
+      } finally {
+        if (openCodeUpgradePromise === upgradeOperation) {
+          openCodeUpgradePromise = null;
+        }
       }
-
-      return res.json({ ...(payload ?? { success: true }), restarted: true });
     } catch (error) {
       console.error('Failed to upgrade OpenCode:', error);
       return res.status(500).json({
@@ -180,6 +333,17 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/opencode/upgrade-status', async (_req, res) => {
     try {
+      const capability = getOpenCodeUpgradeCapability();
+      if (!capability.supported) {
+        const current = await readOpenCodeCurrentVersion().catch(() => ({ ok: false, currentVersion: null }));
+        return res.json({
+          available: false,
+          currentVersion: current.ok ? current.currentVersion : null,
+          latestVersion: null,
+          upgrade: capability,
+        });
+      }
+
       const [healthResponse, latestVersion] = await Promise.all([
         fetch(buildOpenCodeUrl('/global/health', ''), {
           method: 'GET',
@@ -203,6 +367,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         available,
         currentVersion,
         latestVersion,
+        upgrade: capability,
       });
     } catch (error) {
       return res.status(500).json({
@@ -259,7 +424,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.put('/api/config/settings', async (req, res) => {
     try {
-      const updated = await persistSettings(req.body ?? {});
+      const updated = await persistSettings(req.body ?? {}, { surface: settingsSurfaceOf(req) });
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
@@ -268,7 +433,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  app.post('/api/mcp/auth/pending', async (req, res) => {
+  // The body parser is per-route on this server; without it req.body is
+  // undefined here, the state read as absent, and the "parked" context was
+  // silently never stored — the callback then always failed as unknown.
+  app.post('/api/mcp/auth/pending', express.json({ limit: '16kb' }), async (req, res) => {
     try {
       pruneExpiredPendingMcpAuthContexts();
 
@@ -285,6 +453,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const entry = {
         name,
         directory: normalizePendingString(req.body?.directory),
+        // Which surface started the flow. It belongs here rather than in the
+        // redirect URI: that URI is written into the server's config once and
+        // deliberately never rewritten, so anything encoded in it would be
+        // frozen at whatever runtime authorised first.
+        origin: normalizePendingString(req.body?.origin),
         expiresAt: Date.now() + PENDING_MCP_AUTH_TTL_MS,
       };
       pendingMcpAuthContextByState.set(state, entry);
@@ -294,6 +467,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         context: {
           name: entry.name,
           directory: entry.directory,
+          origin: entry.origin,
         },
       });
     } catch (error) {
@@ -338,6 +512,89 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
+  // Browser return leg of the MCP OAuth flow, completed entirely server-side.
+  //
+  // The provider redirects the SYSTEM browser here, and that browser has no
+  // OpenChamber UI session — the SPA route this path used to land on sits
+  // behind the client-side auth gate, so the user saw a login page instead of
+  // a finished authorization. No session can be required on this path.
+  //
+  // Safe without auth because it acts only on a code+state pair whose `state`
+  // matches a context parked by an authenticated start call: `state` is the
+  // OAuth CSRF secret, generated per flow and known only to the initiating
+  // client and the provider. Without a match the code is NOT forwarded, so an
+  // unauthenticated caller cannot bind this server's MCP entry to a foreign
+  // account by fabricating a callback. The endpoint reads nothing and mutates
+  // nothing else.
+  app.get('/mcp/oauth/callback', async (req, res) => {
+    const queryValue = (key) => normalizePendingString(Array.isArray(req.query?.[key]) ? req.query[key][0] : req.query?.[key]);
+    const state = queryValue('state');
+    const code = queryValue('code');
+    const providerError = queryValue('error');
+    const providerErrorDescription = queryValue('error_description');
+
+    pruneExpiredPendingMcpAuthContexts();
+    const context = state ? pendingMcpAuthContextByState.get(state) ?? null : null;
+    const startedFromDesktop = context?.origin === 'desktop';
+
+    const finish = (status, { title, message }) => {
+      if (state) pendingMcpAuthContextByState.delete(state);
+      res.status(status).type('html').send(renderMcpOAuthCallbackPage({
+        title,
+        message,
+        // Browsers only follow custom-protocol links from a user gesture in
+        // some configurations, so the page both tries the jump and keeps a
+        // visible link as the fallback.
+        desktopReturn: startedFromDesktop,
+      }));
+    };
+
+    if (providerError) {
+      return finish(400, {
+        title: 'Authorization Failed',
+        message: providerErrorDescription || providerError,
+      });
+    }
+    if (!code) {
+      return finish(400, {
+        title: 'Authorization Failed',
+        message: 'The provider did not return an authorization code. Start authorization again from MCP Settings.',
+      });
+    }
+    if (!context?.name) {
+      return finish(400, {
+        title: 'Authorization Failed',
+        message: 'This authorization session has expired or is unknown to the running app. Return to OpenChamber and click Authorize again.',
+      });
+    }
+
+    try {
+      const callbackUrl = new URL(buildOpenCodeUrl(`/mcp/${encodeURIComponent(context.name)}/auth/callback`, ''));
+      if (context.directory) callbackUrl.searchParams.set('directory', context.directory);
+      const upstream = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        body: JSON.stringify({ code }),
+      });
+      if (!upstream.ok) {
+        const payload = await upstream.json().catch(() => null);
+        return finish(502, {
+          title: 'Authorization Failed',
+          message: payload?.error || payload?.message || `OpenCode rejected the authorization code (${upstream.status}). Start authorization again from MCP Settings.`,
+        });
+      }
+      return finish(200, {
+        title: 'Authorization Complete',
+        message: 'You can close this tab and return to OpenChamber.',
+      });
+    } catch (error) {
+      return finish(502, {
+        title: 'Authorization Failed',
+        message: error?.message || 'Failed to complete MCP authorization.',
+      });
+    }
+  });
+
   app.get('/api/provider/:providerId/source', async (req, res) => {
     try {
       const { providerId } = req.params;
@@ -362,7 +619,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const sources = getProviderSources(providerId, directory);
       const { getProviderAuth } = await getAuthLibrary();
       const auth = getProviderAuth(providerId);
-      sources.sources.auth.exists = Boolean(auth);
+      sources.sources.auth.exists = providerId === 'claude-code'
+        ? getClaudeCliAuthStatus().connected
+        : Boolean(auth);
 
       return res.json({
         providerId,
@@ -371,6 +630,63 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to get provider sources:', error);
       return res.status(500).json({ error: error.message || 'Failed to get provider sources' });
+    }
+  });
+
+  app.put('/api/provider', async (req, res) => {
+    try {
+      const providerID = typeof req.body?.providerID === 'string'
+        ? req.body.providerID.trim()
+        : (typeof req.body?.providerId === 'string' ? req.body.providerId.trim() : '');
+      const config = req.body?.config;
+      const scope = typeof req.body?.scope === 'string' ? req.body.scope : 'user';
+
+      if (!providerID) {
+        return res.status(400).json({ error: 'Provider ID is required' });
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        return res.status(400).json({ error: 'Provider config is required' });
+      }
+      if (scope !== 'user' && scope !== 'project' && scope !== 'custom') {
+        return res.status(400).json({ error: 'Invalid scope' });
+      }
+
+      const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+      const queryDirectory = Array.isArray(req.query?.directory)
+        ? req.query.directory[0]
+        : req.query?.directory;
+      const requestedDirectory = headerDirectory || queryDirectory || null;
+
+      let directory = null;
+      if (scope === 'project' || requestedDirectory) {
+        const resolved = await resolveProjectDirectory(req);
+        if (!resolved.directory) {
+          return res.status(400).json({ error: resolved.error || 'Working directory is required' });
+        }
+        directory = resolved.directory;
+      } else {
+        const resolved = await resolveProjectDirectory(req);
+        if (resolved.directory) {
+          directory = resolved.directory;
+        }
+      }
+
+      const { getProviderAuth } = await getAuthLibrary();
+      const hasStoredAuth = Boolean(getProviderAuth(providerID));
+      const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
+
+      return res.json({
+        ...buildDeferredRestartResponse(
+          `Provider ${providerID} saved. Restart OpenCode to apply.`,
+        ),
+        providerId: upsertResult.providerId,
+        path: upsertResult.path,
+        config: upsertResult.config,
+      });
+    } catch (error) {
+      const status = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+      console.error('Failed to upsert provider config:', error);
+      return res.status(status).json({ error: error.message || 'Failed to save provider config' });
     }
   });
 
@@ -420,15 +736,18 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
 
       if (removed) {
-        await refreshOpenCodeAfterConfigChange(`provider ${providerId} disconnected (${scope})`);
+        return res.json({
+          success: true,
+          removed,
+          ...buildDeferredRestartResponse('Provider disconnected successfully. Restart OpenCode to apply.'),
+        });
       }
 
       return res.json({
         success: true,
         removed,
-        requiresReload: removed,
-        message: removed ? 'Provider disconnected successfully' : 'Provider was not connected',
-        reloadDelayMs: removed ? clientReloadDelayMs : undefined,
+        requiresReload: false,
+        message: 'Provider was not connected',
       });
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
@@ -441,6 +760,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const requestedPath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
       if (!requestedPath) {
         return res.status(400).json({ error: 'Path is required' });
+      }
+
+      if (req.body?.create === true) {
+        await fsPromises.mkdir(path.resolve(requestedPath), { recursive: true });
       }
 
       const validated = await validateDirectoryPath(requestedPath);
@@ -486,7 +809,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   });
 
   // Behavior / Global AGENTS.md endpoints
-  const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+  const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
   const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024; // 1 MB
 
   app.get('/api/behavior/agents-md', async (_req, res) => {
@@ -494,10 +817,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       try {
         await fs.promises.access(AGENTS_MD_PATH);
       } catch {
-        return res.json({ content: '', exists: false });
+        return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
       }
       const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-      return res.json({ content, exists: true });
+      return res.json({ content, exists: true, path: AGENTS_MD_PATH });
     } catch (error) {
       console.error('Failed to read AGENTS.md:', error);
       return res.status(500).json({ error: 'Failed to read AGENTS.md' });
@@ -522,14 +845,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
 
-      // Refresh OpenCode so it picks up the new AGENTS.md without a full restart
-      try {
-        await refreshOpenCodeAfterConfigChange('global behavior (AGENTS.md) updated');
-      } catch {
-        // Non-fatal: file was written successfully
-      }
-
-      return res.json({ success: true });
+      return res.json(buildDeferredRestartResponse(
+        'AGENTS.md saved. Restart OpenCode to apply.',
+      ));
     } catch (error) {
       console.error('Failed to write AGENTS.md:', error);
       return res.status(500).json({ error: error.message || 'Failed to write AGENTS.md' });

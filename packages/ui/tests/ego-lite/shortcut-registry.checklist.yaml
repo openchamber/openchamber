@@ -1,0 +1,217 @@
+version: 1
+kind: manual-agent-browser-checklist
+
+metadata:
+  id: shortcut-registry-ego-lite
+  title: Shortcut registry and prefix sequence regression
+  owner: packages/ui
+  runner: ego-lite
+  interface: ego-browser
+  dependencies: []
+  documentation: packages/ui/src/lib/shortcuts/DOCUMENTATION.md
+
+target:
+  default_url: http://127.0.0.1:9601
+  viewport:
+    width: 1800
+    height: 1050
+  evidence_directory: ~/Desktop/openchamber-pr-2532-evidence
+  evidence_prefix: openchamber-pr-2532
+
+limitations:
+  - IME checks use synthetic KeyboardEvent.isComposing and keyCode 229 signals. Repeat them with a real system IME before claiming native IME coverage.
+  - The Windows profile overrides Chromium user-agent data. It validates browser platform detection and rendered shortcut labels, not native Windows keyboard events or desktop packaging.
+  - The macOS profile validates the web runtime. Electron, VS Code, hosted mobile, and Capacitor mobile require separate runtime checks.
+
+platform_profiles:
+  macos_native:
+    description: Use the host browser user agent without overrides.
+    expected_primary_modifier: Command
+    expected_labels:
+      - Command symbol U+2318
+      - Option symbol U+2325
+    setup:
+      - Open the target URL in a fresh ego-lite tab.
+      - Confirm navigator.userAgent contains Macintosh or Mac OS X.
+      - Open Settings, then Shortcuts.
+  windows_ua_mock:
+    description: Override Chromium identity before reloading the application.
+    cdp_command:
+      method: Network.setUserAgentOverride
+      params:
+        userAgent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+        platform: Win32
+        userAgentMetadata:
+          brands:
+            - brand: Chromium
+              version: "138"
+            - brand: Not=A?Brand
+              version: "24"
+          fullVersionList:
+            - brand: Chromium
+              version: 138.0.0.0
+            - brand: Not=A?Brand
+              version: 24.0.0.0
+          fullVersion: 138.0.0.0
+          platform: Windows
+          platformVersion: 10.0.0
+          architecture: x86
+          model: ""
+          mobile: false
+          bitness: "64"
+          wow64: false
+    setup:
+      - Open the target URL in a separate ego-lite tab.
+      - Apply the CDP command above.
+      - Reload before evaluating navigator or rendered shortcut labels.
+      - Confirm navigator.userAgent contains Windows NT and navigator.platform is Win32.
+      - Open Settings, then Shortcuts.
+
+checks:
+  - id: macos-shortcut-labels
+    priority: critical
+    profile: macos_native
+    steps:
+      - Inspect Session Controls, Panels and Tools, Navigation, and Application.
+      - Capture the visible Shortcuts settings pane.
+    assertions:
+      - Open draft project picker renders as Command + S, P using the macOS Command symbol.
+      - Open draft worktree picker renders as Command + S, G using the macOS Command symbol.
+      - Open recent sessions renders as Command + S, L using the macOS Command symbol.
+      - New Mini Chat window renders both macOS Command and Option symbols.
+      - No Windows key glyph is used for Mod or Alt.
+    evidence:
+      type: screenshot
+      filename: openchamber-pr-2532-macos-shortcuts.png
+    last_result:
+      status: passed
+
+  - id: windows-ua-shortcut-labels
+    priority: critical
+    profile: windows_ua_mock
+    steps:
+      - Inspect the same shortcut rows used by macos-shortcut-labels.
+      - Capture the visible Shortcuts settings pane.
+    assertions:
+      - Open draft project picker renders as Ctrl + S, P.
+      - Open draft worktree picker renders as Ctrl + S, G.
+      - Open recent sessions renders as Ctrl + S, L.
+      - New Mini Chat window renders as Ctrl + Alt + N.
+      - No macOS modifier symbols or Windows key glyph are rendered.
+    evidence:
+      type: screenshot
+      filename: openchamber-pr-2532-windows-ua-shortcuts.png
+    last_result:
+      status: passed
+
+  - id: recorder-contextual-prefix
+    priority: critical
+    profile: macos_native
+    steps:
+      - Edit Focus input.
+      - Record Mod + L as the first chord.
+      - Verify no conflict message is shown before the 3000 ms settling timeout.
+      - Record L as the second chord before timeout.
+      - Capture the settled recorder without saving the override.
+    assertions:
+      - The recorder shows two chords and no more than three physical keys per chord.
+      - A contextual prefix warning names Add selection to chat.
+      - Confirm remains enabled because the contextual owner yields outside its context.
+      - The browser-risk warning is visible for the Mod + L leader.
+    evidence:
+      type: screenshot
+      filename: openchamber-pr-2532-recorder-contextual-prefix.png
+    cleanup:
+      - Select Cancel so the test does not persist a shortcut override.
+    last_result:
+      status: passed
+
+  - id: recorder-single-chord-timeout
+    priority: high
+    profile: macos_native
+    steps:
+      - Edit Focus input.
+      - Record Mod + L as the first chord.
+      - Observe the recorder before 3000 ms.
+      - Wait at least 3000 ms without pressing a second chord.
+    assertions:
+      - No conflict or browser-risk message is visible before settlement.
+      - Exact-conflict and browser-risk feedback appears after settlement.
+    cleanup:
+      - Select Cancel so the test does not persist a shortcut override.
+    last_result:
+      status: passed
+
+  - id: selection-toolbar-scope
+    priority: critical
+    profile: macos_native
+    preconditions:
+      - Open a rendered assistant response containing selectable Markdown text.
+    steps:
+      - Select text to open the selection toolbar.
+      - Trigger an unrelated application shortcut and verify it does not run.
+      - Dispatch composing Mod + L and verify Add to chat does not run.
+      - Dispatch composing Escape and verify the toolbar remains open without reaching later global capture listeners.
+      - Dispatch non-composing Mod + L and verify the selected Markdown reaches the composer once.
+      - Reopen the toolbar and press Escape.
+    assertions:
+      - The visible toolbar suspends the global shortcut registry.
+      - IME composition is not consumed by the toolbar shortcut scope.
+      - IME Escape keeps its native default while bypassing global Escape handling.
+      - Add to chat runs once for the active toolbar only.
+      - Escape dismisses the toolbar and restores global shortcuts.
+    evidence:
+      type: recording
+      filename: openchamber-pr-2532-shortcut-regression-final.mov
+    last_result:
+      status: passed
+
+  - id: draft-picker-sequences
+    priority: critical
+    profile: macos_native
+    preconditions:
+      - Open a draft session with project and worktree selectors mounted.
+    steps:
+      - Trigger Mod + K, P and verify the project picker opens.
+      - Press Escape once and verify it closes.
+      - Trigger Mod + K, G and verify the worktree picker opens.
+      - Press Escape once and verify it closes.
+    assertions:
+      - The Mod + K leader arms without a visible menu and completes on the second key.
+      - Each sequence opens only its target picker.
+      - One non-IME Escape closes either controlled picker.
+    evidence:
+      type: recording
+      filename: openchamber-pr-2532-shortcut-regression-final.mov
+    last_result:
+      status: passed
+
+  - id: dropdown-ime-navigation
+    priority: critical
+    profile: macos_native
+    steps:
+      - Open the project picker.
+      - Dispatch Ctrl + N with isComposing true and keyCode 229.
+      - Dispatch Ctrl + P with isComposing true and keyCode 229.
+      - Dispatch Escape with isComposing true and keyCode 229.
+      - Dispatch one non-IME Escape.
+    assertions:
+      - Ctrl + N moves active selection forward during composition.
+      - Ctrl + P moves active selection backward during composition.
+      - IME Escape remains available to the native input method and does not close the picker.
+      - Non-IME Escape closes the picker once.
+    evidence:
+      type: recording
+      filename: openchamber-pr-2532-shortcut-regression-final.mov
+    last_result:
+      status: passed
+
+last_run:
+  date: 2026-08-06
+  application_url: http://127.0.0.1:9601
+  source: working-tree
+  browser: ego-lite through ego-browser
+  overall_status: passed-with-documented-limitations
+  notes:
+    - The browser checks passed against the working tree before commit; repository validation is recorded separately in the pull request.
+    - Keep screenshots and recordings outside the repository and attach them to the pull request.

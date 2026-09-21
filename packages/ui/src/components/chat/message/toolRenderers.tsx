@@ -11,6 +11,39 @@ const cleanOutput = (output: string) => {
     return cleaned.trim();
 };
 
+export const coerceToText = (value: unknown, fallback = ''): string => {
+    if (typeof value === 'string') return value;
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return fallback;
+    }
+};
+
+// Guards the renderer process against V8 "Zone Allocation failed" OOM crashes
+// (issue #2265). When a tool returns oversized external content — e.g. a fetched
+// web page with full-resolution base64 images inlined — the entire payload flows
+// through this module as a single JS string that is JSON.parsed, syntax
+// highlighted, and attached to the DOM. A large enough single string exceeds
+// V8's Zone allocator and hard-crashes the renderer before any virtualization or
+// CSS clip can help. Capping the string length before that work happens keeps a
+// useful head of the output while preventing the pathological allocation.
+export const TOOL_OUTPUT_MAX_CHARS = 512 * 1024;
+
+export const capToolOutputText = (
+    output: string,
+    maxChars: number = TOOL_OUTPUT_MAX_CHARS,
+): string => {
+    if (typeof output !== 'string' || output.length <= maxChars) {
+        return output;
+    }
+    const omitted = output.length - maxChars;
+    const notice = `\n\n… [output truncated: ${omitted} more characters not shown to prevent the renderer from running out of memory]`;
+    return output.slice(0, maxChars) + notice;
+};
+
 const hasLspDiagnostics = (output: string): boolean => {
     if (!output) return false;
     return output.includes('<diagnostics')
@@ -387,8 +420,18 @@ export const renderTodoOutput = (
     options?: { unstyled?: boolean },
 ) => {
     try {
-        const todos = JSON.parse(output) as Todo[];
-        if (!Array.isArray(todos)) {
+        const raw: unknown = JSON.parse(output);
+        if (!Array.isArray(raw)) {
+            return null;
+        }
+        const todos: Todo[] = raw.filter(
+            (t): t is Todo =>
+                !!t &&
+                typeof t === 'object' &&
+                typeof (t as { content?: unknown }).content === 'string' &&
+                typeof (t as { status?: unknown }).status === 'string',
+        );
+        if (todos.length === 0) {
             return null;
         }
 
@@ -446,7 +489,7 @@ export const renderTodoOutput = (
                             {todosByStatus.in_progress.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     {getPriorityDot(todo.priority)}
-                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -463,7 +506,7 @@ export const renderTodoOutput = (
                             {todosByStatus.pending.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     {getPriorityDot(todo.priority)}
-                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -480,7 +523,7 @@ export const renderTodoOutput = (
                             {todosByStatus.completed.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     <Icon name="check" className="w-3 h-3 mt-0.5 flex-shrink-0"  style={{ color: 'var(--status-success)', opacity: 0.7 }}/>
-                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -497,7 +540,7 @@ export const renderTodoOutput = (
                             {todosByStatus.cancelled.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     <span className="w-3 h-3 text-muted-foreground/50 mt-0.5 flex-shrink-0">×</span>
-                                    <span className="typography-code text-muted-foreground/50 line-through flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-muted-foreground/50 line-through flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -554,7 +597,7 @@ export const parseDiffToUnified = (diffText: string): UnifiedDiffHunk[] => {
 
         if (line.startsWith('Index:') || line.startsWith('===') || line.startsWith('---') || line.startsWith('+++')) {
             if (line.startsWith('Index:')) {
-                currentFile = line.split(' ')[1].split('/').pop() || 'file';
+                currentFile = line.slice('Index:'.length).trim().split('/').pop() || 'file';
             }
             i++;
             continue;

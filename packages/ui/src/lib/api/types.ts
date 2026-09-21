@@ -1,5 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { DesktopSettings } from '@/lib/settings/registry';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -18,35 +18,36 @@ interface Subscription {
   close: () => void;
 }
 
-interface RetryPolicy {
-  maxRetries: number;
-  initialDelayMs: number;
-  maxDelayMs: number;
-}
-
-interface TerminalTransportCapability {
-  preferred?: 'ws' | 'http' | 'sse';
-  transports?: Array<'ws' | 'http' | 'sse'>;
-  ws?: {
-    path: string;
-    v?: number;
-    enc?: string;
-  };
-}
-
 export interface TerminalSession {
   sessionId: string;
   cols: number;
   rows: number;
-  capabilities?: {
-    input?: TerminalTransportCapability;
-    stream?: TerminalTransportCapability;
-  };
+  status: 'running' | 'exited' | 'error';
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurpose;
+}
+
+export type TerminalSessionPurpose =
+  | { type: 'terminal' }
+  | { type: 'project-action'; actionId: string; executionId: string };
+
+export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
+
+export interface TerminalShellOption {
+  id: TerminalShell;
+  name: string;
+  supportsLogin: boolean;
 }
 
 export interface TerminalStreamEvent {
-  type: 'connected' | 'data' | 'exit' | 'reconnecting';
+  type: 'snapshot' | 'data' | 'exit' | 'reconnecting';
+  sequence?: number;
   data?: string;
+  replayData?: string;
+  /** PTY size the snapshot history was drawn for; only `snapshot` events carry it. */
+  cols?: number;
+  rows?: number;
+  status?: 'running' | 'exited' | 'error';
   exitCode?: number;
   signal?: number | null;
   attempt?: number;
@@ -54,18 +55,38 @@ export interface TerminalStreamEvent {
 
   runtime?: 'node' | 'bun';
   ptyBackend?: string;
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurpose;
 }
 
-export interface CreateTerminalOptions {
+export interface TerminalError extends Error {
+  code?: string;
+}
+
+interface BaseCreateTerminalOptions {
   cwd: string;
+  sessionId?: string;
   cols?: number;
   rows?: number;
+  themeMode?: 'light' | 'dark';
+  terminalBackground?: string;
+  terminalForeground?: string;
+  shell?: TerminalShell;
+  loginShell?: boolean;
+  purpose?: TerminalSessionPurpose;
 }
 
-export interface TerminalStreamOptions {
-  retry?: Partial<RetryPolicy>;
-  connectionTimeoutMs?: number;
+interface InteractiveCreateTerminalOptions extends BaseCreateTerminalOptions {
+  mode?: 'interactive';
 }
+
+interface CommandCreateTerminalOptions extends BaseCreateTerminalOptions {
+  mode: 'command';
+  command: string;
+}
+
+export type CreateTerminalOptions = InteractiveCreateTerminalOptions | CommandCreateTerminalOptions;
+export type RestartTerminalOptions = InteractiveCreateTerminalOptions;
 
 export interface ResizeTerminalPayload {
   sessionId: string;
@@ -75,7 +96,7 @@ export interface ResizeTerminalPayload {
 
 export interface TerminalHandlers {
   onEvent: (event: TerminalStreamEvent) => void;
-  onError?: (error: Error, fatal?: boolean) => void;
+  onError?: (error: TerminalError, fatal?: boolean) => void;
 }
 
 export interface ForceKillOptions {
@@ -83,13 +104,28 @@ export interface ForceKillOptions {
   cwd?: string;
 }
 
+export interface TerminalServerSession {
+  sessionId: string;
+  cwd: string;
+  status: 'running' | 'exited';
+  createdAt: number | null;
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurpose;
+}
+
 export interface TerminalAPI {
+  listShells?(): Promise<TerminalShellOption[]>;
+  /** Server-side sessions for a working directory, or all directories when cwd is empty; absent on runtimes without a server terminal list. */
+  listSessions?(cwd: string): Promise<TerminalServerSession[]>;
+  /** Marks the sessions as active so the server's idle sweep does not reap terminals an open client still shows. */
+  touchSessions?(sessionIds: string[]): Promise<void>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
-  connect(sessionId: string, handlers: TerminalHandlers, options?: TerminalStreamOptions): Subscription;
+  connect(sessionId: string, handlers: TerminalHandlers): Subscription;
   sendInput(sessionId: string, input: string): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
+  updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void>;
   close(sessionId: string): Promise<void>;
-  restartSession?(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession>;
+  restartSession?(currentSessionId: string, options: RestartTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
 
@@ -128,7 +164,16 @@ export interface GitStatus {
   upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;
-  diffStats?: Record<string, { insertions: number; deletions: number }>;
+  /**
+   * Per-file line stats split by Git scope. A file with edits in both scopes
+   * appears in both maps; the values are never summed into each other.
+   */
+  diffStats?: {
+    /** HEAD -> index (`git diff --cached --numstat`). */
+    staged: Record<string, { insertions: number; deletions: number }>;
+    /** index -> working tree (`git diff --numstat`). */
+    working: Record<string, { insertions: number; deletions: number }>;
+  };
   /** Present when a merge is in progress with conflicts */
   mergeInProgress?: GitMergeInProgress | null;
   /** Present when a rebase is in progress */
@@ -137,8 +182,34 @@ export interface GitStatus {
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
 }
 
+export interface GitUnpushedBranchCounts {
+  /** Local commits not present in each branch's configured upstream. */
+  counts: Record<string, number>;
+}
+
 export interface GitDiffResponse {
   diff: string;
+}
+
+/**
+ * What a submodule entry records. Its patch alone cannot say everything: a
+ * submodule that only gained untracked files is modified in status while its
+ * patch is empty. Commits are null where nothing is recorded, and
+ * `worktreeCommit` is null when the submodule is not checked out.
+ */
+export interface GitSubmoduleState {
+  headCommit: string | null;
+  indexCommit: string | null;
+  worktreeCommit: string | null;
+  hasTrackedChanges: boolean;
+  hasUntrackedFiles: boolean;
+  /** Unmerged: the index holds conflicting commits and no single recorded one. */
+  hasConflict: boolean;
+}
+
+/** Working-tree or staged diff for one status path. `submodule` is null for ordinary paths. */
+export interface GitPathDiffResponse extends GitDiffResponse {
+  submodule: GitSubmoduleState | null;
 }
 
 export interface GetGitDiffOptions {
@@ -147,11 +218,43 @@ export interface GetGitDiffOptions {
   contextLines?: number;
 }
 
+/**
+ * Diff between two refs. Uses three-dot (`base...head`) semantics server-side, so changes
+ * pulled into `head` by merging `base` are excluded. Refs are used as selected.
+ * includeWorkingTree compares that merge base with the checked-out branch's
+ * current files, including staged, unstaged, and untracked changes.
+ */
+export interface GetGitRangeDiffOptions {
+  base: string;
+  head: string;
+  path?: string;
+  contextLines?: number;
+  includeWorkingTree?: boolean;
+}
+
+export interface GetGitRangeFilesOptions {
+  base: string;
+  head: string;
+  includeWorkingTree?: boolean;
+}
+
+/** One changed file in a `base...head` range, with its change letter (A/M/D/R/C). */
+export interface GitRangeFileEntry {
+  path: string;
+  status: string;
+}
+
+export interface GitBranchBaseResponse {
+  /** Null when git has no authoritative record of where the branch started. */
+  base: string | null;
+}
+
 export interface GitFileDiffResponse {
   original: string;
   modified: string;
   path: string;
   isBinary?: boolean;
+  submodule: GitSubmoduleState | null;
 }
 
 export interface GetGitFileDiffOptions {
@@ -173,6 +276,7 @@ export interface GitBranch {
   all: string[];
   current: string;
   branches: Record<string, GitBranchDetails>;
+  defaultBranches?: Record<string, string>;
 }
 
 interface GitCommitSummary {
@@ -319,6 +423,7 @@ export interface GitLogResponse {
 
 export interface CommitFileEntry {
   path: string;
+  previousPath?: string;
   insertions: number;
   deletions: number;
   isBinary: boolean;
@@ -327,6 +432,13 @@ export interface CommitFileEntry {
 
 export interface GitCommitFilesResponse {
   files: CommitFileEntry[];
+}
+
+export interface GetGitCommitDiffOptions {
+  hash: string;
+  path?: string;
+  previousPath?: string;
+  contextLines?: number;
 }
 
 export interface CommitFileDiffResponse {
@@ -340,6 +452,8 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  /** git still registers the worktree, but its directory is gone (deleted outside git). */
+  prunable?: boolean;
 }
 
 export interface GitWorktreeValidationError {
@@ -358,6 +472,7 @@ export interface GitWorktreeValidationResult {
 
 export interface GitWorktreeBootstrapStatus {
   status: 'pending' | 'ready' | 'failed';
+  phase?: 'directory-created' | 'git-ready' | 'setup-ready';
   error: string | null;
   updatedAt: number;
 }
@@ -394,6 +509,7 @@ export interface GitWorktreeCreateResult {
   path: string;
   directoryCreated?: true;
   bootstrapStatus?: GitWorktreeBootstrapStatus;
+  sourceFetchFailed?: true;
 }
 
 export interface RemoveGitWorktreePayload {
@@ -450,9 +566,12 @@ interface GitWorktreeAPI {
 
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
-  getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
-  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
+  getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus>;
+  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
+  getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
+  getGitRangeFiles?(directory: string, options: GetGitRangeFilesOptions): Promise<GitRangeFileEntry[]>;
+  getBranchBase?(directory: string, branch: string): Promise<GitBranchBaseResponse>;
   revertGitFile(directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void>;
   stageGitFile(directory: string, filePath: string): Promise<void>;
   stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
@@ -463,6 +582,7 @@ export interface GitAPI {
   revertGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   getGitBranches(directory: string): Promise<GitBranch>;
+  getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
   removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;
@@ -492,6 +612,7 @@ export interface GitAPI {
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
   getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
+  getGitCommitDiff?(directory: string, options: GetGitCommitDiffOptions): Promise<GitDiffResponse>;
   getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
   getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
@@ -583,6 +704,7 @@ interface FileReadOptions {
   outsideFileGrant?: string;
   optional?: boolean;
   directory?: string;
+  fresh?: boolean;
 }
 
 export interface FilesAPI {
@@ -593,6 +715,7 @@ export interface FilesAPI {
   readFile?(path: string, options?: FileReadOptions): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;
   writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
+  uploadFile?(path: string, file: Blob, options?: { overwrite?: boolean; directory?: string }): Promise<{ success: boolean; path: string }>;
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;
@@ -612,68 +735,20 @@ export interface ProjectEntry {
   } | null;
   iconBackground?: string | null;
   color?: string | null;
+  defaultAgent?: string;
+  defaultModel?: string;
+  /** Variant of `defaultModel`, when that model exposes any. */
+  defaultVariant?: string;
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
 }
 
-export interface SettingsPayload {
-  themeId?: string;
-  useSystemTheme?: boolean;
-  themeVariant?: 'light' | 'dark';
-  lightThemeId?: string;
-  darkThemeId?: string;
-  lastDirectory?: string;
-  homeDirectory?: string;
-  opencodeBinary?: string;
-  projects?: ProjectEntry[];
-  activeProjectId?: string;
-  securityScopedBookmarks?: string[];
-  pinnedDirectories?: string[];
-  showReasoningTraces?: boolean;
-  collapsibleThinkingBlocks?: boolean;
-  showDeletionDialog?: boolean;
-  nativeNotificationsEnabled?: boolean;
-  notificationMode?: 'always' | 'hidden-only';
-  autoDeleteEnabled?: boolean;
-  autoDeleteAfterDays?: number;
-  sessionRetentionAction?: 'archive' | 'delete';
-  followUpBehavior?: 'steer' | 'queue';
-  queueModeEnabled?: boolean;
-  gitmojiEnabled?: boolean;
-  inputSpellcheckEnabled?: boolean;
-  showOpenCodeUpdateNotifications?: boolean;
-  openCodeUpdateToastDismissedVersion?: string;
-  showToolFileIcons?: boolean;
-  showTurnChangedFiles?: boolean;
-  showExpandedBashTools?: boolean;
-  showExpandedEditTools?: boolean;
-  chatRenderMode?: 'sorted' | 'live';
-  messageStreamTransport?: 'auto' | 'ws' | 'sse';
-  activityRenderMode?: 'collapsed' | 'summary';
-  mermaidRenderingMode?: 'svg' | 'ascii';
-  showSplitAssistantMessageActions?: boolean;
-  fontSize?: number;
-  terminalFontSize?: number;
-  uiFont?: string;
-  monoFont?: string;
-  padding?: number;
-  cornerRadius?: number;
-  inputBarOffset?: number;
-  shortcutOverrides?: Record<string, string>;
-  diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
-  gitChangesViewMode?: 'flat' | 'tree';
-  directoryShowHidden?: boolean;
-  filesViewShowGitignored?: boolean;
-  openInAppId?: string;
-  gitProviderId?: string;
-  gitModelId?: string;
-  pwaAppName?: string;
-  mobileKeyboardMode?: 'native' | 'resize-content';
-  draftStarters?: DraftStarterRef[];
-
-  [key: string]: unknown;
-}
+/**
+ * The settings document on the wire. Defined once in the settings registry;
+ * this alias keeps the runtime `SettingsAPI` contract readable.
+ */
+export type SettingsPayload = DesktopSettings;
 
 export interface SettingsLoadResult {
   settings: SettingsPayload;
@@ -747,9 +822,11 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
-  pickFiles?(): Promise<unknown>;
+  pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;
   saveMarkdown?(payload: unknown): Promise<unknown>;
+  /** Add a directory as a VS Code workspace folder; resolves with the full folder list after the add. */
+  addWorkspaceFolder?(path: string): Promise<Array<{ name: string; path: string }>>;
 }
 
 export interface PushSubscribePayload {
@@ -759,17 +836,33 @@ export interface PushSubscribePayload {
     auth: string;
   };
   origin?: string;
+  /** Runtime surface ('ios' | 'android' | 'vscode' | 'desktop' | 'web') for presence-aware routing. */
+  platform?: string;
 }
 
 export interface PushUnsubscribePayload {
   endpoint: string;
 }
 
+export interface ApnsTokenPayload {
+  token: string;
+  /** 'ios' (APNs) or 'android' (FCM) — lets the relay route the token to the right service. */
+  platform?: string;
+  /**
+   * APNs environment the token belongs to: 'sandbox' for Xcode/dev-signed installs,
+   * 'production' for TestFlight/App Store. Omitted when unknown (server defaults to production).
+   */
+  environment?: 'sandbox' | 'production';
+}
+
 export interface PushAPI {
   getVapidPublicKey(): Promise<{ publicKey: string } | null>;
   subscribe(payload: PushSubscribePayload): Promise<{ ok: true } | null>;
   unsubscribe(payload: PushUnsubscribePayload): Promise<{ ok: true } | null>;
-  setVisibility(payload: { visible: boolean }): Promise<{ ok: true } | null>;
+  setVisibility(payload: { visible: boolean; platform?: string }): Promise<{ ok: true } | null>;
+  /** Register a native iOS APNs device token (Capacitor mobile app only). */
+  registerApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
+  unregisterApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
 }
 
 export type GitHubUserSummary = {
@@ -786,17 +879,24 @@ type GitHubRepoRef = {
   url: string;
 };
 
-type GitHubChecksSummary = {
+export type GitHubChecksSummary = {
   state: 'success' | 'failure' | 'pending' | 'unknown';
   total: number;
   success: number;
   failure: number;
+  /** queued + in_progress + unconcluded runs. */
   pending: number;
+  inProgress?: number;
+  queued?: number;
+  /** Earliest started_at among in-progress runs (ISO), for elapsed display. */
+  startedAt?: string;
 };
 
 export type GitHubCheckRun = {
   id?: number;
   name: string;
+  startedAt?: string;
+  completedAt?: string;
   app?: {
     name?: string;
     slug?: string;
@@ -814,6 +914,7 @@ export type GitHubCheckRun = {
     jobId?: number;
     url?: string;
     name?: string;
+    workflowName?: string;
     conclusion?: string | null;
     steps?: Array<{
       name: string;
@@ -898,6 +999,8 @@ export type GitHubPullRequestsListResult = {
 
 export type GitHubPullRequestContextResult = {
   connected: boolean;
+  /** Server-side stamp of when the data was fetched from GitHub (ms epoch); survives server cache serves. */
+  fetchedAt?: number;
   repo?: GitHubRepoRef | null;
   pr?: GitHubPullRequestSummary | null;
   issueComments?: GitHubIssueComment[];
@@ -910,6 +1013,8 @@ export type GitHubPullRequestContextResult = {
 
 export type GitHubPullRequestStatus = {
   connected: boolean;
+  /** Server-side stamp of when the data was fetched from GitHub (ms epoch); survives server cache serves. */
+  fetchedAt?: number;
   repo?: GitHubRepoRef | null;
   branch?: string;
   pr?: GitHubPullRequest | null;
@@ -1058,6 +1163,199 @@ export type GitHubDeviceFlowComplete =
   | { connected: true; user: GitHubUserSummary; scope?: string }
   | { connected: false; status?: string; error?: string };
 
+export type LinearUserSummary = {
+  id: string;
+  name: string | null;
+  displayName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+};
+
+export type LinearOrganizationSummary = {
+  id: string;
+  name: string;
+  urlKey: string | null;
+};
+
+export type LinearWorkspaceSummary = {
+  id: string;
+  name: string | null;
+  urlKey: string | null;
+  current: boolean;
+  user?: LinearUserSummary | null;
+  authorizedAt?: number | null;
+};
+
+export type LinearAuthStatus = {
+  connected: boolean;
+  user?: LinearUserSummary | null;
+  organization?: LinearOrganizationSummary | null;
+  scope?: string;
+  workspaces?: LinearWorkspaceSummary[];
+};
+
+export type LinearAuthStart = {
+  authorizationUrl: string;
+  expiresIn: number;
+  scope: string;
+};
+
+export type LinearAuthOrigin = 'desktop' | 'web';
+
+export type LinearIssueState = {
+  id: string | null;
+  name: string | null;
+  type: string | null;
+};
+
+export type LinearWorkflowState = {
+  id: string;
+  name: string;
+  type: string | null;
+  position: number;
+};
+
+export type LinearIssueAssignee = {
+  name: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+export type LinearIssueTeam = {
+  id: string;
+  key: string;
+  name: string;
+};
+
+export type LinearIssuePriority = 0 | 1 | 2 | 3 | 4;
+
+export type LinearIssueLabel = {
+  id: string;
+  name: string;
+  color: string | null;
+};
+
+export type LinearIssueSummary = {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  state?: LinearIssueState | null;
+  assignee?: LinearIssueAssignee | null;
+  team?: LinearIssueTeam | null;
+  priority?: LinearIssuePriority | null;
+  labels?: LinearIssueLabel[];
+};
+
+export type LinearIssueComment = {
+  id: string;
+  body: string;
+  createdAt: string | null;
+  user?: { name: string | null; displayName: string | null; avatarUrl?: string | null } | null;
+};
+
+export type LinearIssue = LinearIssueSummary & {
+  description?: string | null;
+  comments?: LinearIssueComment[];
+};
+
+export type LinearIssueListStatus = 'all' | 'backlog' | 'todo' | 'started' | 'inReview' | 'completed' | 'canceled' | 'duplicate';
+export type LinearIssueListAssignee = 'any' | 'me';
+export type LinearIssueListPriority = 'all' | 'none' | 'urgent' | 'high' | 'medium' | 'low';
+
+export type LinearIssuesListOptions = {
+  query?: string;
+  cursor?: string;
+  status?: LinearIssueListStatus;
+  assignee?: LinearIssueListAssignee;
+  teamId?: string;
+  priority?: LinearIssueListPriority;
+};
+
+export type LinearIssuesListResult = {
+  connected: boolean;
+  issues?: LinearIssueSummary[];
+  cursor?: string | null;
+  hasMore?: boolean;
+};
+
+export type LinearIssueGetResult = {
+  connected: boolean;
+  issue?: LinearIssue | null;
+};
+
+export type LinearIssueStatesResult = {
+  connected: boolean;
+  states?: LinearWorkflowState[];
+};
+
+export type LinearIssueUpdateInput = {
+  id: string;
+  stateId: string;
+};
+
+export type LinearIssueUpdateResult = {
+  connected: boolean;
+  issue?: LinearIssue | null;
+};
+
+export type LinearTeamMapping = {
+  id: string;
+  key: string;
+  name: string;
+  projectPath: string | null;
+};
+
+export type LinearMappingResult = {
+  connected: boolean;
+  defaultProjectPath?: string | null;
+  teams?: LinearTeamMapping[];
+};
+
+export type LinearMappingWrite = {
+  defaultProjectPath: string | null;
+  teamProjectPaths: { [teamId: string]: string };
+};
+
+export type LinearSessionStatusKind = 'started' | 'completed' | 'failure';
+
+export type LinearSessionStatusPostInput = {
+  kind: LinearSessionStatusKind;
+  sessionId: string;
+  issueIdentifier?: string;
+  sessionOrigin?: string;
+};
+
+export type LinearSessionStatusPostResult =
+  | { connected: false }
+  | { connected: true; posted: true; commentId: string | null }
+  | {
+    connected: true;
+    posted: false;
+    skipped: 'already-posted' | 'issue-not-found' | 'not-started' | 'disabled' | 'origin-not-public';
+  };
+
+export type LinearPreferences = {
+  /** Status comments are off until the user opts in. */
+  sessionComments: boolean;
+};
+
+export interface LinearAPI {
+  authStatus(): Promise<LinearAuthStatus>;
+  authStart(origin?: LinearAuthOrigin): Promise<LinearAuthStart>;
+  authDisconnect(): Promise<{ removed: boolean }>;
+  authActivate(organizationId: string): Promise<LinearAuthStatus>;
+  issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
+  issueGet(id: string): Promise<LinearIssueGetResult>;
+  issueStates(teamId: string): Promise<LinearIssueStatesResult>;
+  issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
+  mappingGet(): Promise<LinearMappingResult>;
+  mappingSet(mapping: LinearMappingWrite): Promise<LinearMappingResult>;
+  sessionStatusPost(input: LinearSessionStatusPostInput): Promise<LinearSessionStatusPostResult>;
+  preferencesGet(): Promise<LinearPreferences>;
+  preferencesSet(preferences: LinearPreferences): Promise<LinearPreferences>;
+}
+
 export interface GitHubAPI {
   authStatus(): Promise<GitHubAuthStatus>;
   authStart(): Promise<GitHubDeviceFlowStart>;
@@ -1095,6 +1393,23 @@ export interface RemoteClientRecord {
   revokedAt: string | null;
   expiresAt?: string | null;
   clientKind?: string | null;
+  authMethod?: string | null;
+  /** Pairing session this client was created from, when authMethod is 'pairing'. */
+  pairingId?: string | null;
+  deviceName?: string | null;
+  devicePlatform?: string | null;
+  usesRelay?: boolean;
+  /** Transport that carried the device's most recent authenticated request. */
+  lastTransport?: 'relay' | 'direct' | null;
+}
+
+// A pairing link that has been created but not yet redeemed by a device.
+export interface PendingPairingRecord {
+  id: string;
+  label?: string;
+  fingerprint?: string | null;
+  expiresAt?: string;
+  usesRelay?: boolean;
 }
 
 export interface RemoteClientCreateResult {
@@ -1111,14 +1426,56 @@ export interface RemoteClientPurgeRevokedResult {
   purged: number;
 }
 
+export interface PairingSessionCreateResult {
+  pairing: {
+    id: string;
+    label?: string;
+    fingerprint?: string | null;
+    expiresAt?: string;
+    secret: string;
+  };
+  server: {
+    label: string;
+    // Transport candidates for the pairing-v2 payload. Shape matches
+    // PairingEndpointCandidate in `@/lib/connectionPayload` (direct lan/tunnel or
+    // relay); left as a structural type here so this contract file stays leaf.
+    candidates: Array<Record<string, unknown>>;
+  };
+}
+
 export interface ClientAuthAPI {
   listClients(): Promise<RemoteClientRecord[]>;
   createClient(input?: { label?: string }): Promise<RemoteClientCreateResult>;
+  // Creates a one-time pairing session (pairing v2). `serverUrl` is the
+  // externally reachable URL to advertise as the direct candidate (the desktop
+  // UI talks to its server over loopback, so it must supply the LAN URL); the
+  // server folds in a relay candidate when its relay host is enabled.
+  createPairingSession(input?: {
+    label?: string;
+    allowedClientKinds?: Array<'mobile' | 'desktop'>;
+    serverUrl?: string;
+    // Per-link transport choice. `includeRelay: true` adds the relay candidate
+    // and enables the relay host on demand; `false` omits it; omitted keeps the
+    // legacy "relay only if already enabled" behavior. `includeDirect: false`
+    // produces a relay-only link (no direct candidate).
+    includeRelay?: boolean;
+    includeDirect?: boolean;
+  }): Promise<PairingSessionCreateResult>;
   purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
   revokeClient(id: string): Promise<RemoteClientRevokeResult>;
+  // Pairing links created but not yet redeemed (the "pending devices" list).
+  listPendingPairings(): Promise<PendingPairingRecord[]>;
+  cancelPairing(id: string): Promise<{ cancelled: boolean }>;
+  // Direct transports the server can be reached on, for the create-device dialog.
+  // LAN reflects the server's actual bind, independent of the UI origin.
+  getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean }>;
 }
 
 export interface RuntimeAPIs {
+  /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
+  themeFiles?: {
+    pick(): Promise<{ status: 'unsupported' } | { status: 'picked'; file: { name: string; size: number; text: string } | null }>;
+  };
   runtime: RuntimeDescriptor;
   terminal: TerminalAPI;
   git: GitAPI;
@@ -1127,6 +1484,7 @@ export interface RuntimeAPIs {
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;
   github?: GitHubAPI;
+  linear?: LinearAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
@@ -1142,7 +1500,7 @@ export type RuntimeAPISelector<TValue> = (apis: RuntimeAPIs) => TValue;
 
 type SkillsCatalogSourceId = string;
 
-type SkillsCatalogSourceType = 'github' | 'clawdhub';
+type SkillsCatalogSourceType = 'github';
 
 export interface SkillsCatalogSource {
   id: SkillsCatalogSourceId;
@@ -1151,24 +1509,16 @@ export interface SkillsCatalogSource {
   source: string;
   defaultSubpath?: string;
   sourceType?: SkillsCatalogSourceType;
+  /** GitHub repository star count (null when unavailable) */
+  stars?: number | null;
+  /** GitHub repository last-push timestamp, ISO (null when unavailable) */
+  repoUpdatedAt?: string | null;
 }
 
 interface SkillsCatalogItemInstalledBadge {
   isInstalled: boolean;
   scope?: 'user' | 'project';
   source?: 'opencode' | 'agents' | 'claude';
-}
-
-interface ClawdHubSkillMetadata {
-  slug: string;
-  version: string;
-  displayName?: string;
-  owner?: string;
-  downloads?: number;
-  stars?: number;
-  versionsCount?: number;
-  createdAt?: number;
-  updatedAt?: number;
 }
 
 export interface SkillsCatalogItem {
@@ -1183,22 +1533,18 @@ export interface SkillsCatalogItem {
   installable: boolean;
   warnings?: string[];
   installed?: SkillsCatalogItemInstalledBadge;
-  /** ClawdHub-specific metadata (present only for ClawdHub sources) */
-  clawdhub?: ClawdHubSkillMetadata;
 }
 
 export interface SkillsCatalogResponse {
   ok: boolean;
   sources?: SkillsCatalogSource[];
   itemsBySource?: Record<SkillsCatalogSourceId, SkillsCatalogItem[]>;
-  pageInfoBySource?: Record<SkillsCatalogSourceId, { nextCursor?: string | null }>;
   error?: { kind: string; message: string };
 }
 
 export interface SkillsCatalogSourceResponse {
   ok: boolean;
   items?: SkillsCatalogItem[];
-  nextCursor?: string | null;
   error?: { kind: string; message: string };
 }
 
@@ -1223,11 +1569,6 @@ export interface SkillsRepoScanResponse {
 
 interface SkillsInstallSelection {
   skillDir: string;
-  /** ClawdHub-specific metadata for installation */
-  clawdhub?: {
-    slug: string;
-    version: string;
-  };
 }
 
 export interface SkillsInstallRequest {
@@ -1253,6 +1594,11 @@ export interface SkillsInstallResponse {
   skipped?: Array<{ skillName: string; reason: string }>;
   error?: SkillsInstallError;
   requiresReload?: boolean;
+  requiresRestart?: boolean;
+  restartDeferred?: boolean;
+  requiresManualRestart?: boolean;
+  reloadFailed?: boolean;
+  warning?: string;
   message?: string;
   reloadDelayMs?: number;
 }

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const eventListeners = new Map();
 
@@ -14,13 +14,11 @@ const readArgValue = (name) => {
 const localOrigin = readArgValue('--openchamber-local-origin');
 const apiBaseUrl = readArgValue('--openchamber-api-base-url');
 const clientToken = readArgValue('--openchamber-client-token');
+const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
-const macVibrancySupported = process.platform === 'darwin';
-// Effective state for this window (main process resolves the saved preference
-// and passes it in). Defaults on when supported unless explicitly '0'.
-const hasMacVibrancy = macVibrancySupported && readArgValue('--openchamber-mac-vibrancy') !== '0';
+const trayEnabled = process.platform !== 'darwin' || readArgValue('--openchamber-tray-enabled') !== '0';
 
 // Preload re-executes on every cross-origin navigation (we run with
 // sandbox:false, per-document). Two separate concerns to balance:
@@ -61,6 +59,24 @@ if (clientToken && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
 }
 
+// Which saved host this window should connect to over the relay-capable path
+// (direct probe first, E2EE tunnel fallback). Local pages only — the id is
+// only useful together with the desktop IPC channel anyway.
+const relayHostId = readArgValue('--openchamber-relay-host-id');
+if (relayHostId && isLocalPage) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_RELAY_HOST_ID__', relayHostId);
+}
+
+if (runtimeHeadersRaw && isLocalPage) {
+  try {
+    const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
+    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
+      contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
+    }
+  } catch {
+  }
+}
+
 // Home directory leaks the OS username — keep local-only. Remote pages
 // operate on the REMOTE server's filesystem, local home is irrelevant
 // (and would be misleading if consumed as a workspace hint).
@@ -76,8 +92,8 @@ if (Number.isFinite(macosMajor) && macosMajor > 0) {
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
   runtime: 'electron',
-  macVibrancy: hasMacVibrancy,
-  macVibrancySupported,
+  arch: process.arch,
+  trayEnabled,
 });
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', process.platform);
@@ -126,18 +142,6 @@ const dispatchNativeEvent = (event, detail) => {
   }
 };
 
-// Toggles the frost on/off in response to the main process around the
-// minimize/restore cycle. The default ("ready") state is set reliably in the
-// renderer (cssGenerator) — not here — because this preload runs at
-// document-start when documentElement may not exist yet.
-const setVibrancyReady = (ready) => {
-  if (!hasMacVibrancy) return;
-  try {
-    document.documentElement.toggleAttribute('data-oc-vibrancy-ready', ready === true);
-  } catch {
-  }
-};
-
 // Main-process events are read-only notifications (update progress,
 // window focus, etc.) — safe to deliver to any page rendered in this
 // webContents. The events themselves don't grant capability.
@@ -151,21 +155,48 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
     return;
   }
 
-  if (event === 'openchamber:vibrancy-ready') {
-    setVibrancyReady(payload.detail?.ready === true);
-  }
-
   dispatchNativeEvent(event, payload.detail);
+});
+
+const relayDevTunnelPorts = new Map();
+let relayDevTunnelHandler = null;
+ipcRenderer.on('openchamber:relay-dev-tunnel-connect', (event, payload) => {
+  if (!isLocalPage || !payload || typeof payload.connectionId !== 'string' || !event.ports?.[0]) return;
+  const port = event.ports[0];
+  relayDevTunnelPorts.set(payload.connectionId, port);
+  port.onmessage = (messageEvent) => relayDevTunnelHandler?.({
+    connectionId: payload.connectionId,
+    remotePort: payload.remotePort,
+    message: messageEvent.data,
+  });
+  port.start();
+  relayDevTunnelHandler?.({ connectionId: payload.connectionId, remotePort: payload.remotePort, message: { type: 'connect' } });
 });
 
 // The desktop bridge is exposed on all pages; the main-process gate in
 // ipcMain.handle('openchamber:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
 // no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
-contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
+const desktopBridge = {
   invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
   grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
-});
+  // Resolves the on-disk path of a File dropped from Finder/Explorer. Only
+  // the path string crosses the bridge; shared UI gates use on the local page.
+  pathForFile: (file) => webUtils.getPathForFile(file),
+};
+
+if (isLocalPage) {
+  desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
+  desktopBridge.relayDevTunnelListen = (handler) => {
+    relayDevTunnelHandler = typeof handler === 'function' ? handler : null;
+  };
+  desktopBridge.relayDevTunnelPost = (connectionId, message) => {
+    relayDevTunnelPorts.get(connectionId)?.postMessage(message);
+    if (message?.type === 'close') relayDevTunnelPorts.delete(connectionId);
+  };
+}
+
+contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', desktopBridge);

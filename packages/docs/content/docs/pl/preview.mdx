@@ -5,28 +5,31 @@ description: Otwórz działający serwer deweloperski wewnątrz OpenChamber.
 
 # Podgląd i serwery deweloperskie
 
-Gdy uruchamiasz serwer deweloperski, OpenChamber może otworzyć go bezpośrednio w aplikacji zamiast w osobnej karcie przeglądarki — dzięki czemu widzisz swoją witrynę obok czatu, przechwytujesz jej konsolę i wskazujesz elementy, aby o nie zapytać.
+Gdy uruchamiasz serwer deweloperski, OpenChamber może otworzyć go od razu w aplikacji zamiast w osobnej karcie przeglądarki — widzisz swoją stronę obok czatu i możesz wskazywać elementy, żeby o nie zapytać.
 
-## Otwórz podgląd
+## Otwieranie serwera deweloperskiego
 
-OpenChamber obserwuje wynik terminala pod kątem adresu lokalnego (wiersz `Local:`, który drukują narzędzia takie jak Vite, Next.js czy Astro). Gdy go wykryje:
+Otwórz panel przeglądarki przyciskiem globusa w nagłówku aplikacji. Jeśli serwer już działa, znajdziesz go na liście i otworzysz jednym kliknięciem — OpenChamber rozpoznaje go po tym, co faktycznie nasłuchuje na twoim komputerze, więc działa niezależnie od sposobu uruchomienia.
 
-- w terminalu pojawia się przycisk **Open preview**
-- [akcja projektu](/pl/project-actions/) z włączonym auto-open otwiera go za Ciebie
-- lokalny link w wiadomości czatu również może go otworzyć
+Serwer otwiera się też sam, gdy:
 
-Witryna ładuje się w panelu bocznym. Podglądać można wyłącznie adresy lokalne (na Twojej własnej maszynie).
+- naciśniesz **Otwórz podgląd** przy lokalnym adresie w terminalu
+- [akcja projektu](/project-actions/) z włączonym automatycznym otwieraniem go uruchomi
+- klikniesz lokalny odnośnik w wiadomości na czacie
 
-## Konsola i inspekcja
+Adres zawsze możesz wpisać ręcznie. Samo `localhost:5173` jest traktowane jako `http://`, więc schematu nie musisz podawać.
 
-W panelu podglądu możesz:
+## Praca ze zdalnym OpenChamber
 
-- obserwować **konsolę** strony — błędy, ostrzeżenia i logi, filtrowane wedle uznania
-- włączyć **inspect**, kliknąć dowolny element i wysłać o nim notatkę — selektor, style, pozycję i zrzut ekranu — prosto do czatu
+Gdy OpenChamber działa na innym komputerze, jego serwer deweloperski też jest na *tamtym* komputerze — `localhost` na twoim laptopie prowadzi zupełnie gdzie indziej. Aplikacja desktopowa załatwia to za ciebie: otwiera lokalny port, którym prowadzi połączenie do zdalnego serwera, dzięki czemu strona ładuje się normalnie, z działającym przeładowaniem na gorąco i narzędziami deweloperskimi. Nadal wpisujesz adres, którego się spodziewasz; technikalia nie wchodzą ci w drogę.
 
-To najszybszy sposób, by powiedzieć agentowi „ten przycisk, tutaj”, bez opisywania go.
+Wymaga to aplikacji desktopowej. W karcie przeglądarki otworzysz tylko serwery na własnym komputerze.
+
+## Adnotacje na stronie
+
+O wskazywaniu elementów, rysowaniu po stronie, przymierzaniu zmian stylów i wysyłaniu tego wszystkiego na czat przeczytasz w [Panelu przeglądarki](/desktop-browser/).
 
 ## Powiązane
 
-- [Akcje projektu](/pl/project-actions/) — automatycznie otwórz serwer przy uruchomieniu
-- [Przeglądarka na komputerze](/pl/desktop-browser/) — te same narzędzia dla dowolnej strony, na komputerze
+- [Akcje projektu](/project-actions/) — automatyczne otwarcie serwera po uruchomieniu
+- [Panel przeglądarki](/desktop-browser/) — adnotacje stron i sterowanie przez agenta

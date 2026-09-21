@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
 
-const MAX_FILE_ATTACH_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
 const createGitCheckIgnoreTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
@@ -99,7 +99,7 @@ export const readUriAsAttachment = async (
 
     const size = stat.size ?? 0;
     if (size > MAX_FILE_ATTACH_SIZE_BYTES) {
-      return { skipped: { name, reason: 'File exceeds 10MB limit' } };
+      return { skipped: { name, reason: 'File exceeds 20MB limit' } };
     }
 
     const bytes = await vscode.workspace.fs.readFile(uri);
@@ -122,25 +122,8 @@ const isPathInside = (candidatePath: string, parentPath: string): boolean => {
 
 export const normalizeFsPath = (value: string) => value.replace(/\\/g, '/');
 
-const execGitCheckIgnore = async (args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number } | null> => {
-  if (GIT_CHECK_IGNORE_TIMEOUT_MS <= 0) {
-    return execGit(args, cwd);
-  }
-
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      execGit(args, cwd),
-      new Promise<null>((resolve) => {
-        timeout = setTimeout(() => resolve(null), GIT_CHECK_IGNORE_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
-};
+const execGitCheckIgnore = (args: string[], cwd: string) =>
+  execGit(args, cwd, { timeoutMs: GIT_CHECK_IGNORE_TIMEOUT_MS });
 
 const gitCheckIgnoreNames = async (cwd: string, names: string[]): Promise<Set<string>> => {
   if (names.length === 0) {
@@ -148,9 +131,6 @@ const gitCheckIgnoreNames = async (cwd: string, names: string[]): Promise<Set<st
   }
 
   const result = await execGitCheckIgnore(['check-ignore', '--', ...names], cwd);
-  if (!result) {
-    return new Set();
-  }
   if (result.exitCode !== 0 || !result.stdout) {
     return new Set();
   }
@@ -169,9 +149,6 @@ const gitCheckIgnorePaths = async (cwd: string, paths: string[]): Promise<Set<st
   }
 
   const result = await execGitCheckIgnore(['check-ignore', '--', ...paths], cwd);
-  if (!result) {
-    return new Set();
-  }
   if (result.exitCode !== 0 || !result.stdout) {
     return new Set();
   }
@@ -538,7 +515,13 @@ export const fetchModelsMetadata = async () => {
   }
 };
 
-const getFsAccessRoot = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+const getFsAccessRoot = (requestedRoot?: string): string => {
+  const workspaceRoots = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
+  const requested = requestedRoot ? path.resolve(requestedRoot) : '';
+  return workspaceRoots.find((root) => path.resolve(root) === requested)
+    || workspaceRoots[0]
+    || os.homedir();
+};
 
 export const getFsMimeType = (filePath: string): string => {
   const ext = path.extname(filePath).toLowerCase();
@@ -564,25 +547,21 @@ export type FsReadPathResolution =
   | { ok: true; resolvedPath: string }
   | { ok: false; status: number; error: string };
 
-export const resolveFileReadPath = async (targetPath: string): Promise<FsReadPathResolution> => {
+export const resolveFileReadPath = async (targetPath: string, requestedRoot?: string): Promise<FsReadPathResolution> => {
   const trimmed = targetPath.trim();
   if (!trimmed) {
     return { ok: false, status: 400, error: 'Path is required' };
   }
 
-  const baseRoot = getFsAccessRoot();
+  const baseRoot = getFsAccessRoot(requestedRoot);
   const resolved = resolveUserPath(trimmed, baseRoot);
   if (!resolved) {
     return { ok: false, status: 400, error: 'Path is required' };
   }
 
   try {
-    const [canonicalPath, canonicalBase] = await Promise.all([
-      fs.promises.realpath(resolved),
-      fs.promises.realpath(baseRoot).catch(() => path.resolve(baseRoot)),
-    ]);
-
-    if (!isPathInside(canonicalPath, canonicalBase)) {
+    const canonicalPath = await fs.promises.realpath(resolved);
+    if (!isPathInside(resolved, path.resolve(baseRoot))) {
       return { ok: false, status: 403, error: 'Access to file denied' };
     }
 

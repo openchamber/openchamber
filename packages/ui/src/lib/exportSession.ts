@@ -3,8 +3,9 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
 import { getRevealLabelKey } from '@/lib/utils';
+import { formatMessageText } from '@/lib/messages/messageMarkdown';
 
-type SessionMessageRecord = { info: Message; parts: Part[] };
+export type SessionMessageRecord = { info: Message; parts: Part[] };
 
 export type ChildSessionExport = {
   title: string;
@@ -58,16 +59,18 @@ function formatMessageHeader(record: SessionMessageRecord): string {
   return details ? `**${label}**\n\n*${details}*` : `**${label}**`;
 }
 
-function extractTextFromParts(parts: Part[]): string {
-  return parts
-    .filter((p): p is Part & { type: 'text'; text: string } => p.type === 'text' && typeof p.text === 'string')
-    .map((p) => p.text)
-    .join('');
+/**
+ * A message's text the way the Markdown export renders it. Guest message and
+ * session items carry the same text, so an extension sees what the export
+ * file would.
+ */
+export function formatMessageRecordText(record: SessionMessageRecord): string {
+  return formatMessageText(record.parts, { user: record.info.role === 'user' });
 }
 
 function formatMessageAsMarkdown(record: SessionMessageRecord): string {
   const role = formatMessageHeader(record);
-  const text = extractTextFromParts(record.parts).trim();
+  const text = formatMessageRecordText(record);
 
   if (!text) return '';
   return `${role}\n\n${text}`;

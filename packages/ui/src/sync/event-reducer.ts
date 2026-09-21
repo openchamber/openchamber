@@ -14,6 +14,12 @@ import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import {
+  compareMessagesChronologically,
+  findMessageIndex,
+  insertMessageChronologically,
+} from "./message-ordering"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -151,10 +157,24 @@ export type GlobalEventResult = {
   project: Project
 } | null
 
+export type SessionMaterializationReason =
+  | "missing-owning-message"
+  | "orphan-delta"
+  | "missing-delta-part"
+  | "empty-assistant-message"
+  | "child-session-idle"
+  | "child-session-discovered"
+  | "ensure-session-messages"
+  | "stream-reconnect"
+  | "transport-switch"
+  | "stale-status-resync"
+  | "settled-running-tool"
+
 export type DirectoryEventResult = boolean | {
   changed: boolean
   materialization: {
     type: "incomplete-session-snapshot"
+    reason: SessionMaterializationReason
     sessionID?: string
     messageID: string
     partID?: string
@@ -165,7 +185,7 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   if (!sessionID) return false
   const messages = draft.message[sessionID]
   if (!messages) return false
-  return Binary.search(messages, messageID, (message) => message.id).found
+  return messages.some((message) => message.id === messageID)
 }
 
 export function reduceGlobalEvent(event: Event): GlobalEventResult {
@@ -203,6 +223,21 @@ export function applyDirectoryEvent(
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
   },
 ): DirectoryEventResult {
+  const markSessionEvent = (sessionID: string, deleted: boolean) => {
+    const revision = (draft.sessionRevision ?? 0) + 1
+    draft.sessionRevision = revision
+    draft.sessionListSource = "live"
+    draft.sessionEventRevision = draft.sessionEventRevision ?? {}
+    draft.sessionDeletedRevision = draft.sessionDeletedRevision ?? {}
+    if (deleted) {
+      draft.sessionDeletedRevision[sessionID] = revision
+      delete draft.sessionEventRevision[sessionID]
+    } else {
+      draft.sessionEventRevision[sessionID] = revision
+      delete draft.sessionDeletedRevision[sessionID]
+    }
+  }
+
   switch (event.type) {
     case "server.instance.disposed": {
       callbacks?.onRefresh?.("")
@@ -213,6 +248,9 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
       if (result.found) {
         sessions[result.index] = info
       } else {
@@ -220,6 +258,7 @@ export function applyDirectoryEvent(
         trimSessions(draft)
         if (!info.parentID) draft.sessionTotal += 1
       }
+      markSessionEvent(info.id, false)
       return true
     }
 
@@ -227,11 +266,19 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      // Keep the freshness check ahead of the archive branch: direct archive
+      // responses handle the store update on their own (optimistic removal +
+      // SDK response), so stale SSE echoes should not win just because they
+      // mark the session archived.
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
 
       if (info.time.archived) {
         if (result.found) sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+        markSessionEvent(info.id, true)
         return true
       }
 
@@ -241,16 +288,21 @@ export function applyDirectoryEvent(
         sessions.splice(result.index, 0, info)
         trimSessions(draft)
       }
+      markSessionEvent(info.id, false)
       return true
     }
 
     case "session.deleted": {
-      const info = (event.properties as { info: Session }).info
       const sessions = draft.session
-      const result = Binary.search(sessions, info.id, (s) => s.id)
+      const props = event.properties as { info?: Session; sessionID?: string }
+      const sessionID = props.info?.id ?? props.sessionID
+      if (!sessionID) return false
+      const result = Binary.search(sessions, sessionID, (s) => s.id)
+      const info = props.info ?? (result.found ? sessions[result.index] : undefined)
       if (result.found) sessions.splice(result.index, 1)
-      cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
-      if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+      cleanupSessionCaches(draft, sessionID, callbacks?.onSetSessionTodo)
+      if (!info?.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+      markSessionEvent(sessionID, true)
       return true
     }
 
@@ -262,6 +314,9 @@ export function applyDirectoryEvent(
 
     case "todo.updated": {
       const props = event.properties as { sessionID: string; todos: Todo[] }
+      if (areJsonEquivalent(draft.todo[props.sessionID], props.todos)) {
+        return false
+      }
       draft.todo[props.sessionID] = props.todos
       callbacks?.onSetSessionTodo?.(props.sessionID, props.todos)
       return true
@@ -303,21 +358,26 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      const result = Binary.search(messages, info.id, (m) => m.id)
-      if (result.found) {
+      const messageIndex = findMessageIndex(messages, info.id)
+      if (messageIndex >= 0) {
         // Skip message replacement if unchanged — preserves reference, avoids re-render
-        const existing = messages[result.index]
+        const existing = messages[messageIndex]
         const unchanged = areMessageUpdateFieldsEqual(existing, info)
         if (unchanged) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
         }
         const next = [...messages]
-        next[result.index] = info
+        if (compareMessagesChronologically(existing, info) === 0) {
+          next[messageIndex] = info
+        } else {
+          next.splice(messageIndex, 1)
+          insertMessageChronologically(next, info)
+        }
         draft.message[info.sessionID] = next
       } else {
         const next = [...messages]
-        next.splice(result.index, 0, info)
+        insertMessageChronologically(next, info)
         draft.message[info.sessionID] = next
       }
       return true
@@ -328,9 +388,9 @@ export function applyDirectoryEvent(
       const messages = draft.message[props.sessionID]
       if (messages) {
         const next = [...messages]
-        const result = Binary.search(next, props.messageID, (m) => m.id)
-        if (result.found) {
-          next.splice(result.index, 1)
+        const messageIndex = findMessageIndex(next, props.messageID)
+        if (messageIndex >= 0) {
+          next.splice(messageIndex, 1)
           draft.message[props.sessionID] = next
         }
       }
@@ -356,41 +416,45 @@ export function applyDirectoryEvent(
         return missingOwningMessage
           ? {
             changed: true,
-            materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+            materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
           }
           : true
       }
       const next = [...parts]
-      const result = Binary.search(next, part.id, (p) => p.id)
-      if (result.found) {
-        const previous = next[result.index]
+      const partIndex = next.findIndex((candidate) => candidate.id === part.id)
+      if (partIndex >= 0) {
+        const previous = next[partIndex]
         if (shouldPreserveExistingPart(previous, part)) {
           return false
         }
         const dedupeFields = getUpdatedDeltaFields(previous, part)
-        next[result.index] = dedupeFields.length > 0
+        next[partIndex] = dedupeFields.length > 0
           ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
           : part
       } else {
         // Replace optimistic part (no sessionID) with server part of same type.
-        // Gate: only scan if the first part lacks sessionID (optimistic parts are
-        // always inserted first). Assistant messages never have optimistic parts,
-        // so this check is effectively free during streaming.
-        const hasOptimistic = next.length > 0 && !(next[0] as { sessionID?: string }).sessionID
-        const optimisticIdx = hasOptimistic && (part.type === "text" || part.type === "file")
+        // Every optimistic part is a candidate, not only the first one: the
+        // server echoes a just-sent message part by part, and after the text
+        // echo replaced the first slot the file echo still has to find the
+        // optimistic file behind it, or the attachment shows twice until the
+        // next page fetch. The scan runs only when a part with a NEW id
+        // arrives, which during assistant streaming is once per part.
+        const optimisticIndex = part.type === "text" || part.type === "file"
           ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
           : -1
-        if (optimisticIdx >= 0) {
-          next.splice(optimisticIdx, 1)
+        if (optimisticIndex >= 0) {
+          // Replace in place: pushing to the end reorders text/file parts of a
+          // just-sent message and remounts its rendered subtree.
+          next[optimisticIndex] = part
+        } else {
+          next.push(part)
         }
-        const insertResult = Binary.search(next, part.id, (p) => p.id)
-        next.splice(insertResult.index, 0, part)
       }
       draft.part[messageID] = next
       return missingOwningMessage
         ? {
           changed: true,
-          materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
         }
         : true
     }
@@ -399,10 +463,10 @@ export function applyDirectoryEvent(
       const props = event.properties as { messageID: string; partID: string }
       const parts = draft.part[props.messageID]
       if (!parts) return false
-      const result = Binary.search(parts, props.partID, (p) => p.id)
-      if (result.found) {
+      const partIndex = parts.findIndex((part) => part.id === props.partID)
+      if (partIndex >= 0) {
         const next = [...parts]
-        next.splice(result.index, 1)
+        next.splice(partIndex, 1)
         if (next.length === 0) {
           delete draft.part[props.messageID]
         } else {
@@ -426,24 +490,24 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
-      const result = Binary.search(parts, props.partID, (p) => p.id)
-      if (!result.found) {
+      const partIndex = parts.findIndex((part) => part.id === props.partID)
+      if (partIndex < 0) {
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
-      const existing = parts[result.index] as Record<string, unknown>
+      const existing = parts[partIndex] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(props.field)
       // Create new Part object + new array so React detects the change
       const next = [...parts]
-      next[result.index] = {
+      next[partIndex] = {
         ...existing,
         [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
         __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),

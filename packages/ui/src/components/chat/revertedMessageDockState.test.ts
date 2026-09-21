@@ -86,4 +86,20 @@ describe('buildRevertedMessageDockState', () => {
         expect(second).not.toBe(first);
         expect(second.records).toHaveLength(1);
     });
+
+    test('collects a post-rollover reverted tail by marker position', () => {
+        const before = message('msg_ffffffffffffBefore', 'user');
+        const marker = message('msg_000000000000Marker', 'user');
+        const after = message('msg_000000000001After', 'user');
+
+        const snapshot = buildRevertedMessageDockState(
+            state({
+                session: [{ id: 'ses_1', revert: { messageID: marker.id } } as State['session'][number]],
+                message: { ses_1: [before, marker, after] },
+            }),
+            'ses_1',
+        );
+
+        expect(snapshot.records.map((record) => record.message.id)).toEqual([marker.id, after.id]);
+    });
 });

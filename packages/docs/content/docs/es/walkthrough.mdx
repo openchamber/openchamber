@@ -1,0 +1,71 @@
+---
+title: Recorrido por los cambios
+description: Lee un diff en el orden que tiene sentido, no en orden alfabético.
+---
+
+# Recorrido por los cambios
+
+Un diff está ordenado por ruta de archivo, que casi nunca es el orden en el que el cambio cobra sentido. El recorrido lo reordena: las ediciones relacionadas se agrupan en **paradas**, cada parada explica qué hace ahora el código de forma distinta, y las paradas se ordenan para que cada una se apoye en la anterior.
+
+Explica y ordena. No juzga tu código ni emite veredictos — para eso está [Review](/git/).
+
+Ábrelo con el icono **Recorrido** en la barra derecha, o con el botón **Recorrido con IA** en los paneles de cambios y de pull request. Ambos solo abren el panel; no se genera nada hasta que pulsas **Generar recorrido**.
+
+## Qué puede recorrer
+
+| Ámbito | Qué incluye |
+| --- | --- |
+| Todo sin confirmar | Todo lo que aún no está en un commit: preparado, sin preparar y archivos nuevos |
+| Preparados | Solo lo que iría a un commit ahora mismo |
+| Sin preparar | Árbol de trabajo y archivos nuevos |
+| Esta rama | Todos los commits de la rama que no están en su base |
+| Pull request | El cambio tal como existe en GitHub |
+
+**Esta rama** no significa "commits sin subir": es todo lo que la rama añade a su base, se haya subido o no. Por eso, tras hacer commit pero antes de subirlo, esta y el pull request difieren a propósito: una muestra lo que hiciste, el otro lo que ven ahora quienes revisan.
+
+Cada ámbito se guarda por separado, así que cambiar entre ellos nunca pierde nada.
+
+## Elegir el modelo
+
+Los recorridos usan tu modelo pequeño por defecto. Elige otro en **Ajustes → Sesiones → Modelo del recorrido de cambios**, o solo para una revisión desde la cabecera del panel — útil cuando un cambio es lo bastante delicado como para merecer un modelo más potente.
+
+El selector solo ofrece modelos capaces de devolver salida estructurada, porque sin ella el recorrido no se puede montar. Si un modelo se queda corto para el diff, la generación se rechaza con una explicación en vez de recortar la entrada en silencio: un recorrido escrito sobre medio diff suena seguro y se equivoca.
+
+Al reabrir el panel verás el modelo que produjo lo que tienes delante, así que **Regenerar** repite con el mismo salvo que lo cambies.
+
+## Elegir el idioma
+
+Los recorridos se escriben en el idioma de tu interfaz por defecto. El selector de idioma de la cabecera del panel arranca ahí, y puedes elegir cualquier otro idioma al que esté traducido OpenChamber para una sola revisión: una explicación guiada solo sirve en un idioma que leas con soltura.
+
+Solo se traduce la prosa. Los identificadores, las rutas de archivo y los nombres de API se quedan tal cual aparecen en tu código, así que lo que nombra una parada sigue siendo lo que puedes buscar.
+
+Si todavía no hay nada generado en el idioma que elegiste, el panel no se vacía: sigue mostrando el recorrido que tiene y lo dice. Pulsa **Generar recorrido** para obtenerlo en el idioma nuevo.
+
+## Coste y caché
+
+Nada se genera por su cuenta. La generación solo empieza cuando la pides, y regenerar también es manual.
+
+Los resultados se guardan en caché según el contenido exacto del diff. Devuelve el árbol de trabajo a un estado anterior y el recorrido anterior vuelve gratis, sin llamar al modelo. El idioma y el modelo forman parte de esa clave, así que cada combinación se guarda por separado: cuando un diff ya tiene recorrido en dos idiomas, cambiar entre ellos es instantáneo y no cuesta nada.
+
+La generación se ejecuta en el servidor de OpenChamber, no en la pestaña del navegador. Recarga la página o cierra el panel y continúa; al volver, el resultado te espera. Solo **Cancelar** la detiene.
+
+## Ser honesto sobre lo desactualizado
+
+Cada parada está anclada al contenido exacto del código que describe, así que el panel puede avisarte cuando ese código ha cambiado:
+
+- **Pasos desactualizados** — el código que describía una parada cambió o desapareció. El recorrido se sigue mostrando, marcado, para que decidas si regenerar.
+- **Sin cubrir** — cambios del diff actual que ninguna parada describe. Ahí entran las ediciones hechas después de generar, los cambios que el recorrido consideró rutinarios y los archivos de bloqueo u otra salida generada, que se dejan fuera del modelo a propósito. Todo aparece al final para que nada desaparezca en silencio.
+
+Regenerar no parchea, reescribe: el recorrido anterior va al modelo como contexto, así que lo que sigue siendo cierto se conserva, y todo se reancla al código actual.
+
+## Notas
+
+- Puedes comentar cualquier línea igual que en la vista de diff; los comentarios se adjuntan al campo del chat.
+- Disponible en escritorio y anchos de tableta. No se ofrece en la extensión de VS Code ni en la app móvil.
+- Recorrer un pull request requiere una cuenta de GitHub conectada — consulta [Issues y PR de GitHub](/github/).
+
+## Relacionado
+
+- [Git y GitHub](/git/) — el panel de cambios del que lee, y la acción Review que sí juzga el código
+- [Issues y PR de GitHub](/github/) — conecta GitHub para recorrer pull requests
+- [Proveedores, modelos y agentes](/providers/) — de dónde sale el modelo pequeño

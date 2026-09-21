@@ -10,7 +10,7 @@ interface InProgressOperationBannerProps {
   onContinue: () => Promise<void>;
   onAbort: () => Promise<void>;
   onResolveWithAI?: () => void;
-  hasUnresolvedConflicts?: boolean;
+  conflictCount?: number;
   isLoading?: boolean;
 }
 
@@ -20,7 +20,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   onContinue,
   onAbort,
   onResolveWithAI,
-  hasUnresolvedConflicts = false,
+  conflictCount = 0,
   isLoading = false,
 }) => {
   const { t } = useI18n();
@@ -30,7 +30,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   const hasMergeInProgress = mergeInProgress && mergeInProgress.head;
   const hasRebaseInProgress = rebaseInProgress && (rebaseInProgress.headName || rebaseInProgress.onto);
   const operation = hasMergeInProgress ? 'merge' : hasRebaseInProgress ? 'rebase' : null;
-  
+
   if (!operation) {
     return null;
   }
@@ -54,54 +54,52 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   };
 
   const isProcessing = processingAction !== null;
+  const hasUnresolvedConflicts = conflictCount > 0;
 
   const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');
-  const operationIconName = operation === 'merge' ? 'git-merge' : 'git-branch';
 
   // Build description
   let description = '';
   if (mergeInProgress) {
-    description = mergeInProgress.message 
+    description = mergeInProgress.message
       ? t('gitView.operation.mergingMessage', { message: mergeInProgress.message })
       : t('gitView.operation.mergeInProgressWithHead', { head: mergeInProgress.head });
   } else if (rebaseInProgress) {
-    description = rebaseInProgress.headName 
+    description = rebaseInProgress.headName
       ? t('gitView.operation.rebasingOnto', { headName: rebaseInProgress.headName, onto: rebaseInProgress.onto || '' })
       : t('gitView.operation.rebaseInProgress');
   }
 
+  const title = !hasUnresolvedConflicts
+    ? t('gitView.operation.inProgressTitle', { operation: operationLabel })
+    : conflictCount === 1
+      ? t('gitView.operation.inProgressTitleOneConflict', { operation: operationLabel, count: conflictCount })
+      : t('gitView.operation.inProgressTitleManyConflicts', { operation: operationLabel, count: conflictCount });
+
+  const hint = hasUnresolvedConflicts
+    ? t('gitView.operation.resolveConflictsHint')
+    : t('gitView.operation.readyToContinueHint');
+
   return (
-    <div className="bg-[var(--status-warning-bg)] border border-[var(--status-warning)] rounded-lg p-3 mx-3 mt-3">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-start gap-2 min-w-0">
-          <Icon name={operationIconName} className="size-4 text-[var(--status-warning)] shrink-0" />
-          <div className="min-w-0">
-            <p className="typography-label text-[var(--status-warning)]">
-              {t('gitView.operation.inProgressTitle', { operation: operationLabel })}
+    <div className="mx-4 mt-3 overflow-hidden rounded-lg border border-[var(--status-warning-border)]">
+      <div className="flex flex-col gap-3 p-3">
+        <div className="min-w-0">
+          <p className="typography-label text-[var(--status-warning)]">
+            {title}
+          </p>
+          {description && (
+            <p className="typography-micro break-words text-muted-foreground">
+              {description}
             </p>
-            {description && (
-              <p className="typography-micro text-muted-foreground truncate">
-                {description}
-              </p>
-            )}
-          </div>
+          )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {hasUnresolvedConflicts && onResolveWithAI && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onResolveWithAI}
-              disabled={isProcessing || isLoading}
-              className="gap-1.5"
-            >
-              <Icon name="sparkling" className="size-4" />
-              {t('gitView.operation.resolveWithAi')}
-            </Button>
-          )}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="typography-micro min-w-0 flex-1 text-muted-foreground">
+            {hint}
+          </p>
 
-          {processingAction !== 'continue' && (
+          <div className="flex shrink-0 items-center gap-1.5">
             <Button
               variant="ghost"
               size="sm"
@@ -116,31 +114,36 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               )}
               {t('gitView.operation.abort')}
             </Button>
-          )}
 
-          {!hasUnresolvedConflicts && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleContinue}
-              disabled={isProcessing || isLoading}
-              className="gap-1.5"
-            >
-              {processingAction === 'continue' ? (
-                <Icon name="loader-4" className="size-4 animate-spin" />
-              ) : (
-                <Icon name="check" className="size-4" />
+            {hasUnresolvedConflicts
+              ? onResolveWithAI && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={onResolveWithAI}
+                  disabled={isProcessing || isLoading}
+                >
+                  {t('gitView.operation.resolveWithAi')}
+                </Button>
+              )
+              : (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleContinue}
+                  disabled={isProcessing || isLoading}
+                  className="gap-1.5"
+                >
+                  {processingAction === 'continue' ? (
+                    <Icon name="loader-4" className="size-4 animate-spin" />
+                  ) : (
+                    <Icon name="check" className="size-4" />
+                  )}
+                  {t('gitView.operation.continue')}
+                </Button>
               )}
-              {t('gitView.operation.continue')}
-            </Button>
-          )}
+          </div>
         </div>
-
-        {hasUnresolvedConflicts && (
-          <p className="typography-micro text-[var(--status-warning)]">
-            {t('gitView.operation.resolveConflictsHint')}
-          </p>
-        )}
       </div>
     </div>
   );

@@ -23,7 +23,7 @@ function isSyncDebugEnabled(): boolean {
   }
   return _enabled
 }
-type SyncDebugCategory = "pipeline" | "reducer" | "dispatch"
+type SyncDebugCategory = "pipeline" | "reducer" | "dispatch" | "recovery"
 
 function log(cat: SyncDebugCategory, ...args: unknown[]): void {
   if (!isSyncDebugEnabled()) return
@@ -73,5 +73,11 @@ export const syncDebug = {
     /** Event applied to store successfully. */
     eventApplied: (eventType: string, sessionID?: string, messageID?: string) =>
       log("dispatch", "event → applied", { eventType, sessionID, messageID }),
+  },
+
+  recovery: {
+    /** A scoped session snapshot fetch is starting because live state looked incomplete. */
+    materializing: (details: { reason: string; directory: string; sessionID: string; messageID?: string; partID?: string }) =>
+      log("recovery", "materializing session", details),
   },
 } as const

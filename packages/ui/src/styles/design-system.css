@@ -1,6 +1,7 @@
 @layer base {
   :root {
     color-scheme: light;
+    -webkit-font-smoothing: antialiased;
     --oc-safe-area-top: 0px;
     --oc-safe-area-right: 0px;
     --oc-safe-area-bottom: 0px;
@@ -16,14 +17,24 @@
     --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
     --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
     --padding-scale: 1;
+    /* Shared glass surfaces. Semantic surface tokens provide each tint. */
+    --oc-glass-blur: 22px;
+    --oc-glass-opacity: 52%;
+    --oc-glass-popover-opacity: 50%;
+    --oc-glass-tooltip-opacity: 62%;
+    --oc-glass-saturation: 1.24;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
-    --text-markdown: 0.9375rem;
-    --text-code: 0.8125rem;
-    --text-ui-header: 0.9375rem;
-    --text-ui-label: 0.8750rem;
-    --text-meta: 0.875rem;
-    --text-micro: 0.875rem;
+    --text-markdown: 0.875rem;
+    --text-code: 0.75rem;
+    --text-ui-header: 0.875rem;
+    --text-ui-label: 0.84375rem;
+    --text-meta: 0.8125rem;
+    --text-micro: 0.8125rem;
+    --text-settings-page-title: 1.0625rem;
+
+    /* Text selection colour shared by native ::selection and the comment overlay */
+    --oc-text-selection: var(--interactive-selection);
 
     /* Default Light Theme */
     --background: oklch(0.97 0.02 85); /* Warm sand background */
@@ -45,7 +56,7 @@
     --border: oklch(0.85 0.02 70); /* Warm border */
     --input: oklch(0.88 0.02 75); /* Input background */
     --ring: oklch(0.65 0.2 55); /* Focus ring color */
-    --radius: 0.625rem;
+    --radius: 0.5625rem;
     --chart-1: oklch(0.58 0.15 230); /* Blue */
     --chart-2: oklch(0.58 0.15 145); /* Oasis green */
     --chart-3: oklch(0.65 0.2 55); /* Orange */
@@ -59,10 +70,14 @@
     --sidebar-accent-foreground: oklch(0.25 0.02 40); /* Dark warm text */
     --sidebar-border: oklch(0.85 0.02 70); /* Warm border */
     --sidebar-ring: oklch(0.65 0.2 55); /* Focus ring */
-    --sidebar-stuck-bg: var(--sidebar); /* Desktop sidebar sticky header background (match sidebar) */
   }
 
   .dark {
+    --oc-glass-blur: 26px;
+    --oc-glass-opacity: 50%;
+    --oc-glass-popover-opacity: 52%;
+    --oc-glass-tooltip-opacity: 64%;
+    --oc-glass-saturation: 1.16;
     /* Default Dark Theme - using OKLCH color space */
     --background: oklch(0.16 0.01 30); /* #151313 */
     --foreground: oklch(0.85 0.02 90); /* #cdccc3 */
@@ -96,19 +111,10 @@
     --sidebar-accent-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
     --sidebar-border: oklch(0.31 0.01 35); /* #393836 */
     --sidebar-ring: oklch(0.77 0.17 85); /* #edb449 */
-    --sidebar-stuck-bg: var(--sidebar); /* Desktop sidebar sticky header background (match sidebar) */
   }
 
   * {
-    border-color: hsl(var(--border));
-  }
-
-  :root * {
-    border-color: rgba(194, 151, 77, 0.2); /* Warm golden sand borders for light mode */
-  }
-
-  .dark * {
-    border-color: rgba(57, 56, 54, 0.5); /* #393836 at 50% opacity */
+    border-color: var(--border); /* Theme border token (interactive.border) — opaque and theme-aware */
   }
 
   body {
@@ -142,13 +148,6 @@
     background-color: var(--background) !important;
   }
 
-  :root.desktop-runtime[data-oc-vibrancy],
-  :root.desktop-runtime[data-oc-vibrancy] body,
-  :root.desktop-runtime[data-oc-vibrancy] #root {
-    background: transparent !important;
-    background-color: transparent !important;
-  }
-
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }
@@ -159,25 +158,62 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
   }
 
-  /* Restore default list styling inside markdown content - override Tailwind preflight */
+  .markdown-content details[data-md-details] {
+    margin-block: 0.75rem;
+    min-width: 0;
+  }
+
+  .markdown-content details[data-md-details] > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.375rem;
+    list-style: none;
+    cursor: pointer;
+    padding-block: 0.375rem;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+    border-radius: 0.25rem;
+  }
+
+  .markdown-content details[data-md-details] > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .markdown-content [data-md-disclosure-icon] {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 0.25em;
+    color: var(--surface-muted-foreground);
+  }
+
+  .markdown-content details[data-md-details][open] > summary > [data-md-disclosure-icon] {
+    transform: rotate(90deg);
+  }
+
+  .markdown-content details[data-md-details] > summary:focus-visible {
+    outline: 2px solid var(--interactive-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Restore list styling inside markdown content - override Tailwind preflight.
+     Native markers with a compact gutter; nesting cycles the marker shape so
+     depth stays readable without extra indentation. */
   .markdown-content ul,
   .markdown-content ol {
-    padding-left: 2em !important;
+    padding-left: 1.25rem !important;
   }
 
   .markdown-content ul {
-    list-style-type: none !important;
+    list-style-type: disc !important;
   }
 
-  .markdown-content ul > li {
-    position: relative;
+  .markdown-content ul ul {
+    list-style-type: circle !important;
   }
 
-  .markdown-content ul > li::before {
-    content: "–";
-    position: absolute;
-    left: -1.25em;
-    color: inherit;
+  .markdown-content ul ul ul {
+    list-style-type: square !important;
   }
 
   .markdown-content ol {
@@ -185,29 +221,215 @@
     list-style-position: outside !important;
   }
 
+  .markdown-content ol ol {
+    list-style-type: lower-alpha !important;
+  }
+
+  .markdown-content ol ol ol {
+    list-style-type: lower-roman !important;
+  }
+
   .markdown-content li {
     display: list-item !important;
   }
 
-  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects) */
-  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
-    outline: none !important;
-    box-shadow: none !important;
+  .markdown-content li::marker {
+    color: currentColor;
   }
 
-  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
-    outline: none !important;
+  .markdown-content ol > li::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .markdown-content li + li {
+    margin-top: 0.25rem;
+  }
+
+  /* GitHub-style task lists: the checkbox replaces the list marker. */
+  .markdown-content li:has(> input[type="checkbox"]:first-child) {
+    list-style-type: none !important;
+  }
+
+  .markdown-content li > input[type="checkbox"]:first-child {
+    margin: 0 0.35em 0.15em -1.25rem;
+    vertical-align: middle;
+  }
+
+  .focus-ring-accent:focus-visible,
+  [data-focus-ring="accent"]:focus-visible {
+    outline: 2px solid var(--interactive-focus-ring) !important;
+    outline-offset: 2px !important;
     box-shadow: none !important;
   }
 }
 
+@layer components {
+  /* A painted surface owns its text context too. Neutral children using
+     text-foreground inherit the surface's foreground, not the canvas color. */
+  .oc-surface-elevated,
+  .bg-surface-elevated,
+  [class~="bg-[var(--surface-elevated)]"],
+  .bg-card,
+  .bg-popover,
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-composer {
+    --foreground: var(--surface-elevated-foreground);
+    color: var(--foreground);
+  }
+
+  .oc-surface-canvas,
+  .bg-background,
+  .bg-surface-background,
+  [class~="bg-[var(--surface-background)]"],
+  .bg-muted,
+  .bg-surface-muted,
+  [class~="bg-[var(--surface-muted)]"],
+  .bg-sidebar,
+  .oc-glass-panel {
+    --foreground: var(--surface-foreground);
+    color: var(--foreground);
+  }
+
+  .oc-surface-code,
+  [class~="bg-[var(--syntax-background)]"] {
+    --foreground: var(--syntax-foreground);
+    color: var(--foreground);
+  }
+
+  .bg-interactive-selection {
+    --foreground: var(--interactive-selection-foreground);
+    color: var(--foreground);
+  }
+
+  /* Shared translucent surfaces. Each variant only chooses its semantic tint;
+     blur, accessibility fallbacks, and floating-surface elevation stay common.
+     Utilities remain able to opt an individual consumer out. */
+  .oc-glass-popover,
+.oc-glass-tooltip,
+.oc-glass-panel,
+.oc-glass-composer {
+  background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+  backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+}
+
+.oc-glass-popover {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-popover-opacity);
+}
+
+.oc-glass-tooltip {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-tooltip-opacity);
+}
+
+.oc-glass-panel {
+  --oc-glass-color: var(--surface-muted);
+}
+
+/* The chat composer floating over the transcript. */
+.oc-glass-composer {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-popover-opacity);
+}
+
+.oc-glass-floating {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
+    inset 0 0 0 1px rgb(0 0 0 / 0.04),
+    0 0 0 1px rgb(0 0 0 / 0.1),
+    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
+    0 4px 8px -2px rgb(0 0 0 / 0.08),
+    0 12px 20px -4px rgb(0 0 0 / 0.08);
+}
+
+.dark .oc-glass-floating {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.36),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
+    0 6px 6px -3px rgb(0 0 0 / 0.16);
+}
+
+/* Voice overlay. Glass inside glass is not glass: a nested backdrop-filter
+   blurs the parent's own content (placeholder, footer icons), not the
+   transcript, so that content read through the overlay. While the overlay is
+   up, the composer's own contents go transparent and exactly one glass
+   surface remains. Desktop: the overlay is mounted inside the glass box, so
+   every box descendant off the overlay's ancestor chain hides and the box
+   stays the glass. Mobile: the overlay is mounted beside the pill/box in
+   [data-dictation-host], so those siblings hide and the overlay is the glass. */
+.oc-glass-composer:has(.oc-dictation-overlay)
+  *:not(.oc-dictation-overlay, .oc-dictation-overlay *, :has(.oc-dictation-overlay)),
+[data-dictation-host]:has(> .oc-dictation-overlay) > :not(.oc-dictation-overlay) {
+  opacity: 0;
+}
+
+.oc-glass-backdrop {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* The recap hint floats in the band above the composer; a panel docked
+   there (queue, suggestion, BTW) would push it up over the transcript, so it
+   hides while any panel is mounted. See ComposerFloatingPanel. */
+[data-composer-bound][data-floating-panel] .oc-recap-hint {
+  opacity: 0;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel,
+  .oc-glass-composer {
+    background-color: var(--oc-glass-color);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel,
+  .oc-glass-composer,
+  .oc-glass-backdrop {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel,
+  .oc-glass-composer {
+    background-color: var(--oc-glass-color);
+  }
+}
+}
+
 @theme inline {
   --radius-none: 0;
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.625rem;
-  --radius-xl: 0.75rem;
+  --radius-sm: 0.25rem; /* 4px */
+  --radius-md: 0.4375rem; /* 7px */
+  --radius-lg: 0.5625rem; /* 9px */
+  --radius-xl: 0.75rem; /* 12px */
   --radius-full: 9999px;
+
+  /* Semantic spacing aliases (4/8px grid) */
+  --space-1: var(--spacing-1); /* 4px */
+  --space-2: var(--spacing-2); /* 8px */
+  --space-3: var(--spacing-3); /* 12px */
+  --space-4: var(--spacing-4); /* 16px */
+  --space-6: var(--spacing-6); /* 24px */
+  --space-8: var(--spacing-8); /* 32px */
+
+  /* Elevation / stacking */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --transition-fast: 150ms ease-in-out;
 
   /* Override Tailwind spacing scale with custom properties that respect --padding-scale */
   --spacing-0: 0;
@@ -281,6 +503,16 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /* Surface layer tokens (Theme.colors.surface.*) */
+  --color-surface-background: var(--surface-background);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-muted-foreground: var(--surface-muted-foreground);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-elevated-foreground: var(--surface-elevated-foreground);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-subtle: var(--surface-subtle);
+
   /* Interactive state tokens (Theme.colors.interactive.*) */
   --color-interactive-hover: var(--interactive-hover);
   --color-interactive-active: var(--interactive-active);
@@ -315,20 +547,14 @@
   --markdown-code-block-line-height: var(--markdown-code-block-line-height);
 
   /* Markdown color variables */
-  --markdown-heading1: var(--markdown-heading1);
-  --markdown-heading2: var(--markdown-heading2);
-  --markdown-heading3: var(--markdown-heading3);
-  --markdown-heading4: var(--markdown-heading4);
   --markdown-link: var(--markdown-link);
   --markdown-link-hover: var(--markdown-link-hover);
   --markdown-list-marker: var(--markdown-list-marker);
-  --markdown-inline-code: var(--markdown-inline-code);
-  --markdown-inline-code-bg: var(--markdown-inline-code-bg);
   --markdown-blockquote: var(--markdown-blockquote);
   --markdown-blockquote-border: var(--markdown-blockquote-border);
 
   /* Markdown spacing defaults */
-  --markdown-paragraph-spacing: 0.75rem;
+  --markdown-paragraph-spacing: 0.65rem;
   --markdown-heading-primary-top: 0.75rem;
   --markdown-heading-primary-bottom: 0.35rem;
   --markdown-heading-secondary-top: 0.6rem;
@@ -343,9 +569,9 @@
   --markdown-heading4-size: var(--text-markdown);
   --markdown-heading5-size: var(--text-markdown);
   --markdown-heading6-size: var(--text-markdown);
-  --font-sans: "IBM Plex Mono", "JetBrains Mono", "Fira Code", "SFMono-Regular", "Menlo", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-heading: var(--font-sans);
-  --font-mono: "IBM Plex Mono", "JetBrains Mono", "Fira Code", "SFMono-Regular", "Menlo", monospace;
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace;
   --font-family-sans: var(--font-sans);
   --font-family-mono: var(--font-mono);
 }
@@ -396,6 +622,16 @@
   .agent-variable {
     --agent-color: var(--syntax-variable);
     --agent-color-bg: var(--syntax-variable);
+  }
+
+  .agent-string {
+    --agent-color: var(--syntax-string);
+    --agent-color-bg: var(--syntax-string);
+  }
+
+  .agent-operator {
+    --agent-color: var(--syntax-operator);
+    --agent-color-bg: var(--syntax-operator);
   }
 
   /* Apply colors with opacity for badges */

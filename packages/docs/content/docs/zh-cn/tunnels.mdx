@@ -5,7 +5,9 @@ description: 安全地将 OpenChamber 开放给远程和移动访问。
 
 # 隧道
 
-隧道是指向你的 OpenChamber 的一个公开链接，让你可以从手机或另一个网络访问它。使用 `openchamber tunnel` 为正在运行的实例创建一个隧道。
+隧道是指向你的 OpenChamber 的一个公开链接，让你可以在另一个网络上用普通浏览器访问它。使用 `openchamber tunnel` 为正在运行的实例创建一个隧道。
+
+> 连接你**自己的设备**（移动应用、另一台桌面设备）通常不需要隧道 — 改为 [配对它们](/zh-cn/connect-devices/)，让端到端加密的 [Private Relay](/zh-cn/private-relay/) 零配置地处理外出访问。
 
 ## 前置要求
 
@@ -110,6 +112,7 @@ openchamber tunnel stop --port 3000
 
 ## 相关内容
 
+- [连接设备](/zh-cn/connect-devices/) — 无需公开 URL 即可配对你自己的设备
 - [安全](/zh-cn/security/) — 在开放访问前保护 UI
 - [桌面端隧道](/zh-cn/desktop-tunnels/) — 无需从 CLI 启动即可在桌面应用中设置隧道
 - [PWA 与移动访问](/zh-cn/mobile/) — 从手机访问 OpenChamber

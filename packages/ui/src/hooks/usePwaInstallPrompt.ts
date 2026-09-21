@@ -3,7 +3,7 @@ import { toast } from '@/components/ui';
 import { isWebRuntime } from '@/lib/desktop';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { useI18n } from '@/lib/i18n';
-import { getSafeSessionStorage, getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage, getSafeSessionStorage } from '@/stores/utils/safeStorage';
 import { shouldShowPwaInstallToast } from '@/components/update/openCodeUpdateDedup';
 
 type InstallPromptOutcome = 'accepted' | 'dismissed';
@@ -66,7 +66,7 @@ export const usePwaInstallPrompt = () => {
       installEvent.preventDefault();
       deferredPrompt = installEvent;
 
-      const localStorage = getSafeStorage();
+      const localStorage = getDeferredSafeStorage();
       const sessionStorage = getSafeSessionStorage();
       const decision = shouldShowPwaInstallToast({
         dismissed: localStorage.getItem(INSTALL_TOAST_DISMISSED_KEY),
@@ -90,7 +90,7 @@ export const usePwaInstallPrompt = () => {
         cancel: {
           label: tRef.current('pwa.installPrompt.dismiss'),
           onClick: () => {
-            getSafeStorage().setItem(INSTALL_TOAST_DISMISSED_KEY, 'true');
+            getDeferredSafeStorage().setItem(INSTALL_TOAST_DISMISSED_KEY, 'true');
             dismissInstallToast();
           },
         },

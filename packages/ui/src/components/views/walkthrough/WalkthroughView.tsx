@@ -1,0 +1,928 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useI18n, type Locale } from '@/lib/i18n';
+import { openExternalUrl } from '@/lib/url';
+import { buildWalkthroughView } from '@/lib/walkthrough/model';
+import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
+import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
+import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
+import { CommitComparisonSelector } from '@/components/views/git/CommitComparisonSelector';
+import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
+import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { gitPushScopeKey, subscribeGitPush } from '@/lib/gitPushEvents';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useGitBranches, useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useUIStore } from '@/stores/useUIStore';
+import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
+import { cn } from '@/lib/utils';
+import { WalkthroughBlocker } from './WalkthroughBlocker';
+import { WALKTHROUGH_ACTION_CLASS } from './walkthroughAction';
+import { WalkthroughStages } from './WalkthroughStages';
+import { useWalkthroughStageProgress } from './useWalkthroughStageProgress';
+import { WalkthroughStream } from './WalkthroughStream';
+import { WalkthroughToc } from './WalkthroughToc';
+import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+
+interface WalkthroughViewProps {
+  directory: string;
+  /**
+   * The context panel keeps this view mounted but hidden via CSS, so work
+   * that should only run for a visible consumer has to be told. Defaults to
+   * true for mounts that have no visibility signal.
+   */
+  visible?: boolean;
+}
+
+const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
+
+// What a walkthrough is — and what it deliberately is not — cannot be read off
+// the panel: the first question users asked about it was whether its marks were
+// review findings. The guide answers that, so it is reachable from the surface
+// itself rather than only from the release announcement.
+const WALKTHROUGH_GUIDE_URL = 'https://docs.openchamber.dev/walkthrough/';
+
+// DropdownMenuLabel defaults to the same size and weight as its items, which
+// makes a heading read as another choice. This matches SelectLabel, the
+// treatment used by the worktree picker.
+const SCOPE_GROUP_LABEL_CLASS = 'typography-meta font-normal text-muted-foreground';
+
+// Below this the table of contents would squeeze the diff into uselessness, so
+// the stream takes the whole panel and the header arrows carry navigation.
+const TOC_MIN_PANEL_WIDTH = 720;
+const TOC_MIN_WIDTH = 180;
+// The diff is the point of the surface; the contents column may never take more
+// than half the panel no matter how far the user drags.
+const TOC_MAX_FRACTION = 0.5;
+
+// Below this the header controls wrap onto a second row and the labels squeeze
+// to two letters and an ellipsis, which reads as broken rather than dense. The
+// controls drop their text instead: every one of them carries an icon that
+// already identifies it.
+//
+// Every control in this row is 32px tall — `Button` size `sm` and the dropdown
+// trigger's `default` size are both h-8, so this is the design system's form
+// scale rather than a number picked here. Three heights in one row (28px
+// pickers, 32px action, 36px arrows) read as misalignment, not hierarchy.
+const HEADER_COMPACT_WIDTH = 680;
+
+export const WalkthroughView = ({ directory: rootDirectory, visible = true }: WalkthroughViewProps) => {
+  const { t, locale, locales, label } = useI18n();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [panelWidth, setPanelWidth] = useState(0);
+
+  // The walkthrough documents one repository. When the root is not itself a
+  // repository, that is the resolved nested repository; everything below keys
+  // off `directory`.
+  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(rootDirectory || null, { enabled: visible });
+  const directory = gitDirectory ?? rootDirectory;
+
+  // Panel width, not viewport width: this surface is resizable independently of
+  // the window.
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      setPanelWidth(entries[0]?.contentRect.width ?? 0);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const storedTocWidth = useUIStore((state) => state.walkthroughTocWidth);
+  const setStoredTocWidth = useUIStore((state) => state.setWalkthroughTocWidth);
+  const [draggingToc, setDraggingToc] = useState(false);
+
+  const showToc = panelWidth === 0 || panelWidth >= TOC_MIN_PANEL_WIDTH;
+  // Zero means the observer has not reported yet; assume there is room rather
+  // than rendering a compact header for one frame on every open.
+  const compactHeader = panelWidth > 0 && panelWidth < HEADER_COMPACT_WIDTH;
+  // Clamped on read rather than on write: the panel can be resized after the
+  // width was stored, and a remembered 400px column must not swallow a narrow
+  // panel.
+  const tocWidth = Math.min(
+    Math.max(storedTocWidth, TOC_MIN_WIDTH),
+    Math.max(TOC_MIN_WIDTH, (panelWidth || TOC_MIN_PANEL_WIDTH) * TOC_MAX_FRACTION)
+  );
+
+  const handleTocResizeStart = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = tocWidth;
+      const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
+      setDraggingToc(true);
+
+      const onMove = (moveEvent: PointerEvent) => {
+        const next = Math.min(maxWidth, Math.max(TOC_MIN_WIDTH, startWidth + moveEvent.clientX - startX));
+        setStoredTocWidth(next);
+      };
+      const onUp = () => {
+        setDraggingToc(false);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    },
+    [setStoredTocWidth, tocWidth]
+  );
+
+  const handleTocResizeKey = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = event.shiftKey ? 40 : 10;
+      const delta = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+      if (delta === 0) return;
+      event.preventDefault();
+      const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
+      setStoredTocWidth(Math.min(maxWidth, Math.max(TOC_MIN_WIDTH, tocWidth + delta)));
+    },
+    [setStoredTocWidth, tocWidth]
+  );
+  const [scope, setScope] = useState<WalkthroughWorkingTreeScope>('all');
+  const [pendingSourceSelection, setPendingSourceSelection] = useState<{ directory: string; kind: 'branch' | 'commit' | 'pr' } | null>(null);
+  const [activeStopId, setActiveStopId] = useState<string | null>(null);
+  const [scrollToStopId, setScrollToStopId] = useState<string | null>(null);
+  const [visitedStopIds, setVisitedStopIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  const diffLayoutPreference = useUIStore((state) => state.diffLayoutPreference);
+  const wrapLines = useUIStore((state) => state.diffWrapLines);
+  // The walkthrough column is narrower than the diff surface and stops are read
+  // top-to-bottom, so `dynamic` resolves to inline here rather than guessing
+  // from the window width.
+  const renderSideBySide = diffLayoutPreference === 'side-by-side';
+
+  const requestedSource = useWalkthroughStore((state) => state.requestedSource[directory]);
+  const clearRequestedSource = useWalkthroughStore((state) => state.clearRequestedSource);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+
+  const status = useGitStatus(directory || null);
+  const runtimeKey = useGitStore((state) => state.runtimeKey);
+  const [pushRevision, setPushRevision] = useState(0);
+  useEffect(() => subscribeGitPush((scope) => {
+    if (scope === gitPushScopeKey(directory, runtimeKey)) setPushRevision((value) => value + 1);
+  }), [directory, runtimeKey]);
+  const branches = useGitBranches(directory || null);
+  const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
+  const ensureAll = useGitStore((state) => state.ensureAll);
+  const { git } = useRuntimeAPIs();
+
+  useEffect(() => {
+    if (visible && directory) void ensureAll(directory, git);
+  }, [directory, ensureAll, git, visible]);
+
+  // Changes and walkthrough share the explicit base choice and reflog detection.
+  const currentBranch = status?.current ?? null;
+  const choosingCommit = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'commit' && !requestedSource;
+  const isCommitScope = choosingCommit || requestedSource?.kind === 'commit';
+  const commitComparison = useCommitComparison(directory || null, currentBranch, visible && isCommitScope,
+    requestedSource?.kind === 'commit' ? requestedSource.hash : undefined);
+  const selectedCommitHash = commitComparison.selectedCommit?.hash ?? (requestedSource?.kind === 'commit' ? requestedSource.hash : null);
+  const { base: comparisonBase, resolved: comparisonBaseResolved, revision: branchRevision } = useBranchComparisonBase(directory || null, currentBranch, visible);
+  const branchSource = useMemo<WalkthroughSource | null>(() => {
+    if (!currentBranch || !comparisonBase || comparisonBase === currentBranch) return null;
+    return { kind: 'branch', baseRef: comparisonBase, headRef: currentBranch };
+  }, [comparisonBase, currentBranch]);
+
+  const choosingPr = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'pr' && !requestedSource;
+  const isPrScope = choosingPr || requestedSource?.kind === 'pr';
+  const prComparison = usePullRequestComparison(directory || null, currentBranch, visible && isPrScope,
+    requestedSource?.kind === 'pr' ? requestedSource : undefined);
+  const selectedPr = prComparison.selectedSource;
+
+  const source = useMemo<WalkthroughSource>(
+    () => isPrScope && selectedPr ? selectedPr : isCommitScope && selectedCommitHash
+      ? { kind: 'commit', hash: selectedCommitHash }
+      : requestedSource?.kind === 'branch'
+      ? branchSource ?? requestedSource
+      : requestedSource ?? { kind: 'working-tree', scope },
+    [branchSource, isCommitScope, isPrScope, requestedSource, scope, selectedCommitHash, selectedPr]
+  );
+  const choosingBranchBase = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'branch' && !requestedSource;
+  const isBranchScope = choosingBranchBase || source.kind === 'branch';
+  const branchNeedsBase = choosingBranchBase || (source.kind === 'branch' && !branchSource);
+  const commitNeedsSelection = choosingCommit || (isCommitScope && !selectedCommitHash);
+  const prNeedsSelection = isPrScope && !selectedPr;
+  const needsSourceSelection = branchNeedsBase || commitNeedsSelection || prNeedsSelection;
+
+  const selectWorkingTree = useCallback(
+    (value: WalkthroughWorkingTreeScope) => {
+      setPendingSourceSelection(null);
+      clearRequestedSource(directory);
+      setScope(value);
+    },
+    [clearRequestedSource, directory]
+  );
+  const entry = useWalkthroughStore((state) => state.getEntry(directory, source));
+  const load = useWalkthroughStore((state) => state.load);
+  const generate = useWalkthroughStore((state) => state.generate);
+  const cancel = useWalkthroughStore((state) => state.cancel);
+  const requestSource = useWalkthroughStore((state) => state.requestSource);
+  useEffect(() => {
+    if (!choosingPr || !selectedPr) return;
+    requestSource(directory, selectedPr);
+    setPendingSourceSelection(null);
+  }, [choosingPr, directory, requestSource, selectedPr]);
+  useEffect(() => {
+    if (!choosingBranchBase || !branchSource) return;
+    requestSource(directory, branchSource);
+    setPendingSourceSelection(null);
+  }, [branchSource, choosingBranchBase, directory, requestSource]);
+  useEffect(() => {
+    if (!choosingCommit || !selectedCommitHash) return;
+    requestSource(directory, { kind: 'commit', hash: selectedCommitHash });
+    setPendingSourceSelection(null);
+  }, [choosingCommit, directory, requestSource, selectedCommitHash]);
+  const selectModel = useWalkthroughStore((state) => state.selectModel);
+  const selectedModel = useWalkthroughStore((state) => state.getSelectedModel(directory, source));
+  const selectLanguage = useWalkthroughStore((state) => state.selectLanguage);
+  const selectedLanguage = useWalkthroughStore((state) => state.getSelectedLanguage(directory, source));
+
+  // Explicit pick first, then the language the walkthrough on screen is
+  // actually written in, then the interface locale. The middle step matters for
+  // the same reason it does for the model: reopening a review should describe
+  // what is there, not what a fresh one would be.
+  const generatedLanguage = entry.result?.language;
+  const activeLanguage: Locale = (
+    selectedLanguage && locales.includes(selectedLanguage as Locale)
+      ? (selectedLanguage as Locale)
+      : generatedLanguage && locales.includes(generatedLanguage as Locale)
+        ? (generatedLanguage as Locale)
+        : locale
+  );
+
+  // Reloads on a model or language change: whether this diff fits, and whether
+  // the model can produce structured output, are answers about a specific
+  // request — and the language instruction is part of that request.
+  const sourceRevision = source.kind === 'branch' ? branchRevision : '';
+  const prPushRevision = source.kind === 'pr' ? pushRevision : 0;
+  const lastPrRead = useRef<string | null>(null);
+  useEffect(() => {
+    if (!visible || needsSourceSelection) return;
+    if (source.kind === 'pr') {
+      const key = JSON.stringify([runtimeKey, directory, source, activeLanguage, selectedModel, prPushRevision]);
+      if (lastPrRead.current === key) return;
+      lastPrRead.current = key;
+    }
+    void load(directory, source, { language: activeLanguage });
+  }, [activeLanguage, needsSourceSelection, directory, load, source, selectedModel, sourceRevision, visible, runtimeKey, prPushRevision]);
+
+  const view = useMemo(() => needsSourceSelection ? null : buildWalkthroughView(entry.result), [needsSourceSelection, entry.result]);
+
+  // A new walkthrough is a new reading path: keeping the old progress would
+  // mark stops as visited that the user has never seen.
+  const generatedAt = entry.result?.generatedAt;
+  const lastGeneratedAt = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (lastGeneratedAt.current === generatedAt) return;
+    lastGeneratedAt.current = generatedAt;
+    setVisitedStopIds(new Set());
+    setActiveStopId(view?.stops[0]?.stop.id ?? null);
+  }, [generatedAt, view]);
+
+  const handleActiveStopChange = useCallback((stopId: string) => {
+    setActiveStopId(stopId);
+    setVisitedStopIds((visited) => {
+      if (visited.has(stopId)) return visited;
+      const next = new Set(visited);
+      next.add(stopId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectStop = useCallback(
+    (stopId: string) => {
+      handleActiveStopChange(stopId);
+      setScrollToStopId(stopId);
+    },
+    [handleActiveStopChange]
+  );
+
+  const step = useCallback(
+    (delta: number) => {
+      if (!view || view.stops.length === 0) return;
+      const currentIndex = view.stops.findIndex((stop) => stop.stop.id === activeStopId);
+      const nextIndex = Math.min(view.stops.length - 1, Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + delta));
+      handleSelectStop(view.stops[nextIndex].stop.id);
+    },
+    [activeStopId, handleSelectStop, view]
+  );
+
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const sourceValue = isPrScope ? 'pr' : isCommitScope ? 'commit' : isBranchScope ? 'branch' : source.kind === 'working-tree' ? source.scope : source.kind;
+  const sourceLabel = isPrScope ? t('session.githubIntegration.tabs.pullRequests') : isCommitScope ? t('commitComparison.mode') : isBranchScope
+    ? t('walkthrough.scope.branch')
+    : source.kind === 'pr'
+      ? t('walkthrough.scope.pullRequest', { number: source.number })
+      : scope === 'all'
+        ? t('walkthrough.scope.all')
+        : scope === 'staged'
+          ? t('walkthrough.scope.staged')
+          : t('walkthrough.scope.working');
+
+  // Explicit pick first, then the model that actually produced what is on
+  // screen, then whatever settings resolve to. The middle step is what makes
+  // reopening a review show the model behind it rather than the default.
+  // Never present a provider without a usable login as the current selection —
+  // the picker already hides them from the menu; showing one as selected was
+  // the whole "why say so?" failure mode.
+  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
+  const [modelProviders, setModelProviders] = useState<string[] | undefined>(undefined);
+
+  const providerIsAuthenticated = (providerId: string | undefined) => {
+    if (!providerId) return false;
+    // Until the auth list loads, do not present a candidate as selected —
+    // otherwise an unauthenticated config model flashes in the picker.
+    if (modelProviders === undefined) return false;
+    return modelProviders.includes(providerId);
+  };
+  const readinessModelRef = entry.readiness?.model
+    && entry.readiness.model.hasLogin !== false
+    && providerIsAuthenticated(entry.readiness.model.providerID)
+    ? `${entry.readiness.model.providerID}/${entry.readiness.model.modelID}`
+    : undefined;
+  const resultModelRef = entry.result?.model
+    && providerIsAuthenticated(entry.result.model.providerID)
+    ? `${entry.result.model.providerID}/${entry.result.model.modelID}`
+    : undefined;
+  const selectedModelUsable = selectedModel
+    && providerIsAuthenticated(selectedModel.split('/')[0])
+    ? selectedModel
+    : undefined;
+  const activeModel = selectedModelUsable ?? resultModelRef ?? readinessModelRef;
+  const [activeProviderId, ...activeModelParts] = (activeModel ?? '').split('/');
+  const activeModelId = activeModelParts.join('/');
+
+  useEffect(() => {
+    if (modelProviders !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await runtimeFetch('/api/small-model', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return;
+        const payload = (await response.json().catch(() => null)) as { authenticatedProviders?: unknown } | null;
+        if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
+          setModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
+        }
+      } catch {
+        // Leave undefined: the picker then offers every provider, which is
+        // worse but not broken.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [modelProviders]);
+
+  const isStructuredOutputCapable = useCallback(
+    (providerId: string, modelId: string) =>
+      modelsMetadata.get(`${providerId}/${modelId}`)?.structured_output !== false,
+    [modelsMetadata]
+  );
+
+  // Only generation is worth interrupting. A read is a few hundred milliseconds
+  // of git with nothing to cancel, and offering a Cancel button for it made the
+  // action flicker every time the model or language changed.
+  const isGeneratingEntry = entry.status === 'generating';
+
+  // What is on screen versus what is being asked for. A read that has settled
+  // is the only thing that can answer this: while one is in flight the panel is
+  // still showing the previous answer, and a banner claiming something is
+  // missing before we know would be the same flicker in another place.
+  const shownModel = entry.result?.model
+    ? `${entry.result.model.providerID}/${entry.result.model.modelID}`
+    : undefined;
+  const shownLanguage = entry.result?.language;
+  const shownLocale = shownLanguage && locales.includes(shownLanguage as Locale)
+    ? (shownLanguage as Locale)
+    : undefined;
+  const settled = entry.status === 'ready' && Boolean(view);
+  // An entry written before walkthroughs had a language carries none. Unknown
+  // is not the same as different, so it is not reported as missing.
+  const languageMissing = settled && Boolean(shownLocale) && shownLocale !== activeLanguage;
+  const modelMissing = settled && Boolean(shownModel) && Boolean(activeModel) && shownModel !== activeModel;
+
+  // The stage list outlives the work by a beat. Assembling takes milliseconds,
+  // so without this the result replaces the list before the last step is ever
+  // seen finishing — the user is told about a step they never observe.
+  const stageProgress = useWalkthroughStageProgress(entry.stage, entry.status === 'generating');
+
+  // Only a generation that started from an empty panel gets held: regenerating
+  // over an existing walkthrough keeps the stream on screen with a banner, and
+  // hiding readable content to show a progress list would be a downgrade.
+  const startedFromEmptyRef = useRef(false);
+  const previousStatusRef = useRef(entry.status);
+  useEffect(() => {
+    if (previousStatusRef.current !== 'generating' && entry.status === 'generating') {
+      startedFromEmptyRef.current = !view;
+    }
+    previousStatusRef.current = entry.status;
+  }, [entry.status, view]);
+
+  const showStages = startedFromEmptyRef.current
+    && (entry.status === 'generating' || stageProgress.holding);
+  // Auth/login gaps are not a full-panel blocker: hide the unusable model and
+  // disable Generate instead of explaining a raw provider error.
+  const blockedReason = entry.error?.code === 'context-too-small'
+    || entry.error?.code === 'structured-output-unsupported'
+    || entry.error?.code === 'no-model'
+    || entry.error?.code === 'empty-diff'
+    || entry.error?.code === 'only-generated'
+    || entry.error?.code === 'output-exhausted'
+    // Client-detected rather than reported: the server answered something that
+    // was not JSON, so it has no walkthrough routes at all.
+    || entry.error?.code === 'server-unsupported'
+    ? entry.error.code
+    : entry.readiness && !entry.readiness.ready && !view
+      && entry.readiness.reason !== 'no-provider-login'
+      ? entry.readiness.reason
+      : undefined;
+
+  // Both sources carry the model that was tried; the error is the more specific
+  // one when generation actually ran.
+  const blockedModel = entry.error?.model ?? entry.readiness?.model;
+  const blockedRequiredChars = entry.error?.requiredChars ?? entry.readiness?.requiredChars;
+  const blockedAvailableChars = entry.error?.availableChars ?? entry.readiness?.availableChars;
+
+  // Not ready, or no usable selected model, means Generate must not look
+  // actionable — including when the resolved model has no login.
+  const generateDisabled = needsSourceSelection || !activeModel || Boolean(entry.readiness && !entry.readiness.ready);
+
+  const handleGenerate = useCallback(
+    (force: boolean) => {
+      if (generateDisabled) return;
+      void generate(directory, source, { force, language: activeLanguage });
+    },
+    [activeLanguage, directory, generate, generateDisabled, source]
+  );
+
+  const isGitRepo = useIsGitRepo(gitDirectory || null);
+  const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
+  const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
+  // Non-repo root: surface nested-repository resolution while the operating
+  // directory has not proven to be a repository (discovering, failed,
+  // unsupported, none found, or settling on the auto-selected one).
+  if (rootIsGitRepo === false && isGitRepo !== true) {
+    return (
+      <NestedRepoResolutionStates
+        rootIsGitRepo={rootIsGitRepo}
+        resolvedIsGitRepo={isGitRepo}
+        nestedRepos={nestedRepos}
+        onRetryDiscovery={() => {
+          if (rootDirectory) void ensureNestedRepos(rootDirectory, { force: true });
+        }}
+      />
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
+          <NestedRepoPicker
+            repositories={nestedRepos}
+            selectedRepository={gitDirectory ?? null}
+            onSelectRepository={(repository) => {
+              if (rootDirectory) selectNestedRepo(rootDirectory, repository);
+            }}
+            repositoryRoot={rootDirectory ?? undefined}
+          />
+        ) : null}
+        <DropdownMenu open={sourceMenuOpen} onOpenChange={setSourceMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t('walkthrough.scope.selectorAria')}
+            >
+              <span className="whitespace-nowrap">{sourceLabel}</span>
+              <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuRadioGroup
+              value={sourceValue}
+              onValueChange={(value) => {
+                setSourceMenuOpen(false);
+                if (value === 'commit') {
+                  clearRequestedSource(directory);
+                  setPendingSourceSelection({ directory, kind: 'commit' });
+                  return;
+                }
+                if (value === 'branch') {
+                  if (branchSource) {
+                    setPendingSourceSelection(null);
+                    requestSource(directory, branchSource);
+                  } else {
+                    clearRequestedSource(directory);
+                    setPendingSourceSelection({ directory, kind: 'branch' });
+                  }
+                  return;
+                }
+                if (value === 'pr') {
+                  clearRequestedSource(directory);
+                  setPendingSourceSelection({ directory, kind: 'pr' });
+                  return;
+                }
+                selectWorkingTree(value as WalkthroughWorkingTreeScope);
+              }}
+            >
+              {/* Grouped so "everything" is visibly scoped to uncommitted work:
+                  on its own next to "This branch" it read as "all changes that
+                  exist", which is the opposite of what it selects. */}
+              <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
+                {t('walkthrough.scope.group.workingTree')}
+              </DropdownMenuLabel>
+              {SCOPES.map((value) => (
+                <DropdownMenuRadioItem key={value} value={value}>
+                  {value === 'all'
+                    ? t('walkthrough.scope.all')
+                    : value === 'staged'
+                      ? t('walkthrough.scope.staged')
+                      : t('walkthrough.scope.working')}
+                </DropdownMenuRadioItem>
+              ))}
+              {currentBranch && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuRadioItem value="branch">
+                    {t('walkthrough.scope.branch')}
+                  </DropdownMenuRadioItem>
+                </>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioItem value="commit">
+                {t('commitComparison.mode')}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="pr">
+                {t('session.githubIntegration.tabs.pullRequests')}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {isBranchScope && (
+          <BranchComparisonSelector
+            key={JSON.stringify([directory, currentBranch])}
+            branches={branches?.all ?? []}
+            currentBranch={currentBranch}
+            base={comparisonBase}
+            onSelect={(base) => {
+              if (directory && currentBranch) setBaseOverride(directory, currentBranch, base);
+            }}
+          />
+        )}
+
+        {isCommitScope && (
+          <CommitComparisonSelector
+            key={JSON.stringify([directory, currentBranch])}
+            commits={commitComparison.commits}
+            selectedHash={selectedCommitHash}
+            loading={commitComparison.loading}
+            error={commitComparison.error}
+            onSelect={commitComparison.select}
+            onRefresh={() => void commitComparison.refresh()}
+          />
+        )}
+        {isPrScope && <PullRequestComparisonSelector key={JSON.stringify([directory, currentBranch])} comparison={prComparison} />}
+
+        <div className="ml-auto flex min-w-0 items-center gap-1">
+          {isPrScope && selectedPr && <Button variant="ghost" size="sm"
+            aria-label={t('contextPanel.mode.diff')} title={t('contextPanel.mode.diff')}
+            onClick={() => openContextPanelTab(rootDirectory, { mode: 'diff', diffScope: 'pr' })}>
+            <Icon name="arrow-left-right" className="size-4" />
+            {!compactHeader && t('contextPanel.mode.diff')}
+          </Button>}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={t('walkthrough.help.guide')}
+                onClick={() => {
+                  void openExternalUrl(WALKTHROUGH_GUIDE_URL);
+                }}
+              >
+                <Icon name="question" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="typography-micro leading-tight">{t('walkthrough.help.guide')}</p>
+            </TooltipContent>
+          </Tooltip>
+
+          {/* A walkthrough nobody can read is worth nothing, so the prose
+              language is a per-review choice like the model — defaulting to the
+              interface language, which is the best evidence of what the reader
+              reads. */}
+          <DropdownMenu open={languageMenuOpen} onOpenChange={setLanguageMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex h-8 min-w-0 flex-shrink items-center gap-1.5 rounded-md px-2 typography-ui-label text-muted-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={t('walkthrough.language.selectorAria')}
+                title={compactHeader ? label(activeLanguage) : undefined}
+              >
+                <Icon name="global" className="size-4 flex-shrink-0 opacity-70" />
+                {!compactHeader && (
+                  <>
+                    <span className="truncate">{label(activeLanguage)}</span>
+                    <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
+                  </>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
+                {t('walkthrough.language.menuLabel')}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={activeLanguage}
+                onValueChange={(value) => {
+                  setLanguageMenuOpen(false);
+                  selectLanguage(directory, source, value);
+                }}
+              >
+                {locales.map((value) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    {label(value)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Choosing a roomier model for a risky change is a per-review call,
+              so this is panel state rather than a settings edit. */}
+          <ModelSelector
+            providerId={activeProviderId ?? ''}
+            modelId={activeModelId}
+            onChange={(providerId, modelId) => {
+              selectModel(directory, source, providerId && modelId ? `${providerId}/${modelId}` : null);
+            }}
+            // While the auth list is loading, allow none — not every provider.
+            allowedProviderIds={modelProviders ?? []}
+            isModelAllowed={isStructuredOutputCapable}
+            tooltipsEnabled={false}
+            dropdownPortalToBody
+            compact={compactHeader}
+            className={cn('h-8 min-w-0', !compactHeader && 'max-w-48')}
+          />
+          {view && (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={t('walkthrough.action.previous')}
+                onClick={() => step(-1)}
+              >
+                <Icon name="arrow-right-s" className="size-4 rotate-180" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={t('walkthrough.action.next')}
+                onClick={() => step(1)}
+              >
+                <Icon name="arrow-right-s" className="size-4" />
+              </Button>
+            </>
+          )}
+
+          {isGeneratingEntry ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label={compactHeader ? t('walkthrough.action.cancel') : undefined}
+              title={compactHeader ? t('walkthrough.action.cancel') : undefined}
+              onClick={() => cancel(directory, source)}
+            >
+              {compactHeader
+                ? <Icon name="stop" className="size-3.5" />
+                : t('walkthrough.action.cancel')}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={generateDisabled
+                ? 'border-border text-muted-foreground'
+                : WALKTHROUGH_ACTION_CLASS}
+              disabled={generateDisabled}
+              aria-label={compactHeader
+                ? (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))
+                : undefined}
+              title={compactHeader
+                ? (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))
+                : undefined}
+              onClick={() => handleGenerate(Boolean(view))}
+            >
+              <Icon name={view ? 'refresh' : 'route'} className="size-3.5" />
+              {!compactHeader && (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))}
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {/* While regenerating over an existing walkthrough the stream keeps showing
+          the old content, so the only other signal would be the button swapping
+          to Cancel — far too quiet for something that runs for tens of seconds. */}
+      {entry.status === 'generating' && view && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-[var(--status-info-background)] px-3 py-2">
+          <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-[var(--status-info)]" />
+          <span className="typography-meta text-foreground">
+            {entry.stage === 'collecting'
+              ? t('walkthrough.stage.collecting')
+              : entry.stage === 'assembling'
+                ? t('walkthrough.stage.assembling')
+                : t('walkthrough.stage.asking')}
+          </span>
+        </div>
+      )}
+
+      {/* Switching the model or the language is a request for a walkthrough
+          that may not exist yet. Falling back to the last one is better than an
+          empty panel, but only if the panel says so — otherwise the picker
+          claims Ukrainian over English prose. */}
+      {(languageMissing || modelMissing) && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-[var(--status-info-background)] px-3 py-2">
+          <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
+          <span className="typography-meta text-foreground">
+            {languageMissing && modelMissing
+              ? t('walkthrough.missing.languageAndModel')
+              : languageMissing
+                ? t('walkthrough.missing.language', {
+                  requested: label(activeLanguage),
+                  shown: label(shownLocale as Locale),
+                })
+                : t('walkthrough.missing.model', { model: activeModelId })}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="ml-auto"
+            disabled={generateDisabled}
+            // Not forced: if an entry for this exact request existed the banner
+            // would not be here, and a forced run would refuse the cache it may
+            // find on the way.
+            onClick={() => handleGenerate(false)}
+          >
+            {t('walkthrough.action.generate')}
+          </Button>
+        </div>
+      )}
+
+      {view?.isStale && entry.status !== 'generating' && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-status-warning/10 px-3 py-2">
+          <Icon name="error-warning" className="size-4 shrink-0 text-status-warning" />
+          <span className="typography-meta text-foreground">
+            {t('walkthrough.stale.banner', { count: view.staleStopCount })}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="ml-auto"
+            // Clicking this again mid-flight would abort the running generation
+            // and start another — paying for the same answer twice.
+            disabled={isGeneratingEntry}
+            onClick={() => handleGenerate(true)}
+          >
+            {t('walkthrough.action.regenerate')}
+          </Button>
+        </div>
+      )}
+
+      {entry.error && !blockedReason && entry.error.code !== 'no-provider-login' && (
+        <div className="flex shrink-0 items-start gap-2 border-b border-border/60 bg-status-error/10 px-3 py-2">
+          <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-status-error" />
+          {/* Provider errors arrive as raw JSON bodies. Show a readable amount
+              and keep the rest reachable rather than filling the panel. */}
+          <span className="typography-meta line-clamp-2 text-foreground" title={entry.error.message}>
+            {entry.error.message}
+          </span>
+        </div>
+      )}
+
+      <div className={cn('flex min-h-0 flex-1', showToc ? 'flex-row' : 'flex-col')}>
+        {prNeedsSelection ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading
+              ? t('session.githubPrPicker.loading.pullRequests') : t('pullRequestComparison.select'))}</p>
+            {!prComparison.loading && <PullRequestComparisonSelector comparison={prComparison} />}
+          </div>
+        ) : commitNeedsSelection ? (
+          <div className="flex flex-1 items-center justify-center gap-2 p-8 typography-meta text-muted-foreground">
+            {commitComparison.loading ? <Icon name="loader-4" className="size-6 animate-spin" />
+              : commitComparison.error ?? t('commitComparison.noCommits')}
+          </div>
+        ) : branchNeedsBase ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            {!comparisonBaseResolved && currentBranch ? (
+              <Icon name="loader-4" className="size-6 animate-spin text-muted-foreground" />
+            ) : (
+              <p className="typography-meta text-muted-foreground">
+                {t('gitView.pr.toast.baseBranchRequired')}
+              </p>
+            )}
+          </div>
+        ) : blockedReason ? (
+          <WalkthroughBlocker
+            reason={blockedReason}
+            model={blockedModel}
+            requiredChars={blockedRequiredChars}
+            availableChars={blockedAvailableChars}
+            onRetry={() => void load(directory, source)}
+          />
+        ) : showStages ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
+            <WalkthroughStages progress={stageProgress} />
+          </div>
+        ) : view ? (
+          <>
+            {showToc && (
+              <>
+                <WalkthroughToc
+                  view={view}
+                  activeStopId={activeStopId}
+                  visitedStopIds={visitedStopIds}
+                  onSelectStop={handleSelectStop}
+                  width={tocWidth}
+                />
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={t('walkthrough.toc.resize')}
+                  tabIndex={0}
+                  onPointerDown={handleTocResizeStart}
+                  onKeyDown={handleTocResizeKey}
+                  className={cn(
+                    'group relative w-1 shrink-0 cursor-col-resize',
+                    'before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:content-[\'\']',
+                    'hover:bg-interactive-selection focus-visible:bg-interactive-selection focus-visible:outline-none',
+                    draggingToc && 'bg-interactive-selection'
+                  )}
+                />
+              </>
+            )}
+            <WalkthroughStream
+              view={view}
+              activeStopId={activeStopId}
+              scrollToStopId={scrollToStopId}
+              onActiveStopChange={handleActiveStopChange}
+              onScrollHandled={() => setScrollToStopId(null)}
+              renderSideBySide={renderSideBySide}
+              wrapLines={wrapLines}
+            />
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            {entry.status === 'loading' ? (
+              <Icon name="loader-4" className="size-6 animate-spin text-muted-foreground" />
+            ) : (
+              <>
+                <Icon name="route" className="size-6 text-muted-foreground" />
+                <h3 className="typography-ui-label font-semibold text-foreground">
+                  {t('walkthrough.empty.title')}
+                </h3>
+                <p className="typography-meta max-w-md text-muted-foreground">
+                  {t('walkthrough.empty.description')}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

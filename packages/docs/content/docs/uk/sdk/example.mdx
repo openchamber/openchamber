@@ -1,0 +1,121 @@
+---
+title: Приклад
+description: Повне розширення OpenChamber з трьох файлів, яке можна скопіювати. Воно підключає токен GitHub, показує список репозиторіїв і прикріплює один із них до чату.
+---
+
+# Приклад
+
+Ці три файли - робоче розширення. Воно підключає токен GitHub, показує список ваших репозиторіїв і дає прикріпити один із них до чату. Скопіюйте їх у теку, а потім замініть API та список під свого провайдера. Поля маніфесту і встановлення описані в [Зробити розширення](/sdk/); кожен метод - у [Host API](/sdk/host/).
+
+`package.json`:
+
+```json
+{
+  "name": "my-repos",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": { "path": "/user", "name": "login" },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "^1.24.0" }
+}
+```
+
+`panel/index.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html, body { margin: 0; height: 100%; } #root { height: 100%; padding: 12px; box-sizing: border-box; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
+```
+
+`panel/main.ts`:
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+import { applyHostReady, mountBanner, mountEmpty, mountList, mountSpinner } from "@openchamber/sdk/ui";
+
+type Repo = { full_name: string; html_url: string; description: string | null };
+
+const host = connectHost();
+const root = document.querySelector("#root")!;
+let mounted: Array<{ dispose: () => void }> = [];
+
+const clear = () => {
+  for (const block of mounted) block.dispose();
+  mounted = [];
+};
+
+let generation = 0;
+const paint = async (connected: boolean) => {
+  const currentGeneration = ++generation;
+  clear();
+  if (!connected) {
+    mounted.push(mountEmpty(root, {
+      title: "Not connected",
+      body: "Paste a GitHub token in Settings → Integrations → GitHub (token).",
+    }));
+    return;
+  }
+  const spinner = mountSpinner(root, { label: "Loading repositories" });
+  mounted.push(spinner);
+  try {
+    const result = await host.request({ method: "GET", path: "/user/repos", query: { per_page: "30", sort: "updated" } });
+    if (currentGeneration !== generation) return;
+    spinner.dispose();
+    if (result.status !== 200) {
+      mounted.push(mountBanner(root, { tone: "error", title: `GitHub answered ${result.status}` }));
+      return;
+    }
+    const repos = JSON.parse(result.body) as Repo[];
+    mounted.push(mountList(root, {
+      items: repos.map((repo) => ({ id: repo.full_name, title: repo.full_name, subtitle: repo.description ?? undefined })),
+      onSelect: (id) => {
+        const repo = repos.find((item) => item.full_name === id);
+        if (repo) void host.attach({ providerId: "my-repos", id: repo.full_name, title: repo.full_name, url: repo.html_url });
+      },
+    }));
+  } catch (error) {
+    if (currentGeneration !== generation) return;
+    spinner.dispose();
+    const text = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    mounted.push(mountBanner(root, { tone: "error", title: "Request failed", body: text }));
+  }
+};
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+});
+let previousConnection: string | undefined;
+host.onConnection((connection) => {
+  const key = JSON.stringify(connection);
+  if (key === previousConnection) return;
+  previousConnection = key;
+  void paint(connection.connected);
+});
+```
+
+Для встановлення й оновлення через Git URL комітьте зібраний `panel/main.js` разом із HTML і маніфестом. OpenChamber не встановлює npm-залежності й не збирає TypeScript під час встановлення extension. Комітьте lockfile, додайте `node_modules/` у `.gitignore`, а браузерні залежності включайте в IIFE. Для оновлення підніміть власну версію extension у `package.json`, перезберіть, закомітьте й запуште. У Settings → Extensions виберіть Update. URL із закріпленим Git-тегом залишається на цьому тегу.
+
+Зберіть його з теки командою `bunx openchamber-guest-bundle panel/main.ts panel/main.js`, а потім додайте теку в Налаштування → Розширення. Ще п'ять прикладів (кожен елемент UI, список задач із діями та командою слеша, локальний сервіс, редактор конфігураційного файлу, пакет лише з інструментами) лежать на [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).

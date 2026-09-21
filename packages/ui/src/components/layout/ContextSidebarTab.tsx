@@ -7,19 +7,20 @@ import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
+import { computeCacheHitRate, findLatestContextFill } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { formatMoney } from '@/lib/money';
 import {
   derivePartsLabel,
   deriveUserSnippet,
   formatAssistantTokens,
   formatMessagePreviewTime,
-  truncateMessageId,
 } from './rawMessagePreview';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -93,6 +94,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   }
 
   const breakdown = source as {
+    total?: unknown;
     input?: unknown;
     output?: unknown;
     reasoning?: unknown;
@@ -104,6 +106,10 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
+  // Multi-step turns accumulate the fields across API round-trips (every tool
+  // call re-reads the whole cached prompt), so summing them overstates the
+  // window. The server-reported total is the final round-trip's window.
+  const reportedTotal = toNonNegativeNumber(breakdown.total);
 
   return {
     input,
@@ -111,7 +117,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
     reasoning,
     cacheRead,
     cacheWrite,
-    total: input + output + reasoning + cacheRead + cacheWrite,
+    total: reportedTotal > 0 ? reportedTotal : input + output + reasoning + cacheRead + cacheWrite,
   };
 };
 
@@ -232,16 +238,6 @@ const computeContextBreakdown = (
 
 const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
 
-const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
-  return new Intl.NumberFormat(getCurrentIntlLocale(), {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value < 0.01 ? 4 : 2,
-    maximumFractionDigits: value < 0.01 ? 4 : 2,
-  }).format(value);
-};
-
 const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';
   return formatDateTimeForPreference(timestamp, timeFormatPreference, {
@@ -275,8 +271,12 @@ export const ContextPanelContent: React.FC = () => {
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const sessions = useSessions();
-  const sessionMessages = useSessionMessageRecords(currentSessionId ?? '');
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const sessions = useSessions(currentSessionDirectory ?? undefined);
+  const sessionMessages = useSessionMessageRecords(
+    currentSessionId ?? '',
+    currentSessionDirectory ?? undefined,
+  );
   const providers = useConfigStore((state) => state.providers);
 
   React.useEffect(() => {
@@ -286,7 +286,7 @@ export const ContextPanelContent: React.FC = () => {
     }
     setExpandedRawMessages((prev) => (Object.keys(prev).length > 0 ? {} : prev));
     setCopiedRawMessageId(null);
-  }, [currentSessionId]);
+  }, [currentSessionDirectory, currentSessionId]);
 
   React.useEffect(() => {
     return () => {
@@ -319,14 +319,11 @@ export const ContextPanelContent: React.FC = () => {
     const assistantMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).role === 'assistant');
     const userMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).isUser);
 
-    let contextMessage: SessionMessage | null = null;
-    for (let i = assistantMessages.length - 1; i >= 0; i -= 1) {
-      const message = assistantMessages[i];
-      if (extractTokenBreakdown(message).total > 0) {
-        contextMessage = message;
-        break;
-      }
-    }
+    // After a compaction the fill is unknown until a response reports tokens;
+    // the compaction record itself still supplies the last-turn breakdown.
+    const contextFill = findLatestContextFill(sessionMessages.map((entry) => entry.info));
+    const contextMessage = contextFill ? sessionMessages[contextFill.index] ?? null : null;
+    const isCompacted = contextFill?.state === 'compacted';
 
     const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
 
@@ -351,9 +348,11 @@ export const ContextPanelContent: React.FC = () => {
     );
 
     const contextLimit = providerModel.contextLimit;
-    const usagePercent = contextLimit && contextLimit > 0
-      ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
-      : 0;
+    const usagePercent = isCompacted
+      ? null
+      : contextLimit && contextLimit > 0
+        ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
+        : 0;
 
     const systemPrompt = ([...sessionMessages].reverse().find(
       (entry) => deriveMessageRole(entry.info).isUser && typeof (entry.info as { system?: unknown }).system === 'string',
@@ -411,7 +410,7 @@ export const ContextPanelContent: React.FC = () => {
   ];
 
   return (
-    <div className="h-full overflow-y-auto bg-background">
+    <ScrollableOverlay outerClassName="h-full" className="bg-background">
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
 
         {/* ── Session header ── */}
@@ -433,12 +432,12 @@ export const ContextPanelContent: React.FC = () => {
           <div className="flex items-baseline justify-between">
             <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
             <span className="typography-micro tabular-nums text-muted-foreground/70">
-              {formatNumber(viewModel.tokenBreakdown.total)}
+              {viewModel.usagePercent === null ? '—' : formatNumber(viewModel.tokenBreakdown.total)}
               {viewModel.contextLimit ? ` / ${formatNumber(viewModel.contextLimit)}` : ''}
             </span>
           </div>
           <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {viewModel.usagePercent > 0 && (
+            {viewModel.usagePercent !== null && viewModel.usagePercent > 0 && (
               <div
                 className="rounded-full transition-all duration-300"
                 style={{
@@ -449,7 +448,9 @@ export const ContextPanelContent: React.FC = () => {
             )}
           </div>
           <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
+            {viewModel.usagePercent === null
+              ? t('contextUsage.compacted.description')
+              : t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
           </div>
         </div>
 
@@ -544,23 +545,15 @@ export const ContextPanelContent: React.FC = () => {
               const partsLabel = derivePartsLabel(message.parts);
               const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
               const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
-              const shortId = truncateMessageId(message.info.id);
               const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
-              // User rows merge the first two columns into a single inline
-              // block: `**user:** <snippet>`. The bold prefix anchors the eye
-              // to the start of the block; the snippet flows inline until the
-              // truncation point chosen by CSS.
-              //
-              // Assistant rows keep two cells: parts label on the left, I/O
-              // tokens right-aligned in a fixed middle column. Other roles
-              // (tool/system) reuse the assistant layout with an empty tokens
-              // cell so columns still align across rows.
+              // Keep token/time columns stable; the message label owns all
+              // remaining space and truncates before it can push metrics.
               const assistantLeft = partsLabel || '\u2014';
               const assistantMiddle = tokens
                 ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
                 : '';
               const otherLeft = role || 'unknown';
-              const otherMiddle = partsLabel;
+              const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
 
               const jsonValue = isExpanded
                 ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
@@ -582,21 +575,13 @@ export const ContextPanelContent: React.FC = () => {
                       }));
                     }}
                   >
-                    {/*
-                      4-column grid: cols 1-2 = role+content area, col 3 = id,
-                      col 4 = time. User rows fuse cols 1-2 into a single
-                      inline `**user:** <snippet>` block via grid-column:
-                      span 2; assistant/other rows keep them split (label |
-                      value) so the I/O tokens line up vertically across rows.
-                    */}
                     <div
                       className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
-                      style={{ gridTemplateColumns: 'auto minmax(0, 1fr) 5rem 4.5rem' }}
+                      style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
                     >
                       {isUser ? (
                         <span
                           className="min-w-0 truncate text-muted-foreground"
-                          style={{ gridColumn: 'span 2' }}
                         >
                           <span className="typography-ui-label text-foreground">user:</span>{' '}
                           {userSnippet}
@@ -607,23 +592,18 @@ export const ContextPanelContent: React.FC = () => {
                             className={
                               isAssistant
                                 ? 'min-w-0 truncate text-muted-foreground'
-                                : 'typography-ui-label text-foreground'
-                            }
-                          >
-                            {isAssistant ? assistantLeft : otherLeft}
-                          </span>
-                          <span
-                            className={
-                              isAssistant
-                                ? 'text-right text-muted-foreground tabular-nums'
                                 : 'min-w-0 truncate text-muted-foreground'
                             }
                           >
-                            {isAssistant ? assistantMiddle : otherMiddle}
+                            {isAssistant ? assistantLeft : otherLabel}
                           </span>
+                          {isAssistant && (
+                            <span className="text-right text-muted-foreground tabular-nums">
+                              {assistantMiddle}
+                            </span>
+                          )}
                         </>
                       )}
-                      <span className="text-right font-mono text-muted-foreground">{shortId}</span>
                       <span className="text-right text-muted-foreground">{previewTime}</span>
                     </div>
                   </button>
@@ -666,6 +646,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 };

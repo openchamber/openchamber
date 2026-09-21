@@ -1,0 +1,30 @@
+---
+title: Git-Identitäten
+description: Committe mit dem richtigen Namen und der richtigen E-Mail für jedes Repository.
+---
+
+# Git-Identitäten
+
+Eine Git-Identität ist der Name und die E-Mail-Adresse, mit denen deine Commits signiert werden. Wenn du zwischen privaten und Arbeits-Repos wechselst, kannst du Identitäten speichern und pro Repository die richtige anwenden, statt dich auf eine einzige globale Einstellung zu verlassen. Verwalte sie unter **Einstellungen → Git**.
+
+## Eine Identität hinzufügen
+
+1. Öffne **Einstellungen → Git** und wähle **New**.
+2. Gib den **name** und die **email** ein, mit denen committen werden soll.
+3. Wähle aus, wie sie sich beim Remote authentifiziert:
+   - **SSH** — verweise auf einen SSH-Schlüssel
+   - **token** — verwende eine gespeicherte Anmeldedaten für einen Host
+4. Gib ihr optional eine Farbe und ein Symbol, damit sie leicht zu erkennen ist.
+
+Auch deine globale System-Identität wird angezeigt, allerdings nur lesbar.
+
+## Eine Identität auf ein Repo anwenden
+
+Das Anwenden einer Identität schreibt sie in die **lokale** Git-Konfiguration dieses Repositories — sie betrifft nur dieses Repo, nicht deine globale Einstellung. SSH-Identitäten setzen außerdem den zu verwendenden SSH-Befehl auf deinen Schlüssel; Token-Identitäten richten die Anmeldedatenspeicherung für den Host ein.
+
+Du kannst Identitäten importieren, die OpenChamber aus deinen vorhandenen Git-Anmeldedaten erkennt, und sie als Token-Identitäten speichern.
+
+## Verwandt
+
+- [Git- & GitHub-Workflows](/git/) — mit der von dir festgelegten Identität committen
+- [GitHub Issues & PRs](/github/) — ein GitHub-Konto für PRs verbinden

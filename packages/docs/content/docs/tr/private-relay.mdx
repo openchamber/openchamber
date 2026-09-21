@@ -1,0 +1,44 @@
+---
+title: Özel Relay
+description: OpenChamber sunucunuza her yerden uçtan uca şifreli bir relay üzerinden ulaşın. Port yok, tunnel yok, kurulum yok.
+---
+
+# Özel Relay
+
+OpenChamber Private Relay, eşleştirilmiş cihazlarınızın sunucunuza her yerden ulaşmasını sağlar. Hücresel ağdan, bir kafe ağından ya da başka bir şehirden bağlanabilirsiniz. Port açmanız, tunnel kurmanız ya da makinenizi internete açmanız gerekmez. Kendi kendini yönetir. [Connect a Device](/connect-devices/) içinde bir cihazı **Anywhere** ile eşleştirmek yeterlidir.
+
+## Nasıl çalışır
+
+Sunucunuz OpenChamber'ın relay altyapısına dışarı giden bir bağlantı açar ve onu açık tutar. Cihazlarınızdan biri ağınızın dışındayken o da relay'e bağlanır ve relay iki taraf arasındaki şifreli trafiği taşır. Makinenizde internetten gelen bağlantıları dinleyen bir şey yoktur.
+
+Doğrudan bağlantı varsa, örneğin aynı Wi-Fi üzerindeyseniz, cihazlarınız onu tercih eder ve relay'i tamamen atlar.
+
+## Relay neyi görür, neyi göremez
+
+Relay kör bir kurye gibidir, aradaki kişi değil:
+
+- **Uçtan uca şifreli.** Cihazınız ve sunucunuz şifreleme anahtarlarını doğrudan birbirleriyle anlaşarak belirler. Relay, anahtarı olmayan kapalı trafiği taşır. Kodunuzu, promptlarınızı veya parolalarınızı okuyamaz.
+- **Yalnızca cihazlarınız bağlanabilir.** Bir cihazın, [one-time pairing](/connect-devices/) yoluyla *sizin* sunucunuzdan verilmiş bir belirtece sahip olması gerekir. Kimse relay üzerinden sunucunuzu keşfedemez ya da sizin oluşturduğunuz bir belirteç olmadan bağlanamaz. İstediğiniz anda herhangi bir belirteci iptal edebilirsiniz.
+- **Eşleştirme bağlantıları tek kullanımlıktır.** Bir eşleştirme QR kodu tam olarak bir kez çalışır ve kullanılmazsa süresi dolar. Bu yüzden sızan eski bir bağlantı değersizdir.
+- **Siz izin vermedikçe hiçbir şey paylaşılmaz.** Relay, siz açana ya da onun üzerinden bir cihaz eşleştirene kadar kapalı kalır. İstediğiniz zaman kapatabilirsiniz. Onun üzerinden bağlı cihazlar anında kesilir.
+
+## Ne zaman çalışır
+
+Relay kendi yaşam döngüsünü yönetir. Hatırlanacak bir anahtar yoktur:
+
+- **İhtiyaç olunca başlar.** Bir **Anywhere** eşleştirmesi oluşturmak relay'i açar. Eşleştirilmiş cihazlardan biri ona ihtiyaç duyduğu sürece yeniden başlatmadan sonra da geri gelir.
+- **Kendi kendine durur.** Hiçbir cihaz ya da bekleyen eşleştirme relay'i kullanmıyorsa, örneğin son relay ile eşleştirilmiş cihazı iptal ettikten sonra, otomatik olarak kapanır.
+
+**Settings → Remote Instances → OpenChamber Relay** ekranında canlı durum görünür. Connected, Reconnecting gibi durumlar ve şu anda üzerinden bağlı cihaz sayısı burada gösterilir. Ayrıca oradan **Disable** düğmesine basarak relay erişimini hemen kapatabilirsiniz. Yerel ağınızdaki cihazlar bundan etkilenmez.
+
+## Relay mi tunnel mı?
+
+- **relay**'i kendi eşleştirilmiş cihazlarınızdan kendi sunucunuza ulaşmak için kullanın. Kurulum gerekmez ve hiçbir şey herkese açık olmaz.
+- Bir [tunnel](/tunnels/) kullanın. Bu, düz bir **public URL** gerektiğinde işe yarar. Örneğin OpenChamber'ı eşleştiremeyeceğiniz bir makinede sıradan bir tarayıcıda açmak ya da bir [UI password](/security/) arkasından erişim paylaşmak için.
+
+## İlgili
+
+- [Connect a Device](/connect-devices/) — bir cihazı tek kullanımlık QR kodla eşleştirin
+- [Mobile Apps](/mobile/) — iOS veya Android uygulamasını yükleyin
+- [Security](/security/) — parolalar, passkey'ler ve temel maruz kalma bilgileri
+- [Remote access](/troubleshooting/remote-access/) — bağlantı tamamlanmadığında

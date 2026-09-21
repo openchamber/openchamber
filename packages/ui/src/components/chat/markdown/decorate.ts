@@ -1,6 +1,9 @@
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import type { IconName } from '@/components/icon/icons';
+import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
+import { getMermaidViewerController } from './mermaidViewer';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -11,38 +14,86 @@ export type MermaidRender = { svg?: string; ascii?: string };
 export type DecorateLabels = {
   copy: string;
   copied: string;
+  enableCodeWrap: string;
+  disableCodeWrap: string;
   copyTable: string;
   downloadTable: string;
   copyDiagram: string;
   downloadDiagram: string;
+  zoomInDiagram: string;
+  zoomOutDiagram: string;
+  resetDiagramView: string;
   previewLabel: string;
   previewTitle: string;
 };
 
+export type MermaidControlOptions = {
+  download: boolean;
+  copy: boolean;
+  showPanZoomControls: boolean;
+};
+
 export type DecorateContext = {
   labels: DecorateLabels;
+  mermaidControls: MermaidControlOptions;
+  codeBlockLineWrap: boolean;
+  deferCodeLineNumberSync?: boolean;
+  onToggleCodeBlockLineWrap?: () => void;
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
   onPreviewLoopback?: (url: string) => void;
 };
 
-// Reference the app's icon sprite (injected into <body> by the shared Icon
-// component) so DOM-built controls use the same themed icons as the rest of
-// the app. Sprite symbols are registered under `#oc-<name>`.
-const spriteIcon = (name: string): string =>
-  `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#oc-${name}"></use></svg>`;
-
 const ICONS = {
-  copy: spriteIcon('file-copy'),
-  check: spriteIcon('check'),
-  download: spriteIcon('download'),
-} as const;
+  copy: 'file-copy',
+  check: 'check',
+  download: 'download',
+  zoomIn: 'add',
+  zoomOut: 'subtract',
+  fit: 'refresh',
+  textWrap: 'text-wrap',
+  image: 'file-image',
+  disclosure: 'arrow-right-s',
+} as const satisfies Record<string, IconName>;
 
 const ICON_BTN_CLASS =
-  'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors';
+  'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]';
 
-const setHtml = (el: Element, html: string): void => {
-  el.innerHTML = html;
+const setIcon = (el: Element, icon: keyof typeof ICONS): void => {
+  const iconName = ICONS[icon];
+  const svg = el.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'remixicon size-3.5');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = el.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#oc-${iconName}`);
+  svg.appendChild(use);
+  el.replaceChildren(svg);
+};
+
+const decorateImageLabels = (root: HTMLElement): void => {
+  for (const label of Array.from(root.querySelectorAll<HTMLElement>('[data-openchamber-markdown-image-label="true"]'))) {
+    if (label.querySelector('[data-openchamber-markdown-image-label-icon]')) continue;
+    const icon = document.createElement('span');
+    icon.className = 'inline-flex shrink-0';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
+    setIcon(icon, 'image');
+    label.prepend(icon);
+  }
+};
+
+const decorateDisclosures = (root: HTMLElement): void => {
+  for (const summary of root.querySelectorAll<HTMLElement>('details[data-md-details] > summary')) {
+    if (summary.querySelector('[data-md-disclosure-icon]')) continue;
+    const label = document.createElement('span');
+    label.append(...Array.from(summary.childNodes));
+    const icon = document.createElement('span');
+    icon.setAttribute('data-md-disclosure-icon', '');
+    icon.setAttribute('aria-hidden', 'true');
+    setIcon(icon, 'disclosure');
+    summary.append(icon, label);
+  }
 };
 
 const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): HTMLButtonElement => {
@@ -52,16 +103,124 @@ const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): 
   button.setAttribute('data-md-action', slot);
   button.setAttribute('title', title);
   button.setAttribute('aria-label', title);
-  setHtml(button, ICONS[icon]);
+  setIcon(button, icon);
   return button;
 };
 
+const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
+  const body = wrapper.querySelector<HTMLElement>('[data-md-code-body]');
+  const pre = wrapper.querySelector<HTMLElement>('pre');
+  const code = wrapper.querySelector<HTMLElement>('pre code');
+  const lineContents = wrapper.querySelectorAll<HTMLElement>('[data-md-code-line-content]');
+  const wrapButton = wrapper.querySelector<HTMLButtonElement>('[data-md-action="toggle-code-wrap"]');
+  wrapper.setAttribute('data-code-wrap', enabled ? 'true' : 'false');
+  body?.classList.toggle('overflow-x-auto', !enabled);
+  body?.classList.toggle('overflow-x-hidden', enabled);
+  pre?.classList.toggle('whitespace-pre-wrap', enabled);
+  pre?.classList.toggle('break-words', enabled);
+  code?.classList.toggle('whitespace-pre-wrap', enabled);
+  code?.classList.toggle('break-words', enabled);
+  if (pre) {
+    pre.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    pre.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  if (code) {
+    code.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    code.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  for (const lineContent of Array.from(lineContents)) {
+    lineContent.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    lineContent.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  if (wrapButton) {
+    const title = enabled ? labels.disableCodeWrap : labels.enableCodeWrap;
+    wrapButton.setAttribute('title', title);
+    wrapButton.setAttribute('aria-label', title);
+    wrapButton.classList.toggle('text-foreground', enabled);
+    wrapButton.classList.toggle('opacity-100', enabled);
+    wrapButton.classList.toggle('text-muted-foreground', !enabled);
+    wrapButton.classList.toggle('opacity-65', !enabled);
+    wrapButton.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  }
+};
+
+const layoutCodeLines = (pre: HTMLPreElement): void => {
+  const code = pre.querySelector<HTMLElement>(':scope > code');
+  if (!code || code.hasAttribute('data-md-code-lines')) return;
+
+  // The real gutter takes over the reserved footprint.
+  pre.removeAttribute('data-md-gutter-reserved');
+
+  const text = code.textContent ?? '';
+  const hasTrailingNewline = text.endsWith('\n');
+  const lines = hasTrailingNewline ? text.slice(0, -1).split('\n') : text.split('\n');
+  const sourceLines = lines.length > 0 ? lines : [''];
+  const highlightedLines = Array.from(code.children).filter((child) => child.classList.contains('line'));
+  if (
+    hasTrailingNewline
+    && highlightedLines.length === sourceLines.length + 1
+    && highlightedLines.at(-1)?.textContent === ''
+  ) {
+    highlightedLines.pop();
+  }
+  const preserveHighlighting = highlightedLines.length === sourceLines.length;
+  const fragment = document.createDocumentFragment();
+
+  sourceLines.forEach((sourceLine, index) => {
+    const row = document.createElement('span');
+    row.setAttribute('data-md-code-line', '');
+
+    const number = document.createElement('span');
+    number.setAttribute('data-md-code-line-number', String(index + 1));
+    number.setAttribute('aria-hidden', 'true');
+
+    const content = document.createElement('span');
+    content.setAttribute('data-md-code-line-content', '');
+    if (preserveHighlighting) {
+      const highlightedLine = highlightedLines[index];
+      if (highlightedLine) content.append(...Array.from(highlightedLine.childNodes));
+    } else {
+      content.textContent = sourceLine;
+    }
+    row.append(number, content);
+    fragment.appendChild(row);
+    if (index < sourceLines.length - 1 || hasTrailingNewline) {
+      const lineBreak = document.createElement('span');
+      lineBreak.setAttribute('data-md-code-line-break', '');
+      lineBreak.textContent = '\n';
+      fragment.appendChild(lineBreak);
+    }
+  });
+
+  code.replaceChildren(fragment);
+  code.setAttribute('data-md-code-lines', '');
+  code.toggleAttribute('data-md-code-trailing-newline', hasTrailingNewline);
+};
+
+export const getMarkdownCodeText = (code: HTMLElement): string => {
+  const lineContents = Array.from(code.querySelectorAll<HTMLElement>('[data-md-code-line-content]'));
+  if (lineContents.length === 0) return code.textContent ?? '';
+  const text = lineContents.map((line) => line.textContent ?? '').join('\n');
+  return code.hasAttribute('data-md-code-trailing-newline') ? `${text}\n` : text;
+};
+
+export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
+  const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
+  for (const wrapper of Array.from(wrappers)) {
+    const pre = wrapper.querySelector<HTMLPreElement>('pre');
+    if (pre) layoutCodeLines(pre);
+    applyCodeBlockWrapState(wrapper, enabled, labels);
+  }
+};
+
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
-  setHtml(button, ICONS.check);
+  setIcon(button, 'check');
   button.setAttribute('title', copiedTitle);
+  button.setAttribute('aria-label', copiedTitle);
   window.setTimeout(() => {
-    setHtml(button, ICONS[restore]);
+    setIcon(button, restore);
     button.setAttribute('title', restoreTitle);
+    button.setAttribute('aria-label', restoreTitle);
   }, 2000);
 };
 
@@ -78,7 +237,7 @@ const decorateInlineCode = (root: HTMLElement): void => {
   }
 };
 
-const decorateCodeBlocks = (root: HTMLElement, labels: DecorateLabels): void => {
+const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
   const blocks = root.querySelectorAll<HTMLPreElement>('pre');
   for (const pre of Array.from(blocks)) {
     // Skip mermaid placeholders (handled separately).
@@ -104,19 +263,37 @@ const decorateCodeBlocks = (root: HTMLElement, labels: DecorateLabels): void => 
     const langLabel = document.createElement('span');
     langLabel.className = 'font-mono text-[13px] text-muted-foreground';
     langLabel.textContent = language;
-    const copyBtn = makeIconButton('copy', labels.copy, 'copy-code');
+    const copyBtn = makeIconButton('copy', ctx.labels.copy, 'copy-code');
+    const wrapBtn = makeIconButton('textWrap', ctx.codeBlockLineWrap ? ctx.labels.disableCodeWrap : ctx.labels.enableCodeWrap, 'toggle-code-wrap');
     header.appendChild(langLabel);
-    header.appendChild(copyBtn);
+    const actions = document.createElement('div');
+    actions.className = 'flex items-center gap-1';
+    actions.setAttribute('data-md-code-actions', '');
+    actions.appendChild(wrapBtn);
+    actions.appendChild(copyBtn);
+    header.appendChild(actions);
 
     const body = document.createElement('div');
+    body.setAttribute('data-md-code-body', '');
     body.className = 'px-3 py-2.5 overflow-x-auto';
 
     parent.replaceChild(wrapper, pre);
     pre.style.margin = '0';
     pre.style.background = 'transparent';
+    pre.classList.add('min-w-0', 'w-full', 'flex-1');
+    if (!ctx.deferCodeLineNumberSync) {
+      layoutCodeLines(pre);
+    } else {
+      // Streaming defers the per-line gutter markup, but the gutter's
+      // horizontal footprint is reserved immediately — otherwise the
+      // end-of-stream decorate pass shifts every code line right by the
+      // gutter column and the finished message visibly jumps.
+      pre.setAttribute('data-md-gutter-reserved', '');
+    }
     body.appendChild(pre);
     wrapper.appendChild(header);
     wrapper.appendChild(body);
+    applyCodeBlockWrapState(wrapper, ctx.codeBlockLineWrap, ctx.labels);
   }
 };
 
@@ -171,6 +348,10 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
   return menu;
 };
 
+const TABLE_COLUMN_MIN_WIDTH = 120;
+const TABLE_COLUMN_MAX_WIDTH = 320;
+const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
+
 const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
   const tables = root.querySelectorAll<HTMLTableElement>('table');
   for (const table of Array.from(tables)) {
@@ -178,7 +359,7 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex flex-col space-y-2';
+    wrapper.className = 'group my-4 flex w-fit max-w-full flex-col space-y-2';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
 
     const toolbar = document.createElement('div');
@@ -211,7 +392,8 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (!parent) continue;
     parent.replaceChild(wrapper, table);
     table.setAttribute('data-markdown', 'table');
-    table.classList.add('w-full', 'border-collapse', 'text-sm');
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'pending');
+    table.classList.add('w-max', 'border-collapse', 'text-sm');
 
     for (const tr of Array.from(table.querySelectorAll('tr'))) {
       tr.classList.add('border-b', 'border-border/60');
@@ -220,15 +402,110 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     lastBodyRow?.classList.remove('border-b');
     lastBodyRow?.classList.add('border-0');
     for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
+      th.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
     }
     for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
+      td.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
     }
 
     scroll.appendChild(table);
     wrapper.appendChild(toolbar);
     wrapper.appendChild(scroll);
+  }
+};
+
+export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
+  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(
+    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"])`,
+  ));
+  if (tables.length === 0 || !root.isConnected) return;
+
+  const measurementRoot = root.ownerDocument.createElement('div');
+  measurementRoot.setAttribute('aria-hidden', 'true');
+  measurementRoot.setAttribute('data-md-table-measure', '');
+  measurementRoot.style.position = 'fixed';
+  measurementRoot.style.left = '-100000px';
+  measurementRoot.style.top = '0';
+  measurementRoot.style.visibility = 'hidden';
+  measurementRoot.style.pointerEvents = 'none';
+  measurementRoot.style.width = 'max-content';
+
+  const probes = tables.map((table) => {
+    const getRowCells = (row: HTMLTableRowElement): HTMLTableCellElement[] => (
+      Array.from(row.children).filter((child): child is HTMLTableCellElement => (
+        child.tagName === 'TH' || child.tagName === 'TD'
+      ))
+    );
+    const bodyRows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody tr'));
+    const sourceRows = bodyRows.some((row) => getRowCells(row).length > 0)
+      ? bodyRows
+      : Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr'));
+    const columnCount = Math.max(
+      0,
+      ...Array.from(table.querySelectorAll<HTMLTableRowElement>('tr')).map((row) => getRowCells(row).length),
+    );
+    const columnProbes: HTMLTableElement[] = [];
+
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const probeTable = root.ownerDocument.createElement('table');
+      probeTable.className = table.className;
+      probeTable.style.tableLayout = 'auto';
+      probeTable.style.width = 'max-content';
+      const probeBody = root.ownerDocument.createElement('tbody');
+
+      for (const row of sourceRows) {
+        const sourceCell = getRowCells(row)[columnIndex];
+        if (!sourceCell) continue;
+        const probeRow = root.ownerDocument.createElement('tr');
+        const probeCell = sourceCell.cloneNode(true);
+        if (!(probeCell instanceof HTMLElement)) continue;
+        probeCell.style.width = 'auto';
+        probeCell.style.minWidth = '0';
+        probeCell.style.maxWidth = 'none';
+        probeCell.style.whiteSpace = 'nowrap';
+        probeCell.style.overflowWrap = 'normal';
+        probeRow.appendChild(probeCell);
+        probeBody.appendChild(probeRow);
+      }
+
+      probeTable.appendChild(probeBody);
+      measurementRoot.appendChild(probeTable);
+      columnProbes.push(probeTable);
+    }
+
+    return { table, columnProbes };
+  });
+
+  root.appendChild(measurementRoot);
+  const plans = probes.map(({ table, columnProbes }) => ({
+    table,
+    widths: columnProbes.map((probe) => Math.min(
+      TABLE_COLUMN_MAX_WIDTH,
+      Math.max(TABLE_COLUMN_MIN_WIDTH, Math.ceil(probe.getBoundingClientRect().width)),
+    )),
+  }));
+  measurementRoot.remove();
+
+  for (const { table, widths } of plans) {
+    const existingColumns = Array.from(table.children).find((child) => (
+      child.matches('colgroup[data-md-table-columns]')
+    ));
+    existingColumns?.remove();
+
+    const colgroup = root.ownerDocument.createElement('colgroup');
+    colgroup.setAttribute('data-md-table-columns', '');
+    for (const width of widths) {
+      const column = root.ownerDocument.createElement('col');
+      column.style.width = `${width}px`;
+      colgroup.appendChild(column);
+    }
+    const firstSection = Array.from(table.children).find((child) => (
+      child.tagName === 'THEAD' || child.tagName === 'TBODY' || child.tagName === 'TFOOT'
+    )) ?? null;
+    table.insertBefore(colgroup, firstSection);
+    table.style.tableLayout = 'fixed';
+    table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
   }
 };
 
@@ -246,33 +523,52 @@ const decorateMermaid = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const block = document.createElement('div');
     block.setAttribute('data-markdown', 'mermaid-block');
+    block.setAttribute('data-md-source', source);
     block.className = 'group relative';
 
     const scroll = document.createElement('div');
     scroll.setAttribute('data-markdown', 'mermaid-scroll');
 
     const toolbar = document.createElement('div');
-    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';
+    toolbar.setAttribute('data-markdown', 'mermaid-toolbar');
+    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity';
 
     if (rendered.svg) {
+      block.setAttribute('data-mermaid-render', 'svg');
+      const viewport = document.createElement('div');
+      viewport.setAttribute('data-markdown', 'mermaid-viewport');
       const svgHost = document.createElement('div');
       svgHost.setAttribute('data-markdown', 'mermaid');
-      setHtml(svgHost, rendered.svg);
-      scroll.appendChild(svgHost);
-      const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
-      copy.setAttribute('data-md-source', source);
-      const download = makeIconButton('download', ctx.labels.downloadDiagram, 'mermaid-download');
-      download.setAttribute('data-md-svg', '1');
-      toolbar.appendChild(copy);
-      toolbar.appendChild(download);
+      svgHost.setAttribute('data-md-original-svg', rendered.svg);
+      svgHost.innerHTML = rendered.svg;
+      viewport.appendChild(svgHost);
+      scroll.appendChild(viewport);
+      if (ctx.mermaidControls.showPanZoomControls) {
+        toolbar.appendChild(makeIconButton('zoomIn', ctx.labels.zoomInDiagram, 'mermaid-zoom-in'));
+        toolbar.appendChild(makeIconButton('zoomOut', ctx.labels.zoomOutDiagram, 'mermaid-zoom-out'));
+        toolbar.appendChild(makeIconButton('fit', ctx.labels.resetDiagramView, 'mermaid-fit'));
+      }
+      if (ctx.mermaidControls.copy) {
+        const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
+        copy.setAttribute('data-md-source', source);
+        toolbar.appendChild(copy);
+      }
+      if (ctx.mermaidControls.download) {
+        const download = makeIconButton('download', ctx.labels.downloadDiagram, 'mermaid-download');
+        download.setAttribute('data-md-svg', '1');
+        toolbar.appendChild(download);
+      }
     } else {
+      block.setAttribute('data-mermaid-render', 'ascii');
       const asciiPre = document.createElement('pre');
       asciiPre.setAttribute('data-markdown', 'mermaid-ascii');
       asciiPre.textContent = rendered.ascii || source;
       scroll.appendChild(asciiPre);
-      const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
-      copy.setAttribute('data-md-source', rendered.ascii || source);
-      toolbar.appendChild(copy);
+      if (ctx.mermaidControls.copy) {
+        const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
+        copy.setAttribute('data-md-source', rendered.ascii || source);
+        toolbar.appendChild(copy);
+      }
     }
 
     block.appendChild(scroll);
@@ -300,6 +596,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
     const faviconUrl = getExternalFaviconUrl(href);
     if (faviconUrl) {
       const favWrap = document.createElement('span');
+      favWrap.setAttribute(MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, 'true');
       favWrap.className =
         'mr-1 inline-flex size-[18px] items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)] align-middle';
       const img = document.createElement('img');
@@ -322,7 +619,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
       preview.setAttribute('data-md-url', href);
       preview.setAttribute('title', ctx.labels.previewTitle);
       preview.setAttribute('aria-label', ctx.labels.previewLabel);
-      setHtml(preview, ICONS.download);
+      setIcon(preview, 'download');
       anchor.parentNode?.insertBefore(preview, anchor.nextSibling);
     }
   }
@@ -330,9 +627,11 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  decorateDisclosures(root);
+  decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
-  decorateCodeBlocks(root, ctx.labels);
+  decorateCodeBlocks(root, ctx);
   decorateTables(root, ctx.labels);
   decorateLinks(root, ctx);
 };
@@ -359,6 +658,67 @@ const closeAllMenus = (container: HTMLElement): void => {
   }
 };
 
+const getContainingMarkdownCode = (node: Node): HTMLElement | null => {
+  const element = node.nodeType === 1 ? node as Element : node.parentElement;
+  return element?.closest<HTMLElement>('pre code[data-md-code-lines]') ?? null;
+};
+
+const getMarkdownCodeSelectionText = (range: Range): string | null => {
+  const code = getContainingMarkdownCode(range.startContainer);
+  if (!code || code !== getContainingMarkdownCode(range.endContainer)) return null;
+  // Line numbers are CSS-generated, so the DOM range is already the exact
+  // source selection, including boundaries between rows and empty lines.
+  return range.toString();
+};
+
+type MarkdownCopyState = {
+  registrations: number;
+  handler: (event: ClipboardEvent) => void;
+  menuHandler: (event: Event) => void;
+};
+
+const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
+
+const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
+  let state = markdownCopyStates.get(doc);
+  if (!state) {
+    const getSelectedText = (): string | null => {
+      const selection = doc.getSelection();
+      if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
+      return getMarkdownCodeSelectionText(selection.getRangeAt(0));
+    };
+    const handler = (event: ClipboardEvent) => {
+      if (!event.clipboardData) return;
+      const text = getSelectedText();
+      if (text === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.clipboardData.setData('text/plain', text);
+    };
+    const menuHandler = (event: Event) => {
+      const text = getSelectedText();
+      if (text === null) return;
+      event.preventDefault();
+      void copyTextToClipboard(text);
+    };
+    state = { registrations: 0, handler, menuHandler };
+    markdownCopyStates.set(doc, state);
+    doc.addEventListener('copy', handler, true);
+    doc.defaultView?.addEventListener('openchamber:copy', menuHandler);
+  }
+  state.registrations += 1;
+
+  return () => {
+    const current = markdownCopyStates.get(doc);
+    if (!current) return;
+    current.registrations -= 1;
+    if (current.registrations > 0) return;
+    doc.removeEventListener('copy', current.handler, true);
+    doc.defaultView?.removeEventListener('openchamber:copy', current.menuHandler);
+    markdownCopyStates.delete(doc);
+  };
+};
+
 /**
  * Attach a single delegated click listener for all in-markdown actions: code
  * copy, table copy/download menus, mermaid copy/download, loopback preview.
@@ -368,6 +728,7 @@ export const attachMarkdownInteractions = (
   container: HTMLElement,
   ctx: DecorateContext,
 ): (() => void) => {
+  const unregisterCodeCopy = registerMarkdownCodeCopy(container.ownerDocument);
   const handleClick = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -382,8 +743,19 @@ export const attachMarkdownInteractions = (
     // Copy code
     if (action === 'copy-code') {
       const code = actionEl.closest('[data-component="markdown-code"]')?.querySelector('code');
-      const text = code?.textContent ?? '';
-      if (text) void copyTextToClipboard(text).then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy));
+      const text = code ? getMarkdownCodeText(code) : '';
+      if (text) {
+        actionEl.setAttribute('data-md-copy-pending', '');
+        void copyTextToClipboard(text)
+          .then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy))
+          .finally(() => actionEl.removeAttribute('data-md-copy-pending'));
+      }
+      return;
+    }
+
+    if (action === 'toggle-code-wrap') {
+      event.preventDefault();
+      ctx.onToggleCodeBlockLineWrap?.();
       return;
     }
 
@@ -430,10 +802,25 @@ export const attachMarkdownInteractions = (
       return;
     }
 
+    // Mermaid local pan/zoom controls
+    if (action === 'mermaid-zoom-in' || action === 'mermaid-zoom-out' || action === 'mermaid-fit') {
+      event.preventDefault();
+      const block = actionEl.closest('[data-markdown="mermaid-block"]');
+      const controller = getMermaidViewerController(block);
+      if (action === 'mermaid-zoom-in') {
+        controller?.zoomIn();
+      } else if (action === 'mermaid-zoom-out') {
+        controller?.zoomOut();
+      } else {
+        controller?.fit();
+      }
+      return;
+    }
+
     // Mermaid download svg
     if (action === 'mermaid-download') {
       const svgHost = actionEl.closest('[data-markdown="mermaid-block"]')?.querySelector('[data-markdown="mermaid"]');
-      const svg = svgHost?.innerHTML ?? '';
+      const svg = svgHost?.getAttribute('data-md-original-svg') ?? svgHost?.innerHTML ?? '';
       if (svg) downloadBlob('diagram.svg', svg, 'image/svg+xml;charset=utf-8');
       return;
     }
@@ -448,5 +835,8 @@ export const attachMarkdownInteractions = (
   };
 
   container.addEventListener('click', handleClick);
-  return () => container.removeEventListener('click', handleClick);
+  return () => {
+    unregisterCodeCopy();
+    container.removeEventListener('click', handleClick);
+  };
 };

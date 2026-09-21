@@ -20,14 +20,15 @@ import {
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { isDesktopShell } from '@/lib/desktop';
 import {
-  getProjectActionsState,
+  getProjectSetup,
   saveProjectActionsState,
+  updateProjectSetup,
+  updateSharedProjectSetup,
   type OpenChamberProjectAction,
   type ProjectRef,
 } from '@/lib/openchamberConfig';
@@ -37,10 +38,22 @@ import {
   PROJECT_ACTION_ICONS,
   PROJECT_ACTIONS_UPDATED_EVENT,
 } from '@/lib/projectActions';
+import {
+  PROJECT_SETTINGS_CONTROL_WIDTH,
+  ProjectSettingsSubsection,
+} from '@/components/sections/projects/ProjectSettingsSubsection';
+import {
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_TRIGGER_CLASS,
+} from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 type EditableProjectAction = OpenChamberProjectAction;
+
+const AUTO_SAVE_DELAY_MS = 450;
+const PROJECT_RUN_IN_PARENT_VALUE = '__project__';
 
 const createActionId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -67,10 +80,19 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
   const loadDesktopSsh = useDesktopSshStore((state) => state.load);
 
   const [actions, setActions] = React.useState<EditableProjectAction[]>([]);
+  // Read-only here: the team's actions from the repo file, and whether that
+  // file could be read at all (a broken file is shown, never treated as empty).
+  const [sharedActions, setSharedActions] = React.useState<OpenChamberProjectAction[]>([]);
+  const [sharedState, setSharedState] = React.useState<{ path: string; status: 'missing' | 'ok' | 'invalid'; reason?: string } | null>(null);
+  const [hiddenSharedIds, setHiddenSharedIds] = React.useState<string[]>([]);
+  const [isSharing, setIsSharing] = React.useState(false);
+  const reloadCounterRef = React.useRef(0);
+  const [reloadCounter, setReloadCounter] = React.useState(0);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [isSaving, setIsSaving] = React.useState(false);
   const [initialSnapshot, setInitialSnapshot] = React.useState<string | null>(null);
   const [expandedActions, setExpandedActions] = React.useState<Record<string, boolean>>({});
+  const isSavingRef = React.useRef(false);
+  const validationToastShownRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (!isDesktopShellApp) {
@@ -85,17 +107,25 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
 
     (async () => {
       try {
-        const state = await getProjectActionsState(projectRef);
+        // The page edits the user's own actions; a teammate's shared actions
+        // are read from the repo and must never be copied into the personal file.
+        const setup = await getProjectSetup(projectRef);
         if (cancelled) {
           return;
         }
-        setActions(state.actions);
-        setInitialSnapshot(JSON.stringify({ actions: state.actions }));
+        setActions(setup.personal.projectActions);
+        setSharedActions(setup.shared.projectActions);
+        setSharedState({ path: setup.shared.path, status: setup.shared.status, reason: setup.shared.reason });
+        setHiddenSharedIds(setup.personal.hiddenSharedActionIds);
+        setInitialSnapshot(JSON.stringify({ actions: setup.personal.projectActions }));
       } catch {
         if (cancelled) {
           return;
         }
         setActions([]);
+        setSharedActions([]);
+        setSharedState(null);
+        setHiddenSharedIds([]);
         setInitialSnapshot(JSON.stringify({ actions: [] }));
       } finally {
         if (!cancelled) {
@@ -107,7 +137,79 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
     return () => {
       cancelled = true;
     };
-  }, [projectRef]);
+  }, [projectRef, reloadCounter]);
+
+  const reload = React.useCallback(() => {
+    reloadCounterRef.current += 1;
+    setReloadCounter(reloadCounterRef.current);
+  }, []);
+
+  const notifyActionsUpdated = React.useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PROJECT_ACTIONS_UPDATED_EVENT, { detail: { projectId: projectRef.id } }));
+    }
+  }, [projectRef.id]);
+
+  // Sharing moves an action between the two files: first into the repo file,
+  // then out of the personal one (a failure after the first step leaves the
+  // action visible once, as personal, which the merge resolves). The lists
+  // reload from the server afterwards so both blocks show what is on disk.
+  const shareAction = React.useCallback(async (action: EditableProjectAction) => {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const shared = await updateSharedProjectSetup(projectRef, {
+        projectActions: [...sharedActions.filter((entry) => entry.id !== action.id), action],
+      });
+      if (!shared) {
+        toast.error(t('settings.projects.shared.toast.shareFailed'));
+        return;
+      }
+      await saveProjectActionsState(projectRef, {
+        actions: actions.filter((entry) => entry.id !== action.id),
+        primaryActionId: null,
+      });
+      reload();
+      notifyActionsUpdated();
+    } finally {
+      setIsSharing(false);
+    }
+  }, [actions, isSharing, notifyActionsUpdated, projectRef, reload, sharedActions, t]);
+
+  const makeActionPersonal = React.useCallback(async (action: OpenChamberProjectAction) => {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const shared = await updateSharedProjectSetup(projectRef, {
+        projectActions: sharedActions.filter((entry) => entry.id !== action.id),
+      });
+      if (!shared) {
+        toast.error(t('settings.projects.shared.toast.shareFailed'));
+        return;
+      }
+      await saveProjectActionsState(projectRef, {
+        actions: [...actions.filter((entry) => entry.id !== action.id), action],
+        primaryActionId: null,
+      });
+      reload();
+      notifyActionsUpdated();
+    } finally {
+      setIsSharing(false);
+    }
+  }, [actions, isSharing, notifyActionsUpdated, projectRef, reload, sharedActions, t]);
+
+  const setSharedActionHidden = React.useCallback(async (actionId: string, hidden: boolean) => {
+    const next = hidden
+      ? [...hiddenSharedIds.filter((id) => id !== actionId), actionId]
+      : hiddenSharedIds.filter((id) => id !== actionId);
+    setHiddenSharedIds(next);
+    if (!(await updateProjectSetup(projectRef, { hiddenSharedActionIds: next }))) {
+      toast.error(t('settings.projects.actions.toast.saveFailed'));
+      setHiddenSharedIds(hiddenSharedIds);
+      return;
+    }
+    notifyActionsUpdated();
+  }, [hiddenSharedIds, notifyActionsUpdated, projectRef, t]);
 
   const desktopForwardOptions = React.useMemo(() => {
     if (!isDesktopShellApp) {
@@ -133,6 +235,69 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
     return initialSnapshot !== JSON.stringify({ actions });
   }, [actions, initialSnapshot]);
 
+  const persistActions = React.useCallback(async (nextActions: EditableProjectAction[]) => {
+    const ok = await saveProjectActionsState(projectRef, {
+      actions: nextActions,
+      primaryActionId: null,
+    });
+    if (!ok) {
+      toast.error(t('settings.projects.actions.toast.saveFailed'));
+      return false;
+    }
+    setInitialSnapshot(JSON.stringify({ actions: nextActions }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PROJECT_ACTIONS_UPDATED_EVENT, {
+        detail: { projectId: projectRef.id },
+      }));
+    }
+    return true;
+  }, [projectRef, t]);
+
+  React.useEffect(() => {
+    if (!hasChanges || isLoading || validationError || isSavingRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (isSavingRef.current) {
+        return;
+      }
+      isSavingRef.current = true;
+      void (async () => {
+        try {
+          await persistActions(actions);
+        } finally {
+          isSavingRef.current = false;
+        }
+      })();
+    }, AUTO_SAVE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [actions, hasChanges, isLoading, persistActions, validationError]);
+
+  React.useEffect(() => {
+    if (!hasChanges || !validationError || isLoading) {
+      if (!validationError) {
+        validationToastShownRef.current = null;
+      }
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (validationToastShownRef.current === validationError) {
+        return;
+      }
+      validationToastShownRef.current = validationError;
+      toast.error(validationError);
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hasChanges, isLoading, validationError]);
+
   const handleAddAction = React.useCallback(() => {
     const nextAction = createEmptyAction();
     setActions((prev) => [...prev, nextAction]);
@@ -155,275 +320,302 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
     setActions((prev) => prev.map((entry) => (entry.id === id ? updater(entry) : entry)));
   }, []);
 
-  const handleSave = React.useCallback(async () => {
-    if (validationError) {
-      toast.error(validationError);
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const ok = await saveProjectActionsState(projectRef, {
-        actions,
-        primaryActionId: null,
-      });
-      if (!ok) {
-        toast.error(t('settings.projects.actions.toast.saveFailed'));
-        return;
-      }
-      setInitialSnapshot(JSON.stringify({ actions }));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(PROJECT_ACTIONS_UPDATED_EVENT, {
-          detail: { projectId: projectRef.id },
-        }));
-      }
-      toast.success(t('settings.projects.actions.toast.saved'));
-    } catch {
-      toast.error(t('settings.projects.actions.toast.saveFailed'));
-    } finally {
-      setIsSaving(false);
-    }
-  }, [actions, projectRef, t, validationError]);
-
-  const canSave = !isSaving && !isLoading && hasChanges && !validationError;
-
   return (
-    <div className="mb-8">
-      <div className="mb-1 flex items-start justify-between gap-2">
-        <div>
-          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.projects.actions.title')}</h3>
-          <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.description')}</p>
-        </div>
+    <ProjectSettingsSubsection
+      title={t('settings.projects.actions.title')}
+      info={t('settings.projects.actions.description')}
+      settingsItem="projects.actions"
+      headerAction={(
         <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={handleAddAction}>
           <Icon name="add" className="h-3.5 w-3.5" />
           {t('settings.projects.actions.actions.add')}
         </Button>
-      </div>
+      )}
+      contentClassName="space-y-0"
+    >
+      {!isLoading && sharedState?.status === 'invalid' ? (
+        <p className="typography-meta text-[var(--status-warning)]">
+          {t('settings.projects.shared.invalid', { path: sharedState.path, reason: sharedState.reason ?? '' })}
+        </p>
+      ) : null}
+      {!isLoading && sharedActions.length > 0 && sharedState ? (
+        <div className={cn('space-y-0 pb-1.5', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.projects.shared.actionsFromRepo', { path: sharedState.path })}
+          </p>
+          {sharedActions.map((action) => {
+            const sharedIconKey = (action.icon as keyof typeof PROJECT_ACTION_ICON_MAP) || 'play';
+            const sharedIconName = PROJECT_ACTION_ICON_MAP[sharedIconKey] || 'play';
+            const hidden = hiddenSharedIds.includes(action.id);
+            return (
+              <div key={action.id} className="flex items-center gap-2 py-1">
+                <Icon name={sharedIconName} className={cn('h-4 w-4 shrink-0 text-muted-foreground', hidden && 'opacity-50')} />
+                <span className={cn('typography-ui-label truncate', hidden ? 'text-muted-foreground' : 'text-foreground')}>{action.name}</span>
+                <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
+                  {hidden ? t('settings.projects.shared.hiddenBadge') : t('settings.projects.shared.badge')}
+                </span>
+                <span className="min-w-0 flex-1 typography-meta font-mono text-muted-foreground truncate">{action.command}</span>
+                <Button type="button" variant="ghost" size="xs" className="!font-normal shrink-0" disabled={isSharing} title={hidden ? t('settings.projects.shared.actions.showTitle') : t('settings.projects.shared.actions.hideTitle')} onClick={() => void setSharedActionHidden(action.id, !hidden)}>
+                  {hidden ? t('settings.projects.shared.actions.show') : t('settings.projects.shared.actions.hide')}
+                </Button>
+                <Button type="button" variant="ghost" size="xs" className="!font-normal shrink-0" disabled={isSharing} title={t('settings.projects.shared.actions.makePersonalTitle')} onClick={() => void makeActionPersonal(action)}>
+                  {t('settings.projects.shared.actions.makePersonal')}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {isLoading ? (
+        <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.loading')}</p>
+      ) : actions.length === 0 && sharedActions.length === 0 ? (
+        <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.empty')}</p>
+      ) : actions.length === 0 ? null : (
+        <div className={cn('space-y-0', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+          {actions.map((action) => {
+            const selectedIconKey = (action.icon as keyof typeof PROJECT_ACTION_ICON_MAP) || 'play';
+            const selectedIconName = PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
+            const isOpen = expandedActions[action.id] ?? false;
+            const title = action.name.trim() || t('settings.projects.actions.state.untitled');
 
-      <section className="pb-2 pt-0 space-y-2">
-        {isLoading ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.loading')}</p>
-        ) : actions.length === 0 ? (
-          <div className="py-2">
-            <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.empty')}</p>
-          </div>
-        ) : (
-          <div className="space-y-0 max-w-[30rem]">
-            {actions.map((action) => {
-              const selectedIconKey = (action.icon as keyof typeof PROJECT_ACTION_ICON_MAP) || 'play';
-              const selectedIconName = PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-              const isOpen = expandedActions[action.id] ?? false;
-              const title = action.name.trim() || t('settings.projects.actions.state.untitled');
+            return (
+              <Collapsible
+                key={action.id}
+                open={isOpen}
+                onOpenChange={(open) => {
+                  setExpandedActions((prev) => ({
+                    ...prev,
+                    [action.id]: open,
+                  }));
+                }}
+                className="py-1.5"
+              >
+                <div className="flex items-start gap-2">
+                  <CollapsibleTrigger className="group flex-1 justify-start gap-2 rounded-md px-0 pr-1 py-1 hover:bg-[var(--interactive-hover)] focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]">
+                    {isOpen ? (
+                      <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <Icon name={selectedIconName} className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <span className="typography-ui-label text-foreground truncate">{title}</span>
+                    </div>
+                  </CollapsibleTrigger>
 
-              return (
-                <Collapsible
-                  key={action.id}
-                  open={isOpen}
-                  onOpenChange={(open) => {
-                    setExpandedActions((prev) => ({
-                      ...prev,
-                      [action.id]: open,
-                    }));
-                  }}
-                  className={cn(
-                    'py-1.5'
-                  )}
-                >
-                  <div className="flex items-start gap-2">
-                    <CollapsibleTrigger className="group flex-1 justify-start gap-2 rounded-md px-0 pr-1 py-1 hover:bg-[var(--interactive-hover)] focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]">
-                      {isOpen ? (
-                        <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <Icon name={selectedIconName} className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="typography-ui-label text-foreground truncate">{title}</span>
-                        </div>
-                      </div>
-                    </CollapsibleTrigger>
-
+                  {action.name.trim() && action.command.trim() ? (
                     <Button
                       type="button"
                       variant="ghost"
                       size="xs"
-                      className="!font-normal h-7 w-7 px-0 text-muted-foreground hover:text-[var(--status-error)]"
-                      onClick={() => handleRemoveAction(action.id)}
+                      className="!font-normal shrink-0"
+                      disabled={isSharing || hasChanges}
+                      title={hasChanges ? t('settings.projects.shared.actions.shareAfterSave') : t('settings.projects.shared.actions.shareTitle', { path: sharedState?.path ?? '.openchamber/project.json' })}
+                      onClick={() => void shareAction(action)}
                     >
-                      <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                      {t('settings.projects.shared.actions.share')}
                     </Button>
-                  </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal h-7 w-7 px-0 text-muted-foreground hover:text-[var(--status-error)]"
+                    onClick={() => handleRemoveAction(action.id)}
+                  >
+                    <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
 
-                  <CollapsibleContent className="pt-1.5">
-                    <div className="space-y-2 pb-6 pl-3 pr-3">
-                      <div className="flex items-center gap-2 py-1">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--interactive-border)] text-foreground hover:bg-[var(--interactive-hover)]"
-                                aria-label={t('settings.projects.actions.field.selectIconAria')}
-                              >
-                                <Icon name={selectedIconName} className="h-4 w-4" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start" className="w-56 p-2">
-                              <div className="grid grid-cols-6 gap-1">
-                              {PROJECT_ACTION_ICONS.map((entry) => {
-                                const iconName = entry.Icon;
-                                const selected = (action.icon || 'play') === entry.key;
-                                return (
-                                  <button
-                                    key={entry.key}
-                                    type="button"
-                                    onClick={() => updateAction(action.id, (current) => ({ ...current, icon: entry.key }))}
-                                    className={cn(
-                                      'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-foreground hover:bg-[var(--interactive-hover)]',
-                                      selected && 'border-[var(--primary-base)] bg-[var(--primary-base)]/10 text-[var(--primary-base)]'
-                                    )}
-                                    aria-label={t('settings.projects.actions.field.iconAria', { icon: entry.label })}
-                                  >
-                                    <Icon name={iconName} className="h-4 w-4" />
-                                  </button>
-                                );
-                              })}
-                              </div>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-
-                          <Input
-                            value={action.name}
-                            onChange={(event) => updateAction(action.id, (current) => ({ ...current, name: event.target.value }))}
-                            placeholder={t('settings.projects.actions.field.actionNamePlaceholder')}
-                            className="h-7 max-w-[14rem]"
-                          />
-                      </div>
-
-                      <div className="py-1">
-                        <p className="typography-meta mb-0.5 text-muted-foreground">{t('settings.projects.actions.field.command')}</p>
-                        <Textarea
-                          value={action.command}
-                          onChange={(event) => updateAction(action.id, (current) => ({ ...current, command: event.target.value }))}
-                          placeholder={t('settings.projects.actions.field.commandPlaceholder')}
-                          className="min-h-[88px] max-w-[30rem] font-mono text-xs"
-                        />
-                      </div>
-
-                      <div className="py-1">
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span className="typography-ui-label text-foreground">{t('settings.projects.actions.field.autoOpenUrl')}</span>
-                          <div
-                            className="group flex cursor-pointer items-center gap-2"
-                            role="button"
-                            tabIndex={0}
-                            aria-pressed={action.autoOpenUrl === true}
-                            onClick={() => updateAction(action.id, (current) => ({
-                              ...current,
-                              ...(current.autoOpenUrl === true ? { autoOpenUrl: undefined } : { autoOpenUrl: true }),
-                            }))}
-                            onKeyDown={(event) => {
-                              if (event.key === ' ' || event.key === 'Enter') {
-                                event.preventDefault();
-                                updateAction(action.id, (current) => ({
-                                  ...current,
-                                  ...(current.autoOpenUrl === true ? { autoOpenUrl: undefined } : { autoOpenUrl: true }),
-                                }));
-                              }
-                            }}
+                <CollapsibleContent className="pt-1.5">
+                  <div className="space-y-2 pb-4 pl-3 pr-1">
+                    <div className="flex items-center gap-2 py-1">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--interactive-border)] text-foreground hover:bg-[var(--interactive-hover)]"
+                            aria-label={t('settings.projects.actions.field.selectIconAria')}
                           >
-                            <Checkbox
-                              checked={action.autoOpenUrl === true}
-                              onChange={(checked) => updateAction(action.id, (current) => ({
+                            <Icon name={selectedIconName} className="h-4 w-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-56 p-2">
+                          <div className="grid grid-cols-6 gap-1">
+                            {PROJECT_ACTION_ICONS.map((entry) => {
+                              const iconName = entry.Icon;
+                              const selected = (action.icon || 'play') === entry.key;
+                              return (
+                                <button
+                                  key={entry.key}
+                                  type="button"
+                                  onClick={() => updateAction(action.id, (current) => ({ ...current, icon: entry.key }))}
+                                  className={cn(
+                                    'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-foreground hover:bg-[var(--interactive-hover)]',
+                                    selected && 'border-border bg-interactive-selection text-interactive-selection-foreground'
+                                  )}
+                                  aria-label={t('settings.projects.actions.field.iconAria', { icon: entry.label })}
+                                >
+                                  <Icon name={iconName} className="h-4 w-4" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
+                      <Input
+                        value={action.name}
+                        onChange={(event) => updateAction(action.id, (current) => ({ ...current, name: event.target.value }))}
+                        placeholder={t('settings.projects.actions.field.actionNamePlaceholder')}
+                        className="h-7 flex-1 min-w-0"
+                      />
+                    </div>
+
+                    <div className="py-1">
+                      <p className="typography-meta mb-0.5 text-muted-foreground">{t('settings.projects.actions.field.command')}</p>
+                      <Textarea
+                        value={action.command}
+                        onChange={(event) => updateAction(action.id, (current) => ({ ...current, command: event.target.value }))}
+                        placeholder={t('settings.projects.actions.field.commandPlaceholder')}
+                        className="min-h-[88px] w-full font-mono text-xs"
+                      />
+                    </div>
+
+                    <div className="py-1">
+                      <div className="mb-0.5 flex items-center gap-2">
+                        <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.runIn.label')}</p>
+                        <SettingsInfoHint contentClassName="max-w-xs">
+                          {t('settings.projects.actions.runIn.info')}
+                        </SettingsInfoHint>
+                      </div>
+                      <Select
+                        value={action.runIn === 'parent' ? PROJECT_RUN_IN_PARENT_VALUE : 'worktree'}
+                        onValueChange={(value) => {
+                          updateAction(action.id, (current) => {
+                            if (value === PROJECT_RUN_IN_PARENT_VALUE) {
+                              return { ...current, runIn: 'parent' };
+                            }
+
+                            return { ...current, runIn: undefined };
+                          });
+                        }}
+                      >
+                        <SelectTrigger
+                          size={SETTINGS_SELECT_SIZE}
+                          className={SETTINGS_SELECT_TRIGGER_CLASS}
+                          aria-label={t('settings.projects.actions.runIn.aria')}
+                        >
+                          <SelectValue>
+                            {(value) => value === 'worktree'
+                              ? t('settings.projects.actions.runIn.worktree')
+                              : t('settings.projects.actions.runIn.project')}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={PROJECT_RUN_IN_PARENT_VALUE}>{t('settings.projects.actions.runIn.project')}</SelectItem>
+                          <SelectItem value="worktree">{t('settings.projects.actions.runIn.worktree')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="py-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="typography-ui-label text-foreground">{t('settings.projects.actions.field.autoOpenUrl')}</span>
+                        <div
+                          className="group flex cursor-pointer items-center gap-2"
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={action.autoOpenUrl === true}
+                          onClick={() => updateAction(action.id, (current) => ({
+                            ...current,
+                            ...(current.autoOpenUrl === true ? { autoOpenUrl: undefined } : { autoOpenUrl: true }),
+                          }))}
+                          onKeyDown={(event) => {
+                            if (event.key === ' ' || event.key === 'Enter') {
+                              event.preventDefault();
+                              updateAction(action.id, (current) => ({
                                 ...current,
-                                ...(checked ? { autoOpenUrl: true } : { autoOpenUrl: undefined }),
-                              }))}
-                              ariaLabel={t('settings.projects.actions.field.autoOpenUrlForAria', { title })}
-                            />
-                            <span className="typography-ui-label font-normal text-foreground/80">{t('settings.projects.actions.field.autoOpenUrlDescription')}</span>
-                          </div>
+                                ...(current.autoOpenUrl === true ? { autoOpenUrl: undefined } : { autoOpenUrl: true }),
+                              }));
+                            }
+                          }}
+                        >
+                          <Checkbox
+                            checked={action.autoOpenUrl === true}
+                            onChange={(checked) => updateAction(action.id, (current) => ({
+                              ...current,
+                              ...(checked ? { autoOpenUrl: true } : { autoOpenUrl: undefined }),
+                            }))}
+                            ariaLabel={t('settings.projects.actions.field.autoOpenUrlForAria', { title })}
+                          />
+                          <span className="typography-ui-label font-normal text-foreground/80">{t('settings.projects.actions.field.autoOpenUrlDescription')}</span>
                         </div>
-
-                        {action.autoOpenUrl === true ? (
-                          <div className="mt-1">
-                            <div className="flex items-center gap-2">
-                              <Input
-                                value={action.openUrl || ''}
-                                onChange={(event) => updateAction(action.id, (current) => ({
-                                  ...current,
-                                  openUrl: event.target.value,
-                                }))}
-                                placeholder={t('settings.projects.actions.field.overrideUrlPlaceholder')}
-                                className="h-7 w-full max-w-[24rem]"
-                              />
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Icon name="information" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 cursor-help" />
-                                </TooltipTrigger>
-                                <TooltipContent sideOffset={8} className="max-w-xs">
-                                  {t('settings.projects.actions.field.overrideUrlTooltip')}
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-
-                            {isDesktopShellApp ? (
-                              <div className="mt-2">
-                                <p className="typography-meta mb-0.5 text-muted-foreground">{t('settings.projects.actions.field.desktopSshForward')}</p>
-                                {desktopForwardOptions.length > 0 ? (
-                                  <Select
-                                    value={
-                                      action.desktopOpenSshForward && desktopForwardOptions.some((entry) => entry.id === action.desktopOpenSshForward)
-                                        ? action.desktopOpenSshForward
-                                        : '__none__'
-                                    }
-                                    onValueChange={(value) => {
-                                      updateAction(action.id, (current) => ({
-                                        ...current,
-                                        ...(value === '__none__' ? { desktopOpenSshForward: undefined } : { desktopOpenSshForward: value }),
-                                      }));
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 w-full max-w-[30rem]">
-                                      <SelectValue placeholder={t('settings.projects.actions.field.useOutputManualUrl')} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="__none__">{t('settings.projects.actions.field.useOutputManualUrl')}</SelectItem>
-                                      {desktopForwardOptions.map((entry) => (
-                                        <SelectItem key={entry.id} value={entry.id}>{entry.label}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                ) : (
-                                  <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.noDesktopSshForwards')}</p>
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
 
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              );
-            })}
-          </div>
-        )}
+                      {action.autoOpenUrl === true ? (
+                        <div className="mt-1">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={action.openUrl || ''}
+                              onChange={(event) => updateAction(action.id, (current) => ({
+                                ...current,
+                                openUrl: event.target.value,
+                              }))}
+                              placeholder={t('settings.projects.actions.field.overrideUrlPlaceholder')}
+                              className="h-7 w-full max-w-[24rem]"
+                            />
+                            <SettingsInfoHint contentClassName="max-w-xs">
+                              {t('settings.projects.actions.field.overrideUrlTooltip')}
+                            </SettingsInfoHint>
+                          </div>
 
-        <div className="pt-3">
-          {validationError ? (
-            <p className="typography-meta mb-2 text-[var(--status-warning)]">{validationError}</p>
-          ) : null}
-          <Button
-            type="button"
-            size="xs"
-            className="!font-normal"
-            onClick={handleSave}
-            disabled={!canSave}
-          >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.projects.actions.actions.save')}
-          </Button>
+                          {isDesktopShellApp ? (
+                            <div className="mt-2">
+                              <p className="typography-meta mb-0.5 text-muted-foreground">{t('settings.projects.actions.field.desktopSshForward')}</p>
+                              {desktopForwardOptions.length > 0 ? (
+                                <Select
+                                  value={
+                                    action.desktopOpenSshForward && desktopForwardOptions.some((entry) => entry.id === action.desktopOpenSshForward)
+                                      ? action.desktopOpenSshForward
+                                      : '__none__'
+                                  }
+                                  onValueChange={(value) => {
+                                    updateAction(action.id, (current) => ({
+                                      ...current,
+                                      ...(value === '__none__' ? { desktopOpenSshForward: undefined } : { desktopOpenSshForward: value }),
+                                    }));
+                                  }}
+                                >
+                                  <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-full">
+                                    <SelectValue placeholder={t('settings.projects.actions.field.useOutputManualUrl')} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">{t('settings.projects.actions.field.useOutputManualUrl')}</SelectItem>
+                                    {desktopForwardOptions.map((entry) => (
+                                      <SelectItem key={entry.id} value={entry.id}>{entry.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.noDesktopSshForwards')}</p>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </div>
-      </section>
-    </div>
+      )}
+
+      {validationError && actions.length > 0 ? (
+        <p className="typography-meta text-[var(--status-warning)]">{validationError}</p>
+      ) : null}
+    </ProjectSettingsSubsection>
   );
 };

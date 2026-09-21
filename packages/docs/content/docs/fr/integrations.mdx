@@ -1,0 +1,53 @@
+---
+title: Intégrations
+description: Connecte GitHub et Linear à OpenChamber.
+---
+
+# Intégrations
+
+**Paramètres → Intégrations** est l'endroit où tu te connectes aux services avec lesquels OpenChamber travaille. La connexion est enregistrée sur le serveur OpenChamber, donc le web, le bureau et un téléphone appairé la partagent.
+
+## GitHub
+
+Déplie la carte **GitHub** et choisis **Connect GitHub** pour te connecter avec un code d'appareil court. Une fois connecté, OpenChamber peut démarrer des sessions depuis des issues et des pull requests, les attacher à des messages, et ouvrir ou mettre à jour des PR. Tout ce que GitHub sait faire est sur [Issues et PR GitHub](/fr/github/).
+
+## Linear
+
+### Connecter un espace de travail
+
+1. Déplie la carte **Linear** et choisis **Connect**.
+2. Approuve l'accès dans l'onglet de navigateur qui s'ouvre. La carte affiche **Waiting for Linear** en attendant.
+
+Connecte une autre organisation Linear avec **Add workspace**. Un seul espace de travail est courant à la fois : change avec **Switch to**, et **Disconnect** ne retire que le courant. Ton association de projets est conservée.
+
+### Parcourir les issues
+
+Dès qu'un espace de travail est connecté, le panneau **Linear** apparaît dans la barre de contexte de droite. Il liste les issues de l'espace courant et te permet de :
+
+- filtrer par statut (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), assigné (**Anyone** ou **Assigned to me**), équipe et priorité
+- chercher par titre, identifiant ou URL Linear
+- ouvrir une issue pour lire sa description, ses commentaires, ses labels et sa priorité
+- changer son **Status** ou choisir **Close issue**
+- changer le **Workspace** courant
+
+### Démarrer une session depuis une issue
+
+- Dans le panneau Linear, ouvre une issue et choisis **Start session**. Le bouton reste dans le pied pendant que l'issue défile.
+- Dans le chat, choisis **New Session From Linear Issue** pour en choisir une dans la liste, avec **Create in worktree** si tu veux une branche neuve.
+- Dans la boîte de dialogue **New Worktree**, choisis **Start from Linear Issue**.
+
+La session s'ouvre dans le projet associé à l'équipe de l'issue, avec l'issue comme premier prompt. Associe les équipes dans la carte Linear : **Default project** couvre toutes les équipes, et **Team projects** le remplace équipe par équipe. Une équipe non associée te demande d'abord de le faire. Le premier message est construit à partir du magic prompt **Issue Review**, modifiable dans **Paramètres → Magic Prompts → Linear**.
+
+### Lier une issue à un message
+
+Dans le composer du chat, choisis **Link Linear Issue**. L'issue accompagne ton prochain message comme contexte, et le panneau d'état de la session garde un lien vers elle.
+
+### Commentaires de session
+
+Active **Session comments** dans la carte Linear : une session démarrée depuis une issue publie un commentaire sur cette issue au démarrage, à la fin ou en cas d'échec, chacun avec un lien qui ouvre la session. Les commentaires ne sont publiés que si ce serveur OpenChamber a une adresse publique, pour que le lien fonctionne pour tout le monde sur l'issue ; sur une adresse locale ou privée, rien n'est publié.
+
+## À voir aussi
+
+- [Issues et PR GitHub](/fr/github/) — tout ce que GitHub peut faire dans OpenChamber
+- [Sessions worktree](/fr/worktrees/) — où les sessions d'issue peuvent démarrer
+- [Magic Prompts](/fr/magic-prompts/) — modifier le prompt de départ d'une session Linear

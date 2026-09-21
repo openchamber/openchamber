@@ -1,0 +1,120 @@
+---
+title: Tunnel
+description: Stelle OpenChamber sicher für Remote- und Mobilzugriff bereit.
+---
+
+# Tunnel
+
+Ein Tunnel ist ein öffentlicher Link zu deinem OpenChamber, damit du ihn von einem normalen Browser in einem anderen Netzwerk aus erreichen kannst. Nutze `openchamber tunnel`, um einen für eine laufende Instanz zu erstellen.
+
+> Wenn du **deine eigenen Geräte** verbindest (die Mobile App, einen anderen Desktop), brauchst du normalerweise keinen Tunnel — [kopple sie](/connect-devices/) stattdessen und lass das Ende-zu-Ende-verschlüsselte [Private Relay](/private-relay/) den Zugriff von unterwegs ohne zusätzliche Einrichtung übernehmen.
+
+## Voraussetzungen
+
+OpenChamber startet das CLI des Tunnel-Anbieters auf deinem Rechner. Installiere zuerst den Anbieter, den du verwenden möchtest:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare Quick Tunnels können mit `cloudflared` laufen. Ngrok benötigt ein ngrok-Konto und ein Authtoken aus dem ngrok-Dashboard:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Schnellstart
+
+1. Starte OpenChamber:
+
+```bash
+openchamber
+```
+
+Wenn du diesen Schritt überspringst, kann `openchamber tunnel start` automatisch einen CLI-Server starten. Beim automatischen Start kannst du Serveroptionen wie `--port`, `--host`, `--lan`, `--ui-password` und `--api-only` mitgeben.
+
+2. Starte einen Cloudflare-Tunnel:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Oder starte einen Ngrok-Tunnel:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
+```
+
+3. Status prüfen:
+
+```bash
+openchamber tunnel status
+```
+
+Sobald der Tunnel aktiv ist, zeigt `status` eine öffentliche URL. Öffne sie oder scanne den QR-Code, um OpenChamber von überall aus zu erreichen.
+
+Standardmäßig druckt OpenChamber in interaktiven TTY-Sitzungen einen QR-Code. Mit `--qr` erzwingst du die QR-Ausgabe, mit `--no-qr` deaktivierst du sie.
+
+## Anbieter
+
+- `cloudflare`: Quick-, Managed-Remote- und Managed-Local-Modi
+- `ngrok`: Quick-Modus
+
+## Verwaltete Modi
+
+### Managed Remote
+
+Verwende ein von Cloudflare verwaltetes Token und einen Hostnamen:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Managed Local
+
+Verwende eine lokale `cloudflared`-Konfiguration:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Profile (managed-remote)
+
+Ein wiederverwendbares Profil speichern:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Mit dem gespeicherten Profil starten:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Nützliche Befehle
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
+openchamber tunnel stop --port 3000
+```
+
+## Hinweise zum Verhalten
+
+- ein aktiver Tunnel pro OpenChamber-Instanz (Port)
+- wenn auf derselben Instanz ein neuer Modus oder Anbieter startet, ersetzt er den vorherigen Tunnel
+- das Erstellen eines neuen Verbindungslinks widerruft den vorherigen unbenutzten Link
+- das automatische Starten des Tunnels bewahrt Server-Flags wie `--ui-password` und `--api-only` in den Instanzeinstellungen auf, die von Neustart-/Update-Flows verwendet werden
+
+## Verwandt
+
+- [Connect a Device](/connect-devices/) — eigene Geräte ohne öffentliche URL koppeln
+- [Security](/security/) — die UI schützen, bevor du sie freigibst
+- [Desktop Tunnels](/desktop-tunnels/) — Tunnel-Einrichtung in der Desktop-App ohne CLI-Start
+- [PWA & Mobile](/mobile/) — OpenChamber vom Telefon aus erreichen
+- [Troubleshooting](/troubleshooting/) — wenn der Tunnel-Link nicht funktioniert

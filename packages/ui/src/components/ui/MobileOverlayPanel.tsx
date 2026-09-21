@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from './ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
+import { useI18n } from '@/lib/i18n';
 
 interface MobileOverlayPanelProps {
   open: boolean;
@@ -41,8 +42,15 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   contentMaxHeightClassName,
   renderHeader,
 }) => {
+  const { t } = useI18n();
   const overlayRootRef = React.useRef<HTMLElement | null>(null);
   const [entered, setEntered] = React.useState(false);
+  // True once the enter transition has finished. While entering, the panel's
+  // keyboard-inset bottom anchor must NOT animate: opening an overlay usually
+  // closes the keyboard at the same moment, and a transitioning `bottom` under
+  // the panel's own rise made the entrance jerky / offset. During the enter the
+  // anchor snaps to its final value and only the rise animates.
+  const [enterSettled, setEnterSettled] = React.useState(false);
 
   if (typeof document !== 'undefined' && !overlayRootRef.current) {
     overlayRootRef.current = ensureOverlayRoot();
@@ -52,10 +60,31 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   React.useEffect(() => {
     if (!open) {
       setEntered(false);
+      setEnterSettled(false);
       return;
     }
     const id = window.setTimeout(() => setEntered(true), ENTER_DELAY_MS);
-    return () => window.clearTimeout(id);
+    const settleId = window.setTimeout(
+      () => setEnterSettled(true),
+      ENTER_DELAY_MS + ENTER_DURATION_MS + 50,
+    );
+    return () => {
+      window.clearTimeout(id);
+      window.clearTimeout(settleId);
+    };
+  }, [open]);
+
+  // Synchronous close signal: this layout-effect cleanup runs inside the same
+  // React flush as the user click that closed the panel, so listeners (e.g.
+  // the keyboard-restore in ChatInput) can refocus an input while iOS still
+  // considers the gesture active — a deferred focus() would not raise the
+  // keyboard in an installed PWA.
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    window.dispatchEvent(new Event('oc:mobile-overlay-opened'));
+    return () => {
+      window.dispatchEvent(new Event('oc:mobile-overlay-closed'));
+    };
   }, [open]);
 
   React.useEffect(() => {
@@ -85,16 +114,27 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
+        'oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-surface-overlay transition-opacity duration-200 ease-out',
+        !enterSettled && 'oc-keyboard-inset-snap',
         entered ? 'opacity-100' : 'opacity-0',
       )}
       role="dialog"
+      aria-label={title}
       aria-modal="true"
       onClick={onClose}
+      // The panel centers over the CHAT column, not the whole app: on a tablet
+      // the shell keeps a persistent sessions sidebar, and a sheet centered on
+      // the window reads as belonging to nothing. The shell publishes the
+      // column's insets; on phones they are 0 and this is a no-op. The scrim
+      // deliberately still covers everything.
+      style={{
+        paddingLeft: 'var(--oc-chat-inset-left, 0px)',
+        paddingRight: 'var(--oc-chat-inset-right, 0px)',
+      }}
     >
         <div
           className={cn(
-            'mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-border/50 bg-background shadow-none pwa-overlay-panel',
+            'oc-surface-elevated mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-border/50 bg-surface-elevated shadow-none pwa-overlay-panel',
             'mx-auto max-w-lg',
             className
           )}
@@ -108,6 +148,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           const closeButton = (
             <button
               type="button"
+              aria-label={t('dialog.common.actions.close')}
               onClick={onClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover"
             >
@@ -126,7 +167,16 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
             </div>
           );
         })()}
-        <ScrollableOverlay useScrollShadow disableHorizontal outerClassName={cn('min-h-0 flex-1', contentMaxHeight)} className="px-2 py-2 pwa-overlay-scroll">
+        <ScrollableOverlay
+          useScrollShadow
+          disableHorizontal
+          // Contain the scroll inside the panel: without this, iOS chains the
+          // rubber-band overscroll to the page behind the sheet, which reads
+          // as a weird content bounce while scrolling the overlay.
+          preventOverscroll
+          outerClassName={cn('min-h-0 flex-1', contentMaxHeight)}
+          className="px-2 py-2 pwa-overlay-scroll"
+        >
           {children}
         </ScrollableOverlay>
         {footer ? (

@@ -18,7 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
+import { selectAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
@@ -27,6 +28,7 @@ import { SettingsProjectSelector } from '@/components/sections/shared/SettingsPr
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface AgentsSidebarProps {
   onItemSelect?: () => void;
@@ -112,7 +114,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   const {
     selectedAgentName,
-    agents,
     setSelectedAgent,
     setAgentDraft,
     createAgent,
@@ -120,7 +121,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     loadAgents,
   } = useAgentsStore(useShallow((s) => ({
     selectedAgentName: s.selectedAgentName,
-    agents: s.agents,
     setSelectedAgent: s.setSelectedAgent,
     setAgentDraft: s.setAgentDraft,
     createAgent: s.createAgent,
@@ -128,9 +128,14 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     loadAgents: s.loadAgents,
   })));
 
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsDirectory));
+
   React.useEffect(() => {
-    loadAgents();
-  }, [loadAgents]);
+    void loadAgents(settingsDirectory);
+  }, [loadAgents, settingsDirectory]);
 
   const bgClass = 'bg-background';
 
@@ -182,11 +187,13 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
     setIsConfirmActionPending(true);
     try {
-      const result = await deleteAgent(confirmActionAgent.name, (confirmActionAgent as Agent & { scope?: AgentScope }).scope);
+      const result = await deleteAgent(confirmActionAgent.name, (confirmActionAgent as Agent & { scope?: AgentScope }).scope, settingsDirectory);
 
       if (result.ok) {
         if (result.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else if (result.restartDeferred) {
+          toast.success(t('settings.view.pendingRestart.saved'));
         } else if (confirmActionType === 'delete') {
           toast.success(t('settings.agents.sidebar.toast.agentDeleted', { name: confirmActionAgent.name }));
         } else {
@@ -243,6 +250,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       disable: draftAgent.disable,
     });
     setSelectedAgent(newName);
+    onItemSelect?.();
 
   };
 
@@ -288,11 +296,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       permission: rulesetToPermissionConfig(renameDialogAgent.permission),
       disable: renameExt.disable,
       scope: renameExt.scope,
-    });
+    }, settingsDirectory);
 
     if (createResult.ok) {
       // Delete old agent
-      const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope);
+      const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope, settingsDirectory);
       if (deleteResult.ok) {
         if (createResult.requiresManualRestart || deleteResult.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));
@@ -350,7 +358,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.agents.sidebar.title')}</h2>
+        <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.agents.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: visibleAgents.length })}</span>
@@ -592,7 +600,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
-          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           tabIndex={0}
         >
           <div className="flex items-center gap-1.5">

@@ -1,13 +1,22 @@
-export type UiFontOption = 'ibm-plex-sans' | 'inter' | 'geist-sans' | 'atkinson-hyperlegible' | 'source-sans-3' | 'roboto' | 'noto-sans' | 'dm-sans' | 'manrope' | 'system';
+export type UiFontOption = 'inter' | 'fixel' | 'geist-sans' | 'atkinson-hyperlegible' | 'source-sans-3' | 'roboto' | 'noto-sans' | 'dm-sans' | 'manrope' | 'system';
 
-export type MonoFontOption = 'ibm-plex-mono' | 'jetbrains-mono' | 'fira-code' | 'geist-mono' | 'commit-mono' | 'source-code-pro' | 'cascadia-code' | 'roboto-mono' | 'iosevka' | 'system-mono';
+export type MonoFontOption = 'jetbrains-mono' | 'fira-code' | 'geist-mono' | 'commit-mono' | 'source-code-pro' | 'cascadia-code' | 'roboto-mono' | 'iosevka' | 'system-mono';
 
-export interface FontFaceSource {
+interface FontFaceSourceBase {
     family: string;
-    packageName: string;
-    filePrefix: string;
     weights: number[];
 }
+
+interface FontsourceFaceSource extends FontFaceSourceBase {
+    packageName: string;
+    filePrefix: string;
+}
+
+interface DirectFontFaceSource extends FontFaceSourceBase {
+    urls: Record<number, string>;
+}
+
+export type FontFaceSource = FontsourceFaceSource | DirectFontFaceSource;
 
 export interface FontOptionDefinition<T extends string> {
     id: T;
@@ -20,17 +29,26 @@ export interface FontOptionDefinition<T extends string> {
 
 export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
     {
-        id: 'ibm-plex-sans',
-        label: 'IBM Plex Sans',
-        description: 'Humanist sans-serif for optimal readability in the interface.',
-        stack: '"IBM Plex Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    },
-    {
         id: 'inter',
         label: 'Inter',
         description: 'Modern UI sans with excellent readability at small sizes.',
         stack: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         source: { family: 'Inter', packageName: '@fontsource/inter', filePrefix: 'inter', weights: [400, 500, 600] }
+    },
+    {
+        id: 'fixel',
+        label: 'Fixel Text',
+        description: 'Humanist geometric sans-serif with full Ukrainian support.',
+        stack: '"Fixel Text", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        source: {
+            family: 'Fixel Text',
+            weights: [400, 500, 600],
+            urls: {
+                400: 'https://cdn.jsdelivr.net/gh/MacPaw/Fixel@f6ee910e98add47e830db87f1a754130506c11a2/fonts/webfonts/FixelText-Regular.woff2',
+                500: 'https://cdn.jsdelivr.net/gh/MacPaw/Fixel@f6ee910e98add47e830db87f1a754130506c11a2/fonts/webfonts/FixelText-Medium.woff2',
+                600: 'https://cdn.jsdelivr.net/gh/MacPaw/Fixel@f6ee910e98add47e830db87f1a754130506c11a2/fonts/webfonts/FixelText-SemiBold.woff2'
+            }
+        }
     },
     {
         id: 'geist-sans',
@@ -85,17 +103,11 @@ export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
         id: 'system',
         label: 'System',
         description: 'Native operating system interface font.',
-        stack: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
+        stack: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
     }
 ];
 
 export const CODE_FONT_OPTIONS: FontOptionDefinition<MonoFontOption>[] = [
-    {
-        id: 'ibm-plex-mono',
-        label: 'IBM Plex Mono',
-        description: 'Balanced monospace for code blocks and technical content.',
-        stack: '"IBM Plex Mono", "SFMono-Regular", "Menlo", monospace'
-    },
     {
         id: 'jetbrains-mono',
         label: 'JetBrains Mono',
@@ -166,8 +178,8 @@ const buildFontMap = <T extends string>(options: FontOptionDefinition<T>[]) =>
 export const UI_FONT_OPTION_MAP = buildFontMap(UI_FONT_OPTIONS);
 export const CODE_FONT_OPTION_MAP = buildFontMap(CODE_FONT_OPTIONS);
 
-export const DEFAULT_UI_FONT: UiFontOption = 'ibm-plex-sans';
-export const DEFAULT_MONO_FONT: MonoFontOption = 'ibm-plex-mono';
+export const DEFAULT_UI_FONT: UiFontOption = 'system';
+export const DEFAULT_MONO_FONT: MonoFontOption = 'system-mono';
 
 export const isUiFontOption = (value: unknown): value is UiFontOption =>
     typeof value === 'string' && value in UI_FONT_OPTION_MAP;

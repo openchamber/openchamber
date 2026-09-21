@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
+import { readManagedCredential, writeManagedCredential } from '../credentials/providers.js';
 import {
   buildResult,
   formatMoney,
@@ -54,25 +55,6 @@ const readStateValue = (key) => {
   }
 };
 
-const writeStateValue = (key, value) => {
-  if (!existsSync(STATE_DB)) return false;
-  try {
-    const escaped = String(value).replace(/'/g, "''");
-    const escapedKey = String(key).replace(/'/g, "''");
-    execFileSync('sqlite3', [
-      STATE_DB,
-      `INSERT OR REPLACE INTO ItemTable (key, value) VALUES ('${escapedKey}', '${escaped}');`
-    ], {
-      encoding: 'utf8',
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'ignore']
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const readFileToken = (path) => {
   try {
     if (!path || !existsSync(path)) return null;
@@ -80,16 +62,6 @@ const readFileToken = (path) => {
     return content || null;
   } catch {
     return null;
-  }
-};
-
-const writeFileToken = (path, value) => {
-  try {
-    if (!path) return false;
-    writeFileSync(path, `${value}\n`, { encoding: 'utf8', mode: 0o600 });
-    return true;
-  } catch {
-    return false;
   }
 };
 
@@ -113,15 +85,15 @@ const loadAuthState = () => {
     return {
       accessToken: fileAccessToken,
       refreshToken: fileRefreshToken,
-      source: 'file',
-      accessTokenPath
+      source: 'file'
     };
   }
 
+  const managed = readManagedCredential(providerId);
   return {
-    accessToken: readStateValue('cursorAuth/accessToken'),
-    refreshToken: readStateValue('cursorAuth/refreshToken'),
-    source: 'sqlite'
+    accessToken: managed?.accessToken || null,
+    refreshToken: managed?.refreshToken || null,
+    source: 'managed'
   };
 };
 
@@ -133,8 +105,18 @@ const tokenNeedsRefresh = (token) => {
 };
 
 const persistAccessToken = (auth, accessToken) => {
-  if (auth.source === 'sqlite') writeStateValue('cursorAuth/accessToken', accessToken);
-  if (auth.source === 'file') writeFileToken(auth.accessTokenPath, accessToken);
+  if (auth.source === 'managed') writeManagedCredential(providerId, { accessToken, refreshToken: auth.refreshToken || '' });
+};
+
+export const importCursorCredential = async () => {
+  const credential = {
+    accessToken: readStateValue('cursorAuth/accessToken') || '',
+    refreshToken: readStateValue('cursorAuth/refreshToken') || '',
+  };
+  if (!credential.accessToken && !credential.refreshToken) throw new Error('Cursor credentials are unavailable');
+  const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'import' });
+  if (!accessToken) throw new Error('Cursor credentials are invalid');
+  return writeManagedCredential(providerId, { ...credential, accessToken });
 };
 
 const refreshAccessToken = async (auth) => {
@@ -165,11 +147,18 @@ const refreshAccessToken = async (auth) => {
   return body.access_token;
 };
 
-const resolveAccessToken = async () => {
-  const auth = loadAuthState();
+const resolveCredentialAccessToken = async (auth) => {
   if (!auth.accessToken && !auth.refreshToken) return null;
   if (!tokenNeedsRefresh(auth.accessToken)) return auth.accessToken;
   return refreshAccessToken(auth);
+};
+
+const resolveAccessToken = async () => resolveCredentialAccessToken(loadAuthState());
+
+export const validateCursorCredential = async (credential) => {
+  const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'validation' });
+  if (!accessToken) throw new Error('Cursor credentials are invalid');
+  await connectPost(USAGE_URL, accessToken);
 };
 
 const connectPost = async (url, accessToken) => {

@@ -35,8 +35,11 @@ function withStableStringId<T extends object>(value: T, id: string): T {
   return value;
 }
 
+const MAX_RESOLVED_THEME_CACHE_ENTRIES = 40;
 const resolvedThemeCache = new Map<string, ShikiThemeRegistrationResolvedLike>();
-const registeredPierreThemes = new Set<string>();
+const registeredPierreThemeSignatures = new Map<string, string>();
+
+export const getThemeContentSignature = (theme: Theme): string => JSON.stringify(theme);
 
 const toResolvedTheme = (raw: VSCodeTextMateTheme, id: string): ShikiThemeRegistrationResolvedLike => {
   const bgRaw = raw.colors?.['editor.background'];
@@ -68,24 +71,33 @@ const buildTextMateTheme = (theme: Theme): VSCodeTextMateTheme => {
 };
 
 export const getResolvedShikiTheme = (theme: Theme): ShikiThemeRegistrationResolvedLike => {
-  const cached = resolvedThemeCache.get(theme.metadata.id);
+  const signature = getThemeContentSignature(theme);
+  const cached = resolvedThemeCache.get(signature);
   if (cached) {
+    resolvedThemeCache.delete(signature);
+    resolvedThemeCache.set(signature, cached);
     return cached;
   }
 
   const raw = buildTextMateTheme(theme);
   const resolved = toResolvedTheme(raw, theme.metadata.id);
-  resolvedThemeCache.set(theme.metadata.id, resolved);
+  resolvedThemeCache.set(signature, resolved);
+  while (resolvedThemeCache.size > MAX_RESOLVED_THEME_CACHE_ENTRIES) {
+    const oldest = resolvedThemeCache.keys().next().value;
+    if (oldest === undefined) break;
+    resolvedThemeCache.delete(oldest);
+  }
   return resolved;
 };
 
 export const ensurePierreThemeRegistered = (theme: Theme): void => {
   const id = theme.metadata.id;
-  if (registeredPierreThemes.has(id)) {
+  const signature = getThemeContentSignature(theme);
+  if (registeredPierreThemeSignatures.get(id) === signature) {
     return;
   }
 
   const resolved = getResolvedShikiTheme(theme);
   registerCustomTheme(id, async () => resolved);
-  registeredPierreThemes.add(id);
+  registeredPierreThemeSignatures.set(id, signature);
 };

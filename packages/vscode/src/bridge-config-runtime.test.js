@@ -52,6 +52,58 @@ afterEach(() => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 describe('VS Code config bridge plugin parity', () => {
+  test('explicit config reload restarts OpenCode', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-reload-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+
+    const reloaded = await handleConfigBridgeMessage({
+      id: 'reload',
+      type: 'api:config/reload',
+    }, ctx, deps);
+
+    expect(reloaded).toEqual({
+      id: 'reload',
+      type: 'api:config/reload',
+      success: true,
+      data: { restarted: true },
+    });
+    expect(ctx.restart).toHaveBeenCalledTimes(1);
+  });
+
+  test('removes agent fields when update payload sends null', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-agent-null-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+    const configDir = path.join(root, '.opencode');
+    const configPath = path.join(configDir, 'opencode.json');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      agent: {
+        build: {
+          variant: 'fast',
+          temperature: 0.3,
+          top_p: 0.8,
+          mode: 'subagent',
+        },
+      },
+    }, null, 2), 'utf8');
+
+    const updated = await handleConfigBridgeMessage({
+      id: 'update-agent-null-fields',
+      type: 'api:config/agents',
+      payload: {
+        method: 'PATCH',
+        name: 'build',
+        directory: root,
+        body: { variant: null, temperature: null, top_p: null },
+      },
+    }, ctx, deps);
+
+    expect(updated?.success).toBe(true);
+    expect(readJson(configPath).agent.build).toEqual({ mode: 'subagent' });
+  });
+
   test('creates, lists, updates, and deletes project plugin entries', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugins-'));
     tempRoots.push(root);
@@ -69,7 +121,14 @@ describe('VS Code config bridge plugin parity', () => {
     }, ctx, deps);
 
     expect(created?.success).toBe(true);
-    expect(ctx.restart).toHaveBeenCalledTimes(1);
+    expect(created?.data).toMatchObject({
+      success: true,
+      requiresReload: false,
+      requiresRestart: true,
+      restartDeferred: true,
+      message: 'Plugin entry changed. Restart OpenCode to apply.',
+    });
+    expect(ctx.restart).not.toHaveBeenCalled();
 
     const listed = await handleConfigBridgeMessage({
       id: 'list',
@@ -218,27 +277,36 @@ describe('VS Code config bridge plugin parity', () => {
     expect(fs.readFileSync(path.join(configDir, 'plugins', 'demo-plugin.ts'), 'utf8')).toBe('export default {}');
   });
 
-  test('reports plugin mutation success when restart fails after writing config', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-restart-'));
+  test('creates MCP config with deferred restart when restart would fail', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-mcp-deferred-'));
     tempRoots.push(root);
     const ctx = createCtx(root, async () => {
       throw new Error('restart failed');
     });
 
     const created = await handleConfigBridgeMessage({
-      id: 'create-restart-failure',
-      type: 'api:config/plugins',
+      id: 'create-mcp-deferred',
+      type: 'api:config/mcp',
       payload: {
         method: 'POST',
-        target: 'entry',
+        name: 'mcp-deferred',
         directory: root,
-        body: { scope: 'project', spec: 'plugin-restart' },
+        body: { scope: 'project', type: 'local', command: ['node', 'server.js'] },
       },
     }, ctx, deps);
 
     expect(created?.success).toBe(true);
-    expect(created?.data).toMatchObject({ success: true, requiresReload: false, reloadFailed: true });
-    expect(created?.data?.warning).toContain('restart failed');
-    expect(readJson(path.join(root, '.opencode', 'opencode.json')).plugin).toEqual(['plugin-restart']);
+    expect(created?.data).toMatchObject({
+      success: true,
+      requiresReload: false,
+      requiresRestart: true,
+      restartDeferred: true,
+      message: 'MCP server "mcp-deferred" created. Restart OpenCode to apply.',
+    });
+    expect(ctx.restart).not.toHaveBeenCalled();
+    expect(readJson(path.join(root, '.opencode', 'opencode.json')).mcp['mcp-deferred']).toMatchObject({
+      type: 'local',
+      command: ['node', 'server.js'],
+    });
   });
 });

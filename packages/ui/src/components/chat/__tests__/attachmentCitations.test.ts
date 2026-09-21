@@ -5,6 +5,7 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
     isGenericImageFilename,
+    nextPastedContextFilename,
 } from '../attachmentCitations';
 
 describe('attachment citations', () => {
@@ -52,5 +53,11 @@ describe('attachment citations', () => {
             'desktop [desktop.jpg] link [desktop.jpg](https://example.com) missing [other.jpg]',
             ['desktop.jpg'],
         )).toEqual([{ start: 8, end: 21 }]);
+    });
+
+    test('assigns sequential pasted-context filenames', () => {
+        expect(nextPastedContextFilename([])).toBe('pasted-context-1.txt');
+        expect(nextPastedContextFilename(['pasted-context-1.txt', 'notes.md'])).toBe('pasted-context-2.txt');
+        expect(nextPastedContextFilename(['PASTED-CONTEXT-2.TXT'])).toBe('pasted-context-1.txt');
     });
 });

@@ -1,6 +1,6 @@
 import { useUIStore } from '@/stores/useUIStore';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { isApplyingServerSettings, updateDesktopSettings } from '@/lib/persistence';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
@@ -72,16 +72,10 @@ export const startModelPrefsAutoSave = () => {
   if (typeof window === 'undefined') {
     return () => {};
   }
-  if (isVSCodeRuntime()) {
-    return () => {};
-  }
 
-  let timer: number | null = null;
   let lastSent: ModelPrefsPayload | null = null;
-  let didSkipInitial = false;
 
   const flush = () => {
-    timer = null;
     const payload = snapshotModelPrefs();
 
     if (lastSent && modelPrefsEqual(lastSent, payload)) {
@@ -93,16 +87,9 @@ export const startModelPrefsAutoSave = () => {
     void updateDesktopSettings(payload).catch(() => {});
   };
 
-  const schedule = () => {
-    if (!didSkipInitial) {
-      didSkipInitial = true;
-      return;
-    }
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-    timer = window.setTimeout(flush, 1200);
-  };
+  const unsubscribeRuntime = subscribeRuntimeEndpointWillChange(() => {
+    lastSent = null;
+  });
 
   const unsubscribe = useUIStore.subscribe((state, prevState) => {
     const next = {
@@ -124,13 +111,19 @@ export const startModelPrefsAutoSave = () => {
     if (modelPrefsEqual(next, prev)) {
       return;
     }
-    schedule();
+    // Adopted from the server by the settings sync: that is the new baseline,
+    // not a change of this window's to send back.
+    if (isApplyingServerSettings()) {
+      lastSent = cloneModelPrefs(next);
+      return;
+    }
+    // updateDesktopSettings owns the shared debounce and lifecycle flush, so
+    // the change is queued immediately and cannot be lost on a quick reload.
+    flush();
   });
 
   return () => {
     unsubscribe();
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
+    unsubscribeRuntime();
   };
 };

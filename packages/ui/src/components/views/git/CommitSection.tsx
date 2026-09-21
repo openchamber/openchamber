@@ -68,6 +68,9 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
         <CommitInput
           value={commitMessage}
           onChange={onCommitMessageChange}
+          onSubmit={() => {
+            if (canCommit && !isGeneratingMessage) onCommit();
+          }}
           placeholder={t('gitView.commit.messagePlaceholder')}
           disabled={commitAction !== null}
           hasTouchInput={hasTouchInput}

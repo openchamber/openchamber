@@ -3,6 +3,7 @@ import os from 'os';
 
 import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
 import { isExactSemver as defaultIsExactSemver, isPathSpec as defaultIsPathSpec, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
+import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
 const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
 const FILE_EXISTS_CODES = new Set(['FILE_EXISTS', 'EEXIST']);
@@ -12,8 +13,6 @@ const BAD_REQUEST_CODES = new Set(['INVALID_FILENAME', 'INVALID_SCOPE', 'INVALID
 export const registerPluginRoutes = (app, dependencies) => {
   const {
     resolveOptionalProjectDirectory,
-    refreshOpenCodeAfterConfigChange,
-    clientReloadDelayMs,
     listPluginEntries,
     getPluginEntry,
     createPluginEntry,
@@ -43,34 +42,13 @@ export const registerPluginRoutes = (app, dependencies) => {
     return directory || null;
   };
 
-  const successPayload = (message) => ({
-    success: true,
-    requiresReload: true,
-    message,
-    reloadDelayMs: clientReloadDelayMs,
-    reloadFailed: false,
-    warning: undefined,
-  });
-
   const completePluginMutation = async (res, operation, _noun, applyChange) => {
     applyChange();
 
     const pastTense = operation.replace(/ion$/, 'ed').replace(/update$/, 'updated');
-
-    try {
-      await refreshOpenCodeAfterConfigChange(`plugin ${operation}`);
-      return res.json(successPayload(`Plugin ${pastTense}. Reloading interface…`));
-    } catch (error) {
-      console.error(`[API:plugin ${operation}] Reload failed after config write:`, error);
-      return res.json({
-        success: true,
-        requiresReload: false,
-        message: `Plugin ${pastTense}, but OpenCode reload failed.`,
-        reloadDelayMs: clientReloadDelayMs,
-        reloadFailed: true,
-        warning: error.message || 'OpenCode reload failed after plugin config changed',
-      });
-    }
+    return res.json(buildDeferredRestartResponse(
+      `Plugin ${pastTense}. Restart OpenCode to apply.`,
+    ));
   };
 
   const validateEntryId = (id) => {

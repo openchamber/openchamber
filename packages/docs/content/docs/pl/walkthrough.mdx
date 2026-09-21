@@ -1,0 +1,71 @@
+---
+title: Przewodnik po zmianach
+description: Czytaj różnice w kolejności, która ma sens, a nie alfabetycznie.
+---
+
+# Przewodnik po zmianach
+
+Różnice są posortowane po ścieżkach plików, a to prawie nigdy nie jest kolejność, w której zmiana staje się zrozumiała. Przewodnik układa je na nowo: powiązane edycje trafiają do wspólnych **kroków**, każdy krok tłumaczy, co kod robi teraz inaczej, a kolejność kroków jest taka, by każdy opierał się na poprzednim.
+
+Tłumaczy i porządkuje. Nie ocenia kodu i nie wydaje werdyktów — od tego jest [Review](/git/).
+
+Otwórz go ikoną **Przewodnik** na prawym pasku albo przyciskiem **Przewodnik AI** w panelach zmian i pull requestu. Oba tylko otwierają panel; nic nie powstaje, dopóki nie naciśniesz **Wygeneruj przewodnik**.
+
+## Co można przejrzeć
+
+| Zakres | Co obejmuje |
+| --- | --- |
+| Wszystko niezatwierdzone | Wszystko, czego nie ma jeszcze w commicie: poczekalnia, drzewo robocze i nowe pliki |
+| W poczekalni | Tylko to, co trafiłoby teraz do commita |
+| Poza poczekalnią | Drzewo robocze i nowe pliki |
+| Ta gałąź | Wszystkie commity gałęzi, których nie ma w jej bazie |
+| Pull request | Zmiana w postaci, w jakiej istnieje na GitHubie |
+
+**Ta gałąź** to nie „commity bez pusha", lecz wszystko, co gałąź dokłada do swojej bazy — niezależnie od pusha. Dlatego po commicie, a przed pushem, ona i pull request celowo się różnią: jedno pokazuje, co zrobiłeś, drugie to, co widzą teraz recenzenci.
+
+Każdy zakres jest zapisywany osobno, więc przełączanie między nimi niczego nie gubi.
+
+## Wybór modelu
+
+Przewodniki domyślnie używają małego modelu. Inny wybierzesz w **Ustawienia → Sesje → Model przewodnika po zmianach** albo — na jeden raz — w nagłówku panelu. Przydaje się, gdy zmiana jest na tyle ryzykowna, że zasługuje na mocniejszy model.
+
+Lista pokazuje tylko modele potrafiące zwracać ustrukturyzowaną odpowiedź, bo bez niej przewodnika nie da się złożyć. Jeśli model jest za mały na te różnice, generowanie zostaje odrzucone z wyjaśnieniem, zamiast po cichu obciąć wejście: przewodnik napisany na podstawie połowy różnic brzmi pewnie i się myli.
+
+Po ponownym otwarciu panelu zobaczysz model, który stworzył to, co masz przed sobą, więc **Wygeneruj ponownie** powtórzy tym samym, dopóki go nie zmienisz.
+
+## Wybór języka
+
+Przewodniki są domyślnie pisane w języku Twojego interfejsu. Selektor języka w nagłówku panelu zaczyna właśnie od niego, a dla pojedynczego przeglądu możesz wybrać dowolny inny język, na który przetłumaczono OpenChamber — prowadzone wyjaśnienie ma sens tylko w języku, który czytasz swobodnie.
+
+Tłumaczona jest wyłącznie proza. Identyfikatory, ścieżki plików i nazwy API pozostają dokładnie takie, jakie są w Twoim kodzie, więc to, co nazywa dany przystanek, nadal da się wyszukać.
+
+Jeśli w wybranym języku nic jeszcze nie powstało, panel się nie opróżnia: nadal pokazuje przewodnik, który ma, i informuje o tym. Naciśnij **Wygeneruj przewodnik**, aby otrzymać go w nowym języku.
+
+## Koszt i pamięć podręczna
+
+Nic nie generuje się samo. Generowanie zaczyna się wyłącznie na Twoje żądanie, ponowne również jest ręczne.
+
+Wyniki są zapisywane w pamięci podręcznej według dokładnej treści różnic. Przywróć drzewo robocze do wcześniejszego stanu, a tamten przewodnik wróci za darmo, bez wywołania modelu. Język i model są częścią tego klucza, więc każda kombinacja jest przechowywana osobno: gdy różnice mają już przewodnik w dwóch językach, przełączanie między nimi jest natychmiastowe i nic nie kosztuje.
+
+Generowanie działa na serwerze OpenChamber, nie w karcie przeglądarki. Odśwież stronę albo zamknij panel, a praca trwa dalej; po powrocie wynik czeka. Zatrzymuje ją tylko **Anuluj**.
+
+## Uczciwość wobec nieaktualności
+
+Każdy krok jest przypięty do dokładnej treści kodu, który opisuje, więc panel potrafi powiedzieć, kiedy ten kod się zmienił:
+
+- **Nieaktualne kroki** — kod opisywany przez krok zmienił się albo zniknął. Przewodnik nadal się wyświetla, z oznaczeniem, żebyś sam zdecydował o ponownym wygenerowaniu.
+- **Nieuwzględnione** — zmiany w bieżących różnicach, których nie opisuje żaden krok. Trafiają tu edycje zrobione po wygenerowaniu, zmiany uznane przez przewodnik za rutynowe oraz pliki blokad i inne wyniki narzędzi, celowo trzymane poza modelem. Wszystko jest wypisane na końcu, żeby nic nie zniknęło po cichu.
+
+Ponowne wygenerowanie nie łata, lecz pisze od nowa: poprzedni przewodnik trafia do modelu jako kontekst, więc to, co nadal jest prawdą, zostaje, a całość zostaje przypięta do bieżącego kodu.
+
+## Uwagi
+
+- Możesz komentować dowolną linię tak samo jak w widoku różnic; komentarze dołączają się do pola czatu.
+- Dostępne na komputerze i przy szerokościach tabletu. Nie ma tego w rozszerzeniu VS Code ani w aplikacji mobilnej.
+- Przewodnik po pull requeście wymaga połączonego konta GitHub — zobacz [Issues i PR na GitHubie](/github/).
+
+## Powiązane
+
+- [Git i GitHub](/git/) — panel zmian, z którego to czyta, oraz akcja Review, która faktycznie ocenia kod
+- [Issues i PR na GitHubie](/github/) — połącz GitHub, aby przeglądać pull requesty
+- [Dostawcy, modele i agenci](/providers/) — skąd bierze się mały model

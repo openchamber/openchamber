@@ -21,6 +21,9 @@ export interface AttachedFile {
     serverPath?: string;
     vscodePath?: string;
     vscodeSource?: 'file' | 'selection';
+    /** Shared ID linking entries extracted from the same document (PPTX, DOCX, etc.).
+     *  Removing any entry with this ID cascades to all entries in the group. */
+    sourceDocumentId?: string;
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';
@@ -33,15 +36,22 @@ export interface SessionHistoryMeta {
     loading: boolean;
 }
 
-export interface SessionContextUsage {
-    totalTokens: number;
-    percentage: number;
+interface SessionContextLimits {
     contextLimit: number;
     outputLimit?: number;
-    normalizedOutput?: number;
     thresholdLimit: number;
     lastMessageId?: string;
 }
+
+export type SessionContextUsage =
+    | (SessionContextLimits & {
+        state: 'measured';
+        totalTokens: number;
+        percentage: number;
+        normalizedOutput?: number;
+    })
+    /** Compacted and no response has reported tokens since: the size is unknown, not zero. */
+    | (SessionContextLimits & { state: 'compacted' });
 
 // Default message limit (can be overridden via settings).
 // Single value controls: fetch from server, active session ceiling, Load More chunk.

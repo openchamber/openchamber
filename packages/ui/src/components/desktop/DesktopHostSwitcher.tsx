@@ -14,6 +14,7 @@ import { toast } from '@/components/ui';
 import { isElectronShell, isDesktopShell } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
 import {
   desktopHostProbe,
@@ -21,15 +22,34 @@ import {
   desktopHostsSet,
   desktopLocalClientTokenGet,
   desktopOpenNewWindowAtUrl,
+  desktopOpenNewWindowForHost,
   getDesktopHostApiUrl,
-  locationMatchesHost,
   normalizeHostUrl,
+  probeRelayDesktopHost,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import {
+  LOCAL_HOST_ID,
+  buildLocalDesktopHost,
+  getLocalDesktopOrigin,
+  resolveCurrentDesktopHost,
+  runtimeKeyForDesktopHost,
+} from '@/lib/desktopCurrentHost';
+import {
+  getDesktopHostStatusSnapshot,
+  probeDesktopHosts,
+  setDesktopHostStatus,
+  pruneDesktopHostStatuses,
+  subscribeDesktopHostStatuses,
+  type DesktopHostStatus,
+} from '@/lib/desktopHostStatus';
+import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
+import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -38,19 +58,10 @@ import {
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
 
-const LOCAL_HOST_ID = 'local';
 const SSH_CONNECT_TIMEOUT_MS = 90_000;
 const SSH_CONNECT_CANCELLED_ERROR = 'SSH connection cancelled';
 
-const runtimeKeyForHost = (host: DesktopHost): string => {
-  if (host.id === LOCAL_HOST_ID) return 'local';
-  return `host:${host.id}`;
-};
-
-type HostStatus = {
-  status: HostProbeResult['status'];
-  latencyMs: number;
-};
+type HostStatus = DesktopHostStatus;
 
 type HostDisplayStatus = HostProbeResult['status'] | 'checking' | null;
 
@@ -71,11 +82,6 @@ const toNavigationUrl = (rawUrl: string): string => {
   }
 };
 
-const getLocalOrigin = (): string => {
-  if (typeof window === 'undefined') return '';
-  return window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-};
-
 const getLocalClientToken = async (): Promise<string> => {
   if (!isElectronShell()) return '';
   return desktopLocalClientTokenGet().catch(() => '');
@@ -90,6 +96,14 @@ const statusDotClass = (status: HostDisplayStatus): string => {
   if (status === 'unreachable') return 'bg-status-error';
   if (status === 'checking') return 'bg-status-info';
   return 'bg-muted-foreground/40';
+};
+
+// Text tone matching statusDotClass, for the per-row status line.
+const statusTextClass = (status: HostDisplayStatus): string => {
+  if (status === 'ok') return 'text-[var(--status-success)]';
+  if (status === 'auth' || status === 'update-recommended') return 'text-[var(--status-warning)]';
+  if (status === 'incompatible' || status === 'wrong-service' || status === 'unreachable') return 'text-[var(--status-error)]';
+  return 'text-muted-foreground';
 };
 
 const isBlockedHostStatus = (status: HostProbeResult['status'] | null): boolean => {
@@ -117,17 +131,6 @@ const statusLabelKey = (status: HostDisplayStatus):
   if (status === 'wrong-service') return 'desktopHostSwitcher.status.wrongService';
   if (status === 'unreachable') return 'desktopHostSwitcher.status.unreachable';
   return 'desktopHostSwitcher.status.unknown';
-};
-
-const statusIcon = (status: HostDisplayStatus) => {
-  if (status === 'checking') return <Icon name="loader-4" className="h-4 w-4 animate-spin" />;
-  if (status === 'ok') return <Icon name="check" className="h-4 w-4" />;
-  if (status === 'auth') return <Icon name="shield-keyhole" className="h-4 w-4" />;
-  if (status === 'update-recommended') return <Icon name="shield-keyhole" className="h-4 w-4" />;
-  if (status === 'incompatible') return <Icon name="cloud-off" className="h-4 w-4" />;
-  if (status === 'wrong-service') return <Icon name="cloud-off" className="h-4 w-4" />;
-  if (status === 'unreachable') return <Icon name="cloud-off" className="h-4 w-4" />;
-  return <Icon name="earth" className="h-4 w-4" />;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -227,58 +230,6 @@ const waitForSshReady = async (
   throw new Error('Timed out waiting for SSH connection');
 };
 
-const buildLocalHost = (localOrigin?: string | null): DesktopHost => ({
-  id: LOCAL_HOST_ID,
-  label: 'Local',
-  url: localOrigin || getLocalOrigin(),
-});
-
-const resolveCurrentHost = (hosts: DesktopHost[]) => {
-  const currentHref = typeof window === 'undefined' ? '' : window.location.href;
-  const localOrigin = hosts.find((host) => host.id === LOCAL_HOST_ID)?.url || getLocalOrigin();
-  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
-  const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
-  const normalizedCurrent = normalizeHostUrl(currentHref) || currentHref;
-
-  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  const runtimeMatch = hosts.find((h) => {
-    return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(h)) : false;
-  });
-
-  if (runtimeMatch) {
-    return {
-      id: runtimeMatch.id,
-      label: runtimeMatch.label,
-      url: normalizeHostUrl(getDesktopHostApiUrl(runtimeMatch)) || getDesktopHostApiUrl(runtimeMatch),
-    };
-  }
-
-  if (currentHref && locationMatchesHost(currentHref, localOrigin)) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  const match = hosts.find((h) => {
-    return currentHref ? locationMatchesHost(currentHref, h.url) : false;
-  });
-
-  if (match) {
-    return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
-  }
-
-  if (currentHref.startsWith('openchamber-ui://')) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  return {
-    id: 'custom',
-    label: redactSensitiveUrl(normalizedCurrent || 'Instance'),
-    url: normalizedCurrent,
-  };
-};
-
 type DesktopHostSwitcherDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -295,13 +246,17 @@ export function DesktopHostSwitcherDialog({
   const { t } = useI18n();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const isRuntimeConnected = useConfigStore((state) => state.isConnected);
 
   const [configHosts, setConfigHosts] = React.useState<DesktopHost[]>([]);
   const [defaultHostId, setDefaultHostId] = React.useState<string | null>(null);
-  const [statusById, setStatusById] = React.useState<Record<string, HostStatus>>({});
-  const [probingHostIds, setProbingHostIds] = React.useState<Record<string, true>>({});
+  // Statuses live outside this component: startup warms them, and the dropdown
+  // remounts on every open — holding them here is what made each open start
+  // from nothing and show "Checking" on rows the app already knew about.
+  const statusSnapshot = React.useSyncExternalStore(subscribeDesktopHostStatuses, getDesktopHostStatusSnapshot, getDesktopHostStatusSnapshot);
+  const statusById = statusSnapshot.byHostId;
+  const isProbing = statusSnapshot.isProbing;
   const [isLoading, setIsLoading] = React.useState(false);
-  const [isProbing, setIsProbing] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [switchingHostId, setSwitchingHostId] = React.useState<string | null>(null);
   const [sshHostIds, setSshHostIds] = React.useState<Record<string, true>>({});
@@ -322,7 +277,7 @@ export function DesktopHostSwitcherDialog({
     error: null,
   });
   const [error, setError] = React.useState<string>('');
-  const [localOrigin, setLocalOrigin] = React.useState<string>(() => getLocalOrigin());
+  const [localOrigin, setLocalOrigin] = React.useState<string>(() => getLocalDesktopOrigin());
 
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editLabel, setEditLabel] = React.useState('');
@@ -332,7 +287,7 @@ export function DesktopHostSwitcherDialog({
   const sshSwitchTokenRef = React.useRef(0);
 
   const allHosts = React.useMemo(() => {
-    const local = buildLocalHost(localOrigin);
+    const local = buildLocalDesktopHost(localOrigin);
     const normalizedRemote = configHosts.map((h) => ({
       ...h,
       url: normalizeHostUrl(h.url) || h.url,
@@ -346,7 +301,7 @@ export function DesktopHostSwitcherDialog({
 
   const current = React.useMemo(() => {
     void runtimeEndpointEpoch;
-    return resolveCurrentHost(allHosts);
+    return resolveCurrentDesktopHost(allHosts);
   }, [allHosts, runtimeEndpointEpoch]);
   const currentDefaultLabel = React.useMemo(() => {
     const id = defaultHostId || LOCAL_HOST_ID;
@@ -393,6 +348,10 @@ export function DesktopHostSwitcherDialog({
         nextSshHostIds[instance.id] = true;
       }
       setConfigHosts(cfg.hosts || []);
+      // Config is the authoritative host list: drop statuses for instances the
+      // user removed. Doing this from a probe run instead would clear entries
+      // every time a run started before the config had finished loading.
+      pruneDesktopHostStatuses((cfg.hosts || []).map((host) => host.id));
       setDefaultHostId(cfg.defaultHostId ?? null);
       setSshHostIds(nextSshHostIds);
       setSshStatusesById(sshStatusMap);
@@ -408,35 +367,7 @@ export function DesktopHostSwitcherDialog({
   }, [t]);
 
   const probeAll = React.useCallback(async (hosts: DesktopHost[]) => {
-    if (!isDesktopShell()) return;
-    setIsProbing(true);
-    const nextProbingHostIds: Record<string, true> = {};
-    for (const host of hosts) {
-      nextProbingHostIds[host.id] = true;
-    }
-    setProbingHostIds(nextProbingHostIds);
-    try {
-      const localClientToken = await getLocalClientToken();
-      const results = await Promise.all(
-        hosts.map(async (h) => {
-          const url = normalizeHostUrl(isElectronShell() ? getDesktopHostApiUrl(h) : h.url);
-          if (!url) {
-            return [h.id, { status: 'unreachable' as const, latencyMs: 0 } satisfies HostStatus] as const;
-          }
-          const clientToken = h.id === LOCAL_HOST_ID ? localClientToken : (h.clientToken || '');
-          const res = await desktopHostProbe(url, { clientToken: clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-          return [h.id, { status: res.status, latencyMs: res.latencyMs } satisfies HostStatus] as const;
-        })
-      );
-      const next: Record<string, HostStatus> = {};
-      for (const [id, val] of results) {
-        next[id] = val;
-      }
-      setStatusById(next);
-    } finally {
-      setProbingHostIds({});
-      setIsProbing(false);
-    }
+    await probeDesktopHosts(hosts);
   }, []);
 
   React.useEffect(() => {
@@ -484,27 +415,86 @@ export function DesktopHostSwitcherDialog({
   }, [open]);
 
   const handleSwitch = React.useCallback(async (host: DesktopHost) => {
+    // Relay legs ride the E2EE tunnel activated in-renderer via
+    // switchRuntimeEndpoint({ relay }); the runtime fetch/socket layers route
+    // through the tunnel from the singleton registry.
+    const activateRelay = (relay: NonNullable<DesktopHost['relay']>, liveTunnel?: ReturnType<typeof createRelayTunnelClient>) => {
+      // Adopt the probe's live tunnel (when it kept one) BEFORE the switch: the
+      // activate call inside switchRuntimeEndpoint sees an equal descriptor and
+      // reuses it — no second WebSocket connect + E2EE handshake.
+      if (liveTunnel) {
+        adoptRelayTunnel({ relayUrl: relay.relayUrl, serverId: relay.serverId, hostEncPubJwk: relay.hostEncPubJwk }, liveTunnel);
+      }
+      switchRuntimeEndpoint({
+        apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
+        clientToken: host.clientToken || null,
+        runtimeKey: runtimeKeyForDesktopHost(host),
+        relay,
+      });
+      // On the relay: learn the server's current LAN address in the background
+      // and hot-switch back to direct if the stored one merely went stale.
+      scheduleDesktopHostCandidateRefresh(host.id);
+    };
+
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
-    if (!origin) return;
+    const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
+    if (!origin && !relayOnly) return;
 
     if (isElectronShell()) {
-      if (!apiOrigin) return;
+      if (!apiOrigin && !host.relay) return;
       setSwitchingHostId(host.id);
       const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
-      const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      setStatusById((prev) => ({
-        ...prev,
-        [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
-      }));
 
-      if (isBlockedHostStatus(probe.status)) {
-        toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }));
+      // The dropdown already probed every host when it opened — act on that
+      // result instead of re-probing (re-probes doubled the switch latency and
+      // flashed transient Unreachable states over a known-good host).
+      const cached = statusById[host.id];
+      if (cached?.status === 'ok') {
+        if (cached.via === 'relay' && host.relay) {
+          activateRelay(host.relay);
+        } else if (apiOrigin) {
+          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host) });
+        } else if (host.relay) {
+          activateRelay(host.relay);
+        }
+        onHostSwitched?.();
         setSwitchingHostId(null);
         return;
       }
 
-      switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+      // No usable probe result — probe now: direct first, relay fallback.
+      // Statuses are written once, with the final outcome, so the row never
+      // flashes intermediate failures while the fallback is still running.
+      let finalStatus: HostStatus = { status: 'unreachable', latencyMs: 0 };
+      let transport: 'direct' | 'relay' | null = null;
+      if (apiOrigin) {
+        const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+        finalStatus = { status: probe.status, latencyMs: probe.latencyMs };
+        if (!isBlockedHostStatus(probe.status)) transport = 'direct';
+      }
+      let relayProbeTunnel: ReturnType<typeof createRelayTunnelClient> | undefined;
+      if (!transport && host.relay) {
+        const probe = await probeRelayDesktopHost(host.relay, { keepTunnel: true, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null })
+          .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+        if (probe.status === 'ok') {
+          finalStatus = { status: probe.status, latencyMs: probe.latencyMs, via: 'relay' };
+          transport = 'relay';
+          relayProbeTunnel = 'tunnel' in probe ? probe.tunnel : undefined;
+        }
+      }
+      setDesktopHostStatus(host.id, finalStatus);
+
+      if (!transport) {
+        toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }));
+        setSwitchingHostId(null);
+        return;
+      }
+      if (transport === 'relay' && host.relay) {
+        activateRelay(host.relay, relayProbeTunnel);
+      } else {
+        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host) });
+      }
       onHostSwitched?.();
       setSwitchingHostId(null);
       return;
@@ -598,11 +588,8 @@ export function DesktopHostSwitcherDialog({
 
     if (host.id !== LOCAL_HOST_ID && isDesktopShell()) {
       setSwitchingHostId(host.id);
-      const probe = await desktopHostProbe(origin, { clientToken: host.clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      setStatusById((prev) => ({
-        ...prev,
-        [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
-      }));
+      const probe = await desktopHostProbe(origin, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      setDesktopHostStatus(host.id, { status: probe.status, latencyMs: probe.latencyMs });
 
       if (isBlockedHostStatus(probe.status)) {
         toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }));
@@ -619,7 +606,7 @@ export function DesktopHostSwitcherDialog({
     } catch {
       window.location.href = target;
     }
-  }, [localOrigin, onHostSwitched, sshHostIds, sshStatusesById, t]);
+  }, [localOrigin, onHostSwitched, sshHostIds, sshStatusesById, statusById, t]);
 
   const cancelEdit = React.useCallback(() => {
     setEditingId(null);
@@ -646,7 +633,7 @@ export function DesktopHostSwitcherDialog({
     const url = resolved.persistedUrl;
 
     const label = (editLabel || redactSensitiveUrl(url)).trim();
-    const nextHosts = configHosts.map((h) => (h.id === editingId ? { ...h, label, url } : h));
+    const nextHosts = configHosts.map((h) => (h.id === editingId ? { ...h, label, url, apiUrl: url } : h));
     await persist(nextHosts, defaultHostId);
     cancelEdit();
     if (resolved.redeemUrl) {
@@ -660,14 +647,21 @@ export function DesktopHostSwitcherDialog({
   }, [configHosts, persist]);
 
   const openInNewWindow = React.useCallback((host: DesktopHost) => {
-    const origin = host.id === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
-    if (!origin) return;
-    const target = toNavigationUrl(origin);
-    desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null }).catch((err: unknown) => {
+    const reportFailure = (err: unknown) => {
       toast.error(t('desktopHostSwitcher.error.failedToOpenNewWindow'), {
         description: err instanceof Error ? err.message : String(err),
       });
-    });
+    };
+    // Relay-capable hosts can't be expressed as a fixed window URL — the new
+    // window boots the local UI and picks direct-vs-tunnel itself.
+    if (host.relay && host.id !== LOCAL_HOST_ID) {
+      desktopOpenNewWindowForHost(host.id).catch(reportFailure);
+      return;
+    }
+    const origin = host.id === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
+    if (!origin) return;
+    const target = toNavigationUrl(origin);
+    desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch(reportFailure);
   }, [localOrigin, t]);
 
   const switchToLocal = React.useCallback(async () => {
@@ -769,7 +763,7 @@ export function DesktopHostSwitcherDialog({
               className={cn(
                 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
                 'hover:text-foreground hover:bg-interactive-hover',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
               )}
               onClick={() => void probeAll(allHosts)}
               disabled={!desktopAvailable || isLoading || isProbing}
@@ -823,7 +817,7 @@ export function DesktopHostSwitcherDialog({
         )}
 
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="space-y-1">
+          <div className={cn('space-y-1', embedded && 'space-y-1.5 px-3 py-1')}>
             {isLoading ? (
               <div className="px-2 py-2 text-muted-foreground text-sm">{t('desktopHostSwitcher.state.loading')}</div>
             ) : (
@@ -834,20 +828,37 @@ export function DesktopHostSwitcherDialog({
                 const isDefault = (defaultHostId || LOCAL_HOST_ID) === host.id;
                 const status = statusById[host.id] || null;
                 const sshStatus = sshStatusesById[host.id] || null;
-                const isChecking = !isSsh && Boolean(probingHostIds[host.id]);
-                const statusKind: HostDisplayStatus = isSsh ? sshPhaseToHostStatus(sshStatus?.phase) : (isChecking ? 'checking' : (status?.status ?? null));
+                // While a probe runs, keep showing the last known result (quiet
+                // refresh — the header's refresh icon is the spinner); only fall
+                // back to "Checking" when there has never been one. "Unknown" is
+                // never shown — an unprobed host is by definition being checked.
+                //
+                // The instance the app is connected to never says "Checking":
+                // the live connection already answers the question a probe would
+                // ask, and reporting otherwise reads as the app not knowing where
+                // it is. A real probe result still wins — it carries the ping.
+                const statusKind: HostDisplayStatus = isSsh
+                  ? sshPhaseToHostStatus(sshStatus?.phase)
+                  : (status?.status ?? (isActive && isRuntimeConnected ? 'ok' : 'checking'));
                 const isEditing = editingId === host.id;
                 const effectiveUrl = isLocal ? localOrigin : (normalizeHostUrl(host.url) || host.url);
                 const displayLabel = host.id === LOCAL_HOST_ID
                   ? t('desktopHostSwitcher.instance.local')
                   : redactSensitiveUrl(host.label);
-                const displayUrl = redactSensitiveUrl(effectiveUrl);
+                // Relay-only hosts have a relay:// pseudo-URL that means nothing
+                // to a person — say how the connection works instead. Hosts with
+                // a direct leg show their address.
+                const displayUrl = host.relay && !host.apiUrl ? t('mobile.connect.relay.badge') : redactSensitiveUrl(effectiveUrl);
 
                 return (
                   <div
                     key={host.id}
                     className={cn(
                       'group flex items-center gap-2 px-2.5 py-2 rounded-md overflow-hidden',
+                      // Dropdown (embedded): mobile-style card per host; the
+                      // active host reads as selected, not just labelled.
+                      embedded && 'rounded-xl bg-[var(--surface-muted)] px-3 py-2.5',
+                      embedded && isActive && 'bg-[var(--interactive-selection)]/25',
                       isEditing ? 'bg-interactive-hover/20' : 'hover:bg-interactive-hover/30'
                     )}
                   >
@@ -862,32 +873,33 @@ export function DesktopHostSwitcherDialog({
                       aria-label={t('desktopHostSwitcher.actions.switchToAria', { instance: displayLabel })}
                     >
                       <span className={cn('h-2 w-2 rounded-full flex-shrink-0', statusDotClass(statusKind))} />
+                      {/* Same reading order as the settings device list: name +
+                          badges on the first line, a toned status line under it,
+                          then the address. */}
                       <div className="flex-1 min-w-0 space-y-0.5">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <div className="flex min-w-0 max-w-[45%] items-center gap-1.5">
-                            <span className="typography-ui-label truncate text-foreground">
-                              {displayLabel}
-                            </span>
-                            {isSsh && (
-                              <span className="typography-micro flex-shrink-0 px-1 rounded leading-none pb-px text-[var(--status-info)] bg-[var(--status-info)]/10">
-                                SSH
-                              </span>
-                            )}
-                            {isActive && (
-                              <span className="typography-micro flex-shrink-0 text-muted-foreground">{t('desktopHostSwitcher.header.current')}</span>
-                            )}
-                          </div>
-                          <span className="inline-flex min-w-0 flex-1 items-center gap-1 typography-micro text-muted-foreground">
-                            <span className="flex-shrink-0">{statusIcon(statusKind)}</span>
-                            <span className="truncate">
-                              {isSsh ? t(sshPhaseLabelKey(sshStatus?.phase)) : t(statusLabelKey(statusKind))}
-                              {!isSsh && statusKind === 'ok' && typeof status?.latencyMs === 'number'
-                                ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(status.latencyMs)) })
-                                : ''}
-                            </span>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="typography-ui-label font-medium truncate text-foreground">
+                            {displayLabel}
                           </span>
+                          {isActive && (
+                            <span className="typography-micro flex-shrink-0 text-muted-foreground bg-muted px-1 rounded leading-none pb-px border border-border/50">
+                              {t('desktopHostSwitcher.header.current')}
+                            </span>
+                          )}
+                          {isSsh && (
+                            <span className="typography-micro flex-shrink-0 px-1 rounded leading-none pb-px text-[var(--status-info)] bg-[var(--status-info)]/10">
+                              SSH
+                            </span>
+                          )}
                         </div>
-                        <div className="typography-micro text-muted-foreground truncate font-mono">
+                        <div className={cn('typography-micro truncate', statusTextClass(statusKind))}>
+                          {isSsh ? t(sshPhaseLabelKey(sshStatus?.phase)) : t(statusLabelKey(statusKind))}
+                          {!isSsh && statusKind === 'ok' && typeof status?.latencyMs === 'number'
+                            ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(status.latencyMs)) })
+                            : ''}
+                          {!isSsh && status?.via === 'relay' ? ` · ${t('settings.remoteInstances.clientAuth.state.viaRelay')}` : ''}
+                        </div>
+                        <div className="typography-micro text-muted-foreground/70 truncate font-mono">
                           {displayUrl}
                         </div>
                       </div>

@@ -1,9 +1,7 @@
 import type {
   Agent,
-  Command,
   Config,
   LspStatus,
-  McpStatus,
   Message,
   Part,
   Path,
@@ -42,7 +40,6 @@ export type ProjectMeta = {
 export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
-  command: Command[]
   project: string
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
@@ -51,12 +48,17 @@ export type State = {
   path: Path
   session: Session[]
   sessionTotal: number
+  sessionListSource?: "empty" | "persisted" | "live" | "authoritative"
+  sessionRevision?: number
+  sessionEventRevision?: Record<string, number>
+  sessionDeletedRevision?: Record<string, number>
   session_status: Record<string, SessionStatus>
+  /** A successful status snapshot makes omitted sessions authoritatively idle. */
+  sessionStatusReady?: boolean
   session_diff: Record<string, FileDiff[]>
   todo: Record<string, Todo[]>
   permission: Record<string, PermissionRequest[]>
   question: Record<string, QuestionRequest[]>
-  mcp: Record<string, McpStatus>
   lsp: LspStatus[]
   vcs: VcsInfo | undefined
   limit: number
@@ -92,6 +94,7 @@ export type EvictPlan = {
   pins: Set<string>
   max: number
   ttl: number
+  graceMs?: number
   now: number
   hasPendingBlockingRequests?: (directory: string) => boolean
 }
@@ -106,8 +109,20 @@ export type DisposeCheck = {
 }
 
 export const MAX_DIR_STORES = 30
+/**
+ * Directories touched within this window are never overflow-eviction victims.
+ *
+ * Sidebar rows call `ensureChild` during render but only take their pin in an
+ * effect after commit. Without a grace window, expanding a project with more
+ * worktrees than `MAX_DIR_STORES` evicted directories that were actively
+ * rendering, which recreated them, which issued another bootstrap request, in
+ * an endless loop (issue #1472). The limit is therefore a soft target: a burst
+ * of live directories overflows briefly rather than thrashing, and the cache is
+ * bounded by idle-time eviction instead.
+ */
+export const EVICTION_GRACE_MS = 30 * 1000
 export const DIR_IDLE_TTL_MS = 20 * 60 * 1000
-export const SESSION_CACHE_LIMIT = 40
+export const SESSION_CACHE_LIMIT = 20
 
 export const INITIAL_STATE: State = {
   project: "",
@@ -118,15 +133,17 @@ export const INITIAL_STATE: State = {
   path: { state: "", config: "", worktree: "", directory: "", home: "" },
   status: "loading",
   agent: [],
-  command: [],
   session: [],
   sessionTotal: 0,
+  sessionListSource: "empty",
+  sessionRevision: 0,
+  sessionEventRevision: {},
+  sessionDeletedRevision: {},
   session_status: {},
   session_diff: {},
   todo: {},
   permission: {},
   question: {},
-  mcp: {},
   lsp: [],
   vcs: undefined,
   limit: 5,

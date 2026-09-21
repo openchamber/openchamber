@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
@@ -8,6 +9,7 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
+import { SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -58,6 +60,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
 
+  /**
+   * See webviewCachedStateRetry.ts — a single postMessage can be dropped
+   * before the webview bridge is ready, leaving the loading screen stuck.
+   */
+  private _scheduleCachedStateRetries(targetView: vscode.WebviewView | undefined): void {
+    scheduleCachedStateRetries({
+      target: targetView ?? this._view,
+      getCurrent: () => this._view,
+      isConnected: () => this._cachedStatus === 'connected',
+      send: () => this._sendCachedState(),
+    });
+  }
+
   private _createMessageId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -102,10 +117,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
+    // The webview bridge may not be ready yet; keep re-sending so a dropped
+    // `connectionStatus` can never leave the webview stuck on its loading screen.
+    this._scheduleCachedStateRetries(webviewView);
 
     // Send current active editor file state to the new webview
     this._lastActiveEditorFilePayload = null;
     void this._broadcastActiveEditorFile();
+
+    webviewView.onDidChangeVisibility(() => {
+      if (this._view === webviewView) this.notifyViewerStateChanged();
+    });
 
     webviewView.onDidDispose(() => {
       for (const [streamId, stream] of this._sseStreams) {
@@ -128,8 +150,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (message.type === 'webview:ready') {
+        for (const [streamId, stream] of this._sseStreams) {
+          if (stream.view !== webviewView) continue;
+          stream.controller.abort();
+          this._sseStreams.delete(streamId);
+        }
+        if (this._view === webviewView) {
+          this._clearPendingMessages();
+          this._sendCachedState();
+        }
+        return;
+      }
+
       if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
         this._confirmMessage(message._msgId);
+        return;
+      }
+
+      // Editor comment threads mirror the composer's drafts, so the webview
+      // reports every change. Handled before the id check because this is a
+      // one-way notification, not a bridge request awaiting a response.
+      if (message.type === 'inlineComments:sync') {
+        // Tagged with the sidebar's identity: a snapshot only speaks for the
+        // store that produced it, and each session panel has its own.
+        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
+          snapshot: message.payload,
+          surfaceId: SIDEBAR_SURFACE_ID,
+        });
         return;
       }
 
@@ -185,6 +233,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     
     // Send to webview if it exists
     this._sendCachedState();
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet).
+    if (status === 'connected') {
+      this._scheduleCachedStateRetries(this._view);
+    }
   }
 
   public addTextToInput(text: string) {
@@ -200,6 +255,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public focusChatInput(): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    void this._view.webview.postMessage({
+      type: 'command',
+      command: 'focusChatInput',
+    });
+  }
+
   public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
     if (!this._view) {
       return;
@@ -210,6 +277,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: 'command',
       command: 'addContextSelection',
       payload: selection,
+    });
+  }
+
+  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; source: 'diff' | 'file'; side?: 'original' | 'modified'; startLine: number; endLine: number; code: string; language: string; comment: string }) {
+    if (!this._view) return;
+    // Bring the chat into view like the other capture flows do, so the chip the
+    // comment becomes is visible rather than waiting behind a collapsed panel.
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addLineComment',
+      payload,
+    });
+  }
+
+  /** Drops a draft the user removed from its editor thread. */
+  public removeLineComment(draftId: string) {
+    if (!this._view) return;
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'removeLineComment',
+      payload: { draftId },
     });
   }
 
@@ -318,6 +407,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
+    this._view?.webview.postMessage({
+      type: 'command',
+      command: 'permissionAutoAcceptSynced',
+      payload: snapshot,
+    });
+  }
+
   /**
    * Ask the webview to run the full OpenCode reload flow (overlay + managed
    * restart via the bridge + config/data refresh) — the same flow used after an
@@ -335,15 +432,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  public notifyWindowFocusChanged(focused: boolean): void {
+  /** Tells the webview whether the user can see it: VS Code focused and the view shown. */
+  public notifyViewerStateChanged(): void {
     if (!this._view) {
       return;
     }
 
     this._view.webview.postMessage({
       type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused },
+      command: 'viewerStateChanged',
+      payload: { windowFocused: vscode.window.state.focused, surfaceVisible: this._view.visible },
     });
   }
 
@@ -426,7 +524,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    this.notifyWindowFocusChanged(vscode.window.state.focused);
+    this.notifyViewerStateChanged();
   }
 
   private _scheduleBroadcast(): void {
@@ -528,7 +626,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async _startSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
     const { id, type, payload } = message;
 
-    const { path, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
+    const { path, headers, streamId: requestedStreamId } = (payload || {}) as { path?: string; headers?: Record<string, string>; streamId?: string };
     const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
 
     if (!this._openCodeManager) {
@@ -540,8 +638,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       };
     }
 
-    const streamId = `sse_${++this._sseCounter}_${Date.now()}`;
+    const streamId = typeof requestedStreamId === 'string' && /^sse_webview_\d+_\d+$/.test(requestedStreamId)
+      ? requestedStreamId
+      : `sse_${++this._sseCounter}_${Date.now()}`;
     const controller = new AbortController();
+    this._sseStreams.set(streamId, { controller, view: this._view });
 
     try {
       const start = await openSseProxy({
@@ -553,8 +654,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });
-
-      this._sseStreams.set(streamId, { controller, view: this._view });
 
       start.run
         .then(() => {
@@ -581,6 +680,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
       };
     } catch (error) {
+      this._sseStreams.delete(streamId);
       const message = error instanceof Error ? error.message : String(error);
       return {
         id,

@@ -1,10 +1,10 @@
-export type Locale = 'en' | 'fr' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja';
+export type Locale = 'en' | 'de' | 'fr' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja' | 'tr';
 
-export const LOCALES = ['en', 'fr', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'de', 'fr', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.french' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.french' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.german' | 'common.language.japanese' | 'common.language.turkish'> = {
   en: 'common.language.english',
   fr: 'common.language.french',
   'zh-CN': 'common.language.simplifiedChinese',
@@ -14,7 +14,9 @@ export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'comm
   'pt-BR': 'common.language.brazilianPortuguese',
   ko: 'common.language.korean',
   pl: 'common.language.polish',
+  de: 'common.language.german',
   ja: 'common.language.japanese',
+  tr: 'common.language.turkish',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -59,8 +61,14 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'ja' || normalized.startsWith('ja-')) {
     return 'ja';
   }
+  if (normalized === 'de' || normalized.startsWith('de-')) {
+    return 'de';
+  }
   if (normalized === 'pl' || normalized.startsWith('pl-')) {
     return 'pl';
+  }
+  if (normalized === 'tr' || normalized.startsWith('tr-')) {
+    return 'tr';
   }
   return DEFAULT_LOCALE;
 }
@@ -94,10 +102,22 @@ export function writeStoredLocale(locale: Locale): void {
   }
 }
 
+declare global {
+  interface Window {
+    /** The host application's display language (VS Code sets it), used before the user picks a locale. */
+    __OPENCHAMBER_HOST_LANGUAGE__?: string;
+  }
+}
+
 export function detectInitialLocale(): Locale {
   const stored = readStoredLocale();
   if (stored) {
     return stored;
+  }
+
+  const hostLanguage = globalThis.window?.__OPENCHAMBER_HOST_LANGUAGE__;
+  if (hostLanguage) {
+    return normalizeLocale(hostLanguage);
   }
 
   return DEFAULT_LOCALE;

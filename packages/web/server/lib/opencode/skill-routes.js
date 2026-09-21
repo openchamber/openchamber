@@ -1,4 +1,16 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
+
+/**
+ * Matches how OpenCode reads its own boolean env flags: any value other than
+ * unset, empty, "0" or "false" enables the flag.
+ */
+const isEnvFlagEnabled = (value) => {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
+};
 
 export const registerSkillRoutes = (app, dependencies) => {
   const {
@@ -10,9 +22,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     readSettingsFromDisk,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
-    refreshOpenCodeAfterConfigChange,
-    clientReloadDelayMs,
     buildOpenCodeUrl,
+
     getOpenCodeAuthHeaders,
     getOpenCodePort,
     getSkillSources,
@@ -21,6 +32,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     createSkill,
     updateSkill,
     deleteSkill,
+    renameSkill,
+    isManagedSkillPath,
     readSkillSupportingFile,
     writeSkillSupportingFile,
     deleteSkillSupportingFile,
@@ -28,14 +41,11 @@ export const registerSkillRoutes = (app, dependencies) => {
     SKILL_DIR,
     getCuratedSkillsSources,
     getCacheKey,
-    getCachedScan,
-    setCachedScan,
+    scanWithCache,
     parseSkillRepoSource,
     scanSkillsRepository,
     installSkillsFromRepository,
-    scanClawdHubPage,
-    installSkillsFromClawdHub,
-    isClawdHubSource,
+    fetchGitHubRepoMetas,
     getProfiles,
     getProfile,
   } = dependencies;
@@ -101,7 +111,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     const userRoots = [
-      path.join(home, '.config', 'opencode'),
+      OPENCODE_CONFIG_DIR,
       path.join(home, '.opencode'),
       path.join(home, '.claude', 'skills'),
       path.join(home, '.agents', 'skills'),
@@ -200,9 +210,33 @@ export const registerSkillRoutes = (app, dependencies) => {
     return null;
   };
 
+  // Prefer an explicit request directory, then soft-fallback to the active
+  // project / lastDirectory so repository-local skills stay visible when the
+  // client omits `directory` (create already used resolveProjectDirectory).
+  const resolveSkillsDirectory = async (req) => {
+    const optional = await resolveOptionalProjectDirectory(req);
+    if (optional.error) {
+      return optional;
+    }
+    if (optional.directory) {
+      return optional;
+    }
+
+    try {
+      const fallback = await resolveProjectDirectory(req);
+      if (fallback.directory) {
+        return { directory: fallback.directory, error: null };
+      }
+    } catch {
+      // ignore — listing user-scoped skills without a project is valid
+    }
+
+    return { directory: null, error: null };
+  };
+
   app.get('/api/config/skills', async (req, res) => {
     try {
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
@@ -212,13 +246,36 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const enrichedSkills = skills.map((skill) => {
         const sources = getSkillSources(skill.name, directory, skill);
+        const skillPath = typeof skill.path === 'string' ? skill.path : null;
         return {
           ...skill,
-          sources
+          sources,
+          renamable: Boolean(
+            skillPath
+            && skillPath !== '<built-in>'
+            && isManagedSkillPath(skillPath, directory)
+          ),
         };
       });
 
-      res.json({ skills: enrichedSkills });
+      // OpenCode decides which external skill roots it loads from process
+      // env, and the browser cannot read that. Report the flags alongside the
+      // scan so the client can narrow its list to what the agent can actually
+      // invoke.
+      //
+      // OpenCode's own skill-list endpoint is not usable for this: on 1.18.14
+      // it returns only global and builtin skills, omitting the project
+      // `.agents`/`.claude` skills the agent demonstrably has.
+      res.json({
+        skills: enrichedSkills,
+        externalSkills: {
+          // `OPENCODE_DISABLE_CLAUDE_CODE` is the broad switch; the specific
+          // one wins independently — OpenCode ORs them.
+          claudeDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE)
+            || isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
+          allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
+        },
+      });
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });
@@ -246,9 +303,26 @@ export const registerSkillRoutes = (app, dependencies) => {
       }));
 
       const sources = [...curatedSources, ...customSources];
-      const sourcesForUi = sources.map(({ gitIdentityId, ...rest }) => rest);
 
-      res.json({ ok: true, sources: sourcesForUi, itemsBySource: {}, pageInfoBySource: {} });
+      const githubRepos = sources
+        .map((src) => parseSkillRepoSource(src.source))
+        .filter((parsed) => parsed.ok && parsed.host === 'github.com')
+        .map((parsed) => parsed.normalizedRepo);
+      const repoMetas = await fetchGitHubRepoMetas(githubRepos);
+
+      const sourcesForUi = sources.map(({ gitIdentityId, ...rest }) => {
+        const parsed = parseSkillRepoSource(rest.source);
+        const meta = parsed.ok && parsed.host === 'github.com'
+          ? repoMetas[parsed.normalizedRepo] || {}
+          : {};
+        return {
+          ...rest,
+          stars: typeof meta.stars === 'number' ? meta.stars : null,
+          repoUpdatedAt: typeof meta.repoUpdatedAt === 'string' ? meta.repoUpdatedAt : null,
+        };
+      });
+
+      res.json({ ok: true, sources: sourcesForUi, itemsBySource: {} });
     } catch (error) {
       console.error('Failed to load skills catalog:', error);
       res.status(500).json({ ok: false, error: { kind: 'unknown', message: error.message || 'Failed to load catalog' } });
@@ -257,7 +331,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
   app.get('/api/config/skills/catalog/source', async (req, res) => {
     try {
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ ok: false, error: { kind: 'invalidSource', message: error } });
       }
@@ -268,7 +342,6 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       const refresh = String(req.query.refresh || '').toLowerCase() === 'true';
-      const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : null;
 
       const curatedSources = getCuratedSkillsSources();
       const settings = await readSettingsFromDisk();
@@ -296,26 +369,6 @@ export const registerSkillRoutes = (app, dependencies) => {
       );
       const installedByName = new Map(resolvedDiscovered.map((s) => [s.name, s]));
 
-      if (src.sourceType === 'clawdhub' || isClawdHubSource(src.source)) {
-        const scanned = await scanClawdHubPage({ cursor: cursor || null });
-        if (!scanned.ok) {
-          return res.status(500).json({ ok: false, error: scanned.error });
-        }
-
-        const items = (scanned.items || []).map((item) => {
-          const installed = installedByName.get(item.skillName);
-          return {
-            ...item,
-            sourceId: src.id,
-            installed: installed
-              ? { isInstalled: true, scope: installed.scope, source: installed.source }
-              : { isInstalled: false },
-          };
-        });
-
-        return res.json({ ok: true, items, nextCursor: scanned.nextCursor || null });
-      }
-
       const parsed = parseSkillRepoSource(src.source);
       if (!parsed.ok) {
         return res.status(400).json({ ok: false, error: parsed.error });
@@ -328,21 +381,19 @@ export const registerSkillRoutes = (app, dependencies) => {
         identityId: src.gitIdentityId || '',
       });
 
-      let scanResult = !refresh ? getCachedScan(cacheKey) : null;
-      if (!scanResult) {
-        const scanned = await scanSkillsRepository({
+      const scanResult = await scanWithCache(
+        cacheKey,
+        () => scanSkillsRepository({
           source: src.source,
           subpath: src.defaultSubpath,
           defaultSubpath: src.defaultSubpath,
           identity: resolveGitIdentity(src.gitIdentityId),
-        });
+        }),
+        { refresh },
+      );
 
-        if (!scanned.ok) {
-          return res.status(500).json({ ok: false, error: scanned.error });
-        }
-
-        scanResult = scanned;
-        setCachedScan(cacheKey, scanResult);
+      if (!scanResult.ok) {
+        return res.status(500).json({ ok: false, error: scanResult.error });
       }
 
       const items = (scanResult.items || []).map((item) => {
@@ -424,42 +475,6 @@ export const registerSkillRoutes = (app, dependencies) => {
         workingDirectory = resolved.directory;
       }
 
-      if (isClawdHubSource(source)) {
-        const result = await installSkillsFromClawdHub({
-          scope,
-          targetSource,
-          workingDirectory,
-          userSkillDir: SKILL_DIR,
-          selections,
-          conflictPolicy,
-          conflictDecisions,
-        });
-
-        if (!result.ok) {
-          if (result.error?.kind === 'conflicts') {
-            return res.status(409).json({ ok: false, error: result.error });
-          }
-          return res.status(400).json({ ok: false, error: result.error });
-        }
-
-        const installed = result.installed || [];
-        const skipped = result.skipped || [];
-        const requiresReload = installed.length > 0;
-
-        if (requiresReload) {
-          await refreshOpenCodeAfterConfigChange('skills install');
-        }
-
-        return res.json({
-          ok: true,
-          installed,
-          skipped,
-          requiresReload,
-          message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-          reloadDelayMs: requiresReload ? clientReloadDelayMs : undefined,
-        });
-      }
-
       const identity = resolveGitIdentity(gitIdentityId);
 
       const result = await installSkillsFromRepository({
@@ -495,19 +510,18 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const installed = result.installed || [];
       const skipped = result.skipped || [];
-      const requiresReload = installed.length > 0;
-
-      if (requiresReload) {
-        await refreshOpenCodeAfterConfigChange('skills install');
-      }
+      const requiresRestart = installed.length > 0;
 
       res.json({
         ok: true,
         installed,
         skipped,
-        requiresReload,
-        message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-        reloadDelayMs: requiresReload ? clientReloadDelayMs : undefined,
+        ...(requiresRestart
+          ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.')
+          : {
+            requiresReload: false,
+            message: 'No skills were installed',
+          }),
       });
     } catch (error) {
       console.error('Failed to install skills:', error);
@@ -518,7 +532,7 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.get('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
@@ -546,7 +560,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
@@ -579,7 +593,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       const { scope, source: skillSource, ...config } = req.body;
       const { directory, error } = scope === SKILL_SCOPE.PROJECT
         ? await resolveProjectDirectory(req)
-        : await resolveOptionalProjectDirectory(req);
+        : await resolveSkillsDirectory(req);
       if (error || (scope === SKILL_SCOPE.PROJECT && !directory)) {
         return res.status(400).json({ error: error || 'Project skill creation requires a directory' });
       }
@@ -588,14 +602,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createSkill(skillName, { ...config, source: skillSource }, directory, scope);
-      await refreshOpenCodeAfterConfigChange('skill creation');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} created successfully. Restart OpenCode to apply.`,
+      ));
     } catch (error) {
       console.error('Failed to create skill:', error);
       res.status(500).json({ error: error.message || 'Failed to create skill' });
@@ -606,23 +615,34 @@ export const registerSkillRoutes = (app, dependencies) => {
     try {
       const skillName = req.params.name;
       const updates = req.body;
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
+      }
+
+      if (typeof updates?.renameTo === 'string') {
+        const newName = updates.renameTo.trim();
+        console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
+        console.log('[Server] Working directory:', directory);
+        renameSkill(skillName, newName, directory);
+        await refreshOpenCodeAfterConfigChange('skill rename');
+
+        return res.json({
+          success: true,
+          name: newName,
+          requiresReload: true,
+          message: `Skill renamed to ${newName} successfully. Reloading interface…`,
+          reloadDelayMs: clientReloadDelayMs,
+        });
       }
 
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
       updateSkill(skillName, updates, directory, updates?.targetPath);
-      await refreshOpenCodeAfterConfigChange('skill update');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} updated successfully. Restart OpenCode to apply.`,
+      ));
     } catch (error) {
       console.error('[Server] Failed to update skill:', error);
       res.status(500).json({ error: error.message || 'Failed to update skill' });
@@ -637,7 +657,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Invalid file path' });
       }
       const { content } = req.body;
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
@@ -671,7 +691,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
@@ -701,20 +721,15 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.delete('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
 
       deleteSkill(skillName, directory);
-      await refreshOpenCodeAfterConfigChange('skill deletion');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} deleted successfully. Restart OpenCode to apply.`,
+      ));
     } catch (error) {
       console.error('Failed to delete skill:', error);
       res.status(500).json({ error: error.message || 'Failed to delete skill' });

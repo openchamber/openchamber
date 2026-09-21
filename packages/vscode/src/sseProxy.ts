@@ -7,6 +7,7 @@ type OpenSseProxyOptions = {
   headers?: Record<string, string>;
   signal: AbortSignal;
   onChunk: (chunk: string) => void;
+  stallTimeoutMs?: number;
 };
 
 type OpenSseProxyResult = {
@@ -22,6 +23,7 @@ const SSE_RESPONSE_HEADERS = {
 // SSE reconnect configuration
 const MAX_RECONNECTS = 3;
 const BASE_RECONNECT_DELAY = 1000; // 1 second
+const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20000;
 
 const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
   if (signal.aborted) {
@@ -117,21 +119,54 @@ const fetchSseResponse = async (
   return response;
 };
 
-const pipeSseResponse = async (response: Response, signal: AbortSignal, onChunk: (chunk: string) => void): Promise<void> => {
+const resolveStallTimeoutMs = (value: number | undefined): number => (
+  Number.isFinite(value) && typeof value === 'number' ? value : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
+);
+
+const pipeSseResponse = async (
+  response: Response,
+  signal: AbortSignal,
+  onChunk: (chunk: string) => void,
+  stallTimeoutMs?: number,
+): Promise<void> => {
   if (!response.body) {
     throw new Error('OpenCode SSE response missing body');
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  let stalled = false;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearStallTimer = () => {
+    if (!stallTimer) {
+      return;
+    }
+    clearTimeout(stallTimer);
+    stallTimer = null;
+  };
+
+  const resetStallTimer = () => {
+    clearStallTimer();
+    const timeoutMs = resolveStallTimeoutMs(stallTimeoutMs);
+    if (timeoutMs <= 0) {
+      return;
+    }
+    stallTimer = setTimeout(() => {
+      stalled = true;
+      void reader.cancel().catch(() => {});
+    }, timeoutMs);
+  };
 
   try {
+    resetStallTimer();
     while (!signal.aborted) {
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
       if (value && value.length > 0) {
+        resetStallTimer();
         const chunk = decoder.decode(value, { stream: true });
         if (chunk.length > 0) {
           onChunk(chunk);
@@ -143,7 +178,12 @@ const pipeSseResponse = async (response: Response, signal: AbortSignal, onChunk:
     if (!signal.aborted && remaining.length > 0) {
       onChunk(remaining);
     }
+  } catch (error) {
+    if (!stalled) {
+      throw error;
+    }
   } finally {
+    clearStallTimer();
     try {
       await reader.cancel();
     } catch {
@@ -163,6 +203,7 @@ export const openSseProxy = async ({
   headers,
   signal,
   onChunk,
+  stallTimeoutMs,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
   // Reconnect logic with exponential backoff
   let reconnectAttempts = 0;
@@ -208,7 +249,7 @@ export const openSseProxy = async ({
   const run = (async () => {
     let activeResponse = response;
     try {
-      await pipeSseResponse(activeResponse, signal, onChunk);
+      await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
     } catch (error: unknown) {
       const cause = (error as { cause?: { code?: string } } | null)?.cause;
 
@@ -228,7 +269,7 @@ export const openSseProxy = async ({
             // Attempt to reconnect
             try {
               activeResponse = await connect();
-              await pipeSseResponse(activeResponse, signal, onChunk);
+              await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
               return; // Successfully reconnected
             } catch (reconnectError) {
               console.error('[SSE] Reconnect failed', reconnectError);

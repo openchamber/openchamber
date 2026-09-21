@@ -1,0 +1,112 @@
+{
+  "metadata": {
+    "id": "openchamber-light",
+    "name": "OpenChamber",
+    "variant": "light",
+    "description": "The OpenChamber signature - Vitesse syntax on warm paper with Flexoki accents, harmonized in OKLCH (light variant)",
+    "version": "1.0.0",
+    "author": "OpenChamber",
+    "tags": [
+      "light",
+      "brand",
+      "hybrid",
+      "warm",
+      "paper"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#b35017",
+      "hover": "#9a4310",
+      "active": "#85390c",
+      "muted": "#b3501780"
+    },
+    "surface": {
+      "background": "#fdfcfa",
+      "foreground": "#393a34",
+      "muted": "#f7f6f4",
+      "mutedForeground": "#5c5c54",
+      "elevated": "#f8f7f5",
+      "overlay": "#39393420"
+    },
+    "interactive": {
+      "border": "#e5e1de",
+      "selection": "#a9998f2b",
+      "borderHover": "#cbc7c2",
+      "focusRing": "#b3501755",
+      "hover": "#0000000d",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#b7493f",
+      "warning": "#8d6c15",
+      "success": "#5f8d3d",
+      "successForeground": "#ffffff",
+      "info": "#2d72c4"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f4f3f1",
+        "comment": "#9dae9d",
+        "keyword": "#15764e",
+        "string": "#c25f4b",
+        "number": "#177b8f",
+        "function": "#4e8b18",
+        "variable": "#bb782a",
+        "type": "#0e8294",
+        "operator": "#b94d50"
+      },
+      "tokens": {
+        "stringEscape": "#393a32",
+        "variableProperty": "#9a8402",
+        "variableLocal": "#cfd0c9",
+        "className": "#5567b6",
+        "punctuation": "#6b6b61",
+        "url": "#136aad"
+      },
+      "highlights": {
+        "diffAdded": "#2c751e",
+        "diffRemoved": "#ab5959",
+        "diffModified": "#2c751e",
+        "diffModifiedBackground": "#5f8d3d20",
+        "lineNumber": "#b9b6b0"
+      }
+    },
+    "pr": {
+      "draft": "#6F6E69",
+      "blocked": "#b35017",
+      "merged": "#795cbc"
+    },
+    "chat": {
+      "userMessageBackground": "#f7f2ee",
+      "divider": "#d8d5d0"
+    },
+    "markdown": {
+      "link": "#2e808f",
+      "linkHover": "#296aa3",
+      "inlineCode": "#006A2C",
+      "inlineCodeBackground": "#F0EFED",
+      "blockquote": "#6b6b63",
+      "blockquoteBorder": "#d8d5d0",
+      "listMarker": "#1e754f99"
+    },
+    "tools": {
+      "border": "#d8d5d099",
+      "icon": "#6b6b63",
+      "title": "#393a34",
+      "description": "#6b6b63",
+      "edit": {
+        "addedBackground": "#2c751e25",
+        "removedBackground": "#ab595925",
+        "lineNumber": "#b9b6b0"
+      }
+    }
+  },
+  "config": {
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

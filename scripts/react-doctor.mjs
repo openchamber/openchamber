@@ -4,8 +4,24 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import {
+  claimedFilePaths,
+  printClaims,
+  readActiveClaims,
+  releaseRun,
+  resolveRunsDir,
+  runDirPath,
+} from "./lib/batch-claims.mjs";
+
 const PROJECT_NAME = "openchamber-monorepo";
-const RUNS_DIR = join(process.cwd(), ".tmp", "react-doctor", "runs");
+// Pinned so unattended batch runs cannot change diagnostics or output shape
+// without an explicit update here.
+const REACT_DOCTOR_VERSION = "0.9.12";
+const PIPELINE = "rd";
+// Resolved before command dispatch so every command shares one claims location.
+const { runsDir: RUNS_DIR, shared: SHARED_CLAIMS } = resolveRunsDir(parseArgs(process.argv.slice(2))["claims-dir"]);
+const DEFAULT_MAX_ACTIVE = 20;
+const DEFAULT_CLAIM_TTL_DAYS = 3;
 
 const PRIORITY_RULES = new Map([
   ["effect-needs-cleanup", 100],
@@ -88,14 +104,25 @@ function usage(exitCode = 0) {
   const out = exitCode === 0 ? console.log : console.error;
   out(`Usage:
   bun run doctor -- next-batch [--min-issues 75] [--max-issues 120] [--max-files 4]
+                              [--max-active ${DEFAULT_MAX_ACTIVE}] [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}]
   bun run doctor -- check-batch --run <run-id>
+  bun run doctor -- active [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}]
+
+Every command accepts --claims-dir <path> to isolate a working copy.
+  bun run doctor -- release --run <run-id>
   bun run doctor -- file <path>
   bun run doctor -- top [--limit 10]
+
+Files selected by an active batch are excluded from later batches, so concurrent
+batches never touch the same file, including batches created by the anti-slop
+pipeline. Claims are shared across clones by default. A batch stays active until
+it is released.
 
 Examples:
   bun run doctor -- next-batch --min-issues 75 --max-issues 120
   bun run doctor -- file packages/ui/src/components/chat/ChatInput.tsx
-  bun run doctor -- check-batch --run 2026-05-14T12-31-44`);
+  bun run doctor -- check-batch --run 2026-05-14T12-31-44Z
+  bun run doctor -- release --run 2026-05-14T12-31-44Z`);
   process.exit(exitCode);
 }
 
@@ -132,7 +159,7 @@ function runReactDoctor() {
   const output = execFileSync(
     "npx",
     [
-      "react-doctor@latest",
+      `react-doctor@${REACT_DOCTOR_VERSION}`,
       "--project",
       PROJECT_NAME,
       "--json",
@@ -296,7 +323,7 @@ function selectBatch(entries, minIssues, maxIssues, maxFiles) {
 }
 
 function writeRun(runId, payload) {
-  const dir = join(RUNS_DIR, runId);
+  const dir = runDirPath(RUNS_DIR, PIPELINE, runId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "baseline.json"), `${JSON.stringify(payload.report, null, 2)}\n`);
   writeFileSync(join(dir, "batch.json"), `${JSON.stringify(payload.batch, null, 2)}\n`);
@@ -304,7 +331,7 @@ function writeRun(runId, payload) {
 }
 
 function readRun(runId) {
-  const dir = join(RUNS_DIR, runId);
+  const dir = runDirPath(RUNS_DIR, PIPELINE, runId);
   const baselinePath = join(dir, "baseline.json");
   const batchPath = join(dir, "batch.json");
   if (!existsSync(baselinePath) || !existsSync(batchPath)) {
@@ -336,10 +363,36 @@ function commandNextBatch(args) {
   const maxIssues = asPositiveInt(args["max-issues"], 120, "max-issues");
   const maxFiles = asPositiveInt(args["max-files"], 4, "max-files");
   if (minIssues > maxIssues) throw new Error("--min-issues cannot be greater than --max-issues.");
+  const maxActive = asPositiveInt(args["max-active"], DEFAULT_MAX_ACTIVE, "max-active");
+  const claimTtlDays = asPositiveInt(args["claim-ttl"], DEFAULT_CLAIM_TTL_DAYS, "claim-ttl");
+
+  const claims = readActiveClaims(RUNS_DIR, claimTtlDays);
+  if (claims.length >= maxActive) {
+    console.log("React Doctor Next Batch");
+    console.log("");
+    console.log("NO BATCH AVAILABLE");
+    console.log(`Reason: ${claims.length} active batches already exist and the limit is ${maxActive}.`);
+    console.log("Stop here. Do not create a branch or a pull request.");
+    console.log("");
+    printClaims(claims, PIPELINE);
+    return;
+  }
 
   const report = runReactDoctor();
-  const diagnostics = allDiagnostics(report);
+  const claimedPaths = claimedFilePaths(claims);
+  const diagnostics = allDiagnostics(report).filter((diagnostic) => !claimedPaths.has(diagnostic.filePath));
   const entries = sortedFileEntries(diagnostics);
+
+  if (entries.length === 0) {
+    console.log("React Doctor Next Batch");
+    console.log("");
+    console.log("NO BATCH AVAILABLE");
+    console.log("Reason: no unclaimed diagnostics remain.");
+    console.log("Stop here. Do not create a branch or a pull request.");
+    console.log("");
+    printClaims(claims, PIPELINE);
+    return;
+  }
   const selection = selectBatch(entries, minIssues, maxIssues, maxFiles);
   const runId = createRunId();
   const selectedFiles = selection.selected.map(([filePath, fileDiagnostics]) => ({
@@ -348,7 +401,7 @@ function commandNextBatch(args) {
     rules: summarizeRules(fileDiagnostics),
   }));
   const metadata = createBatchMetadata(runId, selectedFiles);
-  const batch = { runId, ...metadata, minIssues, maxIssues, maxFiles, selectedFiles, oversized: selection.oversized, belowTarget: selection.belowTarget, reason: selection.reason };
+  const batch = { runId, ...metadata, minIssues, maxIssues, maxFiles, maxActive, selectedFiles, oversized: selection.oversized, belowTarget: selection.belowTarget, reason: selection.reason };
   const runDir = writeRun(runId, { report, batch });
 
   console.log("React Doctor Next Batch");
@@ -363,6 +416,9 @@ function commandNextBatch(args) {
   printReportHeader(report);
   console.log("");
   console.log(`Batch window: ${minIssues}-${maxIssues} diagnostics`);
+  console.log(`Active batches before this one: ${claims.length} of ${maxActive}`);
+  console.log(`Claims directory: ${RUNS_DIR} (${SHARED_CLAIMS ? "shared default" : "override"})`);
+  console.log(`Files excluded as claimed by active batches: ${claimedPaths.size}`);
   console.log(`Selection mode: complete files only`);
   console.log(`Batch total: ${selectedFiles.reduce((sum, file) => sum + file.diagnosticCount, 0)} diagnostics`);
   console.log(`Oversized: ${selection.oversized ? "yes" : "no"}`);
@@ -385,6 +441,20 @@ function commandNextBatch(args) {
     }
     console.log("");
   });
+}
+
+function commandActive(args) {
+  const claimTtlDays = asPositiveInt(args["claim-ttl"], DEFAULT_CLAIM_TTL_DAYS, "claim-ttl");
+  console.log(`Claims directory: ${RUNS_DIR} (${SHARED_CLAIMS ? "shared default" : "override"})`);
+  printClaims(readActiveClaims(RUNS_DIR, claimTtlDays), PIPELINE);
+}
+
+function commandRelease(args) {
+  const runId = args.run;
+  if (!runId || runId === true) throw new Error("Missing --run <run-id>.");
+  const dir = releaseRun(RUNS_DIR, PIPELINE, runId);
+  console.log(`Released batch ${runId}`);
+  console.log(`Removed ${dir}`);
 }
 
 function commandTop(args) {
@@ -478,6 +548,12 @@ async function main() {
       break;
     case "check-batch":
       commandCheckBatch(args);
+      break;
+    case "active":
+      commandActive(args);
+      break;
+    case "release":
+      commandRelease(args);
       break;
     default:
       throw new Error(`Unknown command: ${command}`);

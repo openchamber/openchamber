@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type InstalledDesktopAppInfo } from '@/lib/desktop';
 import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 
 export type OpenInAppOption = OpenInApp & {
   iconDataUrl?: string;
@@ -160,7 +160,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     void loadInstalledApps();
 
     const settingsHandler = (event: Event) => {
-      const detail = (event as CustomEvent<DesktopSettings>).detail;
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings;
       const nextId = detail
         && typeof detail.openInAppId === 'string'
         && detail.openInAppId.length > 0

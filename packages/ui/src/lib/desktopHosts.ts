@@ -1,16 +1,68 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
+import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null;
+};
+
+const isReservedRequestHeaderName = (name: string): boolean => name.trim().toLowerCase() === 'authorization';
+
+const sanitizeRequestHeaders = (headers: unknown): Record<string, string> | undefined => {
+  if (!isRecord(headers)) return undefined;
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const name = key.trim();
+    const headerValue = typeof value === 'string' ? value.trim() : '';
+    if (!name || !headerValue || /[\r\n:]/.test(name) || /[\r\n]/.test(headerValue)) continue;
+    if (isReservedRequestHeaderName(name)) continue;
+    next[name] = headerValue;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+};
+
+/**
+ * Private-relay reachability for a host. A host may carry this ALONGSIDE a
+ * direct `apiUrl` (multi-transport: direct on the home network, E2EE tunnel
+ * away — mirrors the mobile connection model) or as its only transport.
+ * `hostEncPubJwk` is the trust anchor that pins the tunnel to the real server.
+ * The relay admission `grant` is a one-time pairing artifact and is
+ * intentionally NOT persisted — steady-state relay connections route by
+ * `serverId` alone.
+ */
+export type DesktopHostRelay = {
+  relayUrl: string;
+  serverId: string;
+  hostEncPubJwk: JsonWebKey;
+};
 
 export type DesktopHost = {
   id: string;
   label: string;
-  /** Legacy/UI URL. During migration this may equal apiUrl. */
+  /** Legacy/UI URL. During migration this may equal apiUrl. For relay hosts this is a display-only `relay://<serverId>` pseudo-URL. */
   url: string;
-  /** API endpoint used by packaged Electron UI for this instance. */
+  /** API endpoint used by packaged Electron UI for this instance. Absent for relay-only hosts. */
   apiUrl?: string;
   /** Remote client bearer token for packaged-client API access. */
   clientToken?: string;
+  /** Extra headers for desktop runtime API requests. */
+  requestHeaders?: Record<string, string>;
+  /** When set, this host is reached over the private relay tunnel. */
+  relay?: DesktopHostRelay;
+};
+
+/** Display-only pseudo-URL for a relay host (never fetched). */
+export const relayHostDisplayUrl = (serverId: string): string => `relay://${serverId}`;
+
+const parseHostRelay = (value: unknown): DesktopHostRelay | null => {
+  if (!isRecord(value)) return null;
+  const relayUrl = readString(value, 'relayUrl') || readString(value, 'relay_url');
+  const serverId = readString(value, 'serverId') || readString(value, 'server_id');
+  const jwk = value.hostEncPubJwk ?? value.host_enc_pub_jwk;
+  if (!relayUrl || !serverId || !isRecord(jwk)) return null;
+  return { relayUrl, serverId, hostEncPubJwk: jwk as JsonWebKey };
 };
 
 export type DesktopHostsConfig = {
@@ -26,6 +78,122 @@ export type DesktopHostsConfigInput = {
   defaultHostId: string | null;
   initialHostChoiceCompleted?: boolean;
   localClientToken?: string | null;
+};
+
+const desktopPlatformName = (): string | undefined => {
+  if (typeof navigator === 'undefined') return undefined;
+  const ua = navigator.userAgent;
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'macos';
+  if (/Windows/i.test(ua)) return 'windows';
+  if (/Linux/i.test(ua)) return 'linux';
+  return undefined;
+};
+
+export const importDesktopHostPairing = async (
+  link: string,
+  hosts: DesktopHost[],
+): Promise<{ hosts: DesktopHost[]; hostId: string }> => {
+  const payload = parsePairingConnectionPayload(link);
+  if (!payload) throw new Error('invalid-connect-link');
+
+  const installId = await desktopInstallIdGet().catch(() => '');
+  const redeemInit: RequestInit = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      pairingId: payload.pairingId,
+      secret: payload.secret,
+      clientLabel: payload.label || 'OpenChamber Desktop',
+      clientKind: 'desktop',
+      deviceName: 'OpenChamber Desktop',
+      devicePlatform: desktopPlatformName(),
+      ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
+    }),
+  };
+  const readToken = async (response: Response): Promise<string | null> => {
+    if (!response.ok) return null;
+    const body = (await response.json().catch(() => null)) as { clientToken?: unknown } | null;
+    const token = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
+    return token || null;
+  };
+
+  let redeemed: { directUrl?: string; relay?: DesktopHostRelay; token: string } | null = null;
+  const candidates = [...payload.candidates].sort(
+    (a, b) => (a.type === 'relay' ? 1 : 0) - (b.type === 'relay' ? 1 : 0),
+  );
+  for (const candidate of candidates) {
+    if (candidate.type === 'relay') {
+      const tunnel = createRelayTunnelClient({
+        relayUrl: candidate.relayUrl,
+        serverId: candidate.serverId,
+        hostEncPubJwk: candidate.hostEncPubJwk,
+        ...(candidate.grant ? { grant: candidate.grant } : {}),
+      });
+      try {
+        const token = await readToken(await tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit));
+        if (token) {
+          redeemed = {
+            relay: { relayUrl: candidate.relayUrl, serverId: candidate.serverId, hostEncPubJwk: candidate.hostEncPubJwk },
+            token,
+          };
+          break;
+        }
+      } catch {
+        // Try the next advertised transport.
+      } finally {
+        tunnel.close();
+      }
+      continue;
+    }
+    const directUrl = normalizeHostUrl(candidate.url);
+    if (!directUrl) continue;
+    try {
+      const token = await readToken(await fetch(`${directUrl}/api/client-auth/pairing/redeem`, redeemInit));
+      if (token) {
+        redeemed = { directUrl, token };
+        break;
+      }
+    } catch {
+      // Try the next advertised transport.
+    }
+  }
+  if (!redeemed) throw new Error('pairing-redeem-failed');
+
+  const relayCandidate = payload.candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
+  );
+  const relay = redeemed.relay || (relayCandidate
+    ? { relayUrl: relayCandidate.relayUrl, serverId: relayCandidate.serverId, hostEncPubJwk: relayCandidate.hostEncPubJwk }
+    : undefined);
+  const firstDirectUrl = payload.candidates
+    .filter((candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> => candidate.type !== 'relay')
+    .map((candidate) => normalizeHostUrl(candidate.url))
+    .find((value): value is string => Boolean(value));
+  const directUrl = redeemed.directUrl || firstDirectUrl;
+  const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : null);
+  if (!url) throw new Error('pairing-missing-transport');
+
+  const existing = hosts.find((host) => (
+    relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
+  ));
+  const hostId = existing?.id || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const nextHost: DesktopHost = {
+    ...(existing || {}),
+    id: hostId,
+    label: payload.label || existing?.label || redactSensitiveUrl(url),
+    url,
+    apiUrl: directUrl,
+    clientToken: redeemed.token,
+    ...(relay ? { relay } : {}),
+  };
+  return {
+    hostId,
+    hosts: existing
+      ? hosts.map((host) => host.id === hostId ? nextHost : host)
+      : [nextHost, ...hosts],
+  };
 };
 
 export type HostProbeResult = {
@@ -135,10 +303,6 @@ export const locationMatchesHost = (locationHref: string, hostUrl: string): bool
   }
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null;
-};
-
 const readString = (obj: Record<string, unknown>, key: string): string | null => {
   const val = obj[key];
   return typeof val === 'string' ? val : null;
@@ -156,6 +320,8 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const url = readString(value, 'url');
   const apiUrl = readString(value, 'apiUrl') || readString(value, 'api_url');
   const clientToken = readString(value, 'clientToken') || readString(value, 'client_token');
+  const requestHeaders = sanitizeRequestHeaders(value.requestHeaders);
+  const relay = parseHostRelay(value.relay);
   if (!id || !label || !url) return null;
   return {
     id,
@@ -163,6 +329,8 @@ const parseHost = (value: unknown): DesktopHost | null => {
     url,
     ...(apiUrl ? { apiUrl } : {}),
     ...(clientToken ? { clientToken } : {}),
+    ...(requestHeaders ? { requestHeaders } : {}),
+    ...(relay ? { relay } : {}),
   };
 };
 
@@ -226,13 +394,134 @@ export const desktopLocalClientTokenGet = async (): Promise<string> => {
   return typeof raw === 'string' ? raw.trim() : '';
 };
 
-export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null }): Promise<HostProbeResult> => {
+/**
+ * Stable per-install identifier for this desktop. Used as the client dedupe key
+ * so re-pairing or re-authenticating this desktop reuses its single device
+ * record on a server instead of piling up duplicates. Empty string when not in
+ * the desktop shell.
+ */
+export const desktopInstallIdGet = async (): Promise<string> => {
+  const invoke = getInvoke();
+  if (!invoke) return '';
+  const raw = await invoke('desktop_install_id_get').catch(() => null);
+  return typeof raw === 'string' ? raw.trim() : '';
+};
+
+const RELAY_PROBE_TIMEOUT_MS = 8_000;
+// Whole-probe budget, spanning the tunnel's own reconnect attempts.
+const RELAY_PROBE_DEADLINE_MS = 15_000;
+const RELAY_PROBE_RETRY_DELAY_MS = 400;
+
+const fetchRelayProbe = async (
+  tunnel: ReturnType<typeof createRelayTunnelClient>,
+  path: string,
+  timeoutMs: number,
+  init?: RequestInit,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await tunnel.fetch(path, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+};
+
+/**
+ * Reach the host, letting the tunnel's own reconnect do the work.
+ *
+ * The tunnel rejects everything waiting on its channel the moment ONE connect
+ * attempt fails, even though it has already scheduled the next one with
+ * backoff. That is right for app traffic — `runtime-fetch` retries for itself —
+ * but it made a one-shot probe report a durable red "Unreachable" for a host
+ * that answers when the user presses refresh a second later. A cold start is
+ * exactly when that first attempt loses: DNS and TLS to the relay are cold, the
+ * remote host may still be re-establishing its control connection, and the
+ * probe competes with the app's own bootstrap traffic.
+ *
+ * A terminal tunnel state (auth failed, duplicate client, limit reached) will
+ * not resolve by waiting, so it ends the probe immediately.
+ */
+const fetchRelayProbeUntilDeadline = async (
+  tunnel: ReturnType<typeof createRelayTunnelClient>,
+  path: string,
+  deadline: number,
+  init?: RequestInit,
+): Promise<Response> => {
+  for (;;) {
+    // Every attempt is capped by what is LEFT of the budget, not by the full
+    // per-request timeout: an attempt started just under the deadline would
+    // otherwise run the whole 8s past it, and the switch flow waits on this.
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new Error('relay probe deadline exceeded');
+    try {
+      return await fetchRelayProbe(tunnel, path, Math.min(RELAY_PROBE_TIMEOUT_MS, remainingMs), init);
+    } catch (error) {
+      if (tunnel.getStatus().state === 'error') throw error;
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => window.setTimeout(resolve, RELAY_PROBE_RETRY_DELAY_MS));
+    }
+  }
+};
+
+/**
+ * Reachability and client-auth check for a relay host: open a throwaway E2EE
+ * tunnel, verify `/health`, then verify `/auth/session` with the saved bearer.
+ * Relay hosts have no HTTP address for `desktopHostProbe`. Bounded by
+ * `RELAY_PROBE_DEADLINE_MS`: a ghost relay registration (relay lost the host,
+ * host doesn't know) leaves the tunnel reconnecting forever — the probe must
+ * report unreachable rather than hang every status/switch flow with it — while
+ * still spanning enough reconnect attempts that a cold first attempt is not
+ * mistaken for an unreachable instance.
+ */
+export const probeRelayDesktopHost = async (
+  relay: DesktopHostRelay,
+  // With `keepTunnel`, an 'ok' probe RETURNS its live tunnel (the caller owns
+  // it — typically adopting it as the runtime tunnel, skipping a second
+  // WebSocket connect + E2EE handshake); every other outcome closes it.
+  options?: { keepTunnel?: boolean; clientToken?: string | null; requestHeaders?: Record<string, string> | null },
+): Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }> => {
+  const tunnel = createRelayTunnelClient({
+    relayUrl: relay.relayUrl,
+    serverId: relay.serverId,
+    hostEncPubJwk: relay.hostEncPubJwk,
+  });
+  const startedAt = Date.now();
+  const deadline = startedAt + RELAY_PROBE_DEADLINE_MS;
+  let keep = false;
+  try {
+    const response = await fetchRelayProbeUntilDeadline(tunnel, '/health', deadline);
+    if (!response.ok) return { status: 'unreachable', latencyMs: 0 };
+    const headers = new Headers({ Accept: 'application/json' });
+    for (const [name, value] of Object.entries(options?.requestHeaders || {})) {
+      if (name.toLowerCase() !== 'authorization') headers.set(name, value);
+    }
+    const clientToken = options?.clientToken?.trim();
+    if (clientToken) headers.set('Authorization', `Bearer ${clientToken}`);
+    const sessionResponse = await fetchRelayProbeUntilDeadline(tunnel, '/auth/session', deadline, { headers });
+    if (sessionResponse.status === 401 || sessionResponse.status === 403) {
+      return { status: 'auth', latencyMs: Math.max(0, Date.now() - startedAt) };
+    }
+    if (!sessionResponse.ok) return { status: 'unreachable', latencyMs: 0 };
+    keep = options?.keepTunnel === true;
+    return { status: 'ok', latencyMs: Math.max(0, Date.now() - startedAt), ...(keep ? { tunnel } : {}) };
+  } catch {
+    return { status: 'unreachable', latencyMs: 0 };
+  } finally {
+    if (!keep) tunnel.close();
+  }
+};
+
+export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null; expectedServerId?: string | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();
   if (!invoke) {
     return { status: 'unreachable', latencyMs: 0 };
   }
 
-  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined });
+  // `expectedServerId` makes the main-process probe verify the address's
+  // UNAUTHENTICATED /health identity before sending the bearer token — required
+  // when probing an address learned at runtime rather than typed by the user.
+  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined, expectedServerId: options?.expectedServerId || undefined });
   if (!isRecord(raw)) {
     return { status: 'unreachable', latencyMs: 0 };
   }
@@ -247,8 +536,19 @@ export const desktopHostProbe = async (url: string, options?: { clientToken?: st
   return { status, latencyMs };
 };
 
-export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientToken?: string | null }): Promise<void> => {
+export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null }): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
-  await invoke('desktop_new_window_at_url', { url, clientToken: options?.clientToken || undefined });
+  await invoke('desktop_new_window_at_url', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined });
+};
+
+/**
+ * Open a saved host in a new window by id. Required for relay-capable hosts —
+ * the new window boots the local UI and picks the transport itself (direct
+ * first, E2EE tunnel fallback), which a fixed URL cannot express.
+ */
+export const desktopOpenNewWindowForHost = async (hostId: string): Promise<void> => {
+  const invoke = getInvoke();
+  if (!invoke) return;
+  await invoke('desktop_new_window_for_host', { hostId });
 };

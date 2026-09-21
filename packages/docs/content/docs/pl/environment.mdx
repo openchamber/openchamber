@@ -25,6 +25,12 @@ Uruchamia OpenChamber w trybie headless, gdy ustawione na `true` lub `1`. Trasy 
 
 Nadpisuje katalog danych OpenChamber. Domyślnie jest to `~/.config/openchamber`.
 
+Wszystko, co OpenChamber zapisuje, znajduje się w tym katalogu: ustawienia, dane logowania, konfiguracje projektów, motywy, plany i modele mowy. Instancja, która używała własnego katalogu przed wersją 1.23, przy pierwszym uruchomieniu otrzyma kopie folderów `projects`, `themes` i `speech-models` z `~/.config/openchamber`; oryginały pozostają na miejscu i nic nie jest scalane.
+
+### `OPENCHAMBER_CHATS_DIR`
+
+Przenosi katalogi zarządzanych czatów, które OpenChamber tworzy dla czatów bez projektu. Domyślnie jest to `~/.config/openchamber/chats`. Ustaw katalog, który serwer OpenCode może odczytać, gdy OpenChamber i OpenCode działają jako różni użytkownicy. Istniejące czaty nie są przenoszone.
+
 ### `OPENCHAMBER_COMPRESS_API`
 
 Steruje kompresją odpowiedzi API. `true` albo `1` ją włącza, `false` albo `0` wyłącza.

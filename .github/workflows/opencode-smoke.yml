@@ -1,0 +1,135 @@
+name: opencode-smoke
+run-name: OpenCode smoke - ${{ inputs.model }} - ${{ inputs.opencode_version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Prompt sent to the smoke-test agent
+        required: true
+        default: "Reply with exactly: smoke-ok"
+        type: string
+      model:
+        description: Model in provider/model format
+        required: true
+        default: opencode-go/deepseek-v4-flash
+        type: string
+      opencode_version:
+        description: OpenCode version, with or without a leading v, or latest
+        required: true
+        default: latest
+        type: string
+      timeout_minutes:
+        description: Maximum agent runtime in minutes
+        required: true
+        default: 5
+        type: number
+      log_level:
+        description: OpenCode diagnostic log level
+        required: true
+        default: INFO
+        type: choice
+        options:
+          - INFO
+          - DEBUG
+
+jobs:
+  smoke:
+    name: provider smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install OpenCode
+        env:
+          OPENCODE_VERSION: ${{ inputs.opencode_version }}
+        run: |
+          set -o pipefail
+          installer="$(mktemp)"
+          install_log="$(mktemp)"
+          trap 'rm -f "$installer" "$install_log"' EXIT
+
+          curl --retry 2 --retry-all-errors -fsSL --connect-timeout 15 \
+            https://opencode.ai/install -o "$installer"
+
+          install_args=(--no-modify-path)
+          if [ "$OPENCODE_VERSION" != "latest" ]; then
+            install_args+=(--version "$OPENCODE_VERSION")
+          fi
+
+          for attempt in 1 2 3; do
+            echo "Installing OpenCode $OPENCODE_VERSION (attempt $attempt/3)"
+            set +e
+            bash "$installer" "${install_args[@]}" 2>&1 | tee "$install_log"
+            install_status="${PIPESTATUS[0]}"
+            set -e
+
+            if [ "$install_status" -eq 0 ]; then
+              exit 0
+            fi
+
+            if ! grep -Eqi 'failed to fetch version information|connection|network|timed out|temporary failure' "$install_log"; then
+              exit "$install_status"
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$((attempt * 5))"
+            fi
+          done
+
+          exit "$install_status"
+
+      - name: Run provider smoke test
+        env:
+          LOG_LEVEL: ${{ inputs.log_level }}
+          MODEL: ${{ inputs.model }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          PROMPT: ${{ inputs.prompt }}
+          SMOKE_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        run: |
+          started_epoch="$(date +%s)"
+          installed_version="$(opencode --version)"
+          echo "OpenCode version: $installed_version"
+          echo "Smoke agent: provider-smoke"
+          echo "Model: $MODEL"
+          echo "Timeout: ${SMOKE_TIMEOUT_MINUTES}m"
+          echo "Log level: $LOG_LEVEL"
+
+          set +e
+          timeout --signal=TERM --kill-after=30s "${SMOKE_TIMEOUT_MINUTES}m" \
+            opencode run \
+              --agent provider-smoke \
+              --model "$MODEL" \
+              --format json \
+              --print-logs \
+              --log-level "$LOG_LEVEL" \
+              "$PROMPT"
+          smoke_status="$?"
+          set -e
+
+          duration_seconds="$(( $(date +%s) - started_epoch ))"
+          result="failed"
+          if [ "$smoke_status" -eq 0 ]; then
+            result="passed"
+          elif [ "$smoke_status" -eq 124 ]; then
+            result="timed out"
+            echo "::error::OpenCode smoke test exceeded the ${SMOKE_TIMEOUT_MINUTES}m timeout."
+          fi
+
+          {
+            echo "### OpenCode provider smoke test"
+            echo
+            echo "- Result: \`$result\`"
+            echo "- OpenCode: \`$installed_version\`"
+            echo "- Model: \`$MODEL\`"
+            echo "- Duration: \`${duration_seconds}s\`"
+            echo "- Exit code: \`$smoke_status\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$smoke_status"

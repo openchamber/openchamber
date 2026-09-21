@@ -181,6 +181,7 @@ describe('resolveOpenCodeUpgradeStatusVersion', () => {
             resolveOpenCodeUpgradeStatusVersion({
                 available: true,
                 latestVersion: '1.16.0',
+                upgrade: { supported: true },
             }),
         ).toBe('1.16.0');
     });
@@ -190,6 +191,7 @@ describe('resolveOpenCodeUpgradeStatusVersion', () => {
             resolveOpenCodeUpgradeStatusVersion({
                 available: true,
                 latestVersion: '  1.16.0  ',
+                upgrade: { supported: true },
             }),
         ).toBe('1.16.0');
     });
@@ -207,6 +209,22 @@ describe('resolveOpenCodeUpgradeStatusVersion', () => {
             resolveOpenCodeUpgradeStatusVersion({
                 available: false,
                 latestVersion: '1.16.0',
+            }),
+        ).toBe('');
+    });
+
+    test('fails closed when the server does not explicitly support upgrades', () => {
+        expect(
+            resolveOpenCodeUpgradeStatusVersion({
+                available: true,
+                latestVersion: '1.16.0',
+            }),
+        ).toBe('');
+        expect(
+            resolveOpenCodeUpgradeStatusVersion({
+                available: true,
+                latestVersion: '1.16.0',
+                upgrade: { supported: false },
             }),
         ).toBe('');
     });

@@ -1,6 +1,5 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useUIStore } from '@/stores/useUIStore';
 import { ReasoningTimelineBlock } from './ReasoningPart';
 
@@ -22,14 +21,12 @@ const cleanJustificationText = (text: string): string => {
 interface JustificationBlockProps {
     part: Part;
     messageId: string;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     actions?: React.ReactNode;
 }
 
 const JustificationBlock: React.FC<JustificationBlockProps> = ({
     part,
     messageId,
-    onContentChange,
     actions,
 }) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
@@ -47,7 +44,6 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
         <ReasoningTimelineBlock
             text={textContent}
             variant="justification"
-            onContentChange={onContentChange}
             blockId={part.id || `${messageId}-justification`}
             time={time}
             showDuration={chatRenderMode !== 'sorted'}

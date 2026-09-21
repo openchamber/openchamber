@@ -33,6 +33,18 @@ function deltaEvent(delta: string): Event {
   } as Event
 }
 
+function statusEvent(type: "busy" | "retry"): Event {
+  return {
+    type: "session.status",
+    properties: {
+      sessionID: "ses_1",
+      status: type === "busy"
+        ? { type }
+        : { type, attempt: 1, message: "retrying", next: 1 },
+    },
+  } as Event
+}
+
 function createSdk(events: Event[], streamFinished: () => void): OpencodeClient {
   return {
     global: {
@@ -56,6 +68,73 @@ function createSdk(events: Event[], streamFinished: () => void): OpencodeClient 
 }
 
 describe("createEventPipeline", () => {
+  test("delivers one ordered batch per directory flush", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => {
+      resolveStreamFinished = resolve
+    })
+    let resolveDelivered!: (events: readonly Event[]) => void
+    const deliveredBatch = new Promise<readonly Event[]>((resolve) => {
+      resolveDelivered = resolve
+    })
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        partUpdatedEvent("a"),
+        deltaEvent("b"),
+        partUpdatedEvent("ab"),
+      ], resolveStreamFinished),
+      onEvents: (_directory, events) => resolveDelivered([...events]),
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+
+    try {
+      await streamFinished
+      const delivered = await Promise.race([deliveredBatch, failAfter(500)])
+      expect(delivered.map((event) => event.type)).toEqual([
+        "message.part.updated",
+        "message.part.delta",
+        "message.part.updated",
+      ])
+    } finally {
+      pipeline.cleanup()
+    }
+  })
+
+  test("does not coalesce session status across an idle barrier", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => {
+      resolveStreamFinished = resolve
+    })
+    let resolveDelivered!: (events: readonly Event[]) => void
+    const deliveredBatch = new Promise<readonly Event[]>((resolve) => {
+      resolveDelivered = resolve
+    })
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        statusEvent("busy"),
+        { type: "session.idle", properties: { sessionID: "ses_1" } } as Event,
+        statusEvent("retry"),
+      ], resolveStreamFinished),
+      onEvents: (_directory, events) => resolveDelivered([...events]),
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+
+    try {
+      await streamFinished
+      const delivered = await Promise.race([deliveredBatch, failAfter(500)])
+      expect(delivered.map((event) => event.type)).toEqual([
+        "session.status",
+        "session.idle",
+        "session.status",
+      ])
+      expect((delivered[2]?.properties as { status?: { type?: string } }).status?.type).toBe("retry")
+    } finally {
+      pipeline.cleanup()
+    }
+  })
+
   test("preserves part update order around text deltas", async () => {
     let resolveStreamFinished!: () => void
     const streamFinished = new Promise<void>((resolve) => {

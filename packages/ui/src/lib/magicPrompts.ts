@@ -13,6 +13,8 @@ export type MagicPromptId =
   | 'github.pr.review.instructions'
   | 'github.issue.review.visible'
   | 'github.issue.review.instructions'
+  | 'linear.issue.review.visible'
+  | 'linear.issue.review.instructions'
   | 'github.pr.checks.review.visible'
   | 'github.pr.checks.review.instructions'
   | 'github.pr.comments.review.visible'
@@ -37,6 +39,10 @@ export type MagicPromptId =
   | 'session.implementationResponseToReviewer.visible'
   | 'session.plan.visible'
   | 'session.plan.instructions'
+  | 'session.craftGoal.visible'
+  | 'session.craftGoal.instructions'
+  | 'session.scheduleTask.visible'
+  | 'session.scheduleTask.instructions'
   | 'session.catchup.visible'
   | 'session.catchup.instructions'
   | 'session.debug.visible'
@@ -52,7 +58,7 @@ export interface MagicPromptDefinition {
   id: MagicPromptId;
   title: string;
   description: string;
-  group: 'Git' | 'GitHub' | 'Planning' | 'Session';
+  group: 'Git' | 'GitHub' | 'Linear' | 'Planning' | 'Session';
   template: string;
   placeholders?: Array<{ key: string; description: string }>;
 }
@@ -70,7 +76,7 @@ const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
     title: 'Commit Generation Visible Prompt',
     group: 'Git',
     description: 'Visible user message for commit message generation.',
-    template: 'You are generating a Conventional Commits subject line using session context and selected file paths.',
+    template: 'You are generating a Conventional Commits subject line from the diffs of the selected files.',
   },
   {
     id: 'git.commit.generate.instructions',
@@ -79,6 +85,7 @@ const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
     description: 'Hidden instructions for commit message generation.',
     placeholders: [
       { key: 'selected_files', description: 'Bullet list of currently selected file paths.' },
+      { key: 'recent_commits', description: 'Subjects of the most recent commits on the current branch.' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown, explanations, or code fences.
 
@@ -86,13 +93,16 @@ The JSON object must have exactly this shape:
 {"subject": string, "highlights": string[]}
 
 Rules:
-- subject format: <type>: <summary>
-- allowed types: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert
-- no scope in subject
+- match the style of the recent commits below: their language, capitalization, use or absence of a type prefix or scope, and typical length
+- if the recent commits are written in a language other than English, write the subject and highlights in that language
+- when the recent commits show no consistent style, use the format <type>: <summary> with one of: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert, and no scope
 - keep subject concise and user-facing
 - highlights: 0-3 concise user-facing points
 - use double quotes for all JSON strings
 - do not include trailing commas or comments
+
+Recent commits on this branch (newest first):
+{{recent_commits}}
 
 Selected files:
 {{selected_files}}`,
@@ -115,6 +125,7 @@ Selected files:
       { key: 'commits', description: 'Bullet list of commits in base...head.' },
       { key: 'changed_files', description: 'Bullet list of changed files in base...head.' },
       { key: 'additional_context_block', description: 'Optional Additional context block (already formatted).' },
+      { key: 'pr_template_block', description: 'Optional repository pull request template block (already formatted, empty when the repo has none).' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown outside JSON, explanations, or code fences.
 
@@ -123,7 +134,8 @@ The JSON object must have exactly this shape:
 
 Rules:
 - title: concise, outcome-first, conventional style
-- body: markdown with sections: ## Summary, ## Why, ## Testing
+- body, when a repository pull request template is included below: reuse the template as the body. Keep its headings, their order, its wording and its checklists, drop its HTML comments, and fill every section from the commits and changed files. Leave a section empty rather than inventing content for it
+- body, when no template is included: markdown with sections ## Summary, ## Why, ## Testing
 - keep output concrete and user-facing
 - put all markdown inside the body string
 - use double quotes for all JSON strings and escape newlines as \\n
@@ -136,7 +148,7 @@ Commits in range (base...head):
 {{commits}}
 
 Files changed across these commits:
-{{changed_files}}{{additional_context_block}}`,
+{{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
   },
   {
     id: 'github.pr.review.visible',
@@ -214,6 +226,61 @@ Nice-to-have:
     group: 'GitHub',
     description: 'Hidden instructions attached when generating an issue review response.',
     template: `Review this issue using the provided issue context.
+
+Process:
+- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
+- Gather any needed repository context (code, config, docs) to validate assumptions.
+- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
+
+Mode selection by type:
+- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
+- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
+
+Output rules:
+- Compact output; pick ONE template below and omit the others.
+- No emojis. No code snippets. No fenced blocks.
+- Short inline code identifiers allowed.
+- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
+- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
+
+Templates (choose one):
+Bug:
+- Summary (1-2 sentences)
+- Likely cause (max 2)
+- Repro/diagnostics needed (max 3)
+- Fix approach (max 4 steps)
+- Verification (max 3)
+
+Feature:
+- Summary (1-2 sentences)
+- Requirements (max 4)
+- Unknowns/questions (max 4)
+- Proposed plan (max 5 steps)
+- Verification (max 3)
+
+Question/Support:
+- Summary (1-2 sentences)
+- Answer/guidance (max 6 lines)
+- Missing info (max 4)
+
+Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
+  },
+  {
+    id: 'linear.issue.review.visible',
+    title: 'Linear Issue Review Visible Prompt',
+    group: 'Linear',
+    description: 'Visible user message when creating a session from a Linear issue.',
+    placeholders: [
+      { key: 'identifier', description: 'Linear issue identifier, such as ENG-12.' },
+    ],
+    template: 'Review this Linear issue {{identifier}} using the provided issue context',
+  },
+  {
+    id: 'linear.issue.review.instructions',
+    title: 'Linear Issue Review Instructions',
+    group: 'Linear',
+    description: 'Hidden instructions attached when generating a Linear issue review response.',
+    template: `Review this Linear issue using the provided issue context.
 
 Process:
 - First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
@@ -707,6 +774,8 @@ Please review the latest state again and report any remaining issues.
 
 Run this as a dialogue, not a one-shot answer.
 
+Use the \`question\` tool only for clarifying decisions that have a small set of concrete answer options you already know from the conversation or your investigation — choices like option A/B/C, scope boundaries, or edge-case behavior. Ask open-ended questions, including what the user wants in the first place, in plain assistant text. Never invent speculative options just to fit the question tool.
+
 1. Understand before asking. Once the user describes the idea, first investigate the codebase yourself — read the relevant files, existing patterns, data flow, and constraints. Ground every question in what the code actually shows, not in assumptions.
 
 2. Ask in small batches. Ask at most 3 clarifying questions at a time — a number a person can comfortably answer in one reply. Prefer concrete, decision-oriented questions (option A/B/C, edge cases, scope boundaries) over vague open-ended ones. Number them.
@@ -718,6 +787,116 @@ Run this as a dialogue, not a one-shot answer.
 5. Do not write code or begin implementing during this phase. Planning is for understanding and deciding only.
 
 6. When everything is settled, produce the final implementation plan: a clear, ordered breakdown of the work, the files and areas affected, the decisions that were made (and why), known risks, and any remaining assumptions flagged explicitly. The plan must reflect the user's actual answers — never fill gaps with guesses.
+
+7. After presenting the plan, if the \`openchamber\` tool is available, offer to start a separate session yourself to implement it; do so only after the user explicitly confirms, and include the full plan in that session's prompt because the new session cannot see this conversation.
+
+Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.craftGoal.visible',
+    title: 'Goal Crafting Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /craft-goal command.',
+    placeholders: [
+      { key: 'idea_block', description: 'Optional initial task or idea supplied after the command.' },
+    ],
+    template: `Help me turn an idea or task into a clear, verifiable Goal.{{idea_block}}`,
+  },
+  {
+    id: 'session.craftGoal.instructions',
+    title: 'Goal Crafting Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /craft-goal command. Guides discovery and produces a ready-to-use Goal objective.',
+    template: `The user wants help turning a task, idea, or desired outcome into a strong Goal for an autonomous, multi-turn working session.
+
+A Goal is a persistent completion contract, not an implementation plan and not a larger one-shot prompt. Help the user define what "done" means clearly enough that another agent can work toward it, verify it against evidence, continue through uncertain intermediate steps, and stop honestly when completion is blocked.
+
+Run this as a guided dialogue, not a one-shot answer.
+
+Use the \`question\` tool only for clarifying decisions that have a small set of concrete answer options you already know from the conversation or your investigation — choices like option A/B/C, scope boundaries, or edge-case behavior. Ask open-ended questions, including what the user wants in the first place, in plain assistant text. Never invent speculative options just to fit the question tool.
+
+1. Start from the user's intent. If the visible message includes an initial idea, use it immediately. Otherwise ask in plain text what they want to accomplish and wait for the answer. Do not ask them to formulate the Goal themselves.
+
+2. Investigate before asking when context is available. For repository work, inspect relevant code, tests, scripts, documentation, and conventions when that would answer questions or expose constraints. Do not ask for information that can be determined reliably from the workspace.
+
+3. Decide whether a Goal is appropriate. Goals fit work with a durable objective, an evidence-based finish line, and an uncertain or iterative path. If this is a one-off edit, simple explanation, or obvious single step, explain briefly that a normal prompt is likely better. Continue crafting a Goal if the user still wants one.
+
+4. Resolve the Goal contract:
+- Outcome: what must be true when the work is complete.
+- Verification surface: which tests, benchmarks, commands, artifacts, source material, observations, or other evidence prove completion.
+- Constraints: what behavior, quality, compatibility, safety, performance, or scope must remain intact.
+- Boundaries: which files, systems, tools, data, repositories, environments, or resources may or may not be used.
+- Iteration policy: how the working agent should evaluate evidence and choose the next useful action after each attempt.
+- Blocked stop condition: when it should stop, what evidence and attempted paths it should report, and what input would unlock progress.
+
+5. Ask only necessary questions, in batches of at most 3. Prefer concrete, decision-oriented questions. Distinguish facts found in the workspace from decisions only the user can make.
+
+6. Do not over-prescribe the path. Define the destination, evidence standard, and operating constraints while leaving the working agent room to choose its next action from what it learns.
+
+7. Do not invent precision. Never fabricate targets, commands, environments, acceptance criteria, or scope. When exact criteria are unavailable, define an honest evidence standard that separates confirmed results, approximations, blockers, and remaining uncertainty.
+
+8. Do not implement the task. You may inspect the workspace to understand it, but do not edit files, execute the proposed solution, or begin working toward the Goal. This session's deliverable is the Goal itself.
+
+9. Once the contract is resolved, respond in exactly this structure:
+
+## Proposed Goal
+
+\`\`\`text
+<one self-contained Goal objective ready to paste into the Goal dialog; do not prefix it with /goal>
+\`\`\`
+
+## Why This Is Verifiable
+
+- <brief explanation of the outcome and evidence>
+- <brief explanation of the preserved constraints>
+- <brief explanation of the blocked stop condition>
+
+## Assumptions
+
+- <only assumptions that still matter, or "None">
+
+The proposed Goal should normally be one compact paragraph. Keep enough operational detail to make completion auditable, but remove conversational history, rationale, repetition, and implementation details that are not part of the completion contract.
+
+Do not activate, execute, or claim completion of the proposed Goal. End by inviting the user to revise it or use it in the Goal dialog. If the \`openchamber\` tool is available, also offer to start a new Goal session for it yourself; do so only after the user explicitly confirms.
+
+Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.scheduleTask.visible',
+    title: 'Scheduled Task Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /schedule-task command.',
+    placeholders: [
+      { key: 'idea_block', description: 'Optional initial automation idea supplied after the command.' },
+    ],
+    template: `Help me set up a scheduled task.{{idea_block}}`,
+  },
+  {
+    id: 'session.scheduleTask.instructions',
+    title: 'Scheduled Task Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /schedule-task command. Guides the dialogue that defines a scheduled task and optionally creates it through the openchamber tool.',
+    template: `The user wants to set up a scheduled task: a saved prompt that OpenChamber runs automatically on a schedule (daily, weekly, one time, or cron) in a chosen project, with a chosen model and optional Goal Mode.
+
+Run this as a guided dialogue, not a one-shot answer.
+
+Use the \`question\` tool only for clarifying decisions that have a small set of concrete answer options you already know from the conversation or your investigation — choices like option A/B/C, scope boundaries, or edge-case behavior. Ask open-ended questions, including what the user wants in the first place, in plain assistant text. Never invent speculative options just to fit the question tool.
+
+1. Start from the user's intent. If the visible message includes an initial idea, use it immediately. Otherwise ask in plain text what they want to automate, and wait for the answer — do not propose invented automation ideas and do not start investigating the workspace before you know the intent.
+
+2. Investigate before asking. When the task concerns this repository, inspect the relevant code, scripts, tests, or documentation so the prompt you draft is grounded in what actually exists. Do not ask for information the workspace can answer.
+
+3. Resolve the task definition:
+- Name: a short, recognizable task name.
+- Prompt: the exact instruction the scheduled agent receives on every run. It must be fully self-contained — the scheduled session has no memory of this conversation, so include every path, command, and expectation it needs.
+- Schedule: a daily time, weekly days plus a time, a one-time date plus a time, or a cron expression; include the timezone when it matters.
+- Model in provider/model format. Mention agent, variant, or Goal Mode with a token budget only if the user brings them up.
+
+4. Ask only necessary questions, in batches of at most 3. Prefer concrete, decision-oriented questions.
+
+5. Do not perform the task's work in this session. The deliverable is the scheduled task definition.
+
+6. When everything is settled, present the final task definition clearly. If the \`openchamber\` tool is available, offer to create the task yourself and, only after the user explicitly confirms, create it and report the result. If the tool is unavailable, present the definition so the user can add it in OpenChamber's scheduled tasks UI.
 
 Respond in the same language the user uses.`,
   },
@@ -770,6 +949,8 @@ Respond in the same language the user uses.`,
     description: 'Hidden instructions attached to the /debug command. Runs a guided root-cause investigation before proposing a fix.',
     template: `The user wants help debugging an issue. Drive this as a focused root-cause investigation — not a plan, and not an immediate fix.
 
+Use the \`question\` tool only for clarifying decisions that have a small set of concrete answer options you already know from the conversation or your investigation — choices like option A/B/C, scope boundaries, or edge-case behavior. Ask open-ended questions, including what the user wants in the first place, in plain assistant text. Never invent speculative options just to fit the question tool.
+
 1. Get the symptom. When the user describes the problem, capture exactly what is observed versus expected — error messages, stack traces, failing behavior, and when it started. If a key detail is missing to even begin, ask for it briefly.
 
 2. Form hypotheses. List the most likely causes, ordered by probability given the symptom and the code, and be explicit about your reasoning.
@@ -797,6 +978,8 @@ Respond in the same language the user uses.`,
     group: 'Session',
     description: 'Hidden instructions attached to the /weigh command. Investigates the code, then compares distinct approaches with trade-offs and a recommendation — no plan, no code.',
     template: `The user knows WHAT they want to do but not HOW to approach it. Help them choose a direction — this is about weighing options and recommending one, not producing a detailed plan and not writing code.
+
+Use the \`question\` tool only for clarifying decisions that have a small set of concrete answer options you already know from the conversation or your investigation — choices like option A/B/C, scope boundaries, or edge-case behavior. Ask open-ended questions, including what the user wants in the first place, in plain assistant text. Never invent speculative options just to fit the question tool.
 
 First, investigate. Once the user describes the goal, read the relevant code, existing patterns, and constraints so your options are grounded in this codebase rather than generic advice. Make sure you actually understand what they are trying to achieve and why. Ask a clarifying question only if a key constraint is missing and would actually change the options.
 

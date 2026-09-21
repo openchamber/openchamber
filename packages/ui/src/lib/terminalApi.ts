@@ -1,1065 +1,531 @@
-import { getRuntimeUrlResolver } from './runtime-url';
+import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalSessionPurpose, TerminalShellOption, TerminalStreamEvent } from './api/types';
+import type { TerminalChunkSize } from '@/stores/useTerminalStore';
+import { openRuntimeWebSocket } from './relay/runtime-socket';
+import type { RelayTunnelSocketMessageEvent, RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch } from './runtime-fetch';
+import { getRuntimeUrlResolver } from './runtime-url';
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
+import { isTerminalShell } from './terminalShell';
+import { z } from 'zod';
 
-interface TerminalWebSocketDescriptor {
-  path: string;
-  v?: number;
-  enc?: string;
-}
-
-interface TerminalTransportCapability {
-  preferred?: 'ws' | 'http' | 'sse';
-  transports?: Array<'ws' | 'http' | 'sse'>;
-  ws?: TerminalWebSocketDescriptor;
-}
-
-export interface TerminalSession {
-  sessionId: string;
-  cols: number;
-  rows: number;
-  capabilities?: {
-    input?: TerminalTransportCapability;
-    stream?: TerminalTransportCapability;
-  };
-}
-
-export interface TerminalStreamEvent {
-  type: 'connected' | 'data' | 'exit' | 'reconnecting';
-  data?: string;
-  exitCode?: number;
-  signal?: number | null;
-  attempt?: number;
-  maxAttempts?: number;
-  runtime?: 'node' | 'bun';
-  ptyBackend?: string;
-}
-
-export interface CreateTerminalOptions {
-  cwd: string;
+type ClientMessage =
+  | { t: 'hello' | 'ping'; v: 3 }
+  | { t: 'attach' | 'detach'; v: 3; s: string }
+  | { t: 'write'; v: 3; s: string; d: string };
+type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
+type TerminalProjection = {
+  sequence: number;
+  history: string;
+  /** Current PTY size: what the server reported at attach, updated by every accepted resize. */
   cols?: number;
   rows?: number;
-}
-
-export interface ConnectStreamOptions {
-  maxRetries?: number;
-  initialRetryDelay?: number;
-  maxRetryDelay?: number;
-  connectionTimeout?: number;
-}
-
-type TerminalControlMessage = {
-  t: string;
-  s?: string;
-  c?: string;
-  d?: string;
-  f?: boolean;
-  i?: number;
-  r?: number;
-  v?: number;
+  status: TerminalStreamEvent['status'];
+  mode?: TerminalSession['mode'];
+  purpose?: TerminalSessionPurpose;
   exitCode?: number;
   signal?: number | null;
-  runtime?: 'node' | 'bun';
+  runtime?: TerminalStreamEvent['runtime'];
   ptyBackend?: string;
 };
+const TAG = 1;
+const MAX_PROJECTION_BYTES = 512 * 1024;
+const SOCKET_CONNECTING = 0;
+const SOCKET_OPEN = 1;
+/**
+ * Switching terminal tabs detaches the old terminal before attaching the new one,
+ * which momentarily leaves zero subscribers. Closing the socket there forced a
+ * token refresh, a fresh upgrade and a full snapshot replay on every switch, so
+ * hold the idle socket briefly and reuse it instead.
+ */
+const IDLE_SOCKET_GRACE_MS = 15_000;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const terminalModeSchema = z.enum(['interactive', 'command']);
+const terminalStatusSchema = z.enum(['running', 'exited', 'error']);
+const terminalRuntimeSchema = z.enum(['node', 'bun']);
+type TerminalSessionPurposeInput =
+  | TerminalSessionPurpose
+  | { type: 'project-action'; actionId: string; executionId?: string }
+  | null
+  | undefined;
+type TerminalSessionInput = {
+  sessionId?: string;
+  cols?: number;
+  rows?: number;
+  status?: 'running' | 'exited' | 'error';
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurposeInput;
+} | null | undefined;
+const terminalSessionPurposeSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('terminal') }),
+  z.object({ type: z.literal('project-action'), actionId: z.string(), executionId: z.string() }),
+]);
+const terminalSessionSchema = z.object({
+  sessionId: z.string(),
+  cols: z.number(),
+  rows: z.number(),
+  status: terminalStatusSchema,
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+});
+const terminalServerSessionSchema = z.object({
+  sessionId: z.string(),
+  cwd: z.string(),
+  status: z.enum(['running', 'exited']),
+  createdAt: z.number().nullable().optional().transform((value) => value ?? null),
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+});
 
-type StreamSubscription = {
-  token: symbol;
-  sessionId: string;
-  onEvent: (event: TerminalStreamEvent) => void;
-  onError?: (error: Error, fatal?: boolean) => void;
-  maxRetries: number;
-  initialRetryDelay: number;
-  maxRetryDelay: number;
-  connectionTimeout: number;
-  retryCount: number;
-  connected: boolean;
-  connectionTimeoutId: ReturnType<typeof setTimeout> | null;
+const terminalMessageMetadata = {
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+};
+const terminalMessageSchema = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('hello') }),
+  z.object({ t: z.literal('pong') }),
+  z.object({ t: z.literal('error'), s: z.string().optional(), message: z.string().optional(), code: z.string().optional(), fatal: z.boolean().optional() }),
+  z.object({
+    t: z.literal('snapshot'), s: z.string(), q: z.number().int().nonnegative().default(0),
+    history: z.string().default(''), status: terminalStatusSchema,
+    cols: z.number().int().positive().optional(), rows: z.number().int().positive().optional(),
+    exitCode: z.number().nullish().transform(value => value ?? undefined), signal: z.number().nullable().optional(),
+    runtime: terminalRuntimeSchema.optional(), ptyBackend: z.string().optional(), ...terminalMessageMetadata,
+  }),
+  z.object({ t: z.literal('output'), s: z.string(), q: z.number().int().nonnegative(), d: z.string(), r: z.string().optional() }),
+  z.object({ t: z.literal('exit'), s: z.string(), q: z.number().int().nonnegative(), exitCode: z.number().nullish().transform(value => value ?? undefined), signal: z.number().nullable().optional() }),
+  z.object({ t: z.literal('restarted'), s: z.string(), q: z.number().int().nonnegative(), history: z.string().default(''), ...terminalMessageMetadata }),
+]);
+type TerminalMessage = z.infer<typeof terminalMessageSchema>;
+
+const encode = (message: ClientMessage): Uint8Array => {
+  const payload = encoder.encode(JSON.stringify(message));
+  const frame = new Uint8Array(payload.length + 1);
+  frame[0] = TAG;
+  frame.set(payload, 1);
+  return frame;
 };
 
-const CONTROL_TAG_JSON = 0x01;
-const WS_READY_STATE_OPEN = 1;
-const WS_READY_STATE_CONNECTING = 0;
-const DEFAULT_TERMINAL_WS_PATH = '/api/terminal/ws';
-const WS_SEND_WAIT_MS = 1200;
-const WS_RECONNECT_JITTER_MS = 250;
-const WS_KEEPALIVE_INTERVAL_MS = 20000;
-const WS_CONNECT_TIMEOUT_MS = 5000;
-const GLOBAL_TERMINAL_TRANSPORT_STATE_KEY = '__openchamberTerminalTransportState';
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-const normalizeWebSocketPath = (pathValue: string): string => {
-  return getRuntimeUrlResolver().websocket(pathValue);
+const decode = (data: RelayTunnelSocketMessageEvent['data']): TerminalMessage | null => {
+  let bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : encoder.encode(data);
+  if (bytes[0] === TAG) bytes = bytes.subarray(1);
+  try { return terminalMessageSchema.safeParse(JSON.parse(decoder.decode(bytes))).data ?? null; } catch { return null; }
 };
 
-const encodeControlFrame = (payload: TerminalControlMessage): Uint8Array => {
-  const jsonBytes = textEncoder.encode(JSON.stringify(payload));
-  const bytes = new Uint8Array(jsonBytes.length + 1);
-  bytes[0] = CONTROL_TAG_JSON;
-  bytes.set(jsonBytes, 1);
-  return bytes;
-};
-
-const isWsTransportSupported = (capability: TerminalTransportCapability | null | undefined): boolean => {
-  if (!capability) return false;
-  const transports = capability.transports ?? [];
-  const supportsTransport = transports.includes('ws') || capability.preferred === 'ws';
-  return supportsTransport && typeof capability.ws?.path === 'string' && capability.ws.path.length > 0;
-};
-
-const getPreferredTerminalWsPath = (state: TerminalTransportGlobalState): string => (
-  state.streamCapability?.ws?.path
-  ?? state.inputCapability?.ws?.path
-  ?? DEFAULT_TERMINAL_WS_PATH
-);
-
-const createTransportError = (code: string | undefined): Error => {
-  switch (code) {
-    case 'SESSION_NOT_FOUND':
-      return new Error('Terminal session not found');
-    case 'NOT_BOUND':
-      return new Error('Terminal session is not bound');
-    case 'WRITE_FAIL':
-      return new Error('Failed to write to terminal');
-    case 'RATE_LIMIT':
-      return new Error('Terminal websocket is rate limited');
-    case 'BAD_FRAME':
-      return new Error('Terminal websocket protocol violation');
-    default:
-      return new Error('Terminal websocket error');
-  }
-};
-
-class TerminalTransportManager {
-  private socket: WebSocket | null = null;
-  private socketUrl = '';
-  private boundSessionId: string | null = null;
-  private requestedSessionId: string | null = null;
-  private openPromise: Promise<WebSocket | null> | null = null;
-  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
-  private closed = false;
-  private subscriptions = new Map<symbol, StreamSubscription>();
-  private activeSubscriptionToken: symbol | null = null;
-  private replayCursorBySession = new Map<string, number>();
-
-  configure(socketUrl: string): void {
-    if (!socketUrl) {
-      return;
-    }
-
-    if (this.socketUrl === socketUrl) {
-      this.closed = false;
-      if (!this.isConnectedOrConnecting()) {
-        this.ensureConnected();
-      }
-      return;
-    }
-
-    this.socketUrl = socketUrl;
-    this.closed = false;
-    this.resetConnection();
-    this.ensureConnected();
-  }
-
-  subscribe(
-    sessionId: string,
-    onEvent: (event: TerminalStreamEvent) => void,
-    onError?: (error: Error, fatal?: boolean) => void,
-    options?: ConnectStreamOptions
-  ): () => void {
-    const token = Symbol(sessionId);
-    const subscription: StreamSubscription = {
-      token,
-      sessionId,
-      onEvent,
-      onError,
-      maxRetries: options?.maxRetries ?? 3,
-      initialRetryDelay: options?.initialRetryDelay ?? 1000,
-      maxRetryDelay: options?.maxRetryDelay ?? 8000,
-      connectionTimeout: options?.connectionTimeout ?? 10000,
-      retryCount: 0,
-      connected: false,
-      connectionTimeoutId: null,
-    };
-
-    this.subscriptions.set(token, subscription);
-    this.activeSubscriptionToken = token;
-    this.boundSessionId = null;
-    this.requestedSessionId = sessionId;
-    this.ensureConnected();
-    this.startConnectionTimeout(subscription);
-    this.bindActiveSession();
-
-    return () => {
-      this.clearConnectionTimeout(subscription);
-      this.subscriptions.delete(token);
-      if (this.activeSubscriptionToken === token) {
-        this.activeSubscriptionToken = null;
-      }
-      if (this.boundSessionId === sessionId) {
-        this.boundSessionId = null;
-      }
-      if (this.requestedSessionId === sessionId) {
-        this.requestedSessionId = null;
-      }
-      if (this.subscriptions.size === 0) {
-        this.clearReconnectTimeout();
-        this.resetConnection();
-      }
-    };
-  }
-
-  async sendInput(sessionId: string, data: string): Promise<boolean> {
-    if (!sessionId || !data || this.closed || !this.socketUrl) {
-      return false;
-    }
-
-    const socket = await this.getOpenSocket(WS_SEND_WAIT_MS);
-    if (!socket || socket.readyState !== WS_READY_STATE_OPEN) {
-      return false;
-    }
-
-    try {
-      if (this.boundSessionId !== sessionId) {
-        this.requestedSessionId = sessionId;
-        socket.send(encodeControlFrame({ t: 'b', s: sessionId, r: this.replayCursorBySession.get(sessionId) ?? 0, v: 2 }));
-      }
-      socket.send(data);
-      return true;
-    } catch {
-      this.handleSocketFailure(new Error('Terminal websocket send failed'));
-      return false;
-    }
-  }
-
-  unbindSession(sessionId: string): void {
-    if (!sessionId) {
-      return;
-    }
-    if (this.boundSessionId === sessionId) {
-      this.boundSessionId = null;
-    }
-    if (this.requestedSessionId === sessionId) {
-      this.requestedSessionId = null;
-    }
-  }
-
-  close(): void {
-    this.closed = true;
-    this.clearReconnectTimeout();
-    for (const subscription of this.subscriptions.values()) {
-      this.clearConnectionTimeout(subscription);
-    }
-    this.resetConnection();
-    this.socketUrl = '';
-    this.subscriptions.clear();
-    this.activeSubscriptionToken = null;
-    this.replayCursorBySession.clear();
-  }
-
-  prime(): void {
-    if (this.closed || !this.socketUrl || this.isConnectedOrConnecting()) {
-      return;
-    }
-
-    this.ensureConnected();
-  }
-
-  isConnectedOrConnecting(socketUrl?: string): boolean {
-    if (this.closed) {
-      return false;
-    }
-
-    if (socketUrl && this.socketUrl !== socketUrl) {
-      return false;
-    }
-
-    if (this.socket && (this.socket.readyState === WS_READY_STATE_OPEN || this.socket.readyState === WS_READY_STATE_CONNECTING)) {
-      return true;
-    }
-
-    return this.openPromise !== null;
-  }
-
-  private getActiveSubscription(): StreamSubscription | null {
-    if (!this.activeSubscriptionToken) {
-      return null;
-    }
-
-    return this.subscriptions.get(this.activeSubscriptionToken) ?? null;
-  }
-
-  private startConnectionTimeout(subscription: StreamSubscription): void {
-    this.clearConnectionTimeout(subscription);
-    subscription.connectionTimeoutId = setTimeout(() => {
-      if (this.getActiveSubscription()?.token !== subscription.token || subscription.connected) {
-        return;
-      }
-
-      this.handleSocketFailure(new Error('Connection timeout'));
-    }, subscription.connectionTimeout);
-  }
-
-  private clearConnectionTimeout(subscription: StreamSubscription): void {
-    if (!subscription.connectionTimeoutId) {
-      return;
-    }
-
-    clearTimeout(subscription.connectionTimeoutId);
-    subscription.connectionTimeoutId = null;
-  }
-
-  private async getOpenSocket(waitMs: number): Promise<WebSocket | null> {
-    if (this.socket && this.socket.readyState === WS_READY_STATE_OPEN) {
-      return this.socket;
-    }
-
-    this.ensureConnected();
-
-    if (this.socket && this.socket.readyState === WS_READY_STATE_OPEN) {
-      return this.socket;
-    }
-
-    const opened = await Promise.race([
-      this.openPromise ?? Promise.resolve(null),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), waitMs);
-      }),
-    ]);
-
-    if (opened && opened.readyState === WS_READY_STATE_OPEN) {
-      return opened;
-    }
-
-    if (this.socket && this.socket.readyState === WS_READY_STATE_OPEN) {
-      return this.socket;
-    }
-
-    return null;
-  }
-
-  private ensureConnected(): void {
-    if (this.closed || !this.socketUrl) {
-      return;
-    }
-
-    if (this.socket && (this.socket.readyState === WS_READY_STATE_OPEN || this.socket.readyState === WS_READY_STATE_CONNECTING)) {
-      return;
-    }
-
-    if (this.openPromise) {
-      return;
-    }
-
-    this.clearReconnectTimeout();
-
-    this.openPromise = new Promise<WebSocket | null>((resolve) => {
-      let settled = false;
-      let connectTimeout: ReturnType<typeof setTimeout> | null = null;
-
-      const settle = (value: WebSocket | null) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (connectTimeout) {
-          clearTimeout(connectTimeout);
-          connectTimeout = null;
-        }
-        this.openPromise = null;
-        resolve(value);
-      };
-
-      try {
-        const socket = new WebSocket(this.socketUrl);
-        socket.binaryType = 'arraybuffer';
-
-        socket.onopen = () => {
-          this.socket = socket;
-          this.startKeepalive();
-          settle(socket);
-        };
-
-        socket.onmessage = (event) => {
-          void this.handleSocketMessage(event.data);
-        };
-
-        socket.onerror = () => {
-          if (!this.closed && !this.getActiveSubscription()) {
-            this.scheduleReconnect(new Error('Terminal websocket error'));
-          }
-        };
-
-        socket.onclose = () => {
-          if (this.socket === socket) {
-            this.socket = null;
-            this.boundSessionId = null;
-            this.stopKeepalive();
-            if (!this.closed) {
-              this.scheduleReconnect(new Error('Terminal stream connection error'));
-            }
-          }
-          settle(null);
-        };
-
-        this.socket = socket;
-
-        connectTimeout = setTimeout(() => {
-          if (socket.readyState === WS_READY_STATE_CONNECTING) {
-            socket.close();
-            settle(null);
-          }
-        }, WS_CONNECT_TIMEOUT_MS);
-      } catch {
-        settle(null);
-        if (!this.closed) {
-          this.scheduleReconnect(new Error('Terminal websocket open failed'));
-        }
-      }
-    });
-  }
-
-  private bindActiveSession(): void {
-    const activeSubscription = this.getActiveSubscription();
-    if (!activeSubscription || !this.socket || this.socket.readyState !== WS_READY_STATE_OPEN) {
-      return;
-    }
-
-    this.requestedSessionId = activeSubscription.sessionId;
-
-    try {
-      this.socket.send(encodeControlFrame({ t: 'b', s: activeSubscription.sessionId, r: this.replayCursorBySession.get(activeSubscription.sessionId) ?? 0, v: 2 }));
-    } catch {
-      this.handleSocketFailure(new Error('Terminal websocket bind failed'));
-    }
-  }
-
-  private scheduleReconnect(error: Error): void {
-    if (this.closed || !this.socketUrl || this.reconnectTimeout) {
-      return;
-    }
-
-    const activeSubscription = this.getActiveSubscription();
-    if (!activeSubscription) {
-      return;
-    }
-
-    const attempt = activeSubscription.retryCount + 1;
-    const initialDelay = activeSubscription.initialRetryDelay;
-    const maxDelay = activeSubscription.maxRetryDelay;
-    const maxRetries = activeSubscription.maxRetries;
-
-    if (attempt > maxRetries) {
-      this.clearConnectionTimeout(activeSubscription);
-      activeSubscription.onError?.(error, true);
-      return;
-    }
-
-    activeSubscription.retryCount = attempt;
-    activeSubscription.connected = false;
-    activeSubscription.onEvent({
-      type: 'reconnecting',
-      attempt,
-      maxAttempts: maxRetries,
-    });
-    this.startConnectionTimeout(activeSubscription);
-
-    const baseDelay = Math.min(initialDelay * Math.pow(2, Math.max(attempt - 1, 0)), maxDelay);
-    const jitter = Math.floor(Math.random() * WS_RECONNECT_JITTER_MS);
-    const delay = baseDelay + jitter;
-
-    this.reconnectTimeout = setTimeout(() => {
-      this.reconnectTimeout = null;
-      this.ensureConnected();
-      this.bindActiveSession();
-    }, delay);
-  }
-
-  private clearReconnectTimeout(): void {
-    if (!this.reconnectTimeout) {
-      return;
-    }
-
-    clearTimeout(this.reconnectTimeout);
-    this.reconnectTimeout = null;
-  }
-
-  private sendControl(payload: TerminalControlMessage): boolean {
-    if (!this.socket || this.socket.readyState !== WS_READY_STATE_OPEN) {
-      return false;
-    }
-
-    try {
-      this.socket.send(encodeControlFrame(payload));
-      return true;
-    } catch {
-      this.handleSocketFailure(new Error('Terminal websocket control send failed'));
-      return false;
-    }
-  }
-
-  private startKeepalive(): void {
-    this.stopKeepalive();
-    this.keepaliveInterval = setInterval(() => {
-      if (this.closed) {
-        return;
-      }
-
-      this.sendControl({ t: 'p', v: 2 });
-    }, WS_KEEPALIVE_INTERVAL_MS);
-  }
-
-  private stopKeepalive(): void {
-    if (!this.keepaliveInterval) {
-      return;
-    }
-
-    clearInterval(this.keepaliveInterval);
-    this.keepaliveInterval = null;
-  }
-
-  private async handleSocketMessage(messageData: unknown): Promise<void> {
-    const bytes = await this.asUint8Array(messageData);
-    if (bytes && bytes.length > 0 && bytes[0] === CONTROL_TAG_JSON) {
-      this.handleControlMessage(bytes);
-      return;
-    }
-
-    const text = await this.asText(messageData);
-    if (!text) {
-      return;
-    }
-
-    const activeSubscription = this.getActiveSubscription();
-    if (!activeSubscription) {
-      return;
-    }
-
-    activeSubscription.onEvent({ type: 'data', data: text });
-  }
-
-  private handleControlMessage(bytes: Uint8Array): void {
-    if (bytes.length < 2) {
-      return;
-    }
-
-    let payload: TerminalControlMessage;
-    try {
-      payload = JSON.parse(textDecoder.decode(bytes.subarray(1))) as TerminalControlMessage;
-    } catch {
-      this.handleSocketFailure(new Error('Terminal websocket control parse failed'));
-      return;
-    }
-
-    const activeSubscription = this.getActiveSubscription();
-
-    switch (payload.t) {
-      case 'ok':
-        this.bindActiveSession();
-        return;
-      case 'po':
-        return;
-      case 'd': {
-        const sessionId = payload.s ?? this.boundSessionId ?? this.requestedSessionId;
-        if (!activeSubscription || !sessionId || sessionId !== activeSubscription.sessionId) {
-          return;
-        }
-
-        if (typeof payload.i === 'number' && Number.isFinite(payload.i)) {
-          this.replayCursorBySession.set(sessionId, Math.max(this.replayCursorBySession.get(sessionId) ?? 0, Math.trunc(payload.i)));
-        }
-
-        if (typeof payload.d === 'string' && payload.d.length > 0) {
-          activeSubscription.onEvent({ type: 'data', data: payload.d });
-        }
-        return;
-      }
-      case 'bok': {
-        this.boundSessionId = payload.s ?? this.requestedSessionId;
-        if (!activeSubscription) {
-          return;
-        }
-        activeSubscription.retryCount = 0;
-        activeSubscription.connected = true;
-        this.clearConnectionTimeout(activeSubscription);
-        activeSubscription.onEvent({
-          type: 'connected',
-          runtime: payload.runtime,
-          ptyBackend: payload.ptyBackend,
-        });
-        return;
-      }
-      case 'x': {
-        if (!activeSubscription) {
-          this.boundSessionId = null;
-          return;
-        }
-
-        if (payload.s && payload.s !== activeSubscription.sessionId) {
-          return;
-        }
-
-        activeSubscription.connected = false;
-        this.clearConnectionTimeout(activeSubscription);
-        this.boundSessionId = null;
-        this.requestedSessionId = null;
-        this.replayCursorBySession.delete(activeSubscription.sessionId);
-        activeSubscription.onEvent({
-          type: 'exit',
-          exitCode: payload.exitCode,
-          signal: payload.signal ?? null,
-        });
-        return;
-      }
-      case 'e': {
-        const error = createTransportError(payload.c);
-        const isFatal = payload.f === true || payload.c === 'SESSION_NOT_FOUND';
-
-        if (payload.c === 'NOT_BOUND' || payload.c === 'SESSION_NOT_FOUND') {
-          this.boundSessionId = null;
-        }
-
-        if (activeSubscription) {
-          activeSubscription.connected = false;
-          if (isFatal) {
-            this.clearConnectionTimeout(activeSubscription);
-          }
-          activeSubscription.onError?.(error, isFatal);
-        }
-
-        if (payload.f === true) {
-          this.handleSocketFailure(error);
-        }
-        return;
-      }
-      default:
-        return;
-    }
-  }
-
-  private async asUint8Array(messageData: unknown): Promise<Uint8Array | null> {
-    if (messageData instanceof ArrayBuffer) {
-      return new Uint8Array(messageData);
-    }
-
-    if (messageData instanceof Uint8Array) {
-      return messageData;
-    }
-
-    if (typeof Blob !== 'undefined' && messageData instanceof Blob) {
-      const buffer = await messageData.arrayBuffer();
-      return new Uint8Array(buffer);
-    }
-
-    return null;
-  }
-
-  private async asText(messageData: unknown): Promise<string> {
-    if (typeof messageData === 'string') {
-      return messageData;
-    }
-
-    const bytes = await this.asUint8Array(messageData);
-    if (!bytes) {
-      return '';
-    }
-
-    return textDecoder.decode(bytes);
-  }
-
-  private handleSocketFailure(error: Error): void {
-    this.boundSessionId = null;
-    this.requestedSessionId = null;
-    this.resetConnection();
-    this.scheduleReconnect(error);
-  }
-
-  private resetConnection(): void {
-    this.openPromise = null;
-    this.stopKeepalive();
-    if (this.socket) {
-      const socket = this.socket;
-      this.socket = null;
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onerror = null;
-      socket.onclose = null;
-      if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CONNECTING) {
-        socket.close();
-      }
-    }
-    this.boundSessionId = null;
+/**
+ * Server error code for a terminal request whose working directory no longer
+ * exists (a deleted worktree). Mirrors `TERMINAL_CWD_MISSING_CODE` in
+ * `packages/web/server/lib/terminal/runtime.js`.
+ */
+const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
+
+export class TerminalRequestError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = 'TerminalRequestError';
+    this.code = code;
   }
 }
 
-type TerminalTransportGlobalState = {
-  inputCapability: TerminalTransportCapability | null;
-  streamCapability: TerminalTransportCapability | null;
-  manager: TerminalTransportManager | null;
+/** The PTY size a snapshot's history was drawn for, when the server reported one. */
+export const terminalSnapshotSize = (event: Pick<TerminalStreamEvent, 'cols' | 'rows'>): TerminalChunkSize | undefined =>
+  event.cols !== undefined && event.rows !== undefined ? { cols: event.cols, rows: event.rows } : undefined;
+
+export const isTerminalCwdMissingError = (error: unknown): boolean =>
+  error instanceof TerminalRequestError && error.code === TERMINAL_CWD_MISSING_CODE;
+
+const terminalErrorBodySchema = z.object({ error: z.string().optional(), code: z.string().optional() });
+
+const responseError = async (response: Response, fallback: string): Promise<Error> => {
+  const body = terminalErrorBodySchema.safeParse(await response.json().catch(() => null)).data;
+  return new TerminalRequestError(body?.error ?? fallback, body?.code ?? null);
 };
 
-const getTerminalTransportGlobalState = (): TerminalTransportGlobalState => {
-  const globalScope = globalThis as typeof globalThis & {
-    [GLOBAL_TERMINAL_TRANSPORT_STATE_KEY]?: TerminalTransportGlobalState;
-  };
+const trimProjection = (value: string): string => {
+  const bytes = encoder.encode(value);
+  if (bytes.byteLength <= MAX_PROJECTION_BYTES) return value;
+  let start = bytes.byteLength - MAX_PROJECTION_BYTES;
+  while (start < bytes.byteLength && (bytes[start] & 0xc0) === 0x80) start += 1;
+  return decoder.decode(bytes.subarray(start));
+};
 
-  if (!globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY]) {
-    globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY] = {
-      inputCapability: null,
-      streamCapability: null,
-      manager: null,
+const terminalSessionListSchema = z.object({ sessions: z.array(z.unknown()) });
+
+export const parseTerminalSessionPurpose = (value: TerminalSessionPurposeInput): TerminalSessionPurpose | undefined => {
+  return terminalSessionPurposeSchema.safeParse(value).data;
+};
+
+export const parseTerminalSession = (value: TerminalSessionInput): TerminalSession | null => {
+  return terminalSessionSchema.safeParse(value).data ?? null;
+};
+
+type TerminalTransportDependencies = {
+  refreshAuth: () => Promise<unknown>;
+  openSocket: () => RelayTunnelWebSocket;
+  clearUrlAuthToken?: () => void;
+};
+
+export class TerminalTransport {
+  private socket: RelayTunnelWebSocket | null = null;
+  private opening: Promise<void> | null = null;
+  private subscribers = new Map<string, Set<Subscriber>>();
+  private projections = new Map<string, TerminalProjection>();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private idleCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  private failures = 0;
+  private wakeCleanup: (() => void) | null = null;
+  private generation = 0;
+  private disposed = false;
+
+  constructor(private readonly dependencies: TerminalTransportDependencies = {
+    refreshAuth: refreshRuntimeUrlAuthToken,
+    openSocket: () => openRuntimeWebSocket(getRuntimeUrlResolver().websocket('/api/terminal/ws')),
+    clearUrlAuthToken: clearRuntimeUrlAuthToken,
+  }) {}
+
+  subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
+    this.cancelIdleClose();
+    const subscriber = { handlers, lastSequence: -1 };
+    const set = this.subscribers.get(sessionId) ?? new Set<Subscriber>();
+    const first = set.size === 0;
+    set.add(subscriber);
+    this.subscribers.set(sessionId, set);
+    const projection = this.projections.get(sessionId);
+    if (projection) {
+      subscriber.lastSequence = projection.sequence;
+      handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, cols: projection.cols, rows: projection.rows, status: projection.status, mode: projection.mode, purpose: projection.purpose, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
+    }
+    const socketWasOpen = this.socket?.readyState === SOCKET_OPEN;
+    this.ensureConnected().then(() => {
+      const current = this.subscribers.get(sessionId);
+      if (first && socketWasOpen && current === set && current.size > 0) {
+        this.send({ t: 'attach', v: 3, s: sessionId });
+      }
+    }).catch((error) => {
+      if (!set.has(subscriber)) return;
+      handlers.onError?.(error, false);
+      this.scheduleReconnect();
+    });
+    return () => {
+      const current = this.subscribers.get(sessionId);
+      current?.delete(subscriber);
+      if (current?.size === 0) {
+        this.subscribers.delete(sessionId);
+        this.projections.delete(sessionId);
+        this.send({ t: 'detach', v: 3, s: sessionId });
+      }
+      if (this.subscribers.size === 0) {
+        this.cancelReconnect();
+        this.failures = 0;
+        if (this.socket?.readyState === SOCKET_OPEN) {
+          // Healthy socket: hold it briefly so a tab switch can reattach to it.
+          this.scheduleIdleClose();
+          return;
+        }
+        // Nothing to reuse, so abandon any dial that is still in flight.
+        this.generation += 1;
+        this.opening = null;
+        this.closeSocket();
+      }
     };
   }
 
-  return globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY];
-};
-
-const ensureTerminalTransportManager = (): TerminalTransportManager => {
-  const globalState = getTerminalTransportGlobalState();
-  if (!globalState.manager) {
-    globalState.manager = new TerminalTransportManager();
-  }
-  return globalState.manager;
-};
-
-const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capabilities'] | undefined): void => {
-  const globalState = getTerminalTransportGlobalState();
-  globalState.inputCapability = capabilities?.input ?? null;
-  globalState.streamCapability = capabilities?.stream ?? null;
-
-  if (!isWsTransportSupported(globalState.inputCapability) && !isWsTransportSupported(globalState.streamCapability)) {
-    globalState.manager?.close();
-    globalState.manager = null;
-    return;
+  async write(sessionId: string, data: string): Promise<void> {
+    if (!data) return;
+    await this.ensureConnected();
+    if (this.send({ t: 'write', v: 3, s: sessionId, d: data })) return;
+    this.closeSocket();
+    await this.ensureConnected();
+    if (!this.send({ t: 'write', v: 3, s: sessionId, d: data })) throw new Error('Terminal connection is unavailable');
   }
 
-  const socketUrl = normalizeWebSocketPath(getPreferredTerminalWsPath(globalState));
-  if (!socketUrl) {
-    return;
+  dispose(): void {
+    this.disposed = true;
+    this.generation += 1;
+    this.opening = null;
+    this.subscribers.clear();
+    this.projections.clear();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.cancelIdleClose();
+    this.wakeCleanup?.();
+    this.wakeCleanup = null;
+    this.closeSocket();
   }
 
-  const manager = ensureTerminalTransportManager();
-  manager.configure(socketUrl);
-};
-
-const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<void> => {
-  const response = await runtimeFetch(`/api/terminal/${sessionId}/input`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: data,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to send terminal input' }));
-    throw new Error(error.error || 'Failed to send terminal input');
+  forget(sessionId: string): void {
+    this.projections.delete(sessionId);
   }
-};
+
+  /**
+   * Records a resize the server accepted, so a projection snapshot replayed to
+   * a later subscriber (tab switch, remount) still names the size the
+   * terminal's current screen is drawn for.
+   */
+  noteResize(sessionId: string, cols: number, rows: number): void {
+    const projection = this.projections.get(sessionId);
+    if (!projection) return;
+    this.projections.set(sessionId, { ...projection, cols, rows });
+  }
+
+  private async ensureConnected(): Promise<void> {
+    if (this.disposed) throw new Error('Terminal runtime changed');
+    if (this.socket?.readyState === SOCKET_OPEN) return;
+    if (this.opening) {
+      await this.opening;
+      if (this.socket?.readyState === SOCKET_OPEN) return;
+      return this.ensureConnected();
+    }
+    const generation = this.generation;
+    const opening = (async () => {
+      await this.dependencies.refreshAuth();
+      if (generation !== this.generation || this.disposed) throw new Error('Terminal runtime changed');
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let opened = false;
+        let authInvalidated = false;
+        let pendingSocket: RelayTunnelWebSocket | null = null;
+        const isCurrentSocket = () => (
+          generation === this.generation &&
+          !this.disposed &&
+          pendingSocket !== null &&
+          this.socket === pendingSocket
+        );
+        const invalidatePreOpenAuth = () => {
+          if (authInvalidated || opened || !isCurrentSocket()) return;
+          authInvalidated = true;
+          this.dependencies.clearUrlAuthToken?.();
+        };
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          if (error) reject(error);
+          else resolve();
+        };
+        const timeout = setTimeout(() => {
+          invalidatePreOpenAuth();
+          pendingSocket?.close();
+          finish(new Error('Terminal connection timed out'));
+        }, 10_000);
+        try {
+          const socket = this.dependencies.openSocket();
+          pendingSocket = socket;
+          socket.binaryType = 'arraybuffer';
+          this.socket = socket;
+          socket.onopen = () => {
+            if (!isCurrentSocket()) { socket.close(); finish(new Error('Terminal runtime changed')); return; }
+            opened = true;
+            this.failures = 0;
+            this.send({ t: 'hello', v: 3 });
+            for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: 3, s: sessionId });
+            this.startKeepalive();
+            finish();
+          };
+          socket.onmessage = (event) => void this.handleMessage(event.data);
+          socket.onerror = () => {
+            const current = isCurrentSocket();
+            if (current) invalidatePreOpenAuth();
+            finish(new Error('Terminal WebSocket failed'));
+            if (current && this.subscribers.size > 0) this.scheduleReconnect();
+          };
+          socket.onclose = () => {
+            const current = isCurrentSocket();
+            if (current) {
+              this.stopKeepalive();
+              // An upgrade rejected before `open` commonly means the cached
+              // URL-scoped auth token is stale. Retrying it reaches the 8s
+              // backoff cap instead of minting a fresh token.
+              invalidatePreOpenAuth();
+            }
+            if (this.socket === socket) this.socket = null;
+            finish(new Error('Terminal WebSocket closed'));
+            if (current && this.subscribers.size > 0) this.scheduleReconnect();
+          };
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error('Terminal WebSocket failed'));
+          if (!this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
+        }
+      });
+    })();
+    this.opening = opening;
+    try {
+      await opening;
+    } finally {
+      if (this.opening === opening) {
+        this.opening = null;
+      }
+    }
+  }
+
+  private handleMessage(raw: RelayTunnelSocketMessageEvent['data']): void {
+    const message = decode(raw);
+    if (!message || message.t === 'hello' || message.t === 'pong') return;
+    if (message.t === 'error') {
+      const error: TerminalError = new Error(message.message ?? 'Terminal error');
+      error.code = message.code;
+      const targets = message.s ? [message.s] : [...this.subscribers.keys()];
+      for (const id of targets) for (const sub of this.subscribers.get(id) ?? []) sub.handlers.onError?.(error, message.fatal === true);
+      return;
+    }
+    if (!message.s) return;
+    const subscribers = this.subscribers.get(message.s);
+    if (!subscribers) return;
+    if (message.t === 'snapshot') {
+      const projection: TerminalProjection = {
+        sequence: message.q ?? 0,
+        history: message.history ?? '',
+        cols: message.cols,
+        rows: message.rows,
+        status: message.status,
+        mode: message.mode,
+        purpose: message.purpose,
+        exitCode: message.exitCode,
+        signal: message.signal ?? null,
+        runtime: message.runtime,
+        ptyBackend: message.ptyBackend,
+      };
+      this.projections.set(message.s, projection);
+      for (const sub of subscribers) {
+        sub.lastSequence = projection.sequence;
+        sub.handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, cols: projection.cols, rows: projection.rows, status: projection.status, mode: projection.mode, purpose: projection.purpose, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
+      }
+      return;
+    }
+
+    const previous = this.projections.get(message.s);
+    if (previous && message.q > previous.sequence) {
+      if (message.t === 'output') this.projections.set(message.s, { ...previous, sequence: message.q, history: trimProjection(previous.history + (message.r ?? message.d)) });
+      else if (message.t === 'exit') this.projections.set(message.s, { ...previous, sequence: message.q, status: 'exited', exitCode: message.exitCode, signal: message.signal ?? null });
+      else if (message.t === 'restarted') this.projections.set(message.s, { ...previous, sequence: message.q, history: message.history ?? '', status: 'running', mode: message.mode ?? previous.mode, purpose: message.purpose ?? previous.purpose, exitCode: undefined, signal: null });
+    }
+    for (const sub of subscribers) {
+      if (message.q <= sub.lastSequence) continue;
+      sub.lastSequence = message.q;
+      if (message.t === 'output') sub.handlers.onEvent({ type: 'data', sequence: message.q, data: message.d, replayData: message.r });
+      else if (message.t === 'exit') sub.handlers.onEvent({ type: 'exit', sequence: message.q, exitCode: message.exitCode, signal: message.signal ?? null });
+      else if (message.t === 'restarted') sub.handlers.onEvent({ type: 'snapshot', sequence: message.q, data: message.history ?? '', status: 'running', mode: message.mode ?? previous?.mode, purpose: message.purpose ?? previous?.purpose });
+    }
+  }
+
+  private send(message: ClientMessage): boolean {
+    if (!this.socket || this.socket.readyState !== SOCKET_OPEN) return false;
+    try { this.socket.send(encode(message)); return true; } catch { return false; }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.disposed || this.subscribers.size === 0) return;
+    this.failures += 1;
+    const slow = (typeof document !== 'undefined' && document.visibilityState === 'hidden') || (typeof navigator !== 'undefined' && !navigator.onLine);
+    const delay = slow ? 60_000 : Math.min(500 * 2 ** Math.min(this.failures - 1, 10), 8_000);
+    for (const set of this.subscribers.values()) for (const sub of set) sub.handlers.onEvent({ type: 'reconnecting', attempt: this.failures, maxAttempts: Number.POSITIVE_INFINITY });
+    const wake = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.wakeCleanup?.(); this.wakeCleanup = null;
+      void this.ensureConnected().catch(() => this.scheduleReconnect());
+    };
+    if (typeof window !== 'undefined') window.addEventListener('online', wake);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', wake);
+    this.wakeCleanup = () => {
+      if (typeof window !== 'undefined') window.removeEventListener('online', wake);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', wake);
+    };
+    this.reconnectTimer = setTimeout(wake, delay);
+  }
+
+  private scheduleIdleClose(): void {
+    if (this.idleCloseTimer || this.disposed) return;
+    this.idleCloseTimer = setTimeout(() => {
+      this.idleCloseTimer = null;
+      if (this.disposed || this.subscribers.size > 0) return;
+      this.generation += 1;
+      this.opening = null;
+      this.closeSocket();
+    }, IDLE_SOCKET_GRACE_MS);
+  }
+
+  private cancelIdleClose(): void {
+    if (!this.idleCloseTimer) return;
+    clearTimeout(this.idleCloseTimer);
+    this.idleCloseTimer = null;
+  }
+
+  private startKeepalive(): void { this.stopKeepalive(); this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 45_000); }
+  private stopKeepalive(): void { if (this.keepaliveTimer) clearInterval(this.keepaliveTimer); this.keepaliveTimer = null; }
+  private cancelReconnect(): void { if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.wakeCleanup?.(); this.wakeCleanup = null; }
+  private closeSocket(): void { this.stopKeepalive(); const socket = this.socket; this.socket = null; if (socket && (socket.readyState === SOCKET_CONNECTING || socket.readyState === SOCKET_OPEN)) socket.close(); }
+}
+
+let transport = new TerminalTransport();
 
 export async function createTerminalSession(options: CreateTerminalOptions): Promise<TerminalSession> {
-  const response = await runtimeFetch('/api/terminal/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      cwd: options.cwd,
-      cols: options.cols ?? 80,
-      rows: options.rows ?? 24,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to create terminal' }));
-    throw new Error(error.error || 'Failed to create terminal session');
-  }
-
-  const session = await response.json() as TerminalSession;
-  applyTerminalTransportCapabilities(session.capabilities);
-  return session;
+  const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
+  if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
+  const payload: unknown = await response.json().catch(() => null);
+  const parsed = terminalSessionSchema.safeParse(payload).data;
+  if (!parsed) throw new Error('Failed to create terminal session');
+  return parsed;
 }
-
-const connectTerminalStreamViaSse = (
-  sessionId: string,
-  onEvent: (event: TerminalStreamEvent) => void,
-  onError?: (error: Error, fatal?: boolean) => void,
-  options: ConnectStreamOptions = {}
-): (() => void) => {
-  const maxRetries = options.maxRetries ?? 3;
-  const initialRetryDelay = options.initialRetryDelay ?? 1000;
-  const maxRetryDelay = options.maxRetryDelay ?? 8000;
-  const connectionTimeout = options.connectionTimeout ?? 10000;
-
-  let eventSource: EventSource | null = null;
-  let retryCount = 0;
-  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-  let connectionTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  let isClosed = false;
-  let terminalExited = false;
-
-  const clearTimeouts = () => {
-    if (retryTimeout) {
-      clearTimeout(retryTimeout);
-      retryTimeout = null;
+export async function listTerminalSessions(cwd: string): Promise<TerminalServerSession[]> {
+  const response = await runtimeFetch(`/api/terminal/sessions?cwd=${encodeURIComponent(cwd)}`);
+  if (!response.ok) throw await responseError(response, 'Failed to list terminal sessions');
+  const payload: unknown = await response.json().catch(() => null);
+  const rawSessions = terminalSessionListSchema.safeParse(payload).data?.sessions;
+  if (!Array.isArray(rawSessions)) throw new Error('Failed to list terminal sessions');
+  const parsed: TerminalServerSession[] = [];
+  for (const entry of rawSessions) {
+    const session = terminalServerSessionSchema.safeParse(entry).data;
+    if (session) {
+      parsed.push(session);
     }
-    if (connectionTimeoutId) {
-      clearTimeout(connectionTimeoutId);
-      connectionTimeoutId = null;
-    }
-  };
-
-  const cleanup = () => {
-    if (isClosed) {
-      return;
-    }
-
-    isClosed = true;
-    clearTimeouts();
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-  };
-
-  const handleError = (error: Error, isFatal: boolean) => {
-    if (isClosed || terminalExited) {
-      return;
-    }
-
-    if (retryCount < maxRetries && !isFatal) {
-      retryCount += 1;
-      const delay = Math.min(initialRetryDelay * Math.pow(2, retryCount - 1), maxRetryDelay);
-
-      onEvent({
-        type: 'reconnecting',
-        attempt: retryCount,
-        maxAttempts: maxRetries,
-      });
-
-      retryTimeout = setTimeout(() => {
-        if (!isClosed && !terminalExited) {
-          connect();
-        }
-      }, delay);
-      return;
-    }
-
-    onError?.(error, true);
-    cleanup();
-  };
-
-  const connect = () => {
-    if (isClosed || terminalExited) {
-      return;
-    }
-
-    if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-      return;
-    }
-
-    eventSource = new EventSource(getRuntimeUrlResolver().sse(`/api/terminal/${sessionId}/stream`));
-    let opened = false;
-
-    connectionTimeoutId = setTimeout(() => {
-      if (!opened && eventSource?.readyState !== EventSource.OPEN) {
-        eventSource?.close();
-        handleError(new Error('Connection timeout'), false);
-      }
-    }, connectionTimeout);
-
-    eventSource.onopen = () => {
-      if (opened) {
-        return;
-      }
-
-      opened = true;
-      retryCount = 0;
-      clearTimeouts();
-      onEvent({ type: 'connected' });
-    };
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as TerminalStreamEvent;
-
-        if (data.type === 'exit') {
-          getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
-          terminalExited = true;
-          cleanup();
-        }
-
-        onEvent(data);
-      } catch (error) {
-        onError?.(error as Error, false);
-      }
-    };
-
-    eventSource.onerror = () => {
-      clearTimeouts();
-      const isFatalError = terminalExited || eventSource?.readyState === EventSource.CLOSED;
-      eventSource?.close();
-      eventSource = null;
-
-      if (!terminalExited) {
-        handleError(new Error('Terminal stream connection error'), isFatalError);
-      }
-    };
-  };
-
-  connect();
-  return cleanup;
-};
-
-export function connectTerminalStream(
-  sessionId: string,
-  onEvent: (event: TerminalStreamEvent) => void,
-  onError?: (error: Error, fatal?: boolean) => void,
-  options: ConnectStreamOptions = {}
-): () => void {
-  const globalState = getTerminalTransportGlobalState();
-  if (!isWsTransportSupported(globalState.streamCapability)) {
-    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options);
   }
-
-  const manager = ensureTerminalTransportManager();
-  const socketUrl = normalizeWebSocketPath(getPreferredTerminalWsPath(globalState));
-  if (!socketUrl) {
-    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options);
-  }
-
-  manager.configure(socketUrl);
-  return manager.subscribe(sessionId, onEvent, onError, options);
+  return parsed;
 }
-
-export async function sendTerminalInput(
-  sessionId: string,
-  data: string
-): Promise<void> {
-  const globalState = getTerminalTransportGlobalState();
-  if (globalState.manager && await globalState.manager.sendInput(sessionId, data)) {
-    return;
-  }
-
-  await sendTerminalInputHttp(sessionId, data);
+export async function touchTerminalSessions(sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  await command('/api/terminal/touch', 'POST', { sessionIds });
 }
-
-export async function resizeTerminal(
-  sessionId: string,
-  cols: number,
-  rows: number
-): Promise<void> {
-  const response = await runtimeFetch(`/api/terminal/${sessionId}/resize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cols, rows }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to resize terminal' }));
-    throw new Error(error.error || 'Failed to resize terminal');
-  }
+export async function listTerminalShells(): Promise<TerminalShellOption[]> {
+  const response = await runtimeFetch('/api/terminal/shells');
+  if (!response.ok) throw await responseError(response, 'Failed to list terminal shells');
+  const payload = await response.json().catch(() => []);
+  return Array.isArray(payload)
+    ? payload.filter((entry): entry is TerminalShellOption => (
+        entry && typeof entry === 'object' && isTerminalShell(entry.id) && typeof entry.name === 'string' && typeof entry.supportsLogin === 'boolean'
+      ))
+    : [];
 }
+export function connectTerminalStream(sessionId: string, onEvent: TerminalHandlers['onEvent'], onError?: TerminalHandlers['onError']): () => void { return transport.subscribe(sessionId, { onEvent, onError }); }
+export async function sendTerminalInput(sessionId: string, data: string): Promise<void> { await transport.write(sessionId, data); }
 
-export async function closeTerminal(sessionId: string): Promise<void> {
-  getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
-
-  const response = await runtimeFetch(`/api/terminal/${sessionId}`, {
-    method: 'DELETE',
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to close terminal' }));
-    throw new Error(error.error || 'Failed to close terminal');
+async function command(path: string, method: string, body?: unknown): Promise<Response> {
+  const options: RequestInit = { method };
+  if (body !== undefined) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify(body);
   }
+  const response = await runtimeFetch(path, options);
+  if (!response.ok) throw await responseError(response, 'Terminal command failed');
+  return response;
 }
-
-export async function restartTerminalSession(
-  currentSessionId: string,
-  options: { cwd: string; cols?: number; rows?: number }
-): Promise<TerminalSession> {
-  getTerminalTransportGlobalState().manager?.unbindSession(currentSessionId);
-
-  const response = await runtimeFetch(`/api/terminal/${currentSessionId}/restart`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      cwd: options.cwd,
-      cols: options.cols ?? 80,
-      rows: options.rows ?? 24,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to restart terminal' }));
-    throw new Error(error.error || 'Failed to restart terminal');
-  }
-
-  const session = await response.json() as TerminalSession;
-  applyTerminalTransportCapabilities(session.capabilities);
-  return session;
+export async function resizeTerminal(sessionId: string, cols: number, rows: number): Promise<void> {
+  await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows });
+  transport.noteResize(sessionId, cols, rows);
 }
-
-export async function forceKillTerminal(options: {
-  sessionId?: string;
-  cwd?: string;
-}): Promise<void> {
-  const response = await runtimeFetch('/api/terminal/force-kill', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(options),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to force kill terminal' }));
-    throw new Error(error.error || 'Failed to force kill terminal');
-  }
-
-  if (options.sessionId) {
-    getTerminalTransportGlobalState().manager?.unbindSession(options.sessionId);
-  }
+export async function updateTerminalAppearance(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void> { await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance); }
+export async function closeTerminal(sessionId: string): Promise<void> { await command(`/api/terminal/${sessionId}`, 'DELETE'); transport.forget(sessionId); }
+export async function restartTerminalSession(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession> { return (await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options)).json() as Promise<TerminalSession>; }
+export async function forceKillTerminal(options: { sessionId?: string; cwd?: string }): Promise<void> {
+  const response = await command('/api/terminal/force-kill', 'POST', options);
+  const result = await response.json().catch(() => null) as { killedSessionIds?: unknown } | null;
+  if (Array.isArray(result?.killedSessionIds)) {
+    for (const sessionId of result.killedSessionIds) if (typeof sessionId === 'string') transport.forget(sessionId);
+  } else if (options.sessionId) transport.forget(options.sessionId);
 }
-
-export function disposeTerminalInputTransport(): void {
-  const globalState = getTerminalTransportGlobalState();
-  globalState.manager?.close();
-  globalState.manager = null;
-  globalState.inputCapability = null;
-  globalState.streamCapability = null;
-}
-
-export function primeTerminalInputTransport(): void {
-  const globalState = getTerminalTransportGlobalState();
-  if (
-    globalState.inputCapability &&
-    globalState.streamCapability &&
-    !isWsTransportSupported(globalState.inputCapability) &&
-    !isWsTransportSupported(globalState.streamCapability)
-  ) {
-    return;
-  }
-
-  const preferredPath = getPreferredTerminalWsPath(globalState) || DEFAULT_TERMINAL_WS_PATH;
-  const socketUrl = normalizeWebSocketPath(preferredPath);
-  if (!socketUrl) {
-    return;
-  }
-
-  const manager = ensureTerminalTransportManager();
-  if (manager.isConnectedOrConnecting(socketUrl)) {
-    return;
-  }
-
-  manager.configure(socketUrl);
-  manager.prime();
-}
-
-const hotModule = (import.meta as ImportMeta & {
-  hot?: {
-    dispose: (callback: () => void) => void;
-  };
-}).hot;
-
-if (hotModule) {
-  hotModule.dispose(() => {
-    disposeTerminalInputTransport();
-  });
-}
+export function disposeTerminalInputTransport(): void { transport.dispose(); transport = new TerminalTransport(); }

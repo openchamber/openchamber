@@ -18,14 +18,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { selectCommandsForDirectory, useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
+import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface CommandsSidebarProps {
   onItemSelect?: () => void;
@@ -42,7 +44,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
 
   const {
     selectedCommandName,
-    commands,
     setSelectedCommand,
     setCommandDraft,
     createCommand,
@@ -50,20 +51,23 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     loadCommands,
   } = useCommandsStore(useShallow((s) => ({
     selectedCommandName: s.selectedCommandName,
-    commands: s.commands,
     setSelectedCommand: s.setSelectedCommand,
     setCommandDraft: s.setCommandDraft,
     createCommand: s.createCommand,
     deleteCommand: s.deleteCommand,
     loadCommands: s.loadCommands,
   })));
-  const skills = useSkillsStore((s) => s.skills);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsDirectory));
+  const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    loadCommands();
-    loadSkills();
-  }, [loadCommands, loadSkills]);
+    void loadCommands(settingsDirectory);
+    void loadSkills(settingsDirectory);
+  }, [loadCommands, loadSkills, settingsDirectory]);
 
   const skillNames = React.useMemo(() => new Set(skills.map((skill) => skill.name)), [skills]);
   const commandOnlyItems = React.useMemo(
@@ -130,7 +134,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     }
 
     setIsConfirmActionPending(true);
-    const success = await deleteCommand(confirmActionCommand.name);
+    const success = await deleteCommand(confirmActionCommand.name, settingsDirectory);
 
     if (success) {
       if (confirmActionType === 'delete') {
@@ -203,11 +207,11 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       template: renameDialogCommand.template,
       agent: renameDialogCommand.agent,
       model: renameDialogCommand.model,
-    });
+    }, settingsDirectory);
 
     if (success) {
       // Delete old command
-      const deleteSuccess = await deleteCommand(renameDialogCommand.name);
+      const deleteSuccess = await deleteCommand(renameDialogCommand.name, settingsDirectory);
       if (deleteSuccess) {
         toast.success(`Command renamed to "${sanitizedName}"`);
         setSelectedCommand(sanitizedName);
@@ -227,7 +231,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.commands.sidebar.title')}</h2>
+        <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.commands.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.commands.sidebar.total', { count: commandOnlyItems.length })}</span>
@@ -432,7 +436,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
-          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           tabIndex={0}
         >
           <div className="flex items-center gap-2">

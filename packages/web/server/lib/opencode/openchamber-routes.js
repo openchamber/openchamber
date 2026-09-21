@@ -1,3 +1,58 @@
+const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
+
+function resolveSystemdServiceUnit(environment) {
+  if (!environment.INVOCATION_ID) {
+    return null;
+  }
+
+  const configuredUnit = typeof environment.OPENCHAMBER_SYSTEMD_UNIT === 'string'
+    ? environment.OPENCHAMBER_SYSTEMD_UNIT.trim()
+    : '';
+  const unit = configuredUnit || 'openchamber.service';
+  return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
+}
+
+function quotePosixShell(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * `echo` in batch treats `& | < > ( ) ^` as syntax and `%var%` as expansion,
+ * so a line of the log preamble is escaped before it becomes an `echo`.
+ */
+const escapeBatchEchoLine = (line) => {
+  if (!line) return 'echo.';
+  return `echo ${line.replace(/%/g, '%%').replace(/[&|<>()^]/g, '^$&')}`;
+};
+
+/**
+ * The Windows update runs as a batch file, one command per line, so the
+ * `if ... else` block and the multi-line log preamble keep their structure.
+ */
+const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
+  '@echo off',
+  ...logPreamble.split('\n').map(escapeBatchEchoLine),
+  // `timeout` refuses redirected stdin, which is what a detached child has;
+  // a ping to loopback waits about two seconds without a console.
+  'ping -n 3 127.0.0.1 >nul',
+  // npm, pnpm and yarn are .cmd shims on Windows. Without `call`, a batch
+  // file hands control to them for good and the restart below never runs.
+  // Read from a file, cmd expands `%x%` and drops a lone `%`, so a `%` in a
+  // host or UI password would change the restart command. Doubling keeps it.
+  `call ${updateCmd.replace(/%/g, '%%')}`,
+  'if %ERRORLEVEL% EQU 0 (',
+  '  echo Update successful, restarting OpenChamber...',
+  `  ${restartCmd ? restartCmd.replace(/%/g, '%%') : 'echo Service manager will restart OpenChamber.'}`,
+  ') else (',
+  '  echo Update failed',
+  ')',
+  // The restart command carries the server's own flags, `--ui-password`
+  // included, so the file does not outlive the run. Deleting the running
+  // batch file on its last line is safe: cmd has already read it.
+  'del "%~f0"',
+  '',
+].join('\r\n');
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -11,14 +66,13 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    desktopUpdater,
   } = dependencies;
 
-  let cachedModelsMetadata = null;
-  let cachedModelsMetadataTimestamp = 0;
+  let desktopRestartError = null;
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
-      const { checkForUpdates } = await import('../package-manager.js');
       const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
       const parseReportUsage = (value) => {
         if (typeof value !== 'string') return true;
@@ -34,16 +88,40 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         return 'desktop';
       };
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
-
-      const updateInfo = await checkForUpdates({
+      const updateRequest = {
         appType: parseString(req.query.appType),
         deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
         platform: parseString(req.query.platform),
         arch: parseString(req.query.arch),
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
+        installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
-      });
+      };
+      let updateInfo;
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && updateRequest.appType === 'web') {
+        if (desktopRestartError && req.query.updateStatus === 'true') {
+          return res.status(503).json({
+            code: 'DESKTOP_UPDATE_RESTART_FAILED',
+            error: desktopRestartError,
+          });
+        }
+        if (typeof desktopUpdater?.check !== 'function') {
+          return res.status(503).json({
+            available: false,
+            code: 'DESKTOP_UPDATER_UNAVAILABLE',
+            error: 'The desktop updater is not available.',
+          });
+        }
+        updateInfo = {
+          ...await desktopUpdater.check(),
+          packageManager: 'electron',
+          updateOwner: 'electron-updater',
+        };
+      } else {
+        const { checkForUpdates } = await import('../package-manager.js');
+        updateInfo = await checkForUpdates(updateRequest);
+      }
       res.json(updateInfo);
     } catch (error) {
       console.error('Failed to check for updates:', error);
@@ -56,7 +134,42 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
-      const { spawn: spawnChild } = await import('child_process');
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+        if (typeof desktopUpdater?.install !== 'function' || typeof desktopUpdater?.restart !== 'function') {
+          return res.status(503).json({
+            code: 'DESKTOP_UPDATER_UNAVAILABLE',
+            error: 'The desktop updater is not available.',
+          });
+        }
+
+        desktopRestartError = null;
+        const updateInfo = await desktopUpdater.install();
+        if (!updateInfo?.available) {
+          return res.status(400).json({ error: 'No update available' });
+        }
+
+        res.json({
+          success: true,
+          message: 'Desktop update downloaded, host will restart shortly',
+          version: updateInfo.version,
+          packageManager: 'electron',
+          updateOwner: 'electron-updater',
+          autoRestart: true,
+          restartManager: 'electron-updater',
+        });
+
+        setImmediate(() => {
+          Promise.resolve()
+            .then(() => desktopUpdater.restart())
+            .catch((error) => {
+              desktopRestartError = error instanceof Error ? error.message : 'Failed to restart after desktop update';
+              console.error('Failed to restart after desktop update:', error);
+            });
+        });
+        return;
+      }
+
+      const { spawn: spawnChild, spawnSync } = await import('child_process');
       const {
         checkForUpdates,
         getUpdateCommand,
@@ -112,6 +225,55 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isForegroundService = launchMode === 'foreground';
+      const systemdServiceUnit = isForegroundService ? resolveSystemdServiceUnit(process.env) : null;
+
+      if (isForegroundService) {
+        if (!systemdServiceUnit) {
+          return res.status(409).json({
+            error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+          });
+        }
+
+        const updateJobName = `openchamber-update-${Date.now()}`;
+        const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
+        const updateScript = [
+          'set -eu',
+          updateCmd,
+          `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+        ].join('\n');
+        const systemdRun = spawnSync('systemd-run', [
+          '--user',
+          `--unit=${updateJobName}`,
+          '--collect',
+          '--service-type=exec',
+          `--setenv=PATH=${process.env.PATH || ''}`,
+          '/bin/sh',
+          '-c',
+          updateScript,
+        ], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 5000,
+        });
+
+        if (systemdRun.status !== 0) {
+          const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
+          return res.status(409).json({
+            error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: 'Update queued; OpenChamber will restart after installation completes',
+          version: updateInfo.version,
+          packageManager: pm,
+          autoRestart: true,
+          restartManager: 'systemd',
+          jobId: updateJobName,
+          logPath: updateLogPath,
+        });
+      }
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -175,6 +337,26 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         `logPath=${updateLogPath}`,
       ].join('\n');
 
+      const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
+      const shellFlag = isWindows ? '/c' : '-c';
+      // cmd.exe /c takes one command line: a newline inside it ends the
+      // command, so a multi-line script passed as the argument ran nothing
+      // and exited 0, and the server shut itself down believing the update
+      // was under way (#3084). Batch runs from a file instead, written before
+      // the client is told to expect a restart.
+      const windowsScriptPath = path.join(openchamberDataDir, 'update-install.cmd');
+      if (isWindows) {
+        try {
+          fs.mkdirSync(path.dirname(windowsScriptPath), { recursive: true });
+          fs.writeFileSync(windowsScriptPath, buildWindowsUpdateScript({ logPreamble, updateCmd, restartCmd }), 'utf8');
+        } catch (scriptError) {
+          console.error('Failed to write the update script, update not started:', scriptError);
+          return res.status(500).json({
+            error: `Could not write the update script at ${windowsScriptPath}: ${scriptError instanceof Error ? scriptError.message : String(scriptError)}`,
+          });
+        }
+      }
+
       res.json({
         success: true,
         message: 'Update starting, server will restart shortly',
@@ -189,21 +371,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           console.log(`Running: ${updateCmd}`);
           console.log(logPreamble);
 
-          const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
-          const shellFlag = isWindows ? '/c' : '-c';
           const script = isWindows
-            ? `
-            echo ${quoteCmd(logPreamble)}
-            timeout /t 2 /nobreak >nul
-            ${updateCmd}
-            if %ERRORLEVEL% EQU 0 (
-              echo Update successful, restarting OpenChamber...
-              ${restartCmd || 'echo Service manager will restart OpenChamber.'}
-            ) else (
-              echo Update failed
-              exit /b 1
-            )
-            `
+            ? windowsScriptPath
           : `
             printf '%s\n' ${quotePosix(logPreamble)}
             sleep 2
@@ -225,10 +394,24 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           console.warn('Failed to open update log file, continuing without log capture:', logError);
         }
 
+        if (isWindows) {
+          // On Windows the detached child inherits this process's listening
+          // socket, and keeps the port for as long as the batch runs. The
+          // restart inside that batch then fails with "port already in use",
+          // and the update ends with no server. Closing the listener first
+          // leaves nothing to inherit; the process exits right after anyway.
+          try {
+            server.close();
+          } catch (closeError) {
+            console.warn('Failed to close the listener before the update script:', closeError);
+          }
+        }
+
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
           stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
           env: process.env,
+          windowsHide: true,
         });
         child.unref();
 
@@ -254,48 +437,18 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   });
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {
-    const now = Date.now();
-
-    if (cachedModelsMetadata && now - cachedModelsMetadataTimestamp < modelsMetadataCacheTtl) {
-      res.setHeader('Cache-Control', 'public, max-age=60');
-      return res.json(cachedModelsMetadata);
-    }
-
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
-
     try {
-      const response = await fetch(modelsDevApiUrl, {
-        signal: controller?.signal,
-        headers: {
-          Accept: 'application/json'
-        }
+      const { getModelsMetadata } = await import('./models-metadata.js');
+      const { metadata, fromCache, stale } = await getModelsMetadata({
+        url: modelsDevApiUrl,
+        ttlMs: modelsMetadataCacheTtl,
       });
-
-      if (!response.ok) {
-        throw new Error(`models.dev responded with status ${response.status}`);
-      }
-
-      const metadata = await response.json();
-      cachedModelsMetadata = metadata;
-      cachedModelsMetadataTimestamp = Date.now();
-
-      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Cache-Control', fromCache && !stale ? 'public, max-age=60' : 'public, max-age=300');
       res.json(metadata);
     } catch (error) {
       console.warn('Failed to fetch models.dev metadata via server:', error);
-
-      if (cachedModelsMetadata) {
-        res.setHeader('Cache-Control', 'public, max-age=60');
-        res.json(cachedModelsMetadata);
-      } else {
-        const statusCode = error?.name === 'AbortError' ? 504 : 502;
-        res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
-      }
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      const statusCode = error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 504 : 502;
+      res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
     }
   });
 

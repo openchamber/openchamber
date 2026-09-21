@@ -101,6 +101,7 @@ export function assignLanes(commits: GitLogEntry[]): LanedCommit[] {
 
     // Open new lanes for additional parents (merge commits)
     const extraParentLanes: number[] = [];
+    const extraParentIsNew = new Set<number>();
     for (let p = 1; p < commit.parents.length; p++) {
       const parentHash = commit.parents[p];
       // Check if another lane is already waiting for this parent
@@ -109,10 +110,16 @@ export function assignLanes(commits: GitLogEntry[]): LanedCommit[] {
         extraParentLanes.push(existingLane);
       } else {
         const freeLane = activeLanes.indexOf(null);
-        const newLane = freeLane !== -1 ? freeLane : activeLanes.length;
-        activeLanes[newLane] = parentHash;
-        if (newLane === activeLanes.length) activeLanes.push(parentHash);
-        extraParentLanes.push(newLane);
+        if (freeLane !== -1) {
+          activeLanes[freeLane] = parentHash;
+          extraParentLanes.push(freeLane);
+          extraParentIsNew.add(freeLane);
+        } else {
+          const newLane = activeLanes.length;
+          activeLanes.push(parentHash);
+          extraParentLanes.push(newLane);
+          extraParentIsNew.add(newLane);
+        }
       }
     }
 
@@ -151,11 +158,14 @@ export function assignLanes(commits: GitLogEntry[]): LanedCommit[] {
       });
     }
 
-    // Passing-through lanes (active but not this commit's lane or extra parent lanes)
+    // Passing-through lanes (active but not this commit's lane or newly-opened extra parent lanes)
+    // Reused extra parents already have an active lane above the merge, so they must keep their
+    // vertical passing segment for continuity (otherwise a gap appears between
+    // the commit above and the merge row, as in the double-merge-of-same-branch case).
     for (let lane = 0; lane < activeLanes.length; lane++) {
       if (activeLanes[lane] === null) continue;
       if (lane === assignedLane) continue;
-      if (extraParentLanes.includes(lane)) continue;
+      if (extraParentIsNew.has(lane)) continue;
       connectors.push({
         fromLane: lane,
         toLane: lane,

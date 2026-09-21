@@ -21,6 +21,64 @@ Certains prompts ont une partie visible (le message que vous verriez) et une par
 
 Vous avez changé d’avis ? Chaque prompt possède **reset to default**, et il existe aussi **reset all** si vous voulez tout reprendre depuis le début.
 
+## Où chaque prompt est utilisé
+
+Chaque prompt ci-dessous indique où il s’exécute et ce qui le déclenche. Vérifiez le déclencheur avant de modifier, pour savoir quel flux vous changez.
+
+### Git
+
+| Prompt | Où il s’exécute | Quand il se déclenche |
+| --- | --- | --- |
+| Génération de commit | Le bouton de génération dans la zone de commit de la vue git, et l’écran Changes sur mobile | Vous générez un message de commit. Les fichiers sélectionnés et les sujets des commits récents de la branche sont insérés, pour que le message respecte le style du dépôt. |
+| Génération de PR | Le formulaire de création de pull request dans l’onglet PR de la vue git | Vous générez le titre et le corps d’une PR. Sont insérés les branches base et head, les commits et fichiers modifiés entre elles, votre contexte additionnel et le modèle de PR du dépôt s’il existe. |
+| Résolution de conflit merge/rebase | Le dialogue de conflits dans la vue git, quand un merge ou un rebase s’arrête sur des conflits | Vous choisissez « Resolve in current session » ou « Resolve in new session ». L’agent lit les fichiers en conflit, propose une stratégie par fichier et attend votre confirmation avant de modifier, staging ou poursuivre l’opération. |
+| Résolution de conflit cherry-pick | La section « Re-integrate commits » d’une session en worktree | Le déplacement des commits de la session vers la branche cible rencontre un conflit et vous le confiez à l’agent. L’agent résout dans le worktree temporaire, stage les fichiers et poursuit le cherry-pick. |
+
+### GitHub
+
+| Prompt | Où il s’exécute | Quand il se déclenche |
+| --- | --- | --- |
+| Relecture de PR | Le sélecteur « Link GitHub PR » dans le menu de pièces jointes du composer, et le dialogue de nouveau worktree | Deux déclencheurs. Attacher une PR comme contexte prépare les instructions, envoyées avec votre prochain message. Créer une session de worktree depuis une PR utilise le prompt comme premier message de la session, avec le contexte complet de la PR. |
+| Relecture d’issue | Le dialogue de nouveau worktree, quand le worktree part d’une issue | Le premier message de la nouvelle session relit l’issue, avec son corps et ses commentaires attachés comme contexte. |
+| Relecture de checks échoués / commentaires de PR / commentaire unique de PR | — | Aucun flux ne les envoie aujourd’hui. La vue PR les déclenchait avant via des actions de relecture en un clic ; désormais les checks échoués et les commentaires s’épinglent comme brouillons de contexte de chat. Ils restent modifiables pour que les overrides existants continuent de fonctionner. |
+
+### Planning
+
+| Prompt | Où il s’exécute | Quand il se déclenche |
+| --- | --- | --- |
+| Planification depuis un todo | Le panneau Todos dans la barre latérale du projet | Vous envoyez un todo vers une session ou une nouvelle session en worktree. Le texte du todo devient le message visible ; les instructions en font un dialogue de planification guidé par des questions plutôt qu’un passage direct à l’implémentation. |
+| Améliorer un plan | L’action « Improve » sur un plan enregistré dans la vue Plans | Vous envoyez un plan enregistré dans le flux d’amélioration. L’agent lit d’abord le fichier du plan, propose ensuite des changements ancrés dans l’état actuel du dépôt et propose de modifier le même fichier. |
+| Implémenter un plan | L’action « Implement » sur un plan enregistré | Vous envoyez un plan enregistré dans le flux d’implémentation. L’agent lit le fichier du plan et l’implémente de bout en bout sans élargir le périmètre, enregistrant les ajustements dans le fichier quand le plan lui-même s’avère erroné. |
+
+### Session
+
+La plupart alimentent des commandes slash saisies dans le composer. La plupart apparaissent aussi comme chips de départ sur le brouillon d’une nouvelle session.
+
+| Prompt | Où il s’exécute | Quand il se déclenche |
+| --- | --- | --- |
+| Tour du code | `/explore` | Vous demandez une vue d’ensemble du code. |
+| Résumé de session | `/summary`, éventuellement `/summary <sujet>` | Vous résumez la conversation en cours — utile pour passer à une nouvelle session. Nécessite une session existante. |
+| Relecture du workspace | `/workspace-review` | Vous demandez à l’agent de relire le diff actuel du workspace sous l’angle intention, correction et sécurité. |
+| Planification de fonctionnalité | `/plan-feature` | Vous transformez une idée grossière de fonctionnalité en plan d’implémentation via un dialogue guidé de questions-réponses. |
+| Formuler un Goal | `/craft-goal`, éventuellement `/craft-goal <idée>` | Vous transformez une idée en objectif Goal vérifiable pour le dialogue Goal. |
+| Se remettre dans le bain | `/catch-up` | Vous revenez sur un projet et demandez où en sont les choses et quoi reprendre. |
+| Débogage | `/debug` | Vous investiguez un bug : l’agent forme des hypothèses, confirme la cause racine dans le code et seulement ensuite propose un correctif. |
+| Peser les options | `/weigh` | Vous savez quoi construire mais pas comment. L’agent compare deux ou trois approches et en recommande une. |
+| Fusion | L’action « Run fusion » sur un groupe multi-run | Vous combinez les sorties de plusieurs exécutions en une réponse. Les sorties des exécutions sont ajoutées après les instructions. |
+
+### Prompts sans page dans les Paramètres
+
+Quelques prompts se déclenchent automatiquement et n’ont pas de page modifiable dans les Paramètres :
+
+| Prompt | Quand il se déclenche |
+| --- | --- |
+| Tâche planifiée | `/schedule-task`, éventuellement avec une idée initiale. Guide le dialogue qui définit une tâche planifiée. |
+| Handoff de relecture | `/handoff-review`, ou le bouton Review dans la vue diff avec handoff activé. Génère le handoff dans la session de travail. |
+| Premier message de la session de relecture | Le message d’ouverture de la session de relecture générée — avec le handoff quand il a été produit, sans sinon. |
+| Retour de relecture / réponse d’implémentation | Font circuler les messages entre les deux sessions : le retour du relecteur revient vers la session qui implémente, et la réponse de l’implémenteur repart vers la session de relecture. |
+
 ## Pages liées
 
 - [Workflows Git et GitHub](/git/) — beaucoup de ces prompts alimentent les flux git
+- [Notes, todos et plans](/notes-todos-plans/) — les todos et plans derrière les prompts Planning
+- [Multi-run](/multi-run/) — groupes d’exécution et fusion

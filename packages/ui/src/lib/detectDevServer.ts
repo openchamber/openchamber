@@ -43,6 +43,7 @@ export async function detectDevServerCommand(
       command: devAction.command,
       label: devAction.name || 'Start Preview',
       actionId: devAction.id,
+      previewUrlHint: devAction.openUrl,
     };
   }
 

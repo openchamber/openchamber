@@ -24,19 +24,25 @@ O OpenChamber percorre as etapas — verificando a conexão, configurando o remo
 
 Você decide se quer salvar as senhas SSH e de UI ou inseri-las a cada vez. Se a conexão cair, o OpenChamber informa qual etapa falhou para você corrigi-la — veja [Acesso remoto](/pt-br/troubleshooting/remote-access/).
 
-## Links de conexão direta
+## Links de conexão
 
-Se uma máquina remota já executa OpenChamber, crie um link de conexão nela e importe em **Settings → Remote Instances → Server links**:
+Se uma máquina remota já executa OpenChamber, a forma mais fácil de conectar o app de desktop é um link de pareamento. Na UI do servidor remoto, abra **Settings → Remote Instances → Conectar a este servidor → Adicionar um dispositivo**, crie um link e importe-o no seu desktop em **Settings → Remote Instances → Outros servidores OpenChamber → Importar link**. Veja [Conectar um Dispositivo](/pt-br/connect-devices/) para o fluxo completo.
+
+Um link criado com **Em qualquer lugar** carrega tanto um endereço direto quanto uma rota pelo [Private Relay](/pt-br/private-relay/): o desktop conecta diretamente quando consegue alcançar o servidor (mesma rede) e recorre ao relay criptografado de ponta a ponta quando você está fora. O status ao lado de cada servidor salvo mostra qual rota está em uso.
+
+Você também pode criar um link a partir de um terminal na máquina remota:
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
 ```
 
-`connect-url` inicia o servidor primeiro se nada estiver rodando nessa porta. Adicione `--api-only` para um servidor headless, `--lan` para escutar na LAN ao iniciar, `--ui-password` para proteger o acesso pelo navegador e `--name` para nomear a conexão salva.
+`connect-url` inicia o servidor primeiro se nada estiver rodando nessa porta. Adicione `--api-only` para um servidor headless, `--lan` para escutar na LAN ao iniciar, `--ui-password` para proteger o acesso pelo navegador e `--name` para nomear a conexão salva. Adicione `--relay` para um link que também funciona fora da rede local: o dispositivo prefere a conexão direta quando alcançável e recorre ao [Private Relay](/pt-br/private-relay/) — a instância liga o relay sozinha.
 
-O link gerado contém um token de cliente para apps OpenChamber. Esse token é separado da senha da UI do navegador e sobrevive a reinícios até ser revogado ou removido.
+O link gerado contém um segredo de pareamento de uso único. Depois de importado, o dispositivo passa a ter o próprio token de cliente — separado da senha de UI do navegador — que sobrevive a reinícios do servidor até você revogá-lo no servidor emissor.
 
 ## Relacionado
 
+- [Conectar um Dispositivo](/pt-br/connect-devices/) — links de pareamento, códigos QR e gerenciamento de dispositivos
+- [Private Relay](/pt-br/private-relay/) — como funcionam as conexões "Em qualquer lugar"
 - [OpenCode Server](/pt-br/opencode-server/) — conecte a um servidor remoto na web ou no VS Code
 - [Acesso remoto](/pt-br/troubleshooting/remote-access/) — quando uma conexão não se completa

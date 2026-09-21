@@ -1,0 +1,44 @@
+---
+title: Private Relay
+description: Reach your OpenChamber server from anywhere over an end-to-end encrypted relay — no ports, no tunnels, no setup.
+---
+
+# Private Relay
+
+The OpenChamber Private Relay lets your paired devices reach your server from anywhere — cellular, a café network, another city — without opening ports, setting up a tunnel, or exposing your machine to the internet. It manages itself: pairing a device with **Anywhere** in [Connect a Device](/connect-devices/) is all it takes.
+
+## How it works
+
+Your server opens an outbound connection to OpenChamber's relay infrastructure and keeps it alive. When one of your devices is away from your network, it connects to the relay too, and the relay passes encrypted traffic between the two. Nothing on your machine listens for incoming connections from the internet.
+
+When a direct connection is available — you're back home on the same Wi-Fi — your devices prefer it and skip the relay entirely.
+
+## What the relay can and cannot see
+
+The relay is a blind courier, not a middleman:
+
+- **End-to-end encrypted.** Your device and your server agree on encryption keys directly with each other. The relay forwards sealed traffic it has no keys for — it cannot read your code, your prompts, or your passwords.
+- **Only your devices can connect.** A device must hold a token issued by *your* server through [one-time pairing](/connect-devices/). Nobody can discover your server through the relay or connect to it without a token you created — and you can revoke any token at any time.
+- **Pairing links are single-use.** A pairing QR code works exactly once and expires if unused, so a leaked old link is worthless.
+- **Nothing is shared until you opt in.** The relay stays off until you enable it or pair a device over it, and you can disable it at any time — devices connected through it are cut off immediately.
+
+## When it runs
+
+The relay manages its own lifecycle — there is no switch to remember:
+
+- **It starts on demand.** Creating an **Anywhere** pairing turns the relay on, and it comes back after a restart for as long as any paired device still relies on it.
+- **It stops on its own.** Once no device or pending pairing uses the relay — for example after you revoke the last relay-paired device — it shuts down automatically.
+
+**Settings → Remote Instances → OpenChamber Relay** shows the live state (Connected, Reconnecting, …) and how many devices are connected through it right now. You can also press **Disable** there to cut relay access off immediately; devices on your local network are unaffected.
+
+## Relay or a tunnel?
+
+- Use the **relay** to reach your own server from your own paired devices. It's zero-setup and nothing is exposed publicly.
+- Use a [tunnel](/tunnels/) when you need a plain **public URL** — for example to open OpenChamber in an ordinary browser on a machine you can't pair, or to share access behind a [UI password](/security/).
+
+## Related
+
+- [Connect a Device](/connect-devices/) — pair a device with a one-time QR code
+- [Mobile Apps](/mobile/) — install the iOS or Android app
+- [Security](/security/) — passwords, passkeys, and exposure basics
+- [Remote access](/troubleshooting/remote-access/) — when a connection won't complete

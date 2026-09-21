@@ -25,6 +25,22 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber status`.
   - Formats discovered instances and tunnel readiness/status for human, quiet, and JSON output.
 
+- `commands-session.js`
+  - Implements `openchamber session create`, `send`, `fork`, `list`, `status`, and `messages`.
+  - Maps CLI options to shared control-service inputs and owns only human, quiet, and JSON presentation.
+  - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
+  - The server control service owns create/worktree/prompt orchestration, official OpenCode reads, Goal Mode, wait semantics, and partial failures.
+
+- `commands-schedule.js`
+  - Implements scheduled task status/list/create/run/delete/enable/disable.
+  - Maps options to control-service inputs and renders results; project resolution, validation, persistence, and execution remain server-owned.
+
+- `commands-models.js`
+  - Prints OpenChamber default, favorite, and recent model settings.
+
+- `commands-projects.js`
+  - Prints configured project labels, ids, and directories for later control-plane calls.
+
 - `commands-logs.js`
   - Implements `openchamber logs`.
   - Resolves log files, tails recent lines, and follows log output.
@@ -36,6 +52,9 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-connect-url.js`
   - Implements `openchamber connect-url`.
   - Finds or starts a local instance and prints the browser/connect URL according to the selected output mode.
+  - Emits a **pairing v2** link (`openchamber://connect?v=2&p=<base64url>`): it creates a one-time pairing session in the shared store (`client-pairing-sessions.json`) and encodes the pairing id + secret + transport candidates. The client redeems the secret over whichever candidate connects first (`/api/client-auth/pairing/redeem`). No standalone token is embedded — the QR itself is the single-use credential.
+  - The default form advertises the resolved server URL as a direct (lan/tunnel) candidate and folds in a relay candidate when the host relay is enabled, so one link works on-LAN and off-network.
+  - `--relay` builds a relay-only pairing link (the sole candidate is the relay transport), for sharing with a device that is not on the host's network — no server URL, no auto-start. The relay endpoint follows `OPENCHAMBER_RELAY_URL` / the stored setting / the default, matching the running host; the host must be running with the relay enabled to serve the redeem over the tunnel.
 
 - `commands-update.js`
   - Implements `openchamber update`.
@@ -59,6 +78,18 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-paths.js`
   - Data, run, log, settings, tunnel profile, and managed-local config paths.
 
+- `cli-settings-accessors.js`
+  - Minimal settings.json read/write for CLI contexts that must not load the
+    full web settings runtime (`connect-url` relay identity resolution).
+  - Mirrors the settings runtime's guarantees so a CLI read-modify-write can
+    never corrupt shared state: atomic tmp+rename writes (no concurrent reader
+    in the running app can observe a torn file), a strict read that throws on
+    corrupt/unreadable payloads, and the same `0600` file mode.
+  - The strict read gates relay identity regeneration exactly like the server
+    runtime: a swallowed read failure can never mint a replacement signing or
+    encryption keypair, which would change `serverId` and orphan every paired
+    device and push binding.
+
 - `cli-process.js`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
 
@@ -67,6 +98,17 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-http.js`
   - HTTP helpers for health checks, shutdown requests, JSON API calls, tunnel provider fetches, and system info fetches.
+  - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
+
+- `cli-control.js`
+  - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
+  - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
+
+- `cli-api-target.js`
+  - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.
+
+- `cli-goal.js`
+  - Owns shared Goal Mode token-budget validation for session and schedule commands.
 
 - `cli-network.js`
   - Host resolution, URL building, LAN detection, unsafe browser port validation, and UI password/network exposure checks.

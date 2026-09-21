@@ -14,6 +14,9 @@ import {
     parseSkillHref,
 } from '@/lib/messages/inlineMessageLinks';
 import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
+import { extractTerminalContexts } from '@/lib/messages/terminalContext';
+import { readContextPart } from '@/lib/messages/contextParts';
+import UserContextPart from './UserContextPart';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -22,16 +25,31 @@ type UserTextPartProps = {
     messageId: string;
     isMobile: boolean;
     agentMention?: AgentMentionInfo;
+    /**
+     * Message-level collapse: when provided, all parts of the user message
+     * share one expanded state owned by the message body, expanding any part
+     * expands the whole message, and the message body renders the single
+     * collapse control. When absent the part collapses on its own (legacy
+     * single-part behavior).
+     */
+    messageExpanded?: boolean;
+    onExpandMessage?: () => void;
 };
 
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
+const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention, messageExpanded, onExpandMessage }) => {
+    // Structured context (inline comments, terminal selections, annotations,
+    // PR context) renders as a dedicated block instead of raw prompt text.
+    const contextPayload = React.useMemo(() => readContextPart(part), [part]);
+
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
-    const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
+    const serializedText = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
+    const terminalContextState = React.useMemo(() => extractTerminalContexts(serializedText), [serializedText]);
+    const textContent = terminalContextState.visibleText;
 
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
@@ -42,7 +60,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const effectiveDirectory = useEffectiveDirectory();
     const { t } = useI18n();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
-    const isCollapsed = collapsibleUserMessages && !isExpanded;
+    const isControlled = messageExpanded !== undefined;
+    const effectiveExpanded = messageExpanded ?? isExpanded;
+    const isCollapsed = collapsibleUserMessages && !effectiveExpanded;
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
@@ -69,20 +89,47 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     React.useEffect(() => {
         const el = textRef.current;
         if (!el) return;
+        if (!collapsibleUserMessages || effectiveExpanded) return;
 
         const checkTruncation = () => {
-            if (collapsibleUserMessages && !isExpanded) {
-                setIsTruncated(el.scrollHeight > el.clientHeight);
-            }
+            setIsTruncated(el.scrollHeight > el.clientHeight);
         };
 
         checkTruncation();
+        // A just-sent message mounts while its turn is still settling, so the
+        // synchronous read can land before the clamp has its final geometry.
+        // One deferred re-read covers that without waiting for an observer.
+        const initialFrame = window.requestAnimationFrame(checkTruncation);
 
+        // `el` is the clamped box: once line-clamp pins it to two lines its own
+        // size stops changing, so observing it alone freezes the first
+        // measurement. Markdown settles after mount (highlighting, late layout),
+        // and a message measured while still short would never regain the
+        // expand affordance. The children keep their natural height under the
+        // clamp, so they are what reports content growth.
         const resizeObserver = new ResizeObserver(checkTruncation);
         resizeObserver.observe(el);
 
-        return () => resizeObserver.disconnect();
-    }, [collapsibleUserMessages, textContent, isExpanded]);
+        const observeChildren = () => {
+            for (const child of Array.from(el.children)) {
+                resizeObserver.observe(child);
+            }
+        };
+        observeChildren();
+
+        // The renderer swaps subtrees as it settles; re-observe the new children.
+        const mutationObserver = new MutationObserver(() => {
+            observeChildren();
+            checkTruncation();
+        });
+        mutationObserver.observe(el, { childList: true, subtree: true });
+
+        return () => {
+            window.cancelAnimationFrame(initialFrame);
+            mutationObserver.disconnect();
+            resizeObserver.disconnect();
+        };
+    }, [collapsibleUserMessages, textContent, effectiveExpanded]);
 
     React.useEffect(() => {
         if (!collapsibleUserMessages) {
@@ -112,10 +159,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             return;
         }
 
-        if (collapsibleUserMessages && !isExpanded && isTruncated) {
-            setIsExpanded(true);
+        // Measure at click time instead of trusting the observed flag: whether
+        // the text is clipped right now is what decides if expanding does
+        // anything, and the flag can still be catching up on a fresh message.
+        if (collapsibleUserMessages && !effectiveExpanded && element.scrollHeight > element.clientHeight) {
+            setIsTruncated(true);
+            if (isControlled) {
+                onExpandMessage?.();
+            } else {
+                setIsExpanded(true);
+            }
         }
-    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
+    }, [collapsibleUserMessages, effectiveExpanded, hasActiveSelectionInElement, isControlled, onExpandMessage, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -190,17 +245,27 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         });
     }, [agentMention, openSkill, skillByName, textContent]);
 
-    if (!textContent || textContent.trim().length === 0) {
+    if (contextPayload) {
+        return (
+            <UserContextPart
+                payload={contextPayload}
+                collapsed={isCollapsed}
+                onExpand={isControlled ? onExpandMessage : () => setIsExpanded(true)}
+            />
+        );
+    }
+
+    if ((!textContent || textContent.trim().length === 0) && terminalContextState.contexts.length === 0) {
         return null;
     }
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
-            {collapsibleUserMessages && isExpanded && (
+            {collapsibleUserMessages && !isControlled && isExpanded && (
                 <button
                     type="button"
                     onClick={handleCollapse}
-                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
+                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-surface-elevated p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover transition-colors"
                     aria-label={t('chat.message.userText.collapseAria')}
                 >
                     <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
@@ -209,10 +274,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             <div
                 className={cn(
                     "break-words font-sans typography-markdown-body",
-                    isExpanded && "pb-3",
+                    !isControlled && isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     isCollapsed && "line-clamp-2",
-                    collapsibleUserMessages && isTruncated && !isExpanded && "cursor-pointer"
+                    collapsibleUserMessages && isTruncated && !effectiveExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
                 onClick={handleClick}
@@ -230,10 +295,13 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                                 "[&_[data-component='markdown-code']]:bg-transparent",
                                 "[&_[data-component='markdown-code']>*:first-child]:hidden",
                                 "[&_[data-component='markdown-code']>div]:inline",
-                                "[&_[data-component='markdown-code']>div]:p-0",
-                                "[&_[data-component='markdown-code']_pre]:inline",
-                                "[&_[data-component='markdown-code']_code]:inline",
-                            ]
+                                 "[&_[data-component='markdown-code']>div]:p-0",
+                                 "[&_[data-component='markdown-code']_pre]:inline",
+                                 "[&_[data-component='markdown-code']_code]:inline",
+                                 "[&_[data-md-code-line]]:!inline",
+                                 "[&_[data-md-code-line-number]]:hidden",
+                                 "[&_[data-md-code-line-break]]:!inline",
+                             ]
                         )}
                         disableLinkSafety
                         enableFileReferences={false}
@@ -242,6 +310,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     plainTextContent
                 )}
             </div>
+            {terminalContextState.contexts.length > 0 ? (
+                <div className="mt-2 space-y-1.5">
+                    {terminalContextState.contexts.map((context, index) => (
+                        <details key={`${context.terminalLabel}-${context.startLine}-${index}`} className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5 text-xs">
+                            <summary className="cursor-pointer text-muted-foreground">
+                                {t('chat.message.terminalContext', { terminal: context.terminalLabel, start: context.startLine, end: context.endLine })}
+                            </summary>
+                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--surface-foreground)]">{context.text}</pre>
+                        </details>
+                    ))}
+                </div>
+            ) : null}
         </div>
     );
 };

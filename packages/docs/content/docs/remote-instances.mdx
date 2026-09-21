@@ -24,19 +24,25 @@ OpenChamber walks through the steps — checking the connection, setting up the 
 
 You decide whether to save the SSH and UI passwords or enter them each time. If the connection drops, OpenChamber reports which step failed so you can fix it — see [Remote access](/troubleshooting/remote-access/).
 
-## Direct connection links
+## Connection links
 
-If a remote machine already runs OpenChamber, create a connection link there and import it in **Settings → Remote Instances → Server links**:
+If a remote machine already runs OpenChamber, the easiest way to connect the desktop app is a pairing link. On the remote server's UI, open **Settings → Remote Instances → Connect to this server → Add a device**, create a link, and import it on your desktop at **Settings → Remote Instances → Other OpenChamber servers → Import Link**. See [Connect a Device](/connect-devices/) for the full flow.
+
+A link created with **Anywhere** carries both a direct address and a [Private Relay](/private-relay/) route: the desktop connects directly when it can reach the server (same network), and falls back to the end-to-end encrypted relay when you're away. The status next to each saved server shows which route is in use.
+
+You can also create a link from a terminal on the remote machine:
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
 ```
 
-`connect-url` starts the server first if nothing is running on that port. Add `--api-only` for a headless server, `--lan` to bind to the LAN when starting, `--ui-password` to protect browser access, and `--name` to label the saved connection.
+`connect-url` starts the server first if nothing is running on that port. Add `--api-only` for a headless server, `--lan` to bind to the LAN when starting, `--ui-password` to protect browser access, and `--name` to label the saved connection. Add `--relay` for a link that also works away from the local network: the device prefers the direct connection when reachable and falls back to the [Private Relay](/private-relay/) — the instance brings the relay up on its own.
 
-The generated link contains a client token for OpenChamber apps. That token is separate from the browser UI password and survives server restarts until you revoke or delete it.
+The generated link contains a single-use pairing secret. Once imported, the device holds its own client token — separate from the browser UI password — which survives server restarts until you revoke it on the issuing server.
 
 ## Related
 
+- [Connect a Device](/connect-devices/) — pairing links, QR codes, and managing devices
+- [Private Relay](/private-relay/) — how "Anywhere" connections work
 - [OpenCode Server](/opencode-server/) — connect to a remote server on web or VS Code
 - [Remote access](/troubleshooting/remote-access/) — when a connection won't complete

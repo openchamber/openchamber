@@ -1,0 +1,78 @@
+---
+title: Zamanlanmış görevler
+description: Bir promptu zamanlamaya göre otomatik çalıştırın.
+---
+
+# Zamanlanmış görevler
+
+Zamanlanmış bir görev, sizin için bir promptu belirlediğiniz programa göre çalıştırır. Örneğin günlük "dünkü değişiklikleri özetle" ya da haftalık bir temizlik. Çalıştığında OpenChamber yeni bir oturum başlatır ve promptu kendi kendine gönderir. Zamanlayıcıyı oturum kenar çubuğunun üstündeki düğmeden açın.
+
+## Görev oluşturma
+
+1. Oturum kenar çubuğundan zamanlanmış görevler iletişim kutusunu açın.
+2. Bir görev ekleyin ve ona bir ad verin.
+3. Ne zaman çalışacağını seçin:
+   - **daily** — her gün bir ya da daha fazla saatte
+   - **weekly** — seçilen haftanın günlerinde ve saatlerinde
+   - **once** — tek bir tarih ve saatte
+   - **cron** — serbest bir cron ifadesi
+4. Ne yapacağını ayarlayın. Gönderilecek promptu, kullanılacak sağlayıcıyı, modeli ve agent'ı seçin. Prompt bir slash komutu da olabilir, örneğin `/review`.
+5. Kaydedin ve görevin etkin olduğundan emin olun.
+
+İsterseniz herhangi bir görevi hemen **run now** ile çalıştırıp beklediğiniz gibi davrandığını görebilirsiniz.
+
+Çalışmanın tek bir yanıttan sonra durmak yerine promptu tamamlamaya devam etmesini istiyorsanız **Run as goal** seçin. Ayrıntı için [Oturum hedefleri](/session-goals/) sayfasına bakın.
+
+## Döngüler: markdown dosyası olarak zamanlanmış görevler
+
+Bir **loop**, depoya commit edebileceğiniz taşınabilir bir markdown dosyası olarak tanımlanan zamanlanmış görevdir. `.agents/loops/` içine bir dosya koyun ve senkronize etmek için Zamanlanmış Görevler listesini açın. Sunucuyu yeniden başlatmanız gerekmez:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Dosyalar nerede yaşar
+
+- **Proje kapsamı** — proje dizinindeki ya da git worktree köküne kadar olan herhangi bir üst dizindeki `.agents/loops/*.md` dosyaları.
+- **Kullanıcı kapsamı** — `~/.agents/loops/*.md` açık olduğunuz her projeye uygulanır.
+
+Bir proje loop'u ile bir kullanıcı loop'u aynı adı paylaşırsa proje loop'u kazanır.
+
+### Alanlar
+
+| Alan | Anlamı |
+|---|---|
+| `name` | Görev adı, zorunlu, en fazla 80 karakter. |
+| `schedule` | Cron ifadesi, zorunlu. Loop dosyaları yalnızca cron kullanır. |
+| `enabled` | Çalışması için `true` yapın. Loop'lar **varsayılan olarak kapalıdır**, bu yüzden bir dosyayı commit etmek tek başına bir görevi başlatmaz. |
+| `model` | `provider/model`, zorunlu. Örneğin `anthropic/claude-sonnet-4-5`. |
+| `agent` | Kullanılacak agent, isteğe bağlı. |
+| `timezone` | IANA saat dilimi, isteğe bağlı, varsayılan olarak sunucu saat dilimi kullanılır. |
+| body | Çalıştırma promptu, zorunlu. `/review src/` gibi bir slash komutu olabilir. |
+
+### Loop'lar nasıl davranır
+
+- **Dosya, var olduğu sürece yetkilidir.** **Edit** onu yerleşik dosya düzenleyicide açar, etkinleştirme anahtarı frontmatter'ını günceller ve görevi silmek onaydan sonra markdown dosyasını siler. **Run now** yine kullanılabilir.
+- Çalışma zamanı durumu, son çalışma, sonraki çalışma ve durum proje yapılandırmasında tutulur ve markdown dosyasına geri yazılmaz.
+- `name` alanını yeniden adlandırmak görevi yerinde yeniden adlandırır. Bir loop dosyası geçici olarak ayrıştırılamaz hale gelirse, örneğin düzenleme sırasında ya da bir merge conflict yüzünden, dosya düzelene kadar görev son iyi tanımla korunur.
+- `daily` / `weekly` / `once` zamanlamaları ve hedef ayarları yalnızca arayüzdedir. Loop dosyaları her zaman cron kullanır.
+
+## Başarılı olduğunda ne görünür
+
+Bir çalışmadan sonra görev son ne zaman çalıştığını, başarılı olup olmadığını ve oluşturduğu oturuma bağlantıyı gösterir. Çalışma başarısız olursa hata da burada görünür.
+
+## Aklınızda bulunsun
+
+Görevler yalnızca OpenChamber sunucusu çalışırken tetiklenir. Kapatırsanız, zamanlanan çalıştırmalar sunucu geri gelene kadar duraklar.
+
+## İlgili
+
+- [Komutlar ve parçacıklar](/commands-snippets/) — prompt olarak bir slash komutunu yeniden kullanın

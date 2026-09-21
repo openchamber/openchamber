@@ -1,5 +1,8 @@
 import React from 'react';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { cn } from '@/lib/utils';
+import { getLoadedMarkdownRendererModule, loadMarkdownRendererModule } from './markdownRendererLoader';
 
 // Thin lazy wrapper around the MarkdownRenderer implementation.
 // The full implementation (marked + Shiki highlighting + KaTeX + morphdom
@@ -7,23 +10,63 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 // initial bundle lean.
 
 const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
-  import('./MarkdownRendererImpl').then((m) => ({ default: m.MarkdownRenderer }))
+  loadMarkdownRendererModule().then((m) => ({ default: m.MarkdownRenderer }))
 );
 
 const SimpleMarkdownRendererLazy = lazyWithChunkRecovery(() =>
-  import('./MarkdownRendererImpl').then((m) => ({ default: m.SimpleMarkdownRenderer }))
+  loadMarkdownRendererModule().then((m) => ({ default: m.SimpleMarkdownRenderer }))
+);
+
+const MarkdownImageGalleryLazy = lazyWithChunkRecovery(() =>
+  import('./MarkdownImageGallery').then((m) => ({ default: m.MarkdownImageGallery }))
 );
 
 const fallback = <div className="break-words w-full min-w-0" />;
 
-export const MarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof MarkdownRendererLazy>> = (props) => (
-  <React.Suspense fallback={fallback}>
-    <MarkdownRendererLazy {...props} />
-  </React.Suspense>
-);
+const fallbackContentClassName = (variant: unknown): string => {
+  if (variant === 'tool') return 'markdown-content markdown-tool';
+  if (variant === 'reasoning') return 'markdown-content markdown-reasoning';
+  return 'markdown-content leading-relaxed';
+};
 
-export const SimpleMarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof SimpleMarkdownRendererLazy>> = (props) => (
-  <React.Suspense fallback={fallback}>
-    <SimpleMarkdownRendererLazy {...props} />
+const MobileMarkdownFallback = (props: { content?: unknown; className?: unknown; variant?: unknown }) => {
+  if (!isMobileSurfaceRuntime() || typeof props.content !== 'string' || props.content.length === 0) {
+    return fallback;
+  }
+
+  return (
+    <div className={cn('break-words w-full min-w-0 whitespace-pre-wrap', fallbackContentClassName(props.variant), typeof props.className === 'string' ? props.className : undefined)}>
+      {props.content}
+    </div>
+  );
+};
+
+export const MarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof MarkdownRendererLazy>> = (props) => {
+  const loaded = getLoadedMarkdownRendererModule();
+  if (loaded) return <loaded.MarkdownRenderer {...props} />;
+  return (
+    <React.Suspense fallback={<MobileMarkdownFallback {...props} />}>
+      <MarkdownRendererLazy {...props} />
+    </React.Suspense>
+  );
+};
+
+type SimpleMarkdownRendererProps = React.ComponentPropsWithoutRef<typeof SimpleMarkdownRendererLazy> & {
+  fallbackContent?: React.ReactNode;
+};
+
+export const SimpleMarkdownRenderer: React.FC<SimpleMarkdownRendererProps> = ({ fallbackContent, ...props }) => {
+  const loaded = getLoadedMarkdownRendererModule();
+  if (loaded) return <loaded.SimpleMarkdownRenderer {...props} />;
+  return (
+    <React.Suspense fallback={fallbackContent ?? <MobileMarkdownFallback {...props} />}>
+      <SimpleMarkdownRendererLazy {...props} />
+    </React.Suspense>
+  );
+};
+
+export const MarkdownImageGallery: React.FC<React.ComponentPropsWithoutRef<typeof MarkdownImageGalleryLazy>> = (props) => (
+  <React.Suspense fallback={null}>
+    <MarkdownImageGalleryLazy {...props} />
   </React.Suspense>
 );

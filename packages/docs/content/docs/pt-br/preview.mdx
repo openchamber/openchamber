@@ -1,32 +1,35 @@
 ---
-title: Preview e Servidores de Desenvolvimento
+title: Pré-visualização e servidores de desenvolvimento
 description: Abra um servidor de desenvolvimento em execução dentro do OpenChamber.
 ---
 
-# Preview e Servidores de Desenvolvimento
+# Pré-visualização e servidores de desenvolvimento
 
-Quando você inicia um servidor de desenvolvimento, o OpenChamber pode abri-lo logo dentro do app em vez de uma aba separada do navegador — para que você veja seu site ao lado do chat, capture seu console e aponte para elementos para perguntar sobre eles.
+Quando você sobe um servidor de desenvolvimento, o OpenChamber pode abri-lo dentro do próprio aplicativo em vez de uma aba separada — assim você vê seu site ao lado do chat e pode apontar para elementos para perguntar sobre eles.
 
-## Abrir um preview
+## Abrir um servidor de desenvolvimento
 
-O OpenChamber observa a saída do terminal em busca de um endereço local (a linha `Local:` que ferramentas como Vite, Next.js ou Astro imprimem). Quando ele detecta um:
+Abra o painel do navegador pelo botão do globo no cabeçalho. Se já houver um servidor rodando, ele aparece na lista e um clique o abre: o OpenChamber o encontra olhando o que está de fato escutando na sua máquina, então funciona independentemente de como você o iniciou.
 
-- no terminal, aparece um botão **Open preview**
-- uma [ação de projeto](/pt-br/project-actions/) com auto-open ativado o abre para você
-- um link local em uma mensagem do chat também pode abri-lo
+Um servidor também abre sozinho quando:
 
-O site carrega no painel lateral. Apenas endereços locais (na sua própria máquina) podem ter preview.
+- você pressiona **Abrir pré-visualização** em um endereço local no terminal
+- uma [ação de projeto](/project-actions/) com abertura automática inicia um
+- você segue um link local em uma mensagem do chat
 
-## Console e inspeção
+Você sempre pode digitar o endereço à mão. Um simples `localhost:5173` é entendido como `http://`, então não precisa escrever o esquema.
 
-No painel de preview você pode:
+## Trabalhando com um OpenChamber remoto
 
-- acompanhar o **console** da página — erros, avisos e logs, filtrados como você quiser
-- ativar o **inspect**, clicar em qualquer elemento e enviar uma nota sobre ele — seletor, estilos, posição e uma captura de tela — direto no chat
+Quando o OpenChamber roda em outra máquina, o servidor de desenvolvimento está *nessa* máquina — `localhost` no seu notebook aponta para outro lugar completamente. O aplicativo desktop resolve isso: ele abre uma porta local que leva a conexão até o servidor remoto, de modo que a página carrega normalmente, com recarga a quente e ferramentas de desenvolvedor funcionando. Você continua digitando o endereço que espera; o encanamento não atrapalha.
 
-Esta é a forma mais rápida de dizer ao agente "este botão, aqui" sem descrevê-lo.
+Isso exige o aplicativo desktop. Em uma aba do navegador, só é possível abrir servidores da sua própria máquina.
+
+## Anotar a página
+
+Veja [Painel do navegador](/desktop-browser/) para apontar elementos, desenhar sobre a página e mandar tudo para o chat.
 
 ## Relacionado
 
-- [Ações de Projeto](/pt-br/project-actions/) — abra um servidor automaticamente ao iniciá-lo
-- [Navegador no Desktop](/pt-br/desktop-browser/) — as mesmas ferramentas para qualquer página, no desktop
+- [Ações de projeto](/project-actions/) — abrir um servidor automaticamente ao iniciá-lo
+- [Painel do navegador](/desktop-browser/) — anotar páginas e deixar o agente conduzir

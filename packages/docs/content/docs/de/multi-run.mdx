@@ -1,0 +1,34 @@
+---
+title: Multi-run
+description: Führe dieselbe Aufforderung gleichzeitig über mehrere Modelle oder Sitzungen aus.
+---
+
+# Multi-run
+
+Multi-run startet mehrere Sitzungen aus einem einzigen Formular — praktisch, um dieselbe Aufgabe mit verschiedenen Modellen zu testen und die Ergebnisse zu vergleichen. Öffne es über die Schaltfläche oben in der Sitzungs-Seitenleiste.
+
+## Einen Multi-run starten
+
+1. Öffne den Multi-run-Startbildschirm.
+2. Wähle das Projekt und benenne die Run-Gruppe.
+3. Schreibe die Aufforderung und wähle die Modelle aus, mit denen sie ausgeführt werden soll (bis zu fünf pro Gruppe).
+4. Entscheide, ob du **Runs isolieren** möchtest.
+5. Starte.
+
+Jedes Modell erhält seine eigene Sitzung, und alle beginnen mit deiner Aufforderung.
+
+## Isolierte Runs
+
+Aktiviere **Runs isolieren**, damit jeder Run seinen eigenen [Worktree](/worktrees/) und Branch bekommt und sie sich nie dieselben Dateien teilen. Dafür brauchst du ein Git-Repo — für Ordner, die keines sind, wird es automatisch deaktiviert. Wähle den Branch, von dem die Runs starten.
+
+Ohne Isolation ist jeder Run einfach eine normale Sitzung im Projektordner.
+
+## Ergebnisse vergleichen
+
+Jeder Run ist eine normale Sitzung, die du öffnen, lesen und behalten oder verwerfen kannst. Wenn du Runs gestartet hast, um Ansätze zu vergleichen, prüfe sie nebeneinander und nimm den besten mit.
+
+Wenn ein einzelner Run nicht startet, werden die anderen trotzdem ausgeführt — du siehst dann nur weniger Sitzungen, als du angefordert hast.
+
+## Verwandt
+
+- [Worktree-Sitzungen](/worktrees/) — wie Isolation unter der Haube funktioniert

@@ -4,9 +4,14 @@
  */
 
 import { create } from "zustand"
+import type { AttachIssueRequest } from '@openchamber/sdk'
+import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
+import { prepareAttachmentFiles } from "./attachment-files"
+import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
 const FILE_URI_PREFIX = "file://"
+const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
 
@@ -34,13 +39,52 @@ const toFileUrl = (filepath: string): string => {
 
 const getVSCodeSelectionKey = (path: string, filename: string): string => `${path}\u0000${filename}`
 
-const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+const hasGeneratedFilenameCollision = (filenames: string[], attachedFiles: AttachedFile[]): boolean => {
+  if (filenames.length === 0) return false
+  const attachedFilenames = new Set(attachedFiles.map((attachment) => attachment.filename.toLowerCase()))
+  return filenames.some((filename) => attachedFilenames.has(filename.toLowerCase()))
+}
+
+const readFileAsDataUrl = (file: File, mime: string): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader()
-  reader.onload = () => resolve(reader.result as string)
+  reader.onload = () => {
+    const value = typeof reader.result === "string" ? reader.result : ""
+    const commaIndex = value.indexOf(",")
+    resolve(commaIndex === -1 ? value : `data:${mime};base64,${value.slice(commaIndex + 1)}`)
+  }
   reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
   reader.onabort = () => reject(new Error("File read aborted"))
   reader.readAsDataURL(file)
 })
+
+export const prepareLocalAttachments = async (
+  file: File,
+  reservedFilenames: Iterable<string> = [],
+): Promise<AttachedFile[] | undefined> => {
+  const preparedOrPending = prepareAttachmentFiles(file, reservedFilenames)
+  const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
+  if (!preparedFiles || preparedFiles.length === 0) return
+
+  const sourceDocumentId = preparedFiles.length > 1
+    ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    : undefined
+  const attachedFiles: AttachedFile[] = []
+  for (const prepared of preparedFiles) {
+    const dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
+    if (!dataUrl) return
+    attachedFiles.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file: prepared.file,
+      dataUrl,
+      mimeType: prepared.mimeType,
+      filename: prepared.file.name,
+      size: prepared.file.size,
+      source: "local",
+      sourceDocumentId,
+    })
+  }
+  return attachedFiles
+}
 
 const getDataUrlByteSize = (url: string): number => {
   if (!url.startsWith("data:")) return 0
@@ -74,6 +118,12 @@ export type SyntheticContextPart = {
   text: string
   attachments?: AttachedFile[]
   synthetic?: boolean
+  metadata?: ContextPartMetadata
+}
+
+type PendingBtwComposerRequest = {
+  parentSessionId: string
+  text: string
 }
 
 export type VSCodeActiveEditorFile = {
@@ -85,6 +135,12 @@ export type VSCodeActiveEditorFile = {
 }
 
 export type InputState = {
+  pendingComposerRestore: {
+    target: ChatDraftIdentity
+    text: string
+    files: Array<{ url: string; mimeType: string; filename: string }>
+  } | null
+  consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
   pendingSyntheticParts: SyntheticContextPart[] | null
@@ -93,20 +149,31 @@ export type InputState = {
    * render the chips outside ChatInput (e.g. under the welcome message on
    * narrow layouts); consumed by ChatInput, which owns the command-aware submit.
    */
-  pendingPresetSubmit: string | null
+  pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
+  /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
+  pendingGuestIssue: AttachIssueRequest | null
+  pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
+  attachmentDraftKey: string | null
+  attachmentDrafts: Map<string, AttachedFile[]>
+  selectAttachmentDraft: (target: ChatDraftIdentity | null) => void
+  restoreAttachedFiles: (files: AttachedFile[], target: ChatDraftIdentity | null) => void
   activeEditorFile: VSCodeActiveEditorFile | null
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
-  requestPresetSubmit: (text: string) => void
-  consumePendingPresetSubmit: () => string | null
+  requestPresetSubmit: (text: string, type: "command" | "skill") => void
+  consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
+  setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
+  consumePendingGuestIssue: () => AttachIssueRequest | null
+  requestBtwComposer: (request: PendingBtwComposerRequest) => void
+  consumePendingBtwComposerRequest: (parentSessionId: string | null) => PendingBtwComposerRequest | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
-  addAttachedFile: (file: File) => Promise<void>
+  addAttachedFile: (file: File) => Promise<boolean>
   removeAttachedFile: (id: string) => void
-  setAttachedFiles: (files: AttachedFile[]) => void
-  clearAttachedFiles: () => void
+  setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
+  clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
@@ -115,11 +182,45 @@ export type InputState = {
 }
 
 export const useInputStore = create<InputState>()((set, get) => ({
+  pendingComposerRestore: null,
+  consumePendingComposerRestore: (target) => {
+    const pending = get().pendingComposerRestore
+    if (!pending || !target || getChatDraftIdentityKey(pending.target) !== getChatDraftIdentityKey(target)) return null
+    set({ pendingComposerRestore: null })
+    return pending
+  },
   pendingInputText: null,
   pendingInputMode: "replace",
   pendingSyntheticParts: null,
   pendingPresetSubmit: null,
+  pendingGuestIssue: null,
+  pendingBtwComposerRequest: null,
   attachedFiles: [],
+  attachmentDraftKey: null,
+  attachmentDrafts: new Map(),
+  selectAttachmentDraft: (target) => {
+    const key = target ? getChatDraftIdentityKey(target) : null
+    const state = get()
+    if (key === state.attachmentDraftKey) return
+    const drafts = new Map(state.attachmentDrafts)
+    if (state.attachmentDraftKey) {
+      if (state.attachedFiles.length) drafts.set(state.attachmentDraftKey, state.attachedFiles)
+      else drafts.delete(state.attachmentDraftKey)
+    }
+    // Unowned files may arrive from a native picker before the first mount.
+    const files = key ? (drafts.get(key) ?? (state.attachmentDraftKey === null ? state.attachedFiles : [])) : []
+    if (key) drafts.delete(key)
+    attachmentReadGeneration += 1
+    set({ attachmentDraftKey: key, attachmentDrafts: drafts, attachedFiles: files })
+  },
+  restoreAttachedFiles: (files, target) => {
+    const state = get()
+    const key = target ? getChatDraftIdentityKey(target) : null
+    const existing = key === state.attachmentDraftKey ? state.attachedFiles : (key && state.attachmentDrafts.get(key)) || []
+    const present = new Set(existing.map((file) => file.id))
+    const missing = files.filter((file) => !present.has(file.id))
+    if (missing.length) state.setAttachedFiles([...existing, ...missing], target)
+  },
   activeEditorFile: null,
 
   setPendingInputText: (text, mode = "replace") =>
@@ -132,13 +233,31 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return { text: pendingInputText, mode: pendingInputMode }
   },
 
-  requestPresetSubmit: (text) => set({ pendingPresetSubmit: text }),
+  requestPresetSubmit: (text, type) => set({ pendingPresetSubmit: { text, type } }),
 
   consumePendingPresetSubmit: () => {
     const { pendingPresetSubmit } = get()
     if (pendingPresetSubmit === null) return null
     set({ pendingPresetSubmit: null })
     return pendingPresetSubmit
+  },
+
+  setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),
+
+  consumePendingGuestIssue: () => {
+    const { pendingGuestIssue } = get()
+    if (pendingGuestIssue === null) return null
+    set({ pendingGuestIssue: null })
+    return pendingGuestIssue
+  },
+
+  requestBtwComposer: (request) => set({ pendingBtwComposerRequest: request }),
+
+  consumePendingBtwComposerRequest: (parentSessionId) => {
+    const request = get().pendingBtwComposerRequest
+    if (!request || request.parentSessionId !== parentSessionId) return null
+    set({ pendingBtwComposerRequest: null })
+    return request
   },
 
   setPendingSyntheticParts: (parts) => set({ pendingSyntheticParts: parts }),
@@ -152,39 +271,51 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   addAttachedFile: async (file: File) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
-    let dataUrl: string
-    try {
-      dataUrl = await readFileAsDataUrl(file)
-    } catch {
-      return
+    for (let attempt = 0; attempt < MAX_ATTACHMENT_PREPARATION_ATTEMPTS; attempt += 1) {
+      const reservedFilenames = get().attachedFiles.map((attachment) => attachment.filename)
+      let attachedFiles: AttachedFile[] | undefined
+      try {
+        attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
+      } catch {
+        return false
+      }
+      if (!attachedFiles || generation !== attachmentReadGeneration) return false
+
+      const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
+      if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
+
+      set((state) => ({ attachedFiles: [...state.attachedFiles, ...attachedFiles] }))
+      return true
     }
-    if (generation !== attachmentReadGeneration) return
-    const attached: AttachedFile = {
-      id,
-      file,
-      dataUrl,
-      mimeType: file.type,
-      filename: file.name,
-      size: file.size,
-      source: "local",
-    }
-    set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
+    return false
   },
 
   removeAttachedFile: (id) =>
-    set((s) => ({ attachedFiles: s.attachedFiles.filter((f) => f.id !== id) })),
+    set((s) => {
+      const target = s.attachedFiles.find((f) => f.id === id)
+      if (target?.sourceDocumentId) {
+        return { attachedFiles: s.attachedFiles.filter((f) => f.sourceDocumentId !== target.sourceDocumentId) }
+      }
+      return { attachedFiles: s.attachedFiles.filter((f) => f.id !== id) }
+    }),
 
-  setAttachedFiles: (files) => {
+  setAttachedFiles: (files, target) => {
+    const state = get()
+    const key = target === undefined ? state.attachmentDraftKey : target ? getChatDraftIdentityKey(target) : null
+    if (key !== state.attachmentDraftKey) {
+      if (!key) return
+      const drafts = new Map(state.attachmentDrafts)
+      if (files.length) drafts.set(key, files)
+      else drafts.delete(key)
+      set({ attachmentDrafts: drafts })
+      return
+    }
     attachmentReadGeneration += 1
     set({ attachedFiles: files })
   },
 
-  clearAttachedFiles: () => {
-    attachmentReadGeneration += 1
-    set({ attachedFiles: [] })
-  },
+  clearAttachedFiles: (target) => get().setAttachedFiles([], target),
 
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -213,7 +344,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addVSCodeSelectionAttachment: async (path: string, file: File) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
-    const selectionKey = getVSCodeSelectionKey(path, file.name)
+    const selectionKey = `${generation}\u0000${getVSCodeSelectionKey(path, file.name)}`
     const isDuplicate = get().attachedFiles.some(
       (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === file.name && f.vscodePath === path
     )
@@ -221,7 +352,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     pendingVSCodeSelectionKeys.add(selectionKey)
     let dataUrl: string
     try {
-      dataUrl = await readFileAsDataUrl(file)
+      dataUrl = await readFileAsDataUrl(file, file.type)
     } catch {
       return
     } finally {
@@ -266,3 +397,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },
 }))
+
+subscribeChatDraftDeletion((identity) => {
+  useInputStore.getState().setAttachedFiles([], identity)
+})

@@ -1,6 +1,34 @@
 import { hasDesktopInvoke, invokeDesktop, isDesktopShell } from '@/lib/desktop';
 
 type InvokeArgs = Record<string, unknown>;
+type RelayDevTunnelData = ArrayBuffer | Uint8Array;
+type RelayDevTunnelMessage = { type: 'connect' | 'ready' | 'data' | 'close'; data?: RelayDevTunnelData };
+type RelayDevTunnelEvent = { connectionId: string; remotePort: number; message: RelayDevTunnelMessage };
+type RelayDevTunnelBridge = {
+  relayDevTunnelListen?: (handler: (event: RelayDevTunnelEvent) => void) => void;
+  relayDevTunnelPost?: (connectionId: string, message: RelayDevTunnelMessage) => void;
+};
+
+declare global {
+  interface Window {
+    __OPENCHAMBER_DESKTOP__?: RelayDevTunnelBridge;
+  }
+}
+
+const getRelayDevTunnelBridge = (): RelayDevTunnelBridge | null => {
+  return globalThis.window?.__OPENCHAMBER_DESKTOP__ ?? null;
+};
+
+export const listenForDesktopRelayDevTunnels = (handler: (event: RelayDevTunnelEvent) => void): boolean => {
+  const bridge = getRelayDevTunnelBridge();
+  if (!bridge?.relayDevTunnelListen) return false;
+  bridge.relayDevTunnelListen(handler);
+  return true;
+};
+
+export const postDesktopRelayDevTunnelMessage = (connectionId: string, message: RelayDevTunnelMessage): void => {
+  getRelayDevTunnelBridge()?.relayDevTunnelPost?.(connectionId, message);
+};
 
 export const invokeDesktopCommand = async <TValue = unknown>(
   command: string,
@@ -36,16 +64,29 @@ export const setDesktopWindowTitle = async (title: string): Promise<void> => {
   }
 };
 
+export type DesktopSplashColors = {
+  bgLight: string;
+  fgLight: string;
+  bgDark: string;
+  fgDark: string;
+};
+
+/**
+ * Tell the shell which theme the window resolved. The splash colours ride
+ * along so main can paint the next startup splash from its own store; they
+ * are device state and never go through the shared settings document.
+ */
 export const setDesktopWindowTheme = async (
   themeMode?: string,
   themeVariant?: string,
+  splash?: DesktopSplashColors,
 ): Promise<void> => {
   if (!isDesktopShell()) {
     return;
   }
 
   try {
-    await invokeDesktopCommand('desktop_set_window_theme', { themeMode, themeVariant });
+    await invokeDesktopCommand('desktop_set_window_theme', { themeMode, themeVariant, splash });
   } catch {
     // ignore
   }

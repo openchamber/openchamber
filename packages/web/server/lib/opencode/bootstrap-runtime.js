@@ -7,6 +7,7 @@ export const createBootstrapRuntime = (dependencies) => {
     registerTtsRoutes,
     registerNotificationRoutes,
     registerOpenChamberRoutes,
+    registerAgentToolRoutes = () => {},
     express,
   } = dependencies;
 
@@ -18,10 +19,19 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      getServerPort,
+      getTunnelUrl,
       verboseRequestLogs,
       uiPassword,
       tunnelAuthController,
       remoteClientAuthRuntime,
+      clientPairingRuntime,
+      getRelayPairingCandidate,
+      reconcileRelay,
+      getPairingTransports,
+      getDirectCandidateUrls,
+      getServerId,
+      getServerLabel,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
       sayTTSCapability,
@@ -32,7 +42,10 @@ export const createBootstrapRuntime = (dependencies) => {
       writeSettingsToDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,
+      addOrUpdateApnsToken,
+      removeApnsToken,
       updateUiVisibility,
+      clearPendingPushBadge,
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
@@ -49,6 +62,8 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      agentToolRuntime,
+      desktopUpdater,
     } = options;
 
     const uiAuthController = createUiAuth({
@@ -68,17 +83,29 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      getServerId,
+      getServerPort,
+      getTunnelUrl,
       tunnelAuthController,
       uiAuthController,
     });
 
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
 
+    registerAgentToolRoutes(app, { express, agentToolRuntime });
+
     registerAuthAndAccessRoutes(app, {
       express,
       tunnelAuthController,
       uiAuthController,
       remoteClientAuthRuntime,
+      clientPairingRuntime,
+      getRelayPairingCandidate,
+      reconcileRelay,
+      getPairingTransports,
+      getDirectCandidateUrls,
+      getServerId,
+      getServerLabel,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
@@ -95,12 +122,16 @@ export const createBootstrapRuntime = (dependencies) => {
       writeSettingsToDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,
+      addOrUpdateApnsToken,
+      removeApnsToken,
       updateUiVisibility,
+      clearPendingPushBadge,
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
       getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
       getSessionStateSnapshot: sessionRuntime.getSessionStateSnapshot,
+      getPendingBlockingRequestsSnapshot: sessionRuntime.getPendingBlockingRequestsSnapshot,
       getSessionAttentionSnapshot: sessionRuntime.getSessionAttentionSnapshot,
       getSessionState: sessionRuntime.getSessionState,
       getSessionAttentionState: sessionRuntime.getSessionAttentionState,
@@ -124,6 +155,7 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       fetchFreeZenModels,
       getCachedZenModels,
+      desktopUpdater,
     });
 
     return {

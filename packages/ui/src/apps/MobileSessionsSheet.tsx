@@ -1,17 +1,15 @@
 import React from 'react';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
+import { createPortal } from 'react-dom';
 import {
   RiAddLine,
-  RiArchiveLine,
   RiArrowDownSLine,
   RiArrowUpSLine,
   RiCheckLine,
-  RiCloseLine,
   RiDeleteBinLine,
   RiDragMove2Line,
   RiEdit2Line,
-  RiFolder6Line,
   RiFolderAddLine,
-  RiSearchLine,
 } from '@remixicon/react';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import {
@@ -35,32 +33,107 @@ import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerD
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { toast } from '@/components/ui';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { getProjectLabel, normalizePath } from './mobilePaths';
+import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { getDescendantIds, partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
+import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
+import { collectSessionSubtreeIds, runSessionSubtreeAction, type SessionSubtreeAction } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
+import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
+import { resolveSidebarSessionLocations } from '@/components/session/sidebar/recent/sessionLocation';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
-import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import {
+  listProjectWorktrees,
+  partitionWorktreesByRegisteredProject,
+} from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
+import {
+  EMPTY_SESSION_ORDER_RANKS,
+  orderSessionsByLifecycleScopes,
+  useSessionOrderingStore,
+} from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions } from '@/sync/sync-context';
+import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
+import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import type { WorktreeMetadata } from '@/types/worktree';
 
+import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
+import { MobileProjectIcon } from './MobileProjectIcon';
+import { MobileSessionRenameForm } from './MobileSessionRenameForm';
+import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
+import {
+  MobileTimelineList,
+  type TimelineEntry,
+  type TimelineRowHandlers,
+} from './MobileTimelineList';
+import { revealNextTimelinePage, TIMELINE_PAGE_SIZE } from './mobileTimelinePaging';
+import {
+  formatRelativeShort,
+  getParentId,
+  getSessionDirectory,
+  getSessionTimestamp,
+} from './mobileSessionFields';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
-import { MobileSurfaceShell } from './MobileSurfaceShell';
+import { useEdgeSwipe } from './useEdgeSwipe';
 
 type MobileSessionsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 'drawer' (default) renders a full-width left drawer over the app;
+      'sidebar' renders the same content inline for the iPad persistent sidebar. */
+  variant?: 'drawer' | 'sidebar';
+  /** App-level footer bar (desktop-sidebar-style): current instance on the
+      left, settings (and, on hosted web, a pending update) on the right. */
+  footer?: {
+    /** Connected instance label — Capacitor only; null hides the left slot. */
+    instanceLabel: string | null;
+    onOpenInstances?: () => void;
+    onOpenSettings: () => void;
+    /** Present only while a server update is available (hosted web). */
+    onOpenUpdate?: () => void;
+  };
 };
+
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
+
+// Same orders, same labels as the desktop sidebar's sort menu — the setting
+// itself is shared, so the two surfaces must offer the same choices.
+const PROJECT_SORT_OPTIONS = [
+  ['manual', 'sessions.sidebar.header.projectSort.manual'],
+  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+  ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
+  ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
+  ['recent', 'sessions.sidebar.header.projectSort.recent'],
+] as const;
+
+const VIEW_MODE_OPTIONS = [
+  ['projects', 'mobile.sessions.viewMode.projects'],
+  ['timeline', 'mobile.sessions.viewMode.timeline'],
+] as const;
+
+type SidebarViewMode = (typeof VIEW_MODE_OPTIONS)[number][0];
+
+// Pseudo-project key for the collapsible "recent" group's persisted expansion.
 
 type ProjectMeta = {
   id: string;
@@ -72,6 +145,9 @@ type ProjectMeta = {
   iconBackground?: string | null;
   isGitRepo: boolean;
   worktrees: WorktreeMetadata[];
+  /** Read by the 'date-added' / 'recent' project orders. */
+  addedAt?: number;
+  lastOpenedAt?: number;
 };
 
 type WorktreeBucket = {
@@ -96,61 +172,26 @@ type ProjectNode = {
 
 const SESSIONS_PER_BUCKET = 7;
 
+// The timeline opens with the project list, so chats show a short page above it.
+const TIMELINE_CHAT_PAGE_SIZE = 3;
+
 // Left padding for session rows so the title's first letter aligns with its
 // parent label. Root/project-level sessions align with the project label;
 // worktree sessions sit one level deeper. SessionRow adds 16px (dot + gap) on top.
-const PROJECT_SESSION_INDENT = 36;
-const WORKTREE_SESSION_INDENT = 52;
+const PROJECT_SESSION_INDENT = 40;
+// Timeline chats align with the timeline rows' text, which has no gutter.
+const TIMELINE_CHAT_INDENT = 12;
 // Extra left padding applied to each nested subsession level.
-const CHILD_INDENT_STEP = 18;
-
-const getParentId = (session: Session): string | null =>
-  (session as Session & { parentID?: string | null }).parentID ?? null;
-
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
-
-const getSessionDirectory = (session: Session): string => {
-  const sessionWithDirectory = session as Session & {
-    directory?: string | null;
-    project?: { worktree?: string | null } | null;
-  };
-  return normalizePath(sessionWithDirectory.directory ?? sessionWithDirectory.project?.worktree ?? null);
-};
-
-const getProjectLabel = (path: string): string => {
-  const normalized = normalizePath(path);
-  if (!normalized) return '';
-  const segments = normalized.split('/').filter(Boolean);
-  return segments[segments.length - 1]?.replace(/[-_]/g, ' ') || normalized;
-};
-
-const getSessionTimestamp = (session: Session): number => {
-  const raw = session.time?.updated ?? session.time?.created;
-  const value = typeof raw === 'number' ? raw : Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : 0;
-};
-
-const formatRelativeShort = (timestamp: number): string => {
-  if (timestamp <= 0) return '';
-  const diffMs = Date.now() - timestamp;
-  if (diffMs < 60_000) return 'now';
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(timestamp));
-};
+const CHILD_INDENT_STEP = 16;
 
 const pathBelongsToRoot = (path: string, root: string): boolean => {
   const normalizedPath = normalizePath(path);
   const normalizedRoot = normalizePath(root);
+  const prefix = normalizedRoot.endsWith('/') ? normalizedRoot : `${normalizedRoot}/`;
   return Boolean(
     normalizedPath &&
       normalizedRoot &&
-      (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)),
+      (normalizedPath === normalizedRoot || normalizedPath.startsWith(prefix)),
   );
 };
 
@@ -158,73 +199,8 @@ const findExactWorktreeMatch = (project: ProjectMeta, normalizedDirectory: strin
   project.worktrees.find((worktree) => normalizePath(worktree.path) === normalizedDirectory) ?? null
 );
 
-const projectMatchesExactDirectory = (project: ProjectMeta, normalizedDirectory: string): boolean => (
-  normalizedDirectory === project.path || Boolean(findExactWorktreeMatch(project, normalizedDirectory))
-);
-
-const findExactProjectMatch = (projects: ProjectMeta[], directory: string): ProjectMeta | null => {
-  const normalizedDirectory = normalizePath(directory);
-  if (!normalizedDirectory) return null;
-  return projects.find((project) => projectMatchesExactDirectory(project, normalizedDirectory)) ?? null;
-};
-
-const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean => {
-  if (!query) return true;
-  const haystack = `${session.title ?? ''} ${session.id} ${getSessionDirectory(session)} ${projectLabel}`.toLowerCase();
-  return haystack.includes(query);
-};
-
-const MobileProjectIcon: React.FC<{
-  project: Pick<ProjectMeta, 'id' | 'icon' | 'color' | 'iconImage' | 'iconBackground'>;
-  size?: 'sm' | 'md';
-}> = ({ project, size = 'md' }) => {
-  const { currentTheme } = useThemeSystem();
-
-  const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-  const iconColor = project.color ? PROJECT_COLOR_MAP[project.color] ?? null : null;
-
-  const containerClasses = size === 'sm' ? 'size-6 rounded-md' : 'size-8 rounded-lg';
-  const innerClasses = size === 'sm' ? 'size-3.5' : 'size-4';
-  const fallbackIcon = ProjectIcon ? (
-    <Icon name={ProjectIcon} className={innerClasses} style={iconColor ? { color: iconColor } : undefined} />
-  ) : (
-    <RiFolder6Line className={innerClasses} style={iconColor ? { color: iconColor } : undefined} />
-  );
-
-  return (
-    <span
-      className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden bg-[var(--surface-muted)] text-muted-foreground',
-        containerClasses,
-      )}
-      style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
-    >
-      {project.iconImage ? (
-        <ProjectIconImage
-          project={{ id: project.id, iconImage: project.iconImage ?? null }}
-          options={{
-            themeVariant: currentTheme.metadata.variant,
-            iconColor: currentTheme.colors.surface.foreground,
-          }}
-          className="size-full object-contain"
-          fallback={fallbackIcon}
-        />
-      ) : fallbackIcon}
-    </span>
-  );
-};
-
-const ChevronToggle: React.FC<{ expanded: boolean }> = ({ expanded }) => (
-  <span
-    aria-hidden
-    className={cn(
-      'flex size-5 shrink-0 items-center justify-center text-muted-foreground/70 transition-transform duration-150',
-      expanded ? 'rotate-0' : '-rotate-90',
-    )}
-  >
-    <RiArrowDownSLine className="size-4" />
-  </span>
-);
+const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean =>
+  matchesRankQuery([session.title, session.id, getSessionDirectory(session), projectLabel], query);
 
 const ActiveDot: React.FC<{ ariaLabel?: string }> = ({ ariaLabel }) => (
   <span
@@ -244,7 +220,7 @@ const NewWorktreeIconButton: React.FC<{
     <button
       type="button"
       className={cn(
-        'flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+        'flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
         className,
       )}
       aria-label={label}
@@ -260,81 +236,155 @@ const NewWorktreeIconButton: React.FC<{
   );
 };
 
+/** Starts a session draft already pointed at this project — the mobile twin of
+    the desktop sidebar's per-project "+". */
+const NewSessionIconButton: React.FC<{
+  label: string;
+  onClick: () => void;
+  className?: string;
+}> = ({ label, onClick, className }) => (
+  <button
+    type="button"
+    className={cn(
+      'flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+      className,
+    )}
+    aria-label={label}
+    title={label}
+    onClick={(event) => {
+      event.stopPropagation();
+      onClick();
+    }}
+    style={{ touchAction: 'manipulation' }}
+  >
+    <Icon name="add" className="size-4" />
+  </button>
+);
+
 const SessionRow: React.FC<{
   session: Session;
   active: boolean;
   indent: number;
   /** When provided, shown as a small second-line subtitle below the title (e.g. "Project · branch"). */
   contextLabel?: string;
-  /** When true, the row shows the two-step archive confirmation. */
-  confirmingArchive?: boolean;
   /** When true, a chevron is shown in the left gutter to toggle nested subsessions. */
   hasChildren?: boolean;
   expanded?: boolean;
   onToggleChildren?: () => void;
   onSelect: () => void;
-  /** When provided, an archive affordance is shown; first tap arms confirm, X cancels. */
-  onRequestArchive?: () => void;
-  onConfirmArchive?: () => void;
+  /** Swipe-right actions. When omitted, the row is a plain non-swipeable row. */
+  revealed?: boolean;
+  onRevealedChange?: (revealed: boolean) => void;
+  confirmingDelete?: boolean;
+  onArchive?: () => void;
+  onRequestDelete?: () => void;
+  onConfirmDelete?: () => void;
+  renaming?: boolean;
+  onRequestRename?: () => void;
+  onSubmitRename?: (title: string) => void;
+  onCancelRename?: () => void;
+  /** Timeline chats: no left gutter; the status dot sits before the time instead. */
+  statusOnRight?: boolean;
 }> = ({
   session,
   active,
   indent,
   contextLabel,
-  confirmingArchive = false,
+  statusOnRight = false,
   hasChildren = false,
   expanded = false,
   onToggleChildren,
   onSelect,
-  onRequestArchive,
-  onConfirmArchive,
+  revealed = false,
+  onRevealedChange,
+  confirmingDelete = false,
+  onArchive,
+  onRequestDelete,
+  onConfirmDelete,
+  renaming = false,
+  onRequestRename,
+  onSubmitRename,
+  onCancelRename,
 }) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
   const title = session.title?.trim() || t('mobile.sessions.untitled');
-  return (
-    <div
-      className={cn(
-        'relative flex items-center gap-1 transition-colors',
-        active && !confirmingArchive && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
-        confirmingArchive && 'bg-[color-mix(in_srgb,var(--destructive)_8%,transparent)]',
-      )}
-    >
-      {hasChildren && onToggleChildren ? (
+  const swipeEnabled = Boolean(onRevealedChange && onArchive);
+  const aiRename = useSessionAiRenameAction(session.id, session.directory, swipeEnabled && revealed);
+  // Live indicators, same conventions as the desktop sidebar: busy/retry →
+  // spinner; unseen activity on a non-active row → attention dot.
+  const liveStatus = useGlobalSessionStatus(session.id);
+  const unseenCount = useSessionUnseenCount(session.id);
+  const statusType = liveStatus?.type ?? 'idle';
+  const isStreaming = statusType === 'busy' || statusType === 'retry';
+  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
+
+  const rowContent = (
+    <>
+      {/* Left gutter slot: live activity indicator takes priority over the
+          subsession chevron — same position, so rows never shift. When the
+          row has children the slot still toggles them either way. */}
+      {!statusOnRight && (aiRename.pending || isStreaming || showUnreadDot || (hasChildren && onToggleChildren)) ? (
         <button
           type="button"
-          className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0, touchAction: 'manipulation' }}
-          aria-label={expanded
-            ? t('sessions.sidebar.session.subsessions.collapse')
-            : t('sessions.sidebar.session.subsessions.expand')}
+          aria-label={aiRename.pending
+            ? t('sessions.aiRename.generating')
+            : expanded
+              ? t('sessions.sidebar.session.subsessions.collapse')
+              : t('sessions.sidebar.session.subsessions.expand')}
+          disabled={!hasChildren || !onToggleChildren}
           onClick={(event) => {
             event.stopPropagation();
-            onToggleChildren();
+            onToggleChildren?.();
           }}
         >
-          <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
+          {aiRename.pending ? (
+            <Icon name="loader-4" className="size-3 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
+          ) : isStreaming || showUnreadDot ? (
+            <SessionActivityIndicator
+              state={isStreaming ? 'running' : 'unread'}
+              label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
+            />
+          ) : (
+            <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
+          )}
         </button>
       ) : null}
+      {renaming && onSubmitRename && onCancelRename ? (
+        <MobileSessionRenameForm
+          initialTitle={title}
+          indent={indent}
+          onSubmit={onSubmitRename}
+          onCancel={onCancelRename}
+        />
+      ) : (
       <button
         type="button"
+        // Single-line rows: fixed h-9 (36px) to match MobileSessionRenameForm
+        // exactly — min-h-* utilities lose the specificity fight against
+        // mobile.css's global 36px button floor anyway, so make the real
+        // height explicit. Two-line rows (search results with a context
+        // subtitle) keep flexible height.
         className={cn(
-          'flex min-h-12 min-w-0 flex-1 items-center gap-2.5 py-2 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset',
-          confirmingArchive && 'opacity-50',
+          'flex min-w-0 flex-1 items-center gap-2.5 pr-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+          contextLabel ? 'min-h-10 py-1' : 'h-9',
         )}
         style={{ paddingLeft: indent, touchAction: 'manipulation' }}
-        onClick={onSelect}
-        disabled={confirmingArchive}
+        onClick={() => {
+          // A tap while the actions are out just closes them.
+          if (revealed) {
+            onRevealedChange?.(false);
+            return;
+          }
+          onSelect();
+        }}
       >
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-center gap-2.5">
-            <span
-              className={cn(
-                'size-1.5 shrink-0 rounded-full',
-                active ? 'bg-primary' : 'bg-muted-foreground/30',
-              )}
-              aria-hidden
-            />
             <span
               className={cn(
                 'block min-w-0 flex-1 truncate typography-ui-label',
@@ -343,45 +393,79 @@ const SessionRow: React.FC<{
             >
               {title}
             </span>
-            {time ? (
+            {statusOnRight && (aiRename.pending || isStreaming || showUnreadDot) ? (
+              aiRename.pending
+                ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
+                : <SessionActivityIndicator
+                    state={isStreaming ? 'running' : 'unread'}
+                    label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
+                  />
+            ) : null}
+            {/* The elapsed turn takes the time slot while it matters, then
+                hands it back to the relative timestamp. */}
+            {showActivityDuration ? (
+              <SessionActivityDuration
+                sessionId={session.id}
+                running={isStreaming}
+                className="typography-micro"
+              />
+            ) : time ? (
               <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span>
             ) : null}
           </span>
           {contextLabel ? (
-            <span className="block truncate typography-micro text-muted-foreground pl-4">{contextLabel}</span>
+            <span className="block truncate typography-micro text-muted-foreground">{contextLabel}</span>
           ) : null}
         </span>
       </button>
-      {onRequestArchive ? (
-        <>
-          {confirmingArchive ? (
-            <button
-              type="button"
-              className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-destructive px-3 text-destructive-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-              aria-label={t('mobile.sessions.archiveSessionAria', { title })}
-              onClick={onConfirmArchive}
-              style={{ touchAction: 'manipulation' }}
-            >
-              <RiArchiveLine className="size-4" />
-              <span className="typography-ui-label">{t('sessions.sidebar.bulkActions.archive')}</span>
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="mr-1.5 flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground/70 transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            aria-label={
-              confirmingArchive
-                ? t('mobile.sessions.cancelArchiveAria', { title })
-                : t('mobile.sessions.archiveSessionAria', { title })
-            }
-            onClick={onRequestArchive}
-            style={{ touchAction: 'manipulation' }}
-          >
-            {confirmingArchive ? <RiCloseLine className="size-4" /> : <RiArchiveLine className="size-4" />}
-          </button>
-        </>
-      ) : null}
-    </div>
+      )}
+    </>
+  );
+
+  // Plain rows (search results on an elevated card) keep the translucent
+  // treatment; swipeable rows need an OPAQUE background so the action buttons
+  // stay hidden behind the content until it slides.
+  if (!swipeEnabled) {
+    return (
+      <div data-active-session={active || undefined} className="relative overflow-hidden">
+        <div
+          className={cn(
+            'relative flex items-center gap-1 transition-colors',
+            active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
+          )}
+        >
+          {rowContent}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <MobileSwipeActionsRow
+      actionsWidth={ROW_ACTIONS_WIDTH}
+      revealed={revealed}
+      onRevealedChange={(next) => onRevealedChange?.(next)}
+      dataActiveSession={active}
+      contentClassName={cn(
+        'relative flex w-full items-center gap-1 bg-background transition-colors',
+        active && 'bg-[color-mix(in_srgb,var(--primary)_10%,var(--background))]',
+      )}
+      actions={(
+        <MobileSessionRowActions
+          title={title}
+          revealed={revealed}
+          confirmingDelete={confirmingDelete}
+          aiRename={aiRename}
+          onArchive={onArchive}
+          onRequestDelete={onRequestDelete}
+          onConfirmDelete={onConfirmDelete}
+          onRequestRename={onRequestRename}
+          onRevealedChange={onRevealedChange}
+        />
+      )}
+    >
+      {rowContent}
+    </MobileSwipeActionsRow>
   );
 };
 
@@ -393,7 +477,7 @@ const ShowMoreRow: React.FC<{
   return (
     <button
       type="button"
-      className="flex min-h-10 w-full items-center gap-2 py-1.5 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      className="flex min-h-9 w-full items-center gap-2 py-1 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       style={{ paddingLeft: indent, touchAction: 'manipulation' }}
       onClick={onClick}
     >
@@ -411,7 +495,7 @@ const ShowFewerRow: React.FC<{
   return (
     <button
       type="button"
-      className="flex min-h-10 w-full items-center gap-2 py-1.5 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      className="flex min-h-9 w-full items-center gap-2 py-1 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       style={{ paddingLeft: indent, touchAction: 'manipulation' }}
       onClick={onClick}
     >
@@ -421,145 +505,237 @@ const ShowFewerRow: React.FC<{
   );
 };
 
-const SortableProjectRow: React.FC<{
-  project: ProjectMeta;
-  totalSessions: number;
-  confirmingDelete: boolean;
-  onEdit: () => void;
-  onRequestRemove: () => void;
-  onConfirmRemove: () => void;
-}> = ({
-  project,
-  totalSessions,
-  confirmingDelete,
-  onEdit,
-  onRequestRemove,
-  onConfirmRemove,
-}) => {
+/** One draggable worktree row inside a project's reorder card. */
+const SortableWorktreeReorderRow: React.FC<{ worktree: WorktreeMetadata }> = ({ worktree }) => {
   const { t } = useI18n();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 10 : 1,
-  };
+  const path = normalizePath(worktree.path);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path });
+  const label = worktree.branch || worktree.label || worktree.path;
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : 1 }}
       className={cn(
-        'flex items-center gap-1 rounded-2xl border border-border/40 bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
+        'flex items-center gap-1 rounded-xl bg-background px-1 py-1',
         isDragging && 'shadow-lg shadow-black/20',
-        confirmingDelete && 'border-destructive/50 bg-[color-mix(in_srgb,var(--destructive)_8%,var(--surface-elevated))]',
       )}
     >
       <button
         type="button"
-        className="flex size-9 shrink-0 cursor-grab touch-none items-center justify-center rounded-xl text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
-        aria-label={t('mobile.sessions.dragHandleAria', { label: project.label })}
+        className="flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
+        aria-label={t('mobile.sessions.dragHandleAria', { label })}
         {...attributes}
         {...listeners}
       >
         <RiDragMove2Line className="size-4" />
       </button>
-      <MobileProjectIcon project={project} />
-      <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{project.label}</span>
-      {confirmingDelete ? (
-        <button
-          type="button"
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-destructive px-3 text-destructive-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-          aria-label={t('mobile.sessions.confirmRemoveProjectAria', { label: project.label })}
-          onClick={onConfirmRemove}
-          style={{ touchAction: 'manipulation' }}
-        >
-          <RiDeleteBinLine className="size-4" />
-          <span className="typography-ui-label">{t('mobile.sessions.confirmRemoveProject')}</span>
-        </button>
-      ) : (
-        <>
-          <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{totalSessions}</span>
-          <button
-            type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            aria-label={t('mobile.sessions.editProjectAria', { label: project.label })}
-            onClick={onEdit}
-            style={{ touchAction: 'manipulation' }}
-          >
-            <RiEdit2Line className="size-4" />
-          </button>
-        </>
-      )}
-      <button
-        type="button"
-        className={cn(
-          'flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2',
-          confirmingDelete
-            ? 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:ring-primary'
-            : 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive',
-        )}
-        aria-label={
-          confirmingDelete
-            ? t('mobile.sessions.cancelRemoveProjectAria', { label: project.label })
-            : t('mobile.sessions.removeProjectAria', { label: project.label })
-        }
-        onClick={onRequestRemove}
-        style={{ touchAction: 'manipulation' }}
-      >
-        {confirmingDelete ? <RiCloseLine className="size-4" /> : <RiDeleteBinLine className="size-4" />}
-      </button>
+      <Icon name="git-branch" className="size-4 shrink-0 text-muted-foreground" />
+      <span className="block min-w-0 flex-1 truncate typography-ui-label font-bold text-muted-foreground">{label}</span>
     </div>
   );
 };
 
-export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange }) => {
+/** Reorder-mode project card: drag handle reorders projects globally; tapping
+    the rest of the row collapses/expands its worktrees, which reorder within
+    the project through their own nested DndContext. */
+const SortableProjectRow: React.FC<{
+  project: ProjectMeta;
+  totalSessions: number;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onReorderWorktrees: (orderedPaths: string[]) => void;
+}> = ({ project, totalSessions, expanded, onToggleExpanded, onReorderWorktrees }) => {
+  const { t } = useI18n();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  const worktreeSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const hasWorktrees = project.worktrees.length > 0;
+
+  const handleWorktreeDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const paths = project.worktrees.map((worktree) => normalizePath(worktree.path));
+    const fromIndex = paths.indexOf(String(active.id));
+    const toIndex = paths.indexOf(String(over.id));
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = [...paths];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    onReorderWorktrees(next);
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : 1 }}
+      className={cn(
+        'rounded-2xl border border-border/70 bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
+        isDragging && 'shadow-lg shadow-black/20',
+      )}
+    >
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          className="flex size-9 shrink-0 cursor-grab touch-none items-center justify-center rounded-xl text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
+          aria-label={t('mobile.sessions.dragHandleAria', { label: project.label })}
+          {...attributes}
+          {...listeners}
+        >
+          <RiDragMove2Line className="size-4" />
+        </button>
+        <button
+          type="button"
+          className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-xl px-1 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          aria-label={expanded
+            ? t('sessions.sidebar.group.collapseAria', { label: project.label })
+            : t('sessions.sidebar.group.expandAria', { label: project.label })}
+          disabled={!hasWorktrees}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <MobileProjectIcon project={project} />
+          <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{project.label}</span>
+          <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{totalSessions}</span>
+          {hasWorktrees ? (
+            <RiArrowDownSLine
+              className={cn('size-4 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-180')}
+            />
+          ) : null}
+        </button>
+      </div>
+      {expanded && hasWorktrees ? (
+        <DndContext sensors={worktreeSensors} collisionDetection={closestCenter} onDragEnd={handleWorktreeDragEnd}>
+          <SortableContext
+            items={project.worktrees.map((worktree) => normalizePath(worktree.path))}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="mt-1 flex flex-col gap-0.5 pl-3">
+              {project.worktrees.map((worktree) => (
+                <SortableWorktreeReorderRow key={normalizePath(worktree.path)} worktree={worktree} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      ) : null}
+    </div>
+  );
+};
+
+export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
+  const ensureGitStatus = useGitStore((state) => state.ensureStatus);
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
+    [open, variant],
+  ));
+  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
+    [open, variant],
+  ));
   const projects = useProjectsStore((state) => state.projects);
+  const authoritativeProjects = useGlobalSyncStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const archiveSession = useSessionUIStore((state) => state.archiveSession);
+  const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
+  const deleteSession = useSessionUIStore((state) => state.deleteSession);
+  const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
+  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
+  const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
+  const sidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
+  const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
+  // Branch per directory, for the timeline row's third line: worktree sessions
+  // read their worktree's branch, root sessions the project root's checked-out
+  // branch, which only the git store knows. The grouped view never asks.
+  const gitBranchesByDirectory = useGitAllBranches(
+    (open || variant === 'sidebar') && sidebarViewMode === 'timeline',
+  );
   const removeProject = useProjectsStore((state) => state.removeProject);
   const projectExpandedMap = useMobileSessionTreeStore((state) => state.projectExpanded);
   const worktreeExpandedMap = useMobileSessionTreeStore((state) => state.worktreeExpanded);
   const setProjectExpanded = useMobileSessionTreeStore((state) => state.setProjectExpanded);
   const setWorktreeExpanded = useMobileSessionTreeStore((state) => state.setWorktreeExpanded);
   const worktreeOrderByProject = useWorktreeOrderStore((state) => state.orderByProject);
+  const setWorktreeOrder = useWorktreeOrderStore((state) => state.setWorktreeOrder);
   const expandedParents = useMobileSessionExpansionStore((state) => state.expandedParents);
   const toggleParent = useMobileSessionExpansionStore((state) => state.toggleParent);
   const [query, setQuery] = React.useState('');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
-  const [confirmingArchiveSessionId, setConfirmingArchiveSessionId] = React.useState<string | null>(null);
+  // Swipe-right actions: which row has its actions revealed, and whether its
+  // delete button is armed (two-step). One row at a time.
+  const [revealedSessionId, setRevealedSessionId] = React.useState<string | null>(null);
+  const [confirmingDeleteSessionId, setConfirmingDeleteSessionId] = React.useState<string | null>(null);
+  const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null);
+  // Swipe-right actions on group headers (`project:{id}` / `wt:{bucketKey}`) —
+  // separate from session rows, but mutually exclusive with them.
+  const [revealedRowId, setRevealedRowId] = React.useState<string | null>(null);
+  const [confirmingRemoveProjectId, setConfirmingRemoveProjectId] = React.useState<string | null>(null);
+  const [worktreeToDelete, setWorktreeToDelete] = React.useState<{
+    project: ProjectMeta;
+    worktree: WorktreeMetadata;
+  } | null>(null);
   // Bumped to force a re-list of worktrees (e.g. after one is deleted in the editor).
   const [worktreeRefreshKey, setWorktreeRefreshKey] = React.useState(0);
+  const [sortPanelOpen, setSortPanelOpen] = React.useState(false);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
   const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [worktreeDialogProjectId, setWorktreeDialogProjectId] = React.useState<string | null>(null);
-  const [worktreesByProject, setWorktreesByProject] = React.useState<Map<string, WorktreeMetadata[]>>(new Map());
-  const [gitProjectPaths, setGitProjectPaths] = React.useState<Set<string>>(new Set());
+  // Seeded from the app-level worktree discovery (MobileApp populates
+  // availableWorktreesByProject on connect) so the FIRST open already shows
+  // worktrees; the per-open refresh below keeps them fresh without ever
+  // blanking the list.
+  const [worktreesByProject, setWorktreesByProject] = React.useState<Map<string, WorktreeMetadata[]>>(
+    () => new Map(useSessionUIStore.getState().availableWorktreesByProject),
+  );
+  const [gitProjectPaths, setGitProjectPaths] = React.useState<Set<string>>(() => {
+    const seeded = new Set<string>();
+    for (const [path, worktrees] of useSessionUIStore.getState().availableWorktreesByProject) {
+      if (worktrees.length > 0) seeded.add(path);
+    }
+    return seeded;
+  });
   const [editingOrder, setEditingOrder] = React.useState(false);
-  const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null);
+  // Reorder mode collapses projects by default (dragging past 40 worktrees is
+  // painful); tap outside the drag handle to expand one.
+  const [reorderExpandedProjects, setReorderExpandedProjects] = React.useState<Set<string>>(new Set());
   // Per-bucket count of sessions revealed past the default page. Ephemeral —
   // resets when the sheet closes or when a group/project is toggled. Expand
   // state itself lives in useMobileSessionTreeStore (persisted).
   // Key: `${projectId}::${bucketKey}`.
   const [visibleCountByBucket, setVisibleCountByBucket] = React.useState<Map<string, number>>(new Map());
+  // Timeline mode renders one flat list of every project session. The sheet is
+  // a plain scroller, so rows are revealed a page at a time as the end comes
+  // into view; the count resets with the sheet and with the view mode.
+  const [timelineVisibleCount, setTimelineVisibleCount] = React.useState(TIMELINE_PAGE_SIZE);
+  const scrollerRef = React.useRef<HTMLElement>(null);
 
   React.useEffect(() => {
     if (!open) {
       setQuery('');
       setEditingOrder(false);
-      setConfirmingDeleteId(null);
+      setReorderExpandedProjects(new Set());
       setVisibleCountByBucket(new Map());
+      setTimelineVisibleCount(TIMELINE_PAGE_SIZE);
       setEditingProjectId(null);
-      setConfirmingArchiveSessionId(null);
+      setRevealedSessionId(null);
+      setConfirmingDeleteSessionId(null);
+      setRenamingSessionId(null);
+      setRevealedRowId(null);
+      setConfirmingRemoveProjectId(null);
       return;
     }
     void refreshGlobalSessions(liveSessions);
@@ -568,8 +744,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }, [open]);
 
   React.useEffect(() => {
-    if (!editingOrder) setConfirmingDeleteId(null);
+    if (!editingOrder) setReorderExpandedProjects(new Set());
   }, [editingOrder]);
+
+  React.useEffect(() => {
+    setTimelineVisibleCount(TIMELINE_PAGE_SIZE);
+  }, [sidebarViewMode]);
 
   React.useEffect(() => {
     if (!open || projects.length === 0) return;
@@ -587,15 +767,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         }),
       );
       if (cancelled) return;
-      const next = new Map<string, WorktreeMetadata[]>();
+      const discoveredWorktreesByProject = new Map<string, WorktreeMetadata[]>();
       const nextGitProjectPaths = new Set<string>();
       for (const entry of entries) {
         if (entry) {
-          next.set(entry[0], entry[1]);
+          discoveredWorktreesByProject.set(entry[0], entry[1]);
           if (entry[2]) nextGitProjectPaths.add(entry[0]);
         }
       }
-      setWorktreesByProject(next);
+      setWorktreesByProject(partitionWorktreesByRegisteredProject(projects, discoveredWorktreesByProject));
       setGitProjectPaths(nextGitProjectPaths);
     };
     void run();
@@ -606,21 +786,27 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const projectsMeta = React.useMemo<ProjectMeta[]>(
     () =>
-      projects.map((project) => ({
-        id: project.id,
-        label: project.label?.trim() || getProjectLabel(project.path),
-        path: normalizePath(project.path),
-        icon: project.icon,
-        color: project.color,
-        iconImage: project.iconImage,
-        iconBackground: project.iconBackground,
-        isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
-        worktrees: orderWorktrees(
-          worktreeOrderByProject[project.id],
-          worktreesByProject.get(normalizePath(project.path)) ?? [],
-        ),
-      })),
-    [gitProjectPaths, projects, worktreeOrderByProject, worktreesByProject],
+      sortProjectsByOrder(
+        projects.map((project) => ({
+          id: project.id,
+          label: project.label?.trim() || getProjectLabel(project.path),
+          path: normalizePath(project.path),
+          icon: project.icon,
+          color: project.color,
+          iconImage: project.iconImage,
+          iconBackground: project.iconBackground,
+          isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
+          worktrees: orderWorktrees(
+            worktreeOrderByProject[project.id],
+            worktreesByProject.get(normalizePath(project.path)) ?? [],
+          ),
+          addedAt: project.addedAt,
+          lastOpenedAt: project.lastOpenedAt,
+        })),
+        projectSortOrder,
+        manualProjectOrder,
+      ),
+    [gitProjectPaths, manualProjectOrder, projectSortOrder, projects, worktreeOrderByProject, worktreesByProject],
   );
 
   /**
@@ -638,10 +824,73 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     for (const session of liveSessions) {
       if (!seenIds.has(session.id)) merged.push(session);
     }
-    return merged;
+    // Archived sessions never show on mobile (no archived view here): the live
+    // overlay can carry them for the active directory, and they'd otherwise
+    // surface in search and then "disappear" once the overlay refreshes.
+    return merged.filter((session) => !session.time?.archived);
   }, [globalActiveSessions, liveSessions]);
 
+  // Archive and delete take a session's subagents with it. Lineage is resolved
+  // over the whole active list rather than the rendered bucket: a subagent can
+  // sit in another worktree and still belongs to its parent.
+  const childrenBySessionId = React.useMemo(() => {
+    const children = new Map<string, Session[]>();
+    for (const session of sessions) {
+      const parentId = getParentId(session);
+      if (!parentId) continue;
+      const siblings = children.get(parentId) ?? [];
+      siblings.push(session);
+      children.set(parentId, siblings);
+    }
+    return children;
+  }, [sessions]);
+
+  // Managed Chats (sessions under ~/.config/openchamber/chats) are not owned
+  // by any registered project; they get their own section above the project
+  // tree, the same split the desktop sidebar makes. Temporary /btw forks are
+  // dropped here as well.
+  const { projectSessions, chatSessions } = React.useMemo(
+    () => partitionSidebarSessions(sessions, false),
+    [sessions],
+  );
+  const sessionOwnership = React.useMemo(() => createSessionOwnershipIndex(
+    projectSessions,
+    projectsMeta.map((project) => ({ id: project.id, normalizedPath: project.path })),
+    new Map(projectsMeta.map((project) => [project.path, project.worktrees])),
+    false,
+    [],
+    authoritativeProjects,
+  ), [authoritativeProjects, projectSessions, projectsMeta]);
+  const chatsBucket = React.useMemo<WorktreeBucket>(() => ({
+    key: CHAT_DRAFT_PROJECT_ID,
+    label: '',
+    path: '',
+    worktree: null,
+    sessions: orderSessionsByLifecycleScopes(chatSessions, pinnedSessionIds, sessionOrderRanks),
+  }), [chatSessions, pinnedSessionIds, sessionOrderRanks]);
+  const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
+  const chatRootCount = React.useMemo(
+    () => chatSessions.filter((session) => !getParentId(session)).length,
+    [chatSessions],
+  );
+
   const normalizedQuery = query.trim().toLowerCase();
+
+  // On open, bring the current session (or at least its project) into view —
+  // the list keeps its scroll position between opens, so a long project list
+  // otherwise lands wherever it was left. Rows carry data-active-* markers.
+  const contentRootRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      const root = contentRootRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLElement>('[data-active-session="true"]')
+        ?? root.querySelector<HTMLElement>('[data-active-project="true"]');
+      target?.scrollIntoView({ block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
   const projectNodes = React.useMemo<ProjectNode[]>(() => {
     const nodes: ProjectNode[] = projectsMeta.map((project) => ({
@@ -673,13 +922,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       for (const worktree of node.project.worktrees) ensureBucket(node, worktree.path, worktree);
     }
 
-    for (const session of sessions) {
-      const directory = getSessionDirectory(session);
-      if (!directory) continue;
-      const normalizedDirectory = normalizePath(directory);
-      const node = nodes.find((entry) => projectMatchesExactDirectory(entry.project, normalizedDirectory));
+    for (const session of projectSessions) {
+      const owner = sessionOwnership.bySessionId.get(session.id);
+      if (!owner) continue;
+      const node = nodes.find((entry) => entry.project.id === owner.projectId);
       if (!node) continue;
-      const matchedWorktree = findExactWorktreeMatch(node.project, normalizedDirectory);
+      const matchedWorktree = findExactWorktreeMatch(node.project, owner.scopeDirectory);
       const bucket = matchedWorktree
         ? ensureBucket(node, matchedWorktree.path, matchedWorktree)
         : ensureBucket(node, node.project.path, null);
@@ -688,7 +936,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
     for (const node of nodes) {
       for (const bucket of node.buckets) {
-        bucket.sessions.sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
+        bucket.sessions = orderSessionsByLifecycleScopes(bucket.sessions, pinnedSessionIds, sessionOrderRanks);
         for (const session of bucket.sessions) {
           if (!getParentId(session)) node.totalSessions += 1;
         }
@@ -696,7 +944,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, projectsMeta, sessions]);
+  }, [activeProjectId, pinnedSessionIds, projectSessions, projectsMeta, sessionOrderRanks, sessionOwnership]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -712,8 +960,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const isProjectExpanded = (node: ProjectNode): boolean =>
     projectExpandedMap[node.project.id] ?? true;
 
+  // Worktrees default to EXPANDED (desktop parity): their sessions ARE the
+  // content; the header still toggles for users who want them tucked away.
   const isWorktreeExpanded = (node: ProjectNode, bucket: WorktreeBucket): boolean =>
-    worktreeExpandedMap[`${node.project.id}::${bucket.key}`] ?? false;
+    worktreeExpandedMap[`${node.project.id}::${bucket.key}`] ?? true;
 
   const resetBucketVisibleCount = (bucketKey: string) => {
     setVisibleCountByBucket((previous) => {
@@ -739,10 +989,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     });
   };
 
-  const showMoreBucketSessions = (bucketKey: string, currentVisibleCount: number) => {
+  const showMoreBucketSessions = (bucketKey: string, currentVisibleCount: number, pageSize: number) => {
     setVisibleCountByBucket((previous) => {
       const next = new Map(previous);
-      next.set(bucketKey, currentVisibleCount + SESSIONS_PER_BUCKET);
+      next.set(bucketKey, currentVisibleCount + pageSize);
       return next;
     });
   };
@@ -750,8 +1000,21 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Paginated, tree-aware list of a bucket's sessions: top-level sessions paginate,
   // and a parent with subsessions can be expanded to reveal its children (nested,
   // recursively). Pagination counts only top-level sessions.
-  const renderBucketSessions = (node: ProjectNode, bucket: WorktreeBucket, indent: number) => {
-    const bucketKey = `${node.project.id}::${bucket.key}`;
+  const renderBucketSessions = (
+    bucketKey: string,
+    bucket: WorktreeBucket,
+    indent: number,
+    options?: {
+      /** Roots revealed before the first "Show more". Defaults to SESSIONS_PER_BUCKET. */
+      pageSize?: number;
+      /** Roots that always render and never count against the page (pinned). */
+      alwaysVisibleIds?: Set<string>;
+      /** Timeline chats: flush-left rows with the status dot on the right. */
+      statusOnRight?: boolean;
+    },
+  ) => {
+    const pageSize = options?.pageSize ?? SESSIONS_PER_BUCKET;
+    const alwaysVisibleIds = options?.alwaysVisibleIds;
 
     // Group children by parent within this bucket, and treat sessions whose parent
     // is not in this bucket as top-level so nothing is hidden.
@@ -770,10 +1033,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       return !parentId || !idsInBucket.has(parentId);
     });
 
-    const visibleCount = visibleCountByBucket.get(bucketKey) ?? SESSIONS_PER_BUCKET;
-    const visibleRoots = roots.slice(0, visibleCount);
-    const remaining = roots.length - visibleRoots.length;
-    const canShowFewer = roots.length > SESSIONS_PER_BUCKET && remaining === 0;
+    // Pinned roots stay on screen whatever the page is, and do not consume it.
+    const alwaysVisibleRoots = alwaysVisibleIds
+      ? roots.filter((entry) => alwaysVisibleIds.has(entry.id))
+      : [];
+    const pagedRoots = alwaysVisibleIds
+      ? roots.filter((entry) => !alwaysVisibleIds.has(entry.id))
+      : roots;
+    const visibleCount = visibleCountByBucket.get(bucketKey) ?? pageSize;
+    const visiblePagedRoots = pagedRoots.slice(0, visibleCount);
+    const visibleRoots = [...alwaysVisibleRoots, ...visiblePagedRoots];
+    const remaining = pagedRoots.length - visiblePagedRoots.length;
+    const canShowFewer = pagedRoots.length > pageSize && remaining === 0;
 
     const renderNode = (session: Session, rowIndent: number): React.ReactNode => {
       const children = childrenByParent.get(session.id) ?? [];
@@ -788,10 +1059,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             hasChildren={hasChildren}
             expanded={expanded}
             onToggleChildren={hasChildren ? () => toggleParent(session.id) : undefined}
-            confirmingArchive={confirmingArchiveSessionId === session.id}
             onSelect={() => handleSelectSession(session)}
-            onRequestArchive={() => handleRequestArchive(session.id)}
-            onConfirmArchive={() => void handleConfirmArchive(session)}
+            statusOnRight={options?.statusOnRight}
+            revealed={revealedSessionId === session.id}
+            onRevealedChange={(nextRevealed) => handleRowRevealedChange(session.id, nextRevealed)}
+            confirmingDelete={confirmingDeleteSessionId === session.id}
+            onArchive={() => void handleArchive(session)}
+            onRequestDelete={() => setConfirmingDeleteSessionId(session.id)}
+            onConfirmDelete={() => void handleConfirmDelete(session)}
+            renaming={renamingSessionId === session.id}
+            onRequestRename={() => handleRequestRename(session.id)}
+            onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
+            onCancelRename={() => setRenamingSessionId(null)}
           />
           {hasChildren && expanded
             ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
@@ -804,7 +1083,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       <div>
         {visibleRoots.map((session) => renderNode(session, indent))}
         {remaining > 0 ? (
-          <ShowMoreRow indent={indent} onClick={() => showMoreBucketSessions(bucketKey, visibleRoots.length)} />
+          <ShowMoreRow indent={indent} onClick={() => showMoreBucketSessions(bucketKey, visiblePagedRoots.length, pageSize)} />
         ) : null}
         {canShowFewer ? (
           <ShowFewerRow indent={indent} onClick={() => resetBucketVisibleCount(bucketKey)} />
@@ -830,23 +1109,67 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // Switching session switches the working directory (handled by
     // setCurrentSession) — also move the active project so the rest of the app
     // and the active highlight follow the selected session, not just the draft.
-    const project = findExactProjectMatch(projectsMeta, directory ?? '');
-    if (project) setActiveProjectIdOnly(project.id);
+    const owner = sessionOwnership.bySessionId.get(session.id);
+    const project = owner ? projectsMeta.find((candidate) => candidate.id === owner.projectId) ?? null : null;
+    if (project) {
+      setActiveProjectIdOnly(project.id);
+      // Expand the session's project (and worktree group) in the tree, so a
+      // session picked from search is actually visible — and the open-time
+      // auto-scroll can land on it — the next time the drawer opens.
+      setProjectExpanded(project.id, true);
+      const worktree = findExactWorktreeMatch(project, owner?.scopeDirectory ?? '');
+      if (worktree) setWorktreeExpanded(`${project.id}::${normalizePath(worktree.path)}`, true);
+    }
     void setCurrentSession(session.id, directory);
     onOpenChange(false);
   };
 
-  // Two-step archive: first tap arms the confirm on that row, second confirms.
-  // Only one row can be in the confirming state at a time.
-  const handleRequestArchive = (sessionId: string) => {
-    setConfirmingArchiveSessionId((current) => (current === sessionId ? null : sessionId));
+  // Swipe actions. Revealing a row disarms any pending delete confirm; archive
+  // fires immediately (the swipe itself is the intent), delete stays two-step.
+  const handleRowRevealedChange = (sessionId: string, nextRevealed: boolean) => {
+    setRevealedSessionId(nextRevealed ? sessionId : null);
+    setConfirmingDeleteSessionId(null);
+    setRevealedRowId(null);
+    setConfirmingRemoveProjectId(null);
   };
 
-  const handleConfirmArchive = async (session: Session) => {
-    setConfirmingArchiveSessionId(null);
-    const ok = await archiveSession(session.id);
-    if (ok) toast.success(t('sessions.sidebar.session.archive.success'));
-    else toast.error(t('sessions.sidebar.session.archive.error'));
+  // Same contract for group headers (project / worktree rows).
+  const handleRowKeyRevealedChange = (rowKey: string, nextRevealed: boolean) => {
+    setRevealedRowId(nextRevealed ? rowKey : null);
+    setConfirmingRemoveProjectId(null);
+    setRevealedSessionId(null);
+    setConfirmingDeleteSessionId(null);
+  };
+
+  const runSubtreeAction = (action: SessionSubtreeAction, session: Session) => {
+    setRevealedSessionId(null);
+    setConfirmingDeleteSessionId(null);
+    return runSessionSubtreeAction(
+      action,
+      session,
+      collectSessionSubtreeIds(session.id, getDescendantIds(childrenBySessionId, session.id), action === 'delete'),
+      { archiveSession, archiveSessions, deleteSession, deleteSessions },
+      t,
+    );
+  };
+
+  const handleArchive = (session: Session) => runSubtreeAction('archive', session);
+
+  const handleConfirmDelete = (session: Session) => runSubtreeAction('delete', session);
+
+  const handleRequestRename = (sessionId: string) => {
+    setRevealedSessionId(null);
+    setConfirmingDeleteSessionId(null);
+    setRenamingSessionId(sessionId);
+  };
+
+  const handleSubmitRename = async (sessionId: string, title: string) => {
+    setRenamingSessionId(null);
+    try {
+      await updateSessionTitle(sessionId, title);
+    } catch {
+      toast.error(t('mobile.sessions.renameError'));
+    }
   };
 
   const handleStartNewChat = () => {
@@ -865,9 +1188,25 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  // The order is a shared setting, so persist it the same way the desktop
+  // sidebar does — picking it here follows the user to their other surfaces.
+  const handleProjectSortChange = (order: ProjectSortOrder) => {
+    setProjectSortOrder(order);
+    void updateDesktopSettings({ sidebarProjectSortOrder: order });
+    // Dragging projects rewrites the manual order; it means nothing while the
+    // list is sorted by something else.
+    if (order !== 'manual') setEditingOrder(false);
+  };
+
+  // Per-surface profile setting: the phone's choice must not flip the desktop's.
+  const handleViewModeChange = (mode: SidebarViewMode) => {
+    setSidebarViewMode(mode);
+    void updateDesktopSettings({ sidebarViewMode: mode });
+    if (mode === 'timeline') setEditingOrder(false);
+  };
+
   const handleReorderDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    setConfirmingDeleteId(null);
     if (!over || active.id === over.id) return;
     const fromIndex = projectsMeta.findIndex((p) => p.id === active.id);
     const toIndex = projectsMeta.findIndex((p) => p.id === over.id);
@@ -875,27 +1214,28 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     reorderProjects(fromIndex, toIndex);
   };
 
-  const handleRequestRemoveProject = (projectId: string) => {
-    setConfirmingDeleteId((current) => (current === projectId ? null : projectId));
-  };
-
-  const handleConfirmRemoveProject = (project: ProjectMeta) => {
-    removeProject(project.id);
-    setConfirmingDeleteId(null);
-    toast.success(t('mobile.sessions.toast.projectRemoved', { label: project.label }));
+  const toggleReorderProjectExpanded = (projectId: string) => {
+    setReorderExpandedProjects((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
   };
 
   /** Short "Project · branch" string shown under the session title in search results. */
   const buildSessionContextLabel = React.useCallback(
     (session: Session): string => {
       const directory = getSessionDirectory(session);
-      const project = findExactProjectMatch(projectsMeta, directory);
+      if (isChatDirectoryPath(directory)) return t('mobile.sessions.section.chats');
+      const owner = sessionOwnership.bySessionId.get(session.id);
+      const project = owner ? projectsMeta.find((candidate) => candidate.id === owner.projectId) ?? null : null;
       if (!project) return getProjectLabel(directory) || directory;
-      const matchedWorktree = findExactWorktreeMatch(project, normalizePath(directory));
+      const matchedWorktree = findExactWorktreeMatch(project, owner?.scopeDirectory ?? '');
       if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
       return project.label;
     },
-    [projectsMeta],
+    [projectsMeta, sessionOwnership, t],
   );
 
   const handleSelectProject = (project: ProjectMeta) => {
@@ -903,10 +1243,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     onOpenChange(false);
   };
 
+  // Same contract as the desktop sidebar's per-project "+": the draft carries
+  // the project and its directory, so the app's current directory is not
+  // switched out from under the session that is still open behind the drawer.
+  const handleNewSessionInProject = (project: ProjectMeta) => {
+    setActiveProjectIdOnly(project.id);
+    openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+    onOpenChange(false);
+  };
+
   const filteredNodes = React.useMemo(() => {
     if (!normalizedQuery) return projectNodes;
     return projectNodes.filter((node) => {
-      if (`${node.project.label} ${node.project.path}`.toLowerCase().includes(normalizedQuery)) return true;
+      if (matchesRankQuery([node.project.label, node.project.path], normalizedQuery)) return true;
       return node.buckets.some((bucket) =>
         bucket.sessions.some((session) => sessionMatchesQuery(session, node.project.label, normalizedQuery)),
       );
@@ -920,32 +1269,122 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Flat lists used only by the dedicated search-results view.
   const searchSessionMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Session[];
-    return sessions
-      .filter((session) => {
-        const directory = getSessionDirectory(session);
-        const project = findExactProjectMatch(projectsMeta, directory);
+    return orderSessionsByLifecycleScopes(
+      sessions.filter((session) => {
+        // Subsessions are implementation noise in a flat search list — only
+        // top-level sessions are searchable.
+        if (getParentId(session)) return false;
+        const owner = sessionOwnership.bySessionId.get(session.id);
+        const project = owner ? projectsMeta.find((candidate) => candidate.id === owner.projectId) ?? null : null;
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
-      })
-      .sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
-  }, [normalizedQuery, projectsMeta, sessions]);
+      }),
+      pinnedSessionIds,
+      sessionOrderRanks,
+    );
+  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessionOwnership, sessions]);
 
-  const searchProjectMatches = React.useMemo(() => {
-    if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;
-    return projectsMeta
-      .filter((project) => `${project.label} ${project.path}`.toLowerCase().includes(normalizedQuery))
-      .map((project) => ({
-        ...project,
-        sessionCount: sessions.filter((session) => {
-          if (getParentId(session)) return false;
-          const directory = normalizePath(getSessionDirectory(session));
-          return projectMatchesExactDirectory(project, directory);
-        }).length,
-      }));
-  }, [normalizedQuery, projectsMeta, sessions]);
+  const searchProjectMatches = React.useMemo<ProjectMeta[]>(() => {
+    if (!normalizedQuery) return [];
+    return rankByQuery(projectsMeta, normalizedQuery, (project) => [project.label, project.path]);
+  }, [normalizedQuery, projectsMeta]);
+
+  // Timeline mode: one flat, lifecycle-ordered list of every root project
+  // session, with no project or worktree grouping. Search keeps the grouped
+  // behaviour, and reorder mode has nothing to reorder here.
+  const timelineActive = sidebarViewMode === 'timeline' && !normalizedQuery && !editingOrder;
+
+  // The git store only knows directories something asked about. The grouped
+  // view never needs project root branches, so the timeline requests them
+  // itself, the way the desktop sidebar's project headers do.
+  React.useEffect(() => {
+    if (!timelineActive || !git) return;
+    for (const project of projectsMeta) {
+      const root = normalizePath(project.path);
+      if (root) void runBackgroundNetworkTask(() => ensureGitStatus(root, git));
+    }
+  }, [ensureGitStatus, git, projectsMeta, timelineActive]);
+
+  // Project, worktree and branch resolved once per session rather than per row.
+  const timelineContextById = React.useMemo(() => {
+    const contexts = new Map<string, { project: ProjectMeta; branch: string | null }>();
+    if (!timelineActive) return contexts;
+    const locations = resolveSidebarSessionLocations({
+      sessions: projectSessions,
+      projects: projectsMeta.map((project) => ({ id: project.id, normalizedPath: project.path, label: project.label })),
+      ownerBySessionId: sessionOwnership.bySessionId,
+      availableWorktreesByProject: new Map(projectsMeta.map((project) => [project.path, project.worktrees])),
+      gitBranches: gitBranchesByDirectory,
+      homeDirectory: null,
+      hideBranchMatchingProjectLabel: false,
+    });
+    for (const session of projectSessions) {
+      if (getParentId(session)) continue;
+      const location = locations.get(session.id);
+      const project = location ? projectsMeta.find((candidate) => candidate.id === location.projectId) : null;
+      if (!project || !location) continue;
+      contexts.set(session.id, { project, branch: location.branchLabel });
+    }
+    return contexts;
+  }, [gitBranchesByDirectory, projectSessions, projectsMeta, sessionOwnership, timelineActive]);
+
+  const timelineEntries = React.useMemo<TimelineEntry[]>(() => {
+    if (!timelineActive) return [];
+    const roots = projectSessions.filter(
+      (session) => !getParentId(session) && timelineContextById.has(session.id),
+    );
+    return orderSessionsByLifecycleScopes(roots, pinnedSessionIds, sessionOrderRanks).flatMap((session) => {
+      const context = timelineContextById.get(session.id);
+      return context ? [{ session, project: context.project, branch: context.branch }] : [];
+    });
+  }, [pinnedSessionIds, projectSessions, sessionOrderRanks, timelineActive, timelineContextById]);
+
+  const revealMoreTimelineSessions = React.useCallback(() => {
+    setTimelineVisibleCount((current) => revealNextTimelinePage(current, timelineEntries.length));
+  }, [timelineEntries.length]);
+
+  const timelineHandlers: TimelineRowHandlers = {
+    currentSessionId,
+    revealedSessionId,
+    confirmingDeleteSessionId,
+    renamingSessionId,
+    onSelect: handleSelectSession,
+    onRevealedChange: handleRowRevealedChange,
+    onArchive: (session) => void handleArchive(session),
+    onRequestDelete: setConfirmingDeleteSessionId,
+    onConfirmDelete: (session) => void handleConfirmDelete(session),
+    onRequestRename: handleRequestRename,
+    onSubmitRename: (sessionId, title) => void handleSubmitRename(sessionId, title),
+    onCancelRename: () => setRenamingSessionId(null),
+  };
 
   const hasNoMatches =
     normalizedQuery && searchSessionMatches.length === 0 && searchProjectMatches.length === 0;
-  const canEditOrder = !normalizedQuery && projectsMeta.length > 1;
+  // Drag order IS the manual order: offering it under another sort would let
+  // the user rearrange a list that is about to be re-sorted anyway.
+  // The timeline has no project list to reorder, so the toggle goes with it.
+  const canEditOrder = !normalizedQuery
+    && !timelineActive
+    && projectsMeta.length > 1
+    && projectSortOrder === 'manual';
+
+  // Sorting lives in the header next to reordering — the two answer the same
+  // question about the list, and a permanent row of modes above it would cost
+  // a project row for a setting touched once a month.
+  // Reachable with a single project too: the panel also holds the view switch,
+  // which matters long before a second project exists.
+  const sortToggle = !editingOrder && !normalizedQuery && projectsMeta.length > 0 ? (
+    <Button
+      type="button"
+      variant="chip"
+      size="sm"
+      aria-label={t('sessions.sidebar.header.displayMode.label')}
+      title={t('sessions.sidebar.header.displayMode.label')}
+      onClick={() => setSortPanelOpen(true)}
+      style={{ touchAction: 'manipulation' }}
+    >
+      <Icon name="equalizer-2" className="size-4" />
+    </Button>
+  ) : null;
 
   const editToggle = canEditOrder ? (
     <Button
@@ -990,56 +1429,46 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
+  // The new-session button keeps the outer right edge whatever else is showing:
+  // it is the one action people reach for without looking, so it must not slide
+  // around as the icons beside it come and go.
   const trailingActions =
-    newChatButton || addProjectButton || editToggle ? (
+    newChatButton || addProjectButton || sortToggle || editToggle ? (
       <>
-        {newChatButton}
         {addProjectButton}
+        {sortToggle}
         {editToggle}
+        {newChatButton}
       </>
     ) : null;
 
-  return (
-    <MobileSurfaceShell
-      open={open}
-      onClose={() => onOpenChange(false)}
-      ariaLabel={t('mobile.sessions.sheet.title')}
-      title={t('mobile.sessions.sheet.title')}
-      trailing={trailingActions}
-    >
-      <div className="flex h-full flex-col">
-        <div className={cn('shrink-0 px-4 pb-2 pt-1', editingOrder && 'hidden')}>
-          <div className="relative">
-            <RiSearchLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
+  // flex-1 + min-h-0 rather than h-full: both hosts put a fixed-height header
+  // above this, so a 100% height overflows by exactly that header — and the
+  // clipped overflow swallowed the footer.
+  const surfaceContent = (
+      <div ref={contentRootRef} className="flex min-h-0 flex-1 flex-col">
+        <ScrollShadow ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto pb-4">
+          {/* The search bar scrolls WITH the list (iOS-style): the open-time
+              auto-scroll to the current session naturally tucks it away, and
+              scrolling to the very top brings it back. */}
+          <div className={cn('px-4 pb-2 pt-1', editingOrder && 'hidden')}>
+            <SessionSearchInput
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onSearch={setQuery}
+              active={open || variant === 'sidebar'}
+              mobile
               placeholder={t('mobile.sessions.search.placeholder')}
-              className={cn('h-11 pl-9', query && 'pr-10')}
+              clearLabel={t('mobile.sessions.clearSearchAria')}
             />
-            {query ? (
-              <button
-                type="button"
-                className="absolute right-1.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                aria-label={t('mobile.sessions.clearSearchAria')}
-                onClick={() => setQuery('')}
-                style={{ touchAction: 'manipulation' }}
-              >
-                <RiCloseLine className="size-4" />
-              </button>
-            ) : null}
           </div>
-        </div>
-
-        <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
-          {projectsMeta.length === 0 ? (
+          {projectsMeta.length === 0 && chatSessions.length === 0 ? (
             <MobileSessionsEmpty
               title={t('mobile.sessions.empty.noProjectsTitle')}
               description={t('mobile.sessions.empty.noProjectsDescription')}
               action={
                 <button
                   type="button"
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 typography-ui-label text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 typography-ui-label text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => setDirectoryDialogOpen(true)}
                 >
                   <RiFolderAddLine className="size-4" />
@@ -1064,9 +1493,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       {searchSessionMatches.length}
                     </span>
                   </div>
-                  <div className="overflow-hidden rounded-2xl border border-border/40 bg-[var(--surface-elevated)]">
+                  <div className="overflow-hidden rounded-2xl border border-border/70 bg-[var(--surface-elevated)]">
                     {searchSessionMatches.map((session, index) => (
-                      <div key={session.id} className={cn(index > 0 && 'border-t border-border/30')}>
+                      <div key={session.id} className={cn(index > 0 && 'border-t border-border/70')}>
                         <SessionRow
                           session={session}
                           active={currentSessionId === session.id}
@@ -1090,15 +1519,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       {searchProjectMatches.length}
                     </span>
                   </div>
-                  <div className="overflow-hidden rounded-2xl border border-border/40 bg-[var(--surface-elevated)]">
+                  <div className="overflow-hidden rounded-2xl border border-border/70 bg-[var(--surface-elevated)]">
                     {searchProjectMatches.map((project, index) => (
                       <div
                         key={project.id}
-                        className={cn('flex items-center', index > 0 && 'border-t border-border/30')}
+                        className={cn('flex items-center', index > 0 && 'border-t border-border/70')}
                       >
                         <button
                           type="button"
-                          className="flex min-h-14 min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                          className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                           onClick={() => handleSelectProject(project)}
                           style={{ touchAction: 'manipulation' }}
                         >
@@ -1106,16 +1535,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">
                             {project.label}
                           </span>
-                          <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
-                            {project.sessionCount}
-                          </span>
                         </button>
                         {project.isGitRepo ? (
-                          <NewWorktreeIconButton
-                            className="mr-2"
-                            onClick={() => handleNewWorktree(project.id)}
-                          />
+                          <NewWorktreeIconButton onClick={() => handleNewWorktree(project.id)} />
                         ) : null}
+                        <NewSessionIconButton
+                          className="mr-2"
+                          label={t('mobile.sessions.newSessionInProjectAria', { label: project.label })}
+                          onClick={() => handleNewSessionInProject(project)}
+                        />
                       </div>
                     ))}
                   </div>
@@ -1140,10 +1568,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           key={project.id}
                           project={project}
                           totalSessions={node?.totalSessions ?? 0}
-                          confirmingDelete={confirmingDeleteId === project.id}
-                          onEdit={() => setEditingProjectId(project.id)}
-                          onRequestRemove={() => handleRequestRemoveProject(project.id)}
-                          onConfirmRemove={() => handleConfirmRemoveProject(project)}
+                          expanded={reorderExpandedProjects.has(project.id)}
+                          onToggleExpanded={() => toggleReorderProjectExpanded(project.id)}
+                          onReorderWorktrees={(orderedPaths) => setWorktreeOrder(project.id, orderedPaths)}
                         />
                       );
                     })}
@@ -1153,7 +1580,74 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
-              {orderedNodes.map((node, nodeIndex) => {
+              {(() => {
+                const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
+                const chatsLabel = t('mobile.sessions.section.chats');
+                return (
+                  <section>
+                    <div className="flex min-h-12 w-full items-center">
+                      <button
+                        type="button"
+                        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        onClick={() => {
+                          if (revealedRowId) {
+                            handleRowKeyRevealedChange(revealedRowId, false);
+                            return;
+                          }
+                          toggleProject(CHAT_DRAFT_PROJECT_ID, chatsExpanded);
+                        }}
+                        aria-expanded={chatsExpanded}
+                        aria-label={
+                          chatsExpanded
+                            ? t('sessions.sidebar.group.collapseAria', { label: chatsLabel })
+                            : t('sessions.sidebar.group.expandAria', { label: chatsLabel })
+                        }
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-muted)] text-muted-foreground">
+                          <Icon name="chat-4" className="size-4" />
+                        </span>
+                        <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                          {chatsLabel}
+                        </span>
+                        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                          {chatRootCount}
+                        </span>
+                      </button>
+                    </div>
+                    {chatsExpanded ? (
+                      <div className="pb-2">
+                        {chatsBucket.sessions.length > 0 ? (
+                          // The timeline leads with chats, so it shows a short
+                          // page of them; pinned chats always ride along.
+                          renderBucketSessions(
+                            chatsBucketKey,
+                            chatsBucket,
+                            timelineActive ? TIMELINE_CHAT_INDENT : PROJECT_SESSION_INDENT,
+                            timelineActive
+                              ? { pageSize: TIMELINE_CHAT_PAGE_SIZE, alwaysVisibleIds: pinnedSessionIds, statusOnRight: true }
+                              : undefined,
+                          )
+                        ) : (
+                          <p className="px-3 pb-1 typography-micro text-muted-foreground" style={{ paddingLeft: PROJECT_SESSION_INDENT }}>
+                            {t('sessions.sidebar.activity.chatsEmpty')}
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })()}
+              {timelineActive ? (
+                <MobileTimelineList
+                  entries={timelineEntries}
+                  visibleCount={timelineVisibleCount}
+                  onRevealMore={revealMoreTimelineSessions}
+                  scrollRootRef={scrollerRef}
+                  handlers={timelineHandlers}
+                />
+              ) : null}
+              {timelineActive ? null : orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
                   ? node.buckets.filter((bucket) =>
@@ -1166,37 +1660,90 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 return (
                   <section
                     key={node.project.id}
-                    className={cn(nodeIndex > 0 && 'border-t border-border/30')}
+                    className="border-t border-border/70"
                   >
-                    <div className="flex min-h-14 w-full items-center">
-                      <button
-                        type="button"
-                        className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
-                        onClick={() => toggleProject(node.project.id, projectExpanded)}
-                        aria-expanded={projectExpanded}
-                        aria-label={
-                          projectExpanded
-                            ? t('sessions.sidebar.group.collapseAria', { label: node.project.label })
-                            : t('sessions.sidebar.group.expandAria', { label: node.project.label })
-                        }
-                        style={{ touchAction: 'manipulation' }}
-                      >
-                        <MobileProjectIcon project={node.project} />
-                        <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
-                          {node.project.label}
-                        </span>
-                        {node.isActive ? <ActiveDot ariaLabel={t('mobile.sessions.activeProjectAria')} /> : null}
-                        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
-                          {node.totalSessions}
-                        </span>
-                      </button>
-                      {node.project.isGitRepo ? (
-                        <NewWorktreeIconButton
+                    <MobileSwipeActionsRow
+                      actionsWidth={96}
+                      revealed={revealedRowId === `project:${node.project.id}`}
+                      onRevealedChange={(nextRevealed) => handleRowKeyRevealedChange(`project:${node.project.id}`, nextRevealed)}
+                      actions={(
+                        <>
+                          <button
+                            type="button"
+                            tabIndex={revealedRowId === `project:${node.project.id}` ? 0 : -1}
+                            className={cn(
+                              'flex flex-1 items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-destructive',
+                              confirmingRemoveProjectId === node.project.id
+                                ? 'rounded-lg bg-destructive text-destructive-foreground'
+                                : 'text-[var(--status-error)] active:opacity-80',
+                            )}
+                            aria-label={confirmingRemoveProjectId === node.project.id
+                              ? t('mobile.sessions.confirmRemoveProjectAria', { label: node.project.label })
+                              : t('mobile.sessions.removeProjectAria', { label: node.project.label })}
+                            onClick={() => {
+                              if (confirmingRemoveProjectId === node.project.id) {
+                                setRevealedRowId(null);
+                                setConfirmingRemoveProjectId(null);
+                                removeProject(node.project.id);
+                                toast.success(t('mobile.sessions.toast.projectRemoved', { label: node.project.label }));
+                                return;
+                              }
+                              setConfirmingRemoveProjectId(node.project.id);
+                            }}
+                            style={{ touchAction: 'manipulation' }}
+                          >
+                            <RiDeleteBinLine className="size-[18px]" />
+                          </button>
+                          <button
+                            type="button"
+                            tabIndex={revealedRowId === `project:${node.project.id}` ? 0 : -1}
+                            className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                            aria-label={t('mobile.sessions.editProjectAria', { label: node.project.label })}
+                            onClick={() => {
+                              setRevealedRowId(null);
+                              setEditingProjectId(node.project.id);
+                            }}
+                            style={{ touchAction: 'manipulation' }}
+                          >
+                            <RiEdit2Line className="size-[18px]" />
+                          </button>
+                        </>
+                      )}
+                    >
+                      <div data-active-project={node.isActive || undefined} className="flex min-h-12 w-full items-center">
+                        <button
+                          type="button"
+                          className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                          onClick={() => {
+                            if (revealedRowId) {
+                              handleRowKeyRevealedChange(revealedRowId, false);
+                              return;
+                            }
+                            toggleProject(node.project.id, projectExpanded);
+                          }}
+                          aria-expanded={projectExpanded}
+                          aria-label={
+                            projectExpanded
+                              ? t('sessions.sidebar.group.collapseAria', { label: node.project.label })
+                              : t('sessions.sidebar.group.expandAria', { label: node.project.label })
+                          }
+                          style={{ touchAction: 'manipulation' }}
+                        >
+                          <MobileProjectIcon project={node.project} />
+                          <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                            {node.project.label}
+                          </span>
+                        </button>
+                        {node.project.isGitRepo ? (
+                          <NewWorktreeIconButton onClick={() => handleNewWorktree(node.project.id)} />
+                        ) : null}
+                        <NewSessionIconButton
                           className="mr-2"
-                          onClick={() => handleNewWorktree(node.project.id)}
+                          label={t('mobile.sessions.newSessionInProjectAria', { label: node.project.label })}
+                          onClick={() => handleNewSessionInProject(node.project)}
                         />
-                      ) : null}
-                    </div>
+                      </div>
+                    </MobileSwipeActionsRow>
 
                     {projectExpanded ? (
                       <div className="pb-2">
@@ -1209,17 +1756,45 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           return (
                             <>
                               {rootBucket && rootBucket.sessions.length > 0
-                                ? renderBucketSessions(node, rootBucket, PROJECT_SESSION_INDENT)
+                                ? renderBucketSessions(`${node.project.id}::${rootBucket.key}`, rootBucket, PROJECT_SESSION_INDENT)
                                 : null}
                               {worktreeBuckets.map((bucket) => {
                                 const worktreeExpanded = isWorktreeExpanded(node, bucket);
                                 const isActiveWt = activeWorktreePath === bucket.path;
                                 return (
                                   <div key={bucket.key}>
+                                    <MobileSwipeActionsRow
+                                      actionsWidth={48}
+                                      revealed={revealedRowId === `wt:${bucket.key}`}
+                                      onRevealedChange={(nextRevealed) => handleRowKeyRevealedChange(`wt:${bucket.key}`, nextRevealed)}
+                                      actions={(
+                                        <button
+                                          type="button"
+                                          tabIndex={revealedRowId === `wt:${bucket.key}` ? 0 : -1}
+                                          className="flex flex-1 items-center justify-center text-[var(--status-error)] transition-colors active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-destructive"
+                                          aria-label={t('mobile.projectEdit.deleteWorktreeAria', { label: bucket.label })}
+                                          onClick={() => {
+                                            setRevealedRowId(null);
+                                            if (bucket.worktree) {
+                                              setWorktreeToDelete({ project: node.project, worktree: bucket.worktree });
+                                            }
+                                          }}
+                                          style={{ touchAction: 'manipulation' }}
+                                        >
+                                          <RiDeleteBinLine className="size-[18px]" />
+                                        </button>
+                                      )}
+                                    >
                                     <button
                                       type="button"
-                                      className="flex min-h-11 w-full items-center gap-2 py-1.5 pl-4 pr-3 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
-                                      onClick={() => toggleWorktree(node.project.id, bucket.key, worktreeExpanded)}
+                                      className="flex min-h-10 w-full items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                      onClick={() => {
+                                        if (revealedRowId) {
+                                          handleRowKeyRevealedChange(revealedRowId, false);
+                                          return;
+                                        }
+                                        toggleWorktree(node.project.id, bucket.key, worktreeExpanded);
+                                      }}
                                       aria-expanded={worktreeExpanded}
                                       aria-label={
                                         worktreeExpanded
@@ -1228,9 +1803,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                       }
                                       style={{ touchAction: 'manipulation' }}
                                     >
-                                      <ChevronToggle expanded={worktreeExpanded} />
+                                      {/* Desktop visual language: muted semibold
+                                          branch label + git-branch icon, so
+                                          worktree headers recede while plain-
+                                          foreground session titles stand out. */}
                                       <Icon
-                                        name="node-tree"
+                                        name="git-branch"
                                         className={cn(
                                           'size-4 shrink-0',
                                           isActiveWt ? 'text-primary' : 'text-muted-foreground',
@@ -1238,8 +1816,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                       />
                                       <span
                                         className={cn(
-                                          'block min-w-0 flex-1 truncate typography-ui-label font-semibold',
-                                          isActiveWt ? 'text-foreground' : 'text-foreground/90',
+                                          'block min-w-0 flex-1 truncate typography-ui-label font-bold',
+                                          isActiveWt ? 'text-foreground' : 'text-muted-foreground',
                                         )}
                                       >
                                         {bucket.label}
@@ -1251,8 +1829,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                         {bucket.sessions.length}
                                       </span>
                                     </button>
+                                    </MobileSwipeActionsRow>
                                     {worktreeExpanded
-                                      ? renderBucketSessions(node, bucket, WORKTREE_SESSION_INDENT)
+                                      ? renderBucketSessions(`${node.project.id}::${bucket.key}`, bucket, PROJECT_SESSION_INDENT)
                                       : null}
                                   </div>
                                 );
@@ -1268,6 +1847,62 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           )}
         </ScrollShadow>
+
+        {/* App-level footer: instance on the left (Capacitor), settings —
+            plus a pending web update — on the right. Bottom placement keeps
+            the header for list actions and stays thumb-reachable. */}
+        {footer ? (
+          <div
+            className="flex shrink-0 items-center justify-between gap-2 border-t border-border/70 px-2 pt-1.5"
+            style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
+          >
+            {footer.instanceLabel && footer.onOpenInstances ? (
+              <Button
+                type="button"
+                variant="info"
+                size="lg"
+                className="min-w-0 shrink justify-start"
+                onClick={footer.onOpenInstances}
+                aria-label={t('mobile.menu.instances')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="server" className="size-[18px]" />
+                <span className="block min-w-0 truncate">{footer.instanceLabel}</span>
+              </Button>
+            ) : (
+              <div className="min-w-0 flex-1" />
+            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {footer.onOpenUpdate ? (
+                <Button
+                  type="button"
+                  variant="default"
+                  size="lg"
+                  className="w-10 px-0"
+                  onClick={footer.onOpenUpdate}
+                  aria-label={t('mobile.menu.update')}
+                  title={t('mobile.menu.update')}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <Icon name="download" className="size-5" />
+                  <span className="absolute right-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                className="w-10 px-0"
+                onClick={footer.onOpenSettings}
+                aria-label={t('mobile.menu.settings')}
+                title={t('mobile.menu.settings')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="settings-3" className="size-5" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <DirectoryExplorerDialog open={directoryDialogOpen} onOpenChange={setDirectoryDialogOpen} />
         <NewWorktreeDialog
@@ -1293,8 +1928,237 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           onClose={() => setEditingProjectId(null)}
           onWorktreesChanged={() => setWorktreeRefreshKey((value) => value + 1)}
         />
+        <MobileOverlayPanel
+          open={sortPanelOpen}
+          onClose={() => setSortPanelOpen(false)}
+          title={t('sessions.sidebar.header.displayMode.label')}
+        >
+          <div className="flex flex-col">
+            <span className="px-3 pb-1 pt-1 typography-micro font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('mobile.sessions.viewMode.label')}
+            </span>
+            {VIEW_MODE_OPTIONS.map(([mode, labelKey]) => (
+              <button
+                key={mode}
+                type="button"
+                className={cn(
+                  'flex min-h-11 w-full items-center justify-between rounded-lg px-3 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  sidebarViewMode === mode ? 'text-primary' : 'text-foreground',
+                )}
+                onClick={() => {
+                  handleViewModeChange(mode);
+                  setSortPanelOpen(false);
+                }}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <span className="typography-ui-label">{t(labelKey)}</span>
+                {sidebarViewMode === mode ? <Icon name="check" className="size-4" /> : null}
+              </button>
+            ))}
+            {/* Project order only means something while projects are groups. */}
+            {sidebarViewMode === 'timeline' ? null : (
+              <span className="px-3 pb-1 pt-3 typography-micro font-semibold uppercase tracking-wider text-muted-foreground">
+                {t('sessions.sidebar.header.actions.sortProjects')}
+              </span>
+            )}
+            {sidebarViewMode === 'timeline' ? null : PROJECT_SORT_OPTIONS.map(([order, labelKey]) => (
+              <button
+                key={order}
+                type="button"
+                className={cn(
+                  'flex min-h-11 w-full items-center justify-between rounded-lg px-3 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  projectSortOrder === order ? 'text-primary' : 'text-foreground',
+                )}
+                onClick={() => {
+                  handleProjectSortChange(order);
+                  setSortPanelOpen(false);
+                }}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <span className="typography-ui-label">{t(labelKey)}</span>
+                {projectSortOrder === order ? <Icon name="check" className="size-4" /> : null}
+              </button>
+            ))}
+          </div>
+        </MobileOverlayPanel>
+
+        {worktreeToDelete ? (
+          <MobileDeleteWorktreeDialog
+            open
+            project={{ id: worktreeToDelete.project.id, path: worktreeToDelete.project.path }}
+            worktree={worktreeToDelete.worktree}
+            onClose={() => setWorktreeToDelete(null)}
+            onDeleted={() => setWorktreeRefreshKey((value) => value + 1)}
+          />
+        ) : null}
       </div>
-    </MobileSurfaceShell>
+  );
+
+  if (variant === 'sidebar') {
+    if (!open) return null;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center justify-between gap-2 border-b border-border/70 px-4">
+          <h2 className="truncate typography-ui-label font-semibold text-foreground">
+            {t('mobile.sessions.sheet.title')}
+          </h2>
+          {trailingActions ? (
+            <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
+          ) : null}
+        </div>
+        {surfaceContent}
+      </div>
+    );
+  }
+
+  return (
+    <MobileSessionsDrawerContainer
+      open={open}
+      onClose={() => onOpenChange(false)}
+      // The mirror of the swipe that opened the drawer closes it again —
+      // except while a row has its actions out: then the same swipe is the
+      // user putting those away, so it only clears them.
+      onSwipeClose={() => {
+        if (revealedSessionId || revealedRowId) {
+          setRevealedSessionId(null);
+          setRevealedRowId(null);
+          setConfirmingDeleteSessionId(null);
+          setConfirmingRemoveProjectId(null);
+          return;
+        }
+        onOpenChange(false);
+      }}
+      ariaLabel={t('mobile.sessions.sheet.title')}
+    >
+      <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
+        <button
+          type="button"
+          className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t('mobile.surface.closeAria')}
+          onClick={() => onOpenChange(false)}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Icon name="close" className="size-5" />
+        </button>
+        <h2 className="min-w-0 flex-1 truncate px-1 typography-ui-label font-semibold text-foreground">
+          {t('mobile.sessions.sheet.title')}
+        </h2>
+        {trailingActions ? (
+          <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
+        ) : null}
+      </div>
+      {surfaceContent}
+    </MobileSessionsDrawerContainer>
+  );
+};
+
+const DRAWER_ROOT_ID = 'mobile-surface-root';
+const DRAWER_ENTER_DELAY_MS = 16;
+// Slightly long, decelerating slide — matches the workspace drawer so both
+// sides feel like the same piece of chrome.
+const DRAWER_ENTER_DURATION_MS = 320;
+const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
+/** Full-width left drawer for the phone sessions list: covers the whole app
+    and slides in from the left edge. Closes via the header X, a right-edge
+    swipe back toward the left (the mirror of the gesture that opened it),
+    Escape, or the Android back button (handled by MobileShell).
+
+    Stays MOUNTED while closed (parked off-screen, hidden): the sessions
+    sheet's project/worktree state stays warm, so reopening shows the tree
+    instantly instead of refetching from scratch — and the close slide can
+    actually play instead of the drawer vanishing on unmount. */
+const MobileSessionsDrawerContainer: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  /** What the closing edge swipe does; the drawer's owner may want it to undo
+      a lighter state first. Falls back to `onClose`. */
+  onSwipeClose?: () => void;
+  ariaLabel: string;
+  children: React.ReactNode;
+}> = ({ open, onClose, onSwipeClose, ariaLabel, children }) => {
+  const rootRef = React.useRef<HTMLElement | null>(null);
+  const drawerRef = React.useRef<HTMLElement>(null);
+  const [entered, setEntered] = React.useState(false);
+  // Kept visible through the exit slide; flipped to hidden once it finishes.
+  const [visible, setVisible] = React.useState(open);
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  const onSwipeCloseRef = React.useRef(onSwipeClose);
+  React.useEffect(() => {
+    onSwipeCloseRef.current = onSwipeClose;
+  }, [onSwipeClose]);
+
+  // Swipe from the drawer's right edge back toward the left = close, the
+  // reverse of the left-edge swipe that opened it from the chat. Rows inside
+  // reveal their actions in the opposite direction, so the two never fight.
+  useEdgeSwipe(drawerRef, {
+    enabled: open,
+    onRightEdgeSwipe: () => (onSwipeCloseRef.current ?? onCloseRef.current)(),
+  });
+
+  if (typeof document !== 'undefined' && !rootRef.current) {
+    let root = document.getElementById(DRAWER_ROOT_ID);
+    if (!root) {
+      root = document.createElement('div');
+      root.id = DRAWER_ROOT_ID;
+      document.body.appendChild(root);
+    }
+    rootRef.current = root;
+  }
+
+  React.useEffect(() => {
+    if (open) {
+      setVisible(true);
+      const id = window.setTimeout(() => setEntered(true), DRAWER_ENTER_DELAY_MS);
+      return () => window.clearTimeout(id);
+    }
+    setEntered(false);
+    const id = window.setTimeout(() => setVisible(false), DRAWER_ENTER_DURATION_MS + 40);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  if (!rootRef.current) return null;
+
+  return createPortal(
+    <section
+      ref={drawerRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel}
+      aria-hidden={!open}
+      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      style={{
+        paddingTop: 'var(--oc-safe-area-top, 0px)',
+        // Settled state drops the transform entirely so the drawer isn't kept
+        // on a compositing layer (iOS clips those to the safe-area viewport).
+        transform: entered ? 'none' : 'translateX(-100%)',
+        transition: `transform ${DRAWER_ENTER_DURATION_MS}ms ${DRAWER_EASING}`,
+        visibility: visible ? 'visible' : 'hidden',
+        pointerEvents: open ? 'auto' : 'none',
+      }}
+    >
+      <div className="flex h-full min-h-0 flex-col">
+        {children}
+      </div>
+    </section>,
+    rootRef.current,
   );
 };
 

@@ -120,9 +120,9 @@ const DEFAULT_OUT_DIR = path.join(REPO_ROOT, 'packages', 'ui', 'src', 'lib', 'th
 
 const DEFAULT_CONFIG = {
   fonts: {
-    sans: '"IBM Plex Mono", monospace',
-    mono: '"IBM Plex Mono", monospace',
-    heading: '"IBM Plex Mono", monospace',
+    sans: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+    mono: 'ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace',
+    heading: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
   },
   radius: {
     none: '0',
@@ -979,10 +979,6 @@ function buildTheme(
         typing: weakText,
       },
       markdown: {
-        heading1: token(resolved, 'markdown-heading', primaryBase),
-        heading2: token(resolved, 'markdown-heading', primaryBase),
-        heading3: strongText,
-        heading4: foreground,
         link: token(resolved, 'markdown-link', primaryBase),
         linkHover: token(resolved, 'markdown-link-text', primaryHover),
         inlineCode: token(resolved, 'markdown-code', successBase),

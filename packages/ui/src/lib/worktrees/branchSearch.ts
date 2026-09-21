@@ -1,4 +1,4 @@
-import { partitionByFuzzyQuery } from "@/lib/search/fuzzySearch";
+import { rankByQuery } from "@/lib/search/fuzzySearch";
 
 export interface RankedBranchGroups {
   matching: Array<{
@@ -26,42 +26,19 @@ export function rankBranchesForQuery(args: {
     };
   }
 
-  const localPartition = partitionByFuzzyQuery(localBranches, normalizedQuery, (branch) => branch);
-  const remotePartition = partitionByFuzzyQuery(remoteBranches, normalizedQuery, (branch) => branch);
-  const matching: RankedBranchGroups['matching'] = [];
-  const otherLocal = localPartition.other;
-  const otherRemote = remotePartition.other;
-
-  for (const branch of localPartition.matching) {
-    matching.push({
-      label: branch,
-      value: branch,
-      source: 'local',
-    });
-  }
-
-  for (const branch of remotePartition.matching) {
-    matching.push({
-      label: branch,
-      value: `remotes/${branch}`,
-      source: 'remote',
-    });
-  }
-
-  matching.sort((a, b) => {
-    const byLabel = a.label.localeCompare(b.label, undefined, { sensitivity: 'accent' });
-    if (byLabel !== 0) {
-      return byLabel;
-    }
-    if (a.source !== b.source) {
-      return a.source.localeCompare(b.source);
-    }
-    return a.value.localeCompare(b.value);
-  });
+  // Rank local and remote branches together so the order reflects match
+  // quality (an exact or prefix match lands first), not the source group or
+  // the alphabet.
+  const candidates: RankedBranchGroups['matching'] = [
+    ...localBranches.map((branch) => ({ label: branch, value: branch, source: 'local' as const })),
+    ...remoteBranches.map((branch) => ({ label: branch, value: `remotes/${branch}`, source: 'remote' as const })),
+  ];
+  const matching = rankByQuery(candidates, normalizedQuery, (branch) => [branch.label]);
+  const matched = new Set(matching);
 
   return {
     matching,
-    otherLocal,
-    otherRemote,
+    otherLocal: candidates.filter((entry) => entry.source === 'local' && !matched.has(entry)).map((entry) => entry.label),
+    otherRemote: candidates.filter((entry) => entry.source === 'remote' && !matched.has(entry)).map((entry) => entry.label),
   };
 }

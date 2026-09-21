@@ -6,6 +6,8 @@ import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
+import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
+import { createProjectSetupStore, handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
 import {
   fetchOpenCodeSkillsFromApi,
   persistSettings,
@@ -54,6 +56,7 @@ export interface BridgeContext {
 }
 
 const CLIENT_RELOAD_DELAY_MS = 800;
+const projectSetupStore = createProjectSetupStore();
 
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
 const GITHUB_BACKEND_DISABLED_ERROR = 'OpenChamber VS Code backend GitHub integration is disabled. Use native VS Code GitHub integrations.';
@@ -63,6 +66,18 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
   const { id, type, payload } = message;
 
   try {
+    const permissionAutoAcceptResponse = await handlePermissionAutoAcceptBridgeMessage(
+      { id, type, payload },
+      ctx?.context,
+      {
+        broadcast: (snapshot) => vscode.commands.executeCommand(
+          'openchamber.internal.permissionAutoAcceptSynced',
+          snapshot,
+        ),
+      },
+    );
+    if (permissionAutoAcceptResponse) return permissionAutoAcceptResponse;
+
     const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload });
     if (standardGitResponse) {
       return standardGitResponse;
@@ -74,6 +89,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     );
     if (specialGitResponse) {
       return specialGitResponse;
+    }
+    const projectSetupResponse = await handleProjectSetupBridgeMessage({ id, type, payload }, projectSetupStore);
+    if (projectSetupResponse) {
+      return projectSetupResponse;
     }
     const fsResponse = await handleFsBridgeMessage(
       { id, type, payload },

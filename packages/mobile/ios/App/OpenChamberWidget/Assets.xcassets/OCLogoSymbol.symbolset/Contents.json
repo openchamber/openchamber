@@ -1,0 +1,13 @@
+{
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  },
+  "symbols" : [
+    {
+      "filename" : "oclogo-symbol.svg",
+      "idiom" : "universal",
+      "rendering-intent" : "template"
+    }
+  ]
+}

@@ -1,9 +1,16 @@
+import { commitStreamedText } from '../../lib/streamTextCommit';
+
 export const resolveAssistantDisplayText = (input: {
     textContent: string;
     throttledTextContent: string;
     isStreaming: boolean;
 }): string => {
-    return input.isStreaming ? input.throttledTextContent : input.textContent;
+    // While streaming, reveal whole blocks only: rendering stops at the last
+    // complete line so a shown paragraph never mutates in place. The held
+    // tail lands with the next line break (or the finalize pass).
+    return input.isStreaming
+        ? commitStreamedText(input.throttledTextContent)
+        : input.textContent;
 };
 
 export const shouldRenderAssistantText = (input: {

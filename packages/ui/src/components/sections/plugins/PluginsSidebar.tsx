@@ -22,6 +22,7 @@ import {
   type PluginEntry,
   type PluginFile,
 } from '@/stores/usePluginsStore';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface PluginsSidebarProps {
   onItemSelect?: () => void;
@@ -277,7 +278,7 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
         header={
           <div className="border-b px-3 pt-4 pb-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-foreground">
+              <h2 className={SETTINGS_PANEL_TITLE_CLASS}>
                 {t('settings.plugins.sidebar.title')}
               </h2>
             </div>

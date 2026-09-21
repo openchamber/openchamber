@@ -3,12 +3,13 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
-/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
-   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
-   first markdown render of a session; that late injection triggered a style
-   recalc during which the layered `.chat-message-column` width clamp briefly
-   lost, flashing message text to full width before it snapped back. */
-@import "katex/dist/katex.min.css";
+/* KaTeX styles are loaded eagerly through `styles/katex-css` (a JS import) at
+   every app entry point. Keeping them eager avoids a late stylesheet injection
+   on the first markdown render, whose style recalc briefly lost the layered
+   `.chat-message-column` width clamp and flashed message text to full width.
+   A JS import is required because Lightning CSS inlines a CSS `@import`
+   without resolving the relative `url(fonts/...)` references, leaving the
+   KaTeX font files unbundled (openchamber/openchamber#1880). */
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -52,79 +53,6 @@ button,
   transition: background-color 180ms ease;
 }
 
-/* ── macOS vibrancy ───────────────────────────────────────────────────────
-   The window is created transparent with a native 'sidebar' NSVisualEffectView
-   behind it. We keep the whole app opaque (bg-background covers the window)
-   EXCEPT the left sidebar, which is the only translucent surface that lets the
-   native vibrancy show through. `data-oc-vibrancy` = vibrancy active;
-   `data-oc-vibrancy-ready` = native layer has settled (set from the main
-   process after show/restore) — until then the sidebar stays solid to avoid a
-   flash of raw transparency. */
-html[data-oc-vibrancy] body,
-html[data-oc-vibrancy] #root {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-html[data-oc-vibrancy] .main-content-safe-area {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-/* Left sidebar: solid until the native layer is ready, then a translucent
-   overlay so the vibrancy frosts through. */
-html[data-oc-vibrancy] .oc-vibrancy-surface {
-  background: var(--sidebar) !important;
-}
-
-html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
-  background: var(--sidebar-vibrancy-overlay) !important;
-}
-
-/* Inner bg-sidebar elements inside the vibrant surface must not re-paint an
-   opaque fill, or they'd cover the frosted effect. */
-html[data-oc-vibrancy] .oc-vibrancy-surface .bg-sidebar {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-/* Project-actions pill over the open sidebar: drop its opaque surface so it
-   frosts to the exact same level as the sidebar (border keeps its outline). */
-html[data-oc-vibrancy] .oc-vibrancy-pill {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-/* Accessibility: drop translucency when the OS asks for reduced transparency. */
-@media (prefers-reduced-transparency: reduce) {
-  html[data-oc-vibrancy] body,
-  html[data-oc-vibrancy] #root,
-  html[data-oc-vibrancy] .main-content-safe-area {
-    background: var(--surface-background) !important;
-  }
-
-  html[data-oc-vibrancy] .oc-vibrancy-surface,
-  html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
-    background: var(--sidebar) !important;
-  }
-}
-
-/* Suppress WebKit-specific hover/focus adornments on the chat textarea */
-textarea[data-chat-input="true"] {
-  -webkit-appearance: none;
-  background: transparent !important;
-  border: none;
-  box-shadow: none;
-}
-
-textarea[data-chat-input="true"]:hover,
-textarea[data-chat-input="true"]:focus,
-textarea[data-chat-input="true"]:focus-visible {
-  outline: none;
-  border: none;
-  box-shadow: none;
-}
-
 /* Ensure interactive controls consistently show pointer cursor */
 :where(
   button,
@@ -138,22 +66,41 @@ textarea[data-chat-input="true"]:focus-visible {
   cursor: not-allowed;
 }
 
-:root.light .message-content-text::selection,
-:root.light .message-content-text ::selection {
-  background: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
-  color: var(--surface-foreground);
+/* Fractional line heights (1.625 × font-size) make streamed content grow by
+   sub-pixel amounts while scroll positions quantize to the device-pixel grid.
+   The residue accumulates and bottom-anchored rows (status indicator) creep
+   and snap by 1px per few lines during streaming. Rounding the line height to
+   whole pixels keeps content growth on the pixel grid. */
+.message-content-text.leading-relaxed,
+.message-content-text .leading-relaxed {
+  line-height: round(1.625em, 1px);
+}
+
+/* Native selection uses the theme's selection pair. */
+.message-content-text::selection,
+.message-content-text ::selection,
+.oc-file-preview::selection,
+.oc-file-preview ::selection {
+  background: var(--oc-text-selection);
+  color: var(--interactive-selection-foreground);
 }
 
 .oc-cm-selected-line {
-  background: color-mix(in srgb, var(--primary-base) 22%, transparent);
+  background: var(--interactive-selection);
+  color: var(--interactive-selection-foreground);
+}
+
+/* These rectangles sit above glyphs, so the fill must remain translucent. */
+.oc-chat-comment-rect {
+  background-color: color-mix(in srgb, var(--interactive-selection) 35%, transparent);
 }
 
 .pierre-diff-wrapper {
-  --diffs-bg-selection-override: color-mix(in srgb, var(--primary-base) 22%, transparent);
-  --diffs-bg-selection-background-override: color-mix(in srgb, var(--primary-base) 14%, transparent);
-  --diffs-bg-selection-number-override: color-mix(in srgb, var(--primary-base) 28%, transparent);
-  --diffs-bg-selection-number-background-override: color-mix(in srgb, var(--primary-base) 18%, transparent);
-  --diffs-selection-color-override: var(--primary-base);
+  --diffs-bg-selection-override: var(--interactive-selection);
+  --diffs-bg-selection-background-override: var(--interactive-selection);
+  --diffs-bg-selection-number-override: var(--interactive-selection);
+  --diffs-bg-selection-number-background-override: var(--interactive-selection);
+  --diffs-selection-color-override: var(--interactive-selection-foreground);
 }
 
 /* Codemirror syntax fallback for classHighlighter tokens */
@@ -293,12 +240,12 @@ textarea[data-chat-input="true"]:focus-visible {
   color: color-mix(in srgb, var(--syntax-comment) 85%, var(--syntax-foreground) 15%);
 }
 
-:root.vscode-runtime textarea[data-chat-input="true"]::placeholder {
-  color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
+:root.vscode-runtime [data-chat-input="true"] .cm-placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
 }
 
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
-[data-chat-input="true"] + div[data-chat-input-footer="true"] {
+div[data-chat-input-footer="true"] {
   background: transparent !important;
   border: none;
   box-shadow: none;
@@ -307,7 +254,12 @@ textarea[data-chat-input="true"]:focus-visible {
 
 /* Scroll shadow (HeroUI) fallback styling to ensure visible gradients without the Tailwind plugin */
 [data-scroll-shadow="true"] {
-  --scroll-shadow-size: var(--scroll-shadow-size, 48px);
+  /* A concrete default, not var(--scroll-shadow-size, 48px): a custom
+     property referencing itself is a cycle and computes to invalid, which
+     silently killed every mask below for consumers that don't set the
+     variable inline (the hook-based chat scroller). Inline styles from the
+     ScrollShadow component still override this. */
+  --scroll-shadow-size: 48px;
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"] {
@@ -318,39 +270,60 @@ textarea[data-chat-input="true"]:focus-visible {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 calc(100% - var(--scroll-shadow-size)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 calc(100% - var(--scroll-shadow-size)),
     transparent 100%
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 100%
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {
+/* Sticky-fade overlay: the crisp duplicate identity stays
+   mounted and its visibility is driven synchronously by the scroller's own
+   top-scroll data attribute — the same signal that engages the mask — so the
+   overlay appears in the exact frame the mask hides the real header (no blink).
+   ScrollShadow sets data-top-scroll when nothing is below the viewport and
+   data-top-bottom-scroll when content is both above and below. */
+.oc-sticky-fade-overlay {
+  opacity: 0;
+}
+
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
+  opacity: 1;
+}
+
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"]:not([data-top-scroll="true"]):not([data-top-bottom-scroll="true"]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
@@ -442,11 +415,21 @@ button svg,
   shape-rendering: geometricPrecision;
 }
 
-/* GPU acceleration for non-spinning SVGs */
-button svg:not(.animate-spin),
-[role="button"] svg:not(.animate-spin) {
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
+/*
+ * WebKit only. A 3D transform gives every matched icon a compositor layer of
+ * its own, and the compositor walks every layer on every frame. Measured in
+ * Chromium with 60 icons on screen: 66 layers per frame instead of 9, three
+ * times the layerization time, and four points of renderer CPU while a
+ * response streams. The cost grows with the number of buttons on screen, so
+ * Chromium runtimes no longer get the hint. `font: -apple-system-body` is a
+ * value only WebKit parses, which keeps the rule where it was written for.
+ */
+@supports (font: -apple-system-body) {
+  button svg:not(.animate-spin):not(.activity-spinner),
+  [role="button"] svg:not(.animate-spin):not(.activity-spinner) {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
@@ -567,6 +550,19 @@ svg.animate-spin {
   background: transparent;
 }
 
+/* Fully hidden scrollbar for small mobile overlays (session switcher etc.)
+   where a visible bar reads as chrome noise. Scrolling stays intact. */
+.oc-hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.oc-hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 [data-scrollbar="chat"].chat-scroll,
 .chat-scroll {
   scrollbar-gutter: stable both-edges;
@@ -639,6 +635,12 @@ html:not(.dark) .chat-scroll {
   scrollbar-gutter: unset !important;
 }
 
+/* Extensions can cross the overflow threshold as cards expand or the catalog loads. */
+.overlay-scrollbar-target:has(> .extensions-settings-page),
+.extensions-settings-page > .overlay-scrollbar-target {
+  scrollbar-gutter: stable !important;
+}
+
 .overlay-scrollbar-target::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
@@ -665,30 +667,41 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Overlay scrollbar styling (custom thumb) */
+/* Reserve the thumb's 6px width, 4px right inset and a 4px content gap.
+   Follow overflow, not hover visibility, so showing the thumb never shifts text.
+   Direct-child matching prevents nested scrollers from reserving space twice. */
+.overlay-scrollbar-wrapper:has(> .overlay-scrollbar > .overlay-scrollbar__thumb--vertical:not([hidden])) {
+  padding-right: 6px;
+}
+
 .overlay-scrollbar {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  opacity: 0;
   transition: opacity 0.2s ease;
-  z-index: 10;
+  /* Above sticky zone headers (z-20) — the thumb must never dive under
+     a stuck sidebar header while scrolling. */
+  z-index: 30;
 }
 
-.overlay-scrollbar--dense,
-.overlay-scrollbar--bottom-right,
-.overlay-scrollbar--zero,
-.overlay-scrollbar--flush {
-  /* no-op: positioning handled inline */
+.overlay-scrollbar[data-visible="true"] {
+  opacity: 1;
 }
 
 .overlay-scrollbar__thumb {
-  pointer-events: auto;
+  pointer-events: none;
   position: absolute;
   width: 6px;
   background: var(--oc-scrollbar-thumb);
   border-radius: 9999px;
   opacity: 0.8;
   transition: background-color 0.15s ease, opacity 0.15s ease;
-  will-change: transform, height;
+  will-change: transform;
+}
+
+.overlay-scrollbar[data-visible="true"] .overlay-scrollbar__thumb {
+  pointer-events: auto;
 }
 
 .overlay-scrollbar__thumb:hover,
@@ -708,11 +721,11 @@ html:not(.dark) .chat-scroll {
 
 /* Pierre diff viewer styling */
 .pierre-diff-wrapper {
-  --diffs-font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   --diffs-line-height: 24px;
   --diffs-tab-size: 2;
-  --diffs-header-font-family: var(--font-sans, 'IBM Plex Sans', sans-serif);
+  --diffs-header-font-family: var(--font-sans, system-ui, sans-serif);
   --diffs-min-number-column-width: 4ch;
   --diffs-gap-inline: 0;
   --diffs-gap-block: 0;
@@ -863,7 +876,20 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Diff toolbar: drop low-priority labels only when the context panel is genuinely tight. */
+/* Diff toolbar: the walkthrough label goes first. Review is the primary action
+   in this row, so it keeps its label longest; the walkthrough is reachable from
+   the rail as well and reads fine as an icon. */
+@container diff-toolbar (max-width: 36rem) {
+  .diff-toolbar__walkthrough-label {
+    display: none;
+  }
+
+  .diff-toolbar__walkthrough-button {
+    padding-inline: 0.5rem;
+  }
+}
+
+/* Then the rest, once the panel is genuinely tight. */
 @container diff-toolbar (max-width: 28rem) {
   .diff-toolbar__scope-count,
   .diff-toolbar__review-label,
@@ -877,24 +903,52 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Status row: collapse optional text when narrow to keep both sides in one line. */
-@container status-row (max-width: 30rem) {
-  .status-row__active-todo {
+/* Pull request actions: the walkthrough label goes first, since merge controls
+   are the reason the row exists. */
+@container pr-actions (max-width: 30rem) {
+  .pr-actions__walkthrough-label {
+    display: none;
+  }
+
+  .pr-actions__walkthrough-button {
+    padding-inline: 0.5rem;
+  }
+}
+
+/* Hide the long active todo before it can collide with the changed-files summary. */
+@container composer-status-bar (max-width: 38rem) {
+  .composer-status-bar__active-todo {
     display: none;
   }
 }
 
-@container status-row (max-width: 24rem) {
-  .status-row__changed-label {
+/* Hide the secondary changed-files label on narrow mobile layouts. */
+@container composer-status-bar (max-width: 30rem) {
+  .composer-status-bar__changed-label {
     display: none;
   }
 }
 
-/* Assistant message footer: collapse text labels only on very narrow layouts. */
-@container message-footer (max-width: 16rem) {
-  .message-footer__label {
-    display: none;
-  }
+/* Assistant message footer: one line of facts, in priority order. Which of
+   them fit is decided by useFactsFit, which hides the least important ones
+   until the model name stops being truncated — CSS can only guess at the
+   model's width, and a wrapped-away fact leaves its width behind as a hole. */
+.message-footer__facts {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* Each fact carries its own leading separator and spacing. */
+.message-footer__fact {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline-start: 0.375rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Animated tabs: collapse labels based on local container width. */
@@ -923,11 +977,67 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Text font: IBM Plex Sans */
+/*
+ * Active pill indicator motion. Transitions are opt-in via the --is-animated
+ * modifier so first measurement and container resizes reposition instantly
+ * instead of sliding in from the track origin.
+ */
+.pill-tabs__indicator--is-animated {
+  /* Decelerating ease with no overshoot: the indicator settles rather than
+     bouncing back at the end of its travel. */
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Non-composited variant (left/top-positioned indicator, see
+   nonCompositedIndicator in sortable-tabs-strip): same travel curve. */
+.pill-tabs__indicator--is-animated-layout {
+  transition:
+    left 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Underline indicator shares the pill's travel curve so both tab styles feel
+   like the same control. */
+.underline-tabs__indicator--is-animated {
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pill-tabs__button {
+  transition-property: color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pill-tabs__button:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-tabs__indicator--is-animated,
+  .pill-tabs__indicator--is-animated-layout,
+  .underline-tabs__indicator--is-animated {
+    transition: none;
+  }
+
+  .pill-tabs__button:active {
+    transform: none;
+  }
+}
+
+/* Text font. The line height is snapped to whole pixels: a fractional
+   value lets glyph baselines land on half pixels and text lines blur or
+   render unevenly as they scroll. */
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
-  line-height: inherit;
+  line-height: round(1.625em, 1px);
 }
 
 .markdown-content p,
@@ -938,20 +1048,31 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
-/* Restore paragraph block spacing inside markdown content. The
-   --markdown-paragraph-spacing token existed but was never wired, so Tailwind
-   preflight's zeroed <p> margins left adjacent paragraphs collapsed into one
-   visual line. */
-.markdown-content p {
-  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+/* Block rhythm: every block carries the same margin on both sides, so the
+   gap between any two neighbours is one paragraph spacing (margins collapse)
+   and the first/last block of a message adds nothing. Tailwind preflight
+   zeroes these margins, which left adjacent paragraphs reading as one. */
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content hr,
+.markdown-content table {
+  margin: var(--markdown-paragraph-spacing) 0;
 }
 
 /* The markdown renderer wraps each block in a display:contents [data-md-block]
-   element, so the message-level [&_.markdown-content>*:last-child]:mb-0
-   nullifiers target the wrapper (where margin is ignored), not the paragraph.
-   Drop the trailing margin on the last paragraph of the last block directly so
-   messages don't gain extra space at the bottom. */
-.markdown-content > [data-md-block]:last-child p:last-child {
+   element, so the message-level [&_.markdown-content>*:first-child]:mt-0 /
+   [&_.markdown-content>*:last-child]:mb-0 nullifiers target the wrapper
+   (where margin is ignored), not the block. Trim the outer blocks directly so
+   messages gain no extra space at the top or bottom. */
+.markdown-content > [data-md-block]:first-child > :first-child,
+.markdown-content > :first-child:not([data-md-block]) {
+  margin-top: 0;
+}
+
+.markdown-content > [data-md-block]:last-child > :last-child,
+.markdown-content > :last-child:not([data-md-block]) {
   margin-bottom: 0;
 }
 
@@ -967,14 +1088,22 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code) !important;
 }
 
+.question-markdown > .markdown-content.markdown-tool {
+  font-size: inherit !important;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:first-child > :first-child {
+  margin-top: 0;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:last-child > :last-child {
+  margin-bottom: 0;
+}
+
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
   font-size: var(--text-markdown);
   color: var(--surface-muted-foreground);
-  --markdown-heading1: inherit;
-  --markdown-heading2: inherit;
-  --markdown-heading3: inherit;
-  --markdown-heading4: inherit;
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);
   --markdown-blockquote: inherit;
@@ -1026,69 +1155,63 @@ html:not(.dark) .chat-scroll {
   font-size: inherit !important;
 }
 
-/* Streamdown headers: keep proportional but not oversized */
-.markdown-content h1 {
-  font-size: 1.125em;
+/* Headings: a clear step above the body without becoming display type, and
+   more air above than below so each heading binds to the text it introduces. */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 1.25rem 0 0.5rem;
+  color: color-mix(in srgb, var(--foreground) 95%, transparent);
   font-weight: 600;
-  margin-top: 1em;
-  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 1.25rem;
 }
 
 .markdown-content h2 {
-  font-size: 1.0625em;
-  font-weight: 600;
-  margin-top: 0.875em;
-  margin-bottom: 0.375em;
+  font-size: 1.125rem;
 }
 
 .markdown-content h3 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 0.75em;
-  margin-bottom: 0.25em;
+  font-size: 1rem;
 }
 
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 0.625em;
-  margin-bottom: 0.25em;
+  font-size: 0.875rem;
 }
 
-/* Code font: IBM Plex Mono */
+/* Code font */
 .markdown-content code,
 .markdown-content pre {
   font-family: var(--font-mono);
   font-size: var(--text-code);
 }
 
-/* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
+/* Inline code sits inside a sentence: the theme's code colour over its own
+   quiet chip. The colour keeps the theme's value with a touch of transparency,
+   and the chip fades into the background further, so neither shouts like the
+   original full-strength style. */
 .markdown-content code[data-markdown="inline-code"] {
-  background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
+  background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.375rem;
   word-break: break-all;
   overflow-wrap: break-word;
 }
 
-/* Markdown headings - use theme colors */
-.markdown-content h1 {
-  color: var(--markdown-heading1, var(--primary));
-}
-
-.markdown-content h2 {
-  color: var(--markdown-heading2, var(--primary));
-}
-
-.markdown-content h3 {
-  color: var(--markdown-heading3, var(--primary));
-}
-
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 {
-  color: var(--markdown-heading4, var(--foreground));
+@supports (color: color-mix(in lab, red, red)) {
+  .markdown-content code[data-markdown="inline-code"] {
+    background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;
+    color: color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent) !important;
+  }
 }
 
 /* Markdown links - use theme colors */
@@ -1126,8 +1249,9 @@ html:not(.dark) .chat-scroll {
 
 /* Markdown blockquote - use theme colors */
 .markdown-content blockquote {
+  border-left: 2px solid var(--markdown-blockquote-border, var(--border));
+  padding-left: 0.8rem;
   color: var(--markdown-blockquote, var(--muted-foreground));
-  border-left-color: var(--markdown-blockquote-border, var(--border));
 }
 
 /* Markdown horizontal rule - use theme colors */
@@ -1186,6 +1310,8 @@ html:not(.dark) .chat-scroll {
 
 /* Reduce code block header height */
 [data-markdown="code-block-header"] {
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
   margin: 0;
   padding: 0.375rem 0.75rem;
   display: flex;
@@ -1212,7 +1338,9 @@ html:not(.dark) .chat-scroll {
   max-inline-size: 100%;
   min-inline-size: 0;
   overflow: hidden;
-  background: var(--surface-background);
+  --foreground: var(--syntax-foreground);
+  color: var(--foreground);
+  background: var(--syntax-background);
   border: 1px solid var(--interactive-border);
   border-radius: 0.75rem;
 }
@@ -1271,6 +1399,129 @@ html:not(.dark) .chat-scroll {
   background: transparent !important;
 }
 
+/* The marked renderer uses its own code-body wrapper instead of Streamdown's. */
+.markdown-content [data-md-code-body],
+.markdown-content [data-md-code-body] pre,
+.markdown-content [data-md-code-body] code,
+.markdown-content [data-md-code-body] [data-md-code-lines] {
+  background: transparent !important;
+}
+
+.markdown-content [data-md-code-lines] {
+  display: block;
+  min-width: 100%;
+}
+
+.markdown-content [data-md-code-line] {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  min-width: 100%;
+}
+
+/* First uncached open of a session shows a hydration skeleton; the real
+   timeline replacing it fades in once instead of popping. Cached session
+   switches never carry this class and stay instant. */
+@keyframes oc-chat-hydration-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.oc-chat-hydration-reveal,
+[data-timeline-reveal='fading'] {
+  animation: oc-chat-hydration-reveal 100ms ease-out both;
+}
+
+/* Timeline root while a freshly opened session still has provisional first
+   paints (see timelineRevealGate.ts): hidden until every hold releases, then
+   revealed as a whole. */
+[data-timeline-reveal='pending'] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-chat-hydration-reveal,
+  [data-timeline-reveal='fading'] {
+    animation: none;
+  }
+}
+
+/* A block committed mid-stream enters with a fade and a gentle rise —
+   compositor-only properties, deliberately nothing heavier: during a long
+   stream the follow scroll masks the entrance anyway, so the effect only
+   really shows on short replies, and those must not pay for a GPU filter.
+   Blocks committed in the same tick cascade via --oc-md-enter-delay set
+   inline by the renderer. */
+@keyframes oc-md-block-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.oc-md-block-enter {
+  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--oc-md-enter-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-md-block-enter {
+    animation: none;
+  }
+}
+
+/* While streaming defers the per-line gutter markup, hold its horizontal
+   footprint (2rem column + 0.75rem gap) so the finished pass only fills in
+   the numbers instead of shifting every code line. */
+.markdown-content pre[data-md-gutter-reserved] > code {
+  display: block;
+  padding-left: 2.75rem;
+}
+
+.markdown-content [data-md-code-line-number] {
+  align-self: stretch;
+  padding-right: 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.markdown-content [data-md-code-line-number]::before {
+  content: attr(data-md-code-line-number);
+}
+
+.markdown-content [data-md-code-line-content] {
+  min-width: 0;
+}
+
+.markdown-content [data-md-code-line-break] {
+  display: none;
+}
+
+[data-message-image-export="true"] [data-md-code-body] {
+  overflow: visible !important;
+}
+
+[data-message-image-export="true"] [data-md-code-line-content] {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+}
+
+[data-message-image-export="true"] [data-md-code-actions] {
+  display: none !important;
+}
+
 .markdown-content [data-markdown="code-block-actions"] {
   pointer-events: auto;
   transition: opacity 0.15s ease;
@@ -1318,12 +1569,32 @@ html:not(.dark) .chat-scroll {
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid-scroll"] {
   overflow: auto;
+  min-width: 0;
+}
+
+[data-markdown="mermaid-block"][data-mermaid-render="svg"] [data-markdown="mermaid-scroll"] {
+  overflow: hidden;
+}
+
+[data-markdown="mermaid-block"] [data-markdown="mermaid-viewport"] {
+  width: 100%;
+  min-width: 0;
+  height: min(24rem, 70vh);
+  min-height: 12rem;
+  overflow: hidden;
+  touch-action: none;
+  border-radius: 0.5rem;
+  background: var(--surface-elevated);
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  height: 100%;
   display: block;
+}
+
+[data-markdown="mermaid-block"][data-mermaid-panning="true"] [data-markdown="mermaid-viewport"] {
+  cursor: grabbing;
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid-ascii"] {
@@ -1331,19 +1602,16 @@ html:not(.dark) .chat-scroll {
   white-space: pre;
   width: max-content;
   min-width: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   color: var(--surface-foreground);
   background: transparent;
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
-  width: auto !important;
-  min-width: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
   max-width: none !important;
-  height: auto !important;
-}
-
-[data-markdown="mermaid-block"] svg {
   display: block;
   background: var(--surface-elevated);
 }
@@ -1375,10 +1643,21 @@ html:not(.dark) .chat-scroll {
   overflow: auto;
 }
 
-.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
-  width: max-content;
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"][data-mermaid-render="svg"] [data-markdown="mermaid-scroll"] {
+  overflow: hidden;
+}
+
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid-viewport"] {
+  width: 100%;
+  height: 100%;
   min-width: 100%;
   min-height: 100%;
+  overflow: hidden;
+}
+
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
+  width: 100%;
+  height: 100%;
   display: block;
 }
 
@@ -1388,14 +1667,14 @@ html:not(.dark) .chat-scroll {
   width: max-content;
   min-width: 100%;
   min-height: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   color: var(--surface-foreground);
   background: transparent;
 }
 
-.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] svg {
-  width: auto !important;
-  height: auto !important;
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
+  width: 100% !important;
+  height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   min-width: 100%;
@@ -1429,43 +1708,54 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   color: transparent !important;
 }
 
-/* Hide browser/system caret for Ghostty's own input surfaces.
-   Terminal cursor is rendered by the canvas renderer. */
-.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
+/* libghostty-vt terminal surface. The canvas draws the grid and cursor; the
+   textarea only receives keyboard, IME and clipboard events and follows the
+   cursor so IME candidates appear where the user types. */
+.terminal-viewport-container .oc-terminal-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: text;
+}
+
+.terminal-viewport-container .oc-terminal-input {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  padding: 0;
+  border: 0;
+  resize: none;
+  pointer-events: none;
   caret-color: transparent !important;
   outline: none !important;
 }
 
-textarea[aria-label="Terminal input"],
-input[aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar {
+  position: absolute;
+  top: 4px;
+  right: 1px;
+  bottom: 4px;
+  z-index: 1;
+  width: 8px;
+  cursor: default;
+  touch-action: none;
 }
 
-/* When touch terminal input uses the portaled overlay, keep Ghostty's
-   internal editable surfaces fully non-painting to avoid duplicate cursors. */
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
-  caret-color: transparent !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  background: transparent !important;
-  border: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  text-shadow: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 0;
+  border-radius: 3px;
+  background: var(--oc-scrollbar-thumb);
+  transition: background-color 120ms ease-out;
 }
 
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
-  opacity: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  pointer-events: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar:hover .oc-terminal-scrollbar-thumb {
+  background: var(--oc-scrollbar-thumb-hover);
 }
 
 /* Mobile Terminal Optimizations */
@@ -1474,15 +1764,6 @@ input[aria-label="Terminal input"] {
     font-variant-ligatures: none;
     font-feature-settings: "liga" 0, "calt" 0;
   }
-}
-
-/* Font loading states */
-.fonts-loading .terminal-viewport-container {
-  font-family: monospace;
-}
-
-.fonts-loaded .terminal-viewport-container {
-  font-family: "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @keyframes oc-busy-pulse {
@@ -1496,6 +1777,47 @@ input[aria-label="Terminal input"] {
 
 .animate-busy-pulse {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
+}
+
+/*
+ * The staggered dots of a busy indicator that stays on screen for as long as
+ * the agent works. A smooth opacity pulse is composited, yet it still makes
+ * the compositor and the GPU process draw sixty frames a second: about ten
+ * percent of a core on an otherwise still page. Three steps per half cycle
+ * last 200ms each, the same as the stagger between dots, so every dot changes
+ * on the same five frames a second, which halves that cost. Keep the stagger
+ * a multiple of one step or the dots stop sharing frames.
+ */
+.animate-busy-wave {
+  animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite;
+}
+
+@keyframes oc-status-logo {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-status-logo {
+  animation: oc-status-logo 4s steps(10, jump-none) infinite;
+}
+
+@keyframes activity-spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Running-session spinner (opt-in). steps() limits rotation changes to 20 per
+   second. This still adds compositor work while a running indicator is visible.
+   Technique from VS Code's codicon-modifier-spin. */
+.activity-spinner {
+  animation: activity-spin 1.5s steps(30) infinite;
+  transform-box: fill-box;
+  transform-origin: center center;
 }
 
 @keyframes navrail-dot-wave {
@@ -1618,15 +1940,12 @@ input[aria-label="Terminal input"] {
     display: none;
   }
 
-  .animate-busy-pulse {
+  .animate-busy-pulse,
+  .animate-busy-wave,
+  .animate-status-logo {
     animation: none;
   }
 
-}
-
-/* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
-[data-settings-view="true"] .overlay-scrollbar {
-  display: none;
 }
 
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor
@@ -1642,4 +1961,47 @@ html.desktop-runtime [class*="cursor-pointer"] {
 }
 html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   cursor: default;
+}
+
+/* Header session tabs: thin separators between inactive neighbours, hidden
+   around the active or hovered tab (mirrors the titlebar tab language). */
+.session-tab-slot {
+  position: relative;
+}
+.session-tab-slot:not(:first-child):not([data-active='true'])::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  inset-inline-start: -2.75px;
+  width: 1.5px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--border);
+}
+.session-tab-slot[data-active='true'] + .session-tab-slot::before,
+.session-tab-slot:not([data-active='true']):hover::before,
+.session-tab-slot:not([data-active='true']):hover + .session-tab-slot::before {
+  display: none;
+}
+
+/* Header session tabs scroller: never show a scrollbar (it shifts the header
+   content vertically); overflow is communicated by the edge fades. */
+.session-tabs-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.session-tabs-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Session tab titles: fade out instead of "..." — the ellipsis reads as
+   clutter next to the tab's status dot and hover controls. Short titles
+   never reach the fade zone (the span spans the tab, not the text). The
+   fade follows the title's available width, including when hover controls
+   or an open menu reserve space at its end. */
+.session-tab-title {
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
 }

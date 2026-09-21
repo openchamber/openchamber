@@ -166,4 +166,68 @@ describe('assignLanes', () => {
     const bottomStub = cResult.connectors.find((c) => c.type === 'bottom-stub');
     expect(bottomStub).toBeTruthy();
   });
+
+  test('handles double merge of same branch with single commit between merges (screenshot case)', () => {
+    // Repro for screenshot: admin branch forked from base, 3 commits (48f6,c55f,2949),
+    // merged into main at 594c, then one more admin commit 3257 whose parent is
+    // the same 2949 as the merge's second parent (criss-cross), then merged again at a37.
+    // Order is topo-order as returned by `git log --all --topo-order` for that DAG.
+    const commits = [
+      makeCommit('a37', ['594c', '3257']),
+      makeCommit('3257', ['2949']),
+      makeCommit('594c', ['base', '2949']),
+      makeCommit('2949', ['c55f']),
+      makeCommit('c55f', ['48f6']),
+      makeCommit('48f6', ['base']),
+      makeCommit('base', []),
+    ];
+    const result = assignLanes(commits);
+
+    // Should use only 2 lanes (main=0, admin=1) throughout – no lane jump to 2
+    const maxLane = Math.max(...result.map((r) => r.lane));
+    expect(maxLane).toBe(1);
+
+    // The intermediate admin commit 3257 should be on admin lane
+    const c3257 = result.find((r) => r.commit.hash === '3257')!;
+    expect(c3257.lane).toBe(1);
+
+    // Second merge (594c) must reuse admin lane rather than opening a new one,
+    // so its extra parent lane is 1 (reused) not a fresh lane.
+    const m1 = result.find((r) => r.commit.hash === '594c')!;
+    const m1BranchOut = m1.connectors.find((c) => c.type === 'branch-out')!;
+    expect(m1BranchOut.toLane).toBe(1);
+
+    // Crucial: at the merge row, the reused admin lane must keep its vertical
+    // passing segment for continuity between 3257 above and 2949 below.
+    // Without this, a gap appears between those rows (the screenshot bug).
+    const m1Passing = m1.connectors.filter((c) => c.type === 'passing');
+    expect(m1Passing.some((c) => c.fromLane === 1)).toBe(true);
+
+    // Top merge also branch-out to admin lane
+    const m2 = result.find((r) => r.commit.hash === 'a37')!;
+    const m2BranchOut = m2.connectors.find((c) => c.type === 'branch-out')!;
+    expect(m2BranchOut.toLane).toBe(1);
+    // Top merge's admin lane is new, so no passing at that row (branch starts there)
+    expect(m2.connectors.some((c) => c.type === 'passing' && c.fromLane === 1)).toBe(false);
+
+    // Base should merge both lanes cleanly
+    const base = result.find((r) => r.commit.hash === 'base')!;
+    const mergeIns = base.connectors.filter((c) => c.type === 'merge-in');
+    expect(mergeIns.length).toBe(1);
+  });
+
+  test('reuses lane when merge second parent already active (no extra lane)', () => {
+    const commits = [
+      makeCommit('m2', ['m1', 'a3']),
+      makeCommit('a3', ['common']),
+      makeCommit('m1', ['base', 'common']),
+      makeCommit('common', ['base']),
+      makeCommit('base', []),
+    ];
+    const result = assignLanes(commits);
+    // m1 should reuse lane 1 (where a3 lives) rather than opening lane 2
+    const m1 = result.find((r) => r.commit.hash === 'm1')!;
+    expect(m1.connectors.find((c) => c.type === 'branch-out')!.toLane).toBe(1);
+    expect(Math.max(...result.map((r) => r.lane))).toBe(1);
+  });
 });

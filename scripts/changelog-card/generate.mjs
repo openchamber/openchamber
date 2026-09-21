@@ -18,8 +18,8 @@
 // The sentence wraps automatically; the version + sentence block is
 // bottom-anchored over a readability scrim so the glowing plate stays visible.
 //
-// Fonts (IBM Plex Sans, Instrument Serif) are fetched once from Fontsource
-// into ./.fonts (gitignored) and wired into fontconfig for Pango.
+// Accent fonts are fetched once from Fontsource into ./.fonts (gitignored)
+// and wired into fontconfig for Pango. Main text uses the system sans stack.
 
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -30,10 +30,6 @@ const repoRoot = path.resolve(toolDir, '..', '..');
 const fontsDir = path.join(toolDir, '.fonts');
 
 const FONTS = [
-  {
-    file: 'IBMPlexSans-SemiBold.ttf',
-    url: 'https://cdn.jsdelivr.net/fontsource/fonts/ibm-plex-sans@latest/latin-600-normal.ttf',
-  },
   {
     file: 'InstrumentSerif-Italic.ttf',
     url: 'https://cdn.jsdelivr.net/fontsource/fonts/instrument-serif@latest/latin-400-italic.ttf',
@@ -142,7 +138,7 @@ async function main() {
   const sentenceBuf = await sharp({
     text: {
       text: toPangoMarkup(sentence),
-      font: 'IBM Plex Sans 92',
+      font: 'system-ui 92',
       rgba: true,
       width: wrapWidth,
       wrap: 'word',
@@ -160,7 +156,7 @@ async function main() {
       text: `<span foreground="${AMBER}" letter_spacing="2048">${escapeMarkup(
         title
       )}</span>`,
-      font: 'IBM Plex Sans 64',
+      font: 'system-ui 64',
       rgba: true,
       align: 'left',
     },

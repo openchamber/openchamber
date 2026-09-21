@@ -1,0 +1,155 @@
+---
+title: UI キット
+description: "@openchamber/sdk/ui のボタン、入力欄、ドロップダウン、タブ、リストなどの部品で、拡張機能を OpenChamber の他の部分と同じ見た目にする。"
+---
+
+# UI キット
+
+`@openchamber/sdk/ui` は、アプリの色、フォント、余白を使う既製のコントロール一式です。スタイルをコピーしなくても、拡張機能が OpenChamber の他の部分と同じ見た目になります。各コントロールは関数です。あなたが所有する要素と設定を渡すと、そこに自身を描画して `{ update, dispose }` を返します。コントロールを組み合わせて画面を作り、データはあなたが持ちます。キットがプロバイダーや OpenChamber を呼ぶことはありません。`host.request`、`host.attach` などは引き続きあなたが呼びます。キットにないものは自分で HTML と CSS を書けますが、まずキットを使ってください。キットのコントロールはユーザーのテーマ、余白、キーボード操作の習慣に自動で従うので、それで組んだパネルは中に埋め込まれたウェブサイトではなく、OpenChamber の一部のように感じられます。
+
+## まず `applyHostReady` を呼ぶ
+
+コントロールは、`applyHostReady` がページに書き込む CSS 変数から色を読みます。アプリのフォントと文字色もページのルートに設定するので、自分で追加した素の HTML も正しく見えます。最初のマウントの前に `host.onReady` の中で呼んでください。そうすると、ユーザーがテーマを切り替えたときに色がアプリに追従します。
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  // Mount controls and register listeners once here.
+});
+```
+
+キットは、淡い色付きボタン、バッジ、通知の見出し、入力検証メッセージ、リンクに、ホストが計算した文字色を使います。コントラストを自分で計算する必要はありません。
+
+独自の CSS 向けに、`applyHostReady` は `--primary-text`、`--success-text`、`--warning-text`、`--error-text`、`--info-text` と、対応する `--oc-*-text` エイリアスを設定します。ニュートラルな背景や淡い色付き背景の文字に使ってください。塗りつぶしには基本色を使い、単色の `--oc-primary` 背景上の文字には `--oc-primary-fg` を使います。色を最新に保つため、すべての `onReady` スナップショットを適用してください。
+
+`onReady` はパネルが開いている間、セッションのコンテキスト変更などで何度も実行されます。テーマは毎回適用し、コントロールのマウントとリスナーの登録は一度だけ行ってください。入力途中の値は描画関数の外で保持します。タブ切り替え時は既存のパネルを非表示にするか、保存した状態から値を復元してください。
+
+## 選択状態と入力を同期する
+
+`mountTabs`、`mountSelect`、`mountCheckbox`、`mountSwitch` は `onChange` で変更を通知しますが、`activeId`、`value`、`checked` を自動更新しません。値を保存し、`update` で返してください。テキスト欄と検索欄は入力を即座に表示しますが、後の更新で古い値に戻らないよう `update({ value })` も必要です。ボタンの `onClick` は variant を変更しません。モード選択には `mountTabs` を使ってください。
+
+パネルの既存の `root` に一度だけマウントします。
+
+```ts
+import { mountSelect, mountTabs } from "@openchamber/sdk/ui";
+
+let activeId = "convert";
+const tabs = mountTabs(root, {
+  items: [{ id: "convert", label: "Convert" }, { id: "format", label: "Format" }],
+  activeId,
+  onChange: (next) => {
+    activeId = next;
+    tabs.update({ activeId });
+    // Show the matching panel without discarding its draft values.
+  },
+});
+
+let format = "json";
+const select = mountSelect(root, {
+  options: [{ id: "json", label: "JSON" }, { id: "yaml", label: "YAML" }],
+  value: format,
+  onChange: (next) => {
+    format = next;
+    select.update({ value: format });
+  },
+});
+```
+
+形式を入れ替える場合は、状態の両方の値を交換し、既存の両方の select に `update({ value })` を呼び出します。値の変更のために再マウントしないでください。コントロールを削除するときは `dispose()` を呼び出します。
+
+## マウントできるもの
+
+| 関数 | 描画するもの |
+| --- | --- |
+| `mountButton` | ボタン。`variant` は `default`、`secondary`、`outline`、`ghost`、`destructive`。`size` は `default`、`sm`、`xs`。`loading` はスピナーを表示してクリックを止めます。 |
+| `mountTextField` | ラベル付きの入力欄。`multiline` で textarea になります。任意の `helper` や `error` テキスト、`password` マスク、トークンや ID 向けの `mono` があります。 |
+| `mountSearchField` | 虫眼鏡とクリアボタン付きの検索欄。Escape でクリアします。 |
+| `mountSelect` | ドロップダウン。`searchable` でリストの上に絞り込み欄が付きます。矢印キーで移動、Enter で選択、Escape で閉じます。 |
+| `mountCheckbox`、`mountSwitch` | ラベルと任意の `description` 付きのチェックボックスまたはトグル。 |
+| `mountTabs` | ピル型のタブ。各タブに任意の件数を付けられます。左右の矢印キーで移動します。 |
+| `mountBadge` | 小さなピル。`tone` は `neutral`、`primary`、`success`、`warning`、`error`、`info`。 |
+| `mountList` | キーボードで扱いやすいリスト。各行に先頭のキー、タイトル、サブタイトル、右寄せのメタテキスト、バッジを持てます。 |
+| `mountEmpty` | 中央寄せの空状態。タイトル、本文 1 行、任意のボタン。 |
+| `mountSpinner` | 任意のラベル付きのローディングリング。 |
+| `mountBanner` | トーン付きの通知。タイトル、本文、任意のアクション。 |
+| `mountSeparator` | 細い線。中央に任意のラベルを置けます。 |
+| `mountProgress` | 0 から 100 のプログレスバー。 |
+| `mountMenu` | アクション一覧を開くボタン。項目は destructive、disabled、または区切り線にできます。 |
+| `mountText` | プロバイダーから来たテキスト。Markdown 形式の画像と `http(s)` リンクは実際の画像とリンクになり、それ以外はプレーンテキストのままなので、信頼できない内容も安全に表示できます。 |
+
+コントロールの隣に、3 つのプレーンなヘルパーが同梱されています。`filterSelectOptions(options, query)` は `mountSelect` が使う絞り込みです。`splitTextMedia(text)` は `mountText` が描画前に行う処理です。`moveListSelection` はリスト、セレクト、メニューが共有するキーボード移動で、自分でリストを作る場合に使えます。
+
+## 検索付きのリスト
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+  const emptyRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(emptyRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  const search = mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      search.update({ value: next });
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` には変更した設定だけを渡します。リストは、ハイライト中の行がまだ存在する限り、更新をまたいでその行を保持します。
+
+## プロバイダーのテキスト内のリンク
+
+ページはサンドボックスで動き、自力で新しいタブを開けません。`mountText` を使うときは `onOpenUrl` を渡して、リンクを OpenChamber に委ねてください。
+
+```ts
+import { mountText } from "@openchamber/sdk/ui";
+
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## 関連
+
+- [拡張機能を作る](/sdk/): フォルダ、マニフェスト、インストール
+- [Host API](/sdk/host/): `connectHost`、attach、エラーコード

@@ -5,7 +5,9 @@ description: Bezpiecznie udostępnij OpenChamber do dostępu zdalnego i mobilneg
 
 # Tunele
 
-Tunel to publiczny link do Twojego OpenChamber, dzięki któremu możesz dotrzeć do niego z telefonu lub z innej sieci. Użyj `openchamber tunnel`, aby utworzyć go dla działającej instancji.
+Tunel to publiczny link do Twojego OpenChamber, dzięki któremu możesz dotrzeć do niego ze zwykłej przeglądarki w innej sieci. Użyj `openchamber tunnel`, aby utworzyć go dla działającej instancji.
+
+> Łączenie **własnych urządzeń** (aplikacja mobilna, drugi komputer) zwykle nie wymaga tunelu — zamiast tego [sparuj je](/pl/connect-devices/) i pozwól, by szyfrowany end-to-end [Private Relay](/pl/private-relay/) zajął się dostępem spoza domu bez żadnej konfiguracji.
 
 ## Wymagania wstępne
 
@@ -111,6 +113,7 @@ openchamber tunnel stop --port 3000
 
 ## Powiązane
 
+- [Połącz urządzenie](/pl/connect-devices/) — sparuj własne urządzenia bez publicznego adresu URL
 - [Bezpieczeństwo](/pl/security/) — zabezpiecz interfejs przed udostępnieniem
 - [Tunele w aplikacji desktopowej](/pl/desktop-tunnels/) — konfiguracja tunelu w aplikacji desktopowej bez startu z CLI
 - [PWA i dostęp z telefonu](/pl/mobile/) — korzystaj z OpenChamber z telefonu

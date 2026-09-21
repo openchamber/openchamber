@@ -1,11 +1,11 @@
 import React from 'react';
+import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Checkbox } from '@/components/ui/checkbox';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import {
   Select,
   SelectContent,
@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Icon } from "@/components/icon/Icon";
 import {
   getResponseStylePresetInstructions,
   isResponseStylePreset,
@@ -22,8 +21,22 @@ import {
 } from '@/lib/responseStyle';
 import type { DesktopSettings } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import {
+  SettingsSection,
+  SettingsCheckboxRow,
+  SettingsFieldRow,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
+import { resolveBehaviorPrompt, type BehaviorPromptSource } from './behaviorPrompt';
 
-const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
+const agentsMdResponseSchema = z.object({
+  content: z.string(),
+  exists: z.boolean(),
+  path: z.string().min(1).optional(),
+});
 
 const readApiError = async (response: Response, fallback: string) => {
   const data = await response.json().catch(() => null) as { error?: unknown } | null;
@@ -38,6 +51,7 @@ type ResponseStyleValue = ResponseStylePreset | 'custom';
 
 type BehaviorSettingsState = {
   prompt: string;
+  optimizeSystemPrompt: boolean;
   responseStyleEnabled: boolean;
   responseStylePreset: ResponseStyleValue;
   responseStyleCustomInstructions: string;
@@ -45,6 +59,7 @@ type BehaviorSettingsState = {
 
 const DEFAULT_BEHAVIOR_SETTINGS: BehaviorSettingsState = {
   prompt: '',
+  optimizeSystemPrompt: false,
   responseStyleEnabled: false,
   responseStylePreset: 'concise',
   responseStyleCustomInstructions: '',
@@ -70,29 +85,26 @@ const RESPONSE_STYLE_OPTION_LABEL_KEYS: Record<ResponseStylePreset, I18nKey> = {
 };
 
 const saveBehaviorSetting = async (settings: Partial<DesktopSettings>, fallbackError: string) => {
-  const response = await runtimeFetch('/api/config/settings', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(settings),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response, fallbackError));
+  const result = await updateDesktopSettings(settings);
+  if (!result.ok) {
+    throw new Error(fallbackError);
   }
 };
 
 export const BehaviorPage: React.FC = () => {
   const { t } = useI18n();
+  const isVSCode = useIsVSCodeRuntime();
   const [prompt, setPrompt] = React.useState('');
+  const [agentsMdPath, setAgentsMdPath] = React.useState('AGENTS.md');
+  const [optimizeSystemPrompt, setOptimizeSystemPrompt] = React.useState(false);
   const [responseStyleEnabled, setResponseStyleEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleEnabled);
   const [responseStylePreset, setResponseStylePreset] = React.useState<ResponseStyleValue>(DEFAULT_BEHAVIOR_SETTINGS.responseStylePreset);
   const [responseStyleCustomInstructions, setResponseStyleCustomInstructions] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleCustomInstructions);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isApplyingPromptOptimization, setIsApplyingPromptOptimization] = React.useState(false);
   const [initialPrompt, setInitialPrompt] = React.useState('');
+  const [initialOptimizeSystemPrompt, setInitialOptimizeSystemPrompt] = React.useState(false);
   const lastSavedResponseStyleRef = React.useRef<{
     enabled: boolean;
     preset: ResponseStyleValue;
@@ -104,12 +116,8 @@ export const BehaviorPage: React.FC = () => {
 
     const load = async () => {
       try {
-        const [settingsRes, agentsMdRes] = await Promise.all([
-          runtimeFetch('/api/config/settings', {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-            signal: abort.signal,
-          }),
+        const [data, agentsMdRes] = await Promise.all([
+          loadDesktopSettings(),
           runtimeFetch('/api/behavior/agents-md', {
             method: 'GET',
             headers: { Accept: 'application/json' },
@@ -118,29 +126,41 @@ export const BehaviorPage: React.FC = () => {
         ]);
 
         let nextSettings: BehaviorSettingsState = DEFAULT_BEHAVIOR_SETTINGS;
-        if (settingsRes.ok) {
-          const data = await settingsRes.json();
+        let settingsGlobalBehaviorPrompt: string | undefined;
+        if (data) {
           nextSettings = {
             ...nextSettings,
+            optimizeSystemPrompt: data.optimizeSystemPrompt === true,
             responseStyleEnabled: data.responseStyleEnabled === true,
             responseStylePreset: sanitizeResponseStylePreset(data.responseStylePreset),
-            responseStyleCustomInstructions: typeof data.responseStyleCustomInstructions === 'string'
-              ? data.responseStyleCustomInstructions
-              : '',
+            responseStyleCustomInstructions: data.responseStyleCustomInstructions ?? '',
           };
-          if (typeof data.globalBehaviorPrompt === 'string') {
-            nextSettings = { ...nextSettings, prompt: data.globalBehaviorPrompt };
+          if (data.globalBehaviorPrompt !== undefined) {
+            settingsGlobalBehaviorPrompt = data.globalBehaviorPrompt;
           }
         }
 
-        if (!nextSettings.prompt.trim() && agentsMdRes.ok) {
-          const agentsData = await agentsMdRes.json();
-          if (typeof agentsData.content === 'string') {
-            nextSettings = { ...nextSettings, prompt: agentsData.content };
+        // AGENTS.md is the source of truth OpenCode reads at runtime, so an
+        // existing file is authoritative even when it is empty. The persisted
+        // copy (globalBehaviorPrompt) is only a fallback for a missing file or
+        // a failed read.
+        let promptSource: BehaviorPromptSource = { kind: 'missing' };
+        if (agentsMdRes.ok) {
+          const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
+          if (abort.signal.aborted) return;
+          setAgentsMdPath(agentsData.path ?? 'AGENTS.md');
+          if (agentsData.exists) {
+            promptSource = { kind: 'file', content: agentsData.content };
           }
         }
+        nextSettings = {
+          ...nextSettings,
+          prompt: resolveBehaviorPrompt(promptSource, settingsGlobalBehaviorPrompt),
+        };
 
         setPrompt(nextSettings.prompt);
+        setOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);
+        setInitialOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);
         setResponseStyleEnabled(nextSettings.responseStyleEnabled);
         setResponseStylePreset(nextSettings.responseStylePreset);
         setResponseStyleCustomInstructions(nextSettings.responseStyleCustomInstructions);
@@ -200,6 +220,7 @@ export const BehaviorPage: React.FC = () => {
 
   const responseStylePreview = getResponseStylePreview(responseStylePreset, responseStyleCustomInstructions);
   const isPromptDirty = prompt !== initialPrompt;
+  const isPromptOptimizationDirty = optimizeSystemPrompt !== initialOptimizeSystemPrompt;
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -218,13 +239,20 @@ export const BehaviorPage: React.FC = () => {
         throw new Error(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
 
+      const payload = await response.json().catch(() => null);
+      const deferred = noteDeferredRestartFromPayload(payload, 'behavior', { id: 'agents-md' });
+
       await saveBehaviorSetting({
         globalBehaviorPrompt: content,
       }, t('settings.behavior.page.toast.saveFailed'));
 
       setPrompt(content);
       setInitialPrompt(content);
-      toast.success(t('settings.behavior.page.toast.saved'));
+      toast.success(
+        deferred
+          ? t('settings.view.pendingRestart.saved')
+          : t('settings.behavior.page.toast.saved'),
+      );
     } catch (error) {
       console.error('Failed to save behavior:', error);
       const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
@@ -234,127 +262,148 @@ export const BehaviorPage: React.FC = () => {
     }
   };
 
+  const handleSavePromptOptimization = async () => {
+    setIsApplyingPromptOptimization(true);
+    try {
+      await saveBehaviorSetting(
+        { optimizeSystemPrompt },
+        t('settings.behavior.page.toast.saveFailed'),
+      );
+      setInitialOptimizeSystemPrompt(optimizeSystemPrompt);
+      recordDeferredOpenCodeRestart('behavior', { id: 'optimize-system-prompt' });
+      toast.success(t('settings.view.pendingRestart.saved'));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
+      toast.error(message);
+    } finally {
+      setIsApplyingPromptOptimization(false);
+    }
+  };
+
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8 space-y-6">
-        <div className="space-y-1">
-          <h2 className="typography-ui-header font-semibold text-foreground">
-            {t('settings.behavior.page.title')}
-          </h2>
-        </div>
+    <SettingsPageLayout
+      title={t('settings.behavior.page.title')}
+      description={t('settings.page.behavior.description')}
+      showSaveStatus
+    >
+      {!isVSCode && (
+        <SettingsSection
+          title={t('settings.behavior.page.section.systemPromptOptimization')}
+          divider={false}
+          settingsItem="behavior.system-prompt-optimization"
+          contentClassName="space-y-3"
+        >
+          <SettingsCheckboxRow
+            checked={optimizeSystemPrompt}
+            onChange={setOptimizeSystemPrompt}
+            disabled={isLoading || isApplyingPromptOptimization}
+            label={t('settings.behavior.page.systemPromptOptimization.enable')}
+            ariaLabel={t('settings.behavior.page.systemPromptOptimization.enableAria')}
+            info={t('settings.behavior.page.systemPromptOptimization.info')}
+          />
+          <Button
+            type="button"
+            size="xs"
+            onClick={() => void handleSavePromptOptimization()}
+            disabled={isLoading || isApplyingPromptOptimization || !isPromptOptimizationDirty}
+            className="!font-normal"
+          >
+            {isApplyingPromptOptimization
+              ? t('settings.common.actions.saving')
+              : t('settings.common.actions.saveChanges')}
+          </Button>
+        </SettingsSection>
+      )}
 
-        <div data-settings-item="behavior.system-prompt">
-          <div className="mb-1 px-1">
-            <div className="flex items-center gap-1.5">
-              <h3 className="typography-ui-header font-medium text-foreground">
-                {t('settings.behavior.page.section.systemPrompt')}
-              </h3>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  <div className="space-y-1">
-                    <p className="font-medium text-foreground">
-                      {t('settings.behavior.page.warning.title')}
-                    </p>
-                    <p>
-                      {t('settings.behavior.page.warning.description', { path: AGENTS_MD_PATH })}
-                    </p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
+      <SettingsSection
+        title={t('settings.behavior.page.section.systemPrompt')}
+        info={(
+          <div className="space-y-1">
+            <p className="font-medium text-foreground">
+              {t('settings.behavior.page.warning.title')}
+            </p>
+            <p>
+              {t('settings.behavior.page.warning.description', { path: agentsMdPath })}
+            </p>
           </div>
+        )}
+        settingsItem="behavior.system-prompt"
+        contentClassName="space-y-3"
+      >
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={t('settings.behavior.page.field.systemPromptPlaceholder')}
+          rows={12}
+          disabled={isLoading}
+          outerClassName="min-h-[160px] max-h-[70vh]"
+          className="w-full font-mono typography-meta bg-transparent"
+        />
+        <Button
+          onClick={handleSave}
+          disabled={isSaving || !isPromptDirty || isLoading}
+          size="xs"
+          className="!font-normal"
+        >
+          {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
+        </Button>
+      </SettingsSection>
 
-          <section className="px-2 pb-2 pt-0 space-y-3">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={t('settings.behavior.page.field.systemPromptPlaceholder')}
-              rows={12}
-              disabled={isLoading}
-              outerClassName="min-h-[160px] max-h-[70vh]"
-              className="w-full font-mono typography-meta bg-transparent"
-            />
-            <Button
-              onClick={handleSave}
-              disabled={isSaving || !isPromptDirty || isLoading}
-              size="xs"
-              className="!font-normal"
-            >
-              {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
-            </Button>
-          </section>
-        </div>
+      <SettingsSection
+        title={t('settings.behavior.page.section.responseStyle')}
+        info={t('settings.behavior.page.responseStyle.tooltip')}
+        settingsItem="behavior.response-style"
+        contentClassName="space-y-3"
+      >
+        <SettingsCheckboxRow
+          checked={responseStyleEnabled}
+          onChange={setResponseStyleEnabled}
+          disabled={isLoading}
+          label={t('settings.behavior.page.responseStyle.enable')}
+          ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
+        />
 
-        <div data-settings-item="behavior.response-style">
-          <div className="mb-1 px-1">
-            <div className="flex items-center gap-1.5">
-              <h3 className="typography-ui-header font-medium text-foreground">
-                {t('settings.behavior.page.section.responseStyle')}
-              </h3>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  {t('settings.behavior.page.responseStyle.tooltip')}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-3">
-            <label className="flex items-center gap-2 typography-ui-label text-foreground">
-              <Checkbox
-                checked={responseStyleEnabled}
-                onChange={setResponseStyleEnabled}
-                disabled={isLoading}
-                ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
-              />
-              {t('settings.behavior.page.responseStyle.enable')}
-            </label>
-
-            <Select<ResponseStyleValue>
-              value={responseStylePreset}
-              onValueChange={(value) => setResponseStylePreset(value)}
-              disabled={isLoading || !responseStyleEnabled}
-            >
-              <SelectTrigger className="w-full sm:w-56" size="lg">
-                <SelectValue>
-                  {(value) => {
-                    if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');
-                    if (isResponseStylePreset(value)) return t(RESPONSE_STYLE_OPTION_LABEL_KEYS[value]);
-                    return null;
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {RESPONSE_STYLE_PRESETS.map((preset) => (
-                  <SelectItem key={preset} value={preset}>
-                    {t(RESPONSE_STYLE_OPTION_LABEL_KEYS[preset])}
-                  </SelectItem>
-                ))}
-                <SelectItem value="custom">
-                  {t('settings.behavior.page.responseStyle.option.custom')}
+        <SettingsFieldRow
+          label={t('settings.behavior.page.responseStyle.preset')}
+          alignEnd={false}
+        >
+          <Select<ResponseStyleValue>
+            value={responseStylePreset}
+            onValueChange={(value) => setResponseStylePreset(value)}
+            disabled={isLoading || !responseStyleEnabled}
+          >
+            <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+              <SelectValue>
+                {(value) => {
+                  if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');
+                  if (isResponseStylePreset(value)) return t(RESPONSE_STYLE_OPTION_LABEL_KEYS[value]);
+                  return null;
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {RESPONSE_STYLE_PRESETS.map((preset) => (
+                <SelectItem key={preset} value={preset}>
+                  {t(RESPONSE_STYLE_OPTION_LABEL_KEYS[preset])}
                 </SelectItem>
-              </SelectContent>
-            </Select>
+              ))}
+              <SelectItem value="custom">
+                {t('settings.behavior.page.responseStyle.option.custom')}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
 
-            <Textarea
-              value={responseStylePreview}
-              onChange={(event) => setResponseStyleCustomInstructions(event.target.value)}
-              placeholder={t('settings.behavior.page.responseStyle.customPlaceholder')}
-              rows={5}
-              disabled={isLoading || !responseStyleEnabled || responseStylePreset !== 'custom'}
-              outerClassName="min-h-[120px]"
-              className="w-full font-mono typography-meta bg-transparent"
-            />
-          </section>
-        </div>
-
-      </div>
-    </ScrollableOverlay>
+        <Textarea
+          value={responseStylePreview}
+          onChange={(event) => setResponseStyleCustomInstructions(event.target.value)}
+          placeholder={t('settings.behavior.page.responseStyle.customPlaceholder')}
+          rows={5}
+          disabled={isLoading || !responseStyleEnabled || responseStylePreset !== 'custom'}
+          outerClassName="min-h-[120px]"
+          className="w-full font-mono typography-meta bg-transparent"
+        />
+      </SettingsSection>
+    </SettingsPageLayout>
   );
 };

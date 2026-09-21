@@ -1,8 +1,6 @@
-import React from 'react';
 import type { UsageWindow } from '@/types';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
-import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
@@ -25,25 +23,18 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   onToggle,
 }) => {
   const displayMode = useQuotaStore((state) => state.displayMode);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
+  // A balance-only window (DeepSeek's credits balance) carries a value label
+  // and no percentage. An empty track with a "used" caption under it read as
+  // "0% used", so the bar and its caption only render when there is a share
+  // to show; the reset time still does.
+  const hasPercent = displayPercent !== null;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
+  const resetText = resetLabel ? `Resets ${resetLabel}` : '';
   const windowLabel = formatWindowLabel(title);
-
-  const paceInfo = React.useMemo(() => {
-    return calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, title);
-  }, [window.usedPercent, window.resetAt, window.windowSeconds, title]);
-
-  const expectedMarkerPercent = React.useMemo(() => {
-    if (!paceInfo || paceInfo.dailyAllocationPercent === null) {
-      return null;
-    }
-    const expectedUsed = calculateExpectedUsagePercent(paceInfo.elapsedRatio);
-    return displayMode === 'remaining' ? 100 - expectedUsed : expectedUsed;
-  }, [paceInfo, displayMode]);
 
   return (
     <div className="py-3">
@@ -68,28 +59,26 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         </div>
       </div>
 
-      <div className="mt-2.5">
-        <UsageProgressBar
-          percent={displayPercent}
-          tonePercent={window.usedPercent}
-          expectedMarkerPercent={expectedMarkerPercent}
-          className="h-1.5"
-        />
-        <div className="mt-1 flex items-center justify-between">
-          <span className="typography-micro text-muted-foreground">
-            {resetLabel ? `Resets ${resetLabel}` : ''}
-          </span>
-          <span className="typography-micro text-muted-foreground">
-            {barLabel}
-          </span>
+      {hasPercent ? (
+        <div className="mt-2.5">
+          <UsageProgressBar
+            percent={displayPercent}
+            tonePercent={window.usedPercent}
+            className="h-1.5"
+          />
+          <div className="mt-1 flex items-center justify-between">
+            <span className="typography-micro text-muted-foreground">
+              {resetText}
+            </span>
+            <span className="typography-micro text-muted-foreground">
+              {barLabel}
+            </span>
+          </div>
         </div>
-      </div>
+      ) : resetText ? (
+        <div className="mt-1 typography-micro text-muted-foreground">{resetText}</div>
+      ) : null}
 
-      {paceInfo && showPredValues && (
-        <div className="mt-1.5">
-          <PaceIndicator paceInfo={paceInfo} />
-        </div>
-      )}
     </div>
   );
 };

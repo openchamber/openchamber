@@ -1,6 +1,7 @@
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_ATTENTION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_ACTIVITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 const extractSessionStatusUpdate = (payload) => {
@@ -37,26 +38,75 @@ const extractSessionStatusUpdate = (payload) => {
   };
 };
 
-const deriveSessionActivityTransitions = (payload) => {
-  const update = extractSessionStatusUpdate(payload);
-  if (!update) {
-    return [];
-  }
-
-  if (update.type === 'busy' || update.type === 'retry') {
-    return [{ sessionId: update.sessionId, phase: 'busy' }];
-  }
-  if (update.type === 'idle') {
-    return [{ sessionId: update.sessionId, phase: 'cooldown' }];
-  }
-  return [];
-};
+const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
 export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
   const sessionAttentionStates = new Map();
+  // Pending permission and question requests per session, kept from the same
+  // upstream stream. Clients that do not initialize a directory cannot read
+  // its pending list from OpenCode (that read creates an instance), so this
+  // map is their seed. Entries live until the matching reply, the session's
+  // deletion, or an OpenCode restart, which drops every pending request.
+  const pendingRequestsBySession = new Map();
+  let activeSessionCount = 0;
+
+  const getOrCreatePendingRequests = (sessionId) => {
+    let entry = pendingRequestsBySession.get(sessionId);
+    if (!entry) {
+      entry = { permissions: new Map(), questions: new Map() };
+      pendingRequestsBySession.set(sessionId, entry);
+    }
+    return entry;
+  };
+
+  const settlePendingRequest = (kind, sessionId, requestId) => {
+    const entry = pendingRequestsBySession.get(sessionId);
+    if (!entry) return;
+    // OpenCode may omit the request ID on a reply; the session then has no
+    // pending request of that kind we can still vouch for.
+    if (requestId) entry[kind].delete(requestId);
+    else entry[kind].clear();
+    if (entry.permissions.size === 0 && entry.questions.size === 0) pendingRequestsBySession.delete(sessionId);
+  };
+
+  const processBlockingRequestPayload = (payload) => {
+    if (!payload || typeof payload.type !== 'string') return;
+    const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+    if (payload.type === 'permission.asked' || payload.type === 'question.asked') {
+      const sessionId = readRequestId(properties.sessionID);
+      const requestId = readRequestId(properties.id);
+      if (!sessionId || !requestId) return;
+      getOrCreatePendingRequests(sessionId)[payload.type === 'permission.asked' ? 'permissions' : 'questions'].set(requestId, properties);
+      return;
+    }
+    if (payload.type === 'permission.replied') {
+      settlePendingRequest('permissions', readRequestId(properties.sessionID), readRequestId(properties.requestID));
+      return;
+    }
+    if (payload.type === 'question.replied' || payload.type === 'question.rejected') {
+      settlePendingRequest('questions', readRequestId(properties.sessionID), readRequestId(properties.requestID));
+      return;
+    }
+    if (payload.type === 'session.deleted') {
+      const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
+      const sessionId = readRequestId(properties.sessionID) || readRequestId(info.id);
+      if (sessionId) pendingRequestsBySession.delete(sessionId);
+    }
+  };
+
+  const getPendingBlockingRequestsSnapshot = () => {
+    const result = {};
+    for (const [sessionId, entry] of pendingRequestsBySession) {
+      result[sessionId] = {
+        permissions: [...entry.permissions.values()],
+        questions: [...entry.questions.values()],
+      };
+    }
+    return result;
+  };
 
   const getOrCreateAttentionState = (sessionId) => {
     if (!sessionId || typeof sessionId !== 'string') return null;
@@ -90,6 +140,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       sessionActivityCooldowns.delete(sessionId);
     }
 
+    const wasActive = current?.phase === 'busy';
+    const isActive = phase === 'busy';
+    if (wasActive !== isActive) {
+      activeSessionCount = Math.max(0, activeSessionCount + (isActive ? 1 : -1));
+    }
     sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
 
     if (phase === 'cooldown') {
@@ -138,7 +193,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const now = Date.now();
     const existing = sessionStates.get(sessionId);
     const existingAttentionState = sessionAttentionStates.get(sessionId);
-    if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status) {
+    const isRestartInterruption = metadata.reason === 'opencode-restart';
+    if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status && !isRestartInterruption) {
       return;
     }
 
@@ -153,7 +209,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const attentionState = sessionAttentionStates.get(sessionId);
     const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
     const clients = getNotificationClients();
-    if (!existing || existing.status !== status || attentionChanged) {
+    if (!existing || existing.status !== status || attentionChanged || isRestartInterruption) {
       const state = sessionStates.get(sessionId);
       const syntheticPayload = {
         type: 'openchamber:session-status',
@@ -287,15 +343,55 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     return result;
   };
 
+  const getActiveSessionCount = () => activeSessionCount;
+
   const resetAllSessionActivityToIdle = () => {
     for (const timer of sessionActivityCooldowns.values()) {
       clearTimeout(timer);
     }
     sessionActivityCooldowns.clear();
+    activeSessionCount = 0;
     const now = Date.now();
     for (const [sessionId] of sessionActivityPhases) {
       sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: now });
     }
+  };
+
+  const interruptBusySessionsAfterRestart = () => {
+    const interruptedSessionIds = new Set();
+    for (const [sessionId, state] of sessionStates) {
+      if (state.status === 'busy' || state.status === 'retry') {
+        interruptedSessionIds.add(sessionId);
+      }
+    }
+    for (const [sessionId, activity] of sessionActivityPhases) {
+      if (activity.phase === 'busy') {
+        interruptedSessionIds.add(sessionId);
+      }
+    }
+
+    // A restarted OpenCode forgot every pending request with the turns.
+    pendingRequestsBySession.clear();
+    const eventId = `opencode-restart-${Date.now()}`;
+    for (const sessionId of interruptedSessionIds) {
+      updateSessionState(sessionId, 'idle', eventId, {
+        message: 'Interrupted by OpenCode restart',
+        reason: 'opencode-restart',
+      });
+      broadcastEvent?.({
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'MessageAbortedError',
+            message: 'The running turn was interrupted when OpenCode restarted.',
+          },
+        },
+      });
+    }
+
+    resetAllSessionActivityToIdle();
+    return { sessionIds: [...interruptedSessionIds] };
   };
 
   const cleanupOldSessionStates = () => {
@@ -310,26 +406,34 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
         sessionAttentionStates.delete(sessionId);
       }
     }
+    for (const [sessionId, data] of sessionActivityPhases) {
+      if (now - data.updatedAt <= SESSION_ACTIVITY_MAX_AGE_MS) continue;
+      const timer = sessionActivityCooldowns.get(sessionId);
+      if (timer) clearTimeout(timer);
+      sessionActivityCooldowns.delete(sessionId);
+      sessionActivityPhases.delete(sessionId);
+      if (data.phase === 'busy') activeSessionCount = Math.max(0, activeSessionCount - 1);
+    }
   };
 
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
   const processOpenCodeSsePayload = (payload) => {
-    const transitions = deriveSessionActivityTransitions(payload);
-    for (const activity of transitions) {
-      setSessionActivityPhase(activity.sessionId, activity.phase);
+    processBlockingRequestPayload(payload);
+    const update = extractSessionStatusUpdate(payload);
+    if (!update) return;
+
+    if (update.type === 'busy' || update.type === 'retry') {
+      setSessionActivityPhase(update.sessionId, 'busy');
+    } else if (update.type === 'idle') {
+      setSessionActivityPhase(update.sessionId, 'cooldown');
     }
 
-    if (payload && payload.type === 'session.status') {
-      const update = extractSessionStatusUpdate(payload);
-      if (update) {
-        updateSessionState(update.sessionId, update.type, update.eventId || `sse-${Date.now()}`, {
-          attempt: update.attempt,
-          message: update.message,
-          next: update.next,
-        });
-      }
-    }
+    updateSessionState(update.sessionId, update.type, update.eventId || `sse-${Date.now()}`, {
+      attempt: update.attempt,
+      message: update.message,
+      next: update.next,
+    });
   };
 
   const dispose = () => {
@@ -338,12 +442,19 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       clearTimeout(timer);
     }
     sessionActivityCooldowns.clear();
+    sessionActivityPhases.clear();
+    sessionStates.clear();
+    sessionAttentionStates.clear();
+    pendingRequestsBySession.clear();
+    activeSessionCount = 0;
   };
 
   return {
     processOpenCodeSsePayload,
     getSessionActivitySnapshot,
+    getActiveSessionCount,
     getSessionStateSnapshot,
+    getPendingBlockingRequestsSnapshot,
     getSessionAttentionSnapshot,
     getSessionState,
     getSessionAttentionState,
@@ -351,6 +462,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     markSessionUnviewed,
     markUserMessageSent,
     resetAllSessionActivityToIdle,
+    interruptBusySessionsAfterRestart,
     dispose,
   };
 };

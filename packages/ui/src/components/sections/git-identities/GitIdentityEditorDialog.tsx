@@ -1,7 +1,8 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { SettingsCheckboxRow, SETTINGS_FIELD_LABEL_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { toast } from '@/components/ui';
 import {
   Dialog,
@@ -11,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { useGitIdentitiesStore, type GitIdentityProfile, type GitIdentityAuthType } from '@/stores/useGitIdentitiesStore';
@@ -235,7 +235,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             {!isGlobalProfile && (
               <div className="space-y-3">
                 <div>
-                  <label className="typography-ui-label text-foreground block mb-1.5">{t('settings.gitIdentities.editor.field.profileName')}</label>
+                  <label className={`${SETTINGS_FIELD_LABEL_CLASS} block mb-1.5`}>{t('settings.gitIdentities.editor.field.profileName')}</label>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -302,16 +302,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             <div className="space-y-3">
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.userName')}</label>
+                  <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.userName')}</label>
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.gitIdentities.editor.field.userNameTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
+                  <SettingsInfoHint contentClassName="max-w-xs">
+                    {t('settings.gitIdentities.editor.field.userNameTooltip')}
+                  </SettingsInfoHint>
                 </div>
                 <Input
                   value={userName}
@@ -326,16 +321,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
 
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.emailAddress')}</label>
+                  <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.emailAddress')}</label>
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.gitIdentities.editor.field.emailAddressTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
+                  <SettingsInfoHint contentClassName="max-w-xs">
+                    {t('settings.gitIdentities.editor.field.emailAddressTooltip')}
+                  </SettingsInfoHint>
                 </div>
                 <Input
                   type="email"
@@ -380,15 +370,10 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   {authType === 'ssh' && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.sshKeyPath')}</label>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                          </TooltipTrigger>
-                          <TooltipContent sideOffset={8} className="max-w-xs">
-                            {t('settings.gitIdentities.editor.field.sshKeyPathTooltip')}
-                          </TooltipContent>
-                        </Tooltip>
+                        <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.sshKeyPath')}</label>
+                        <SettingsInfoHint contentClassName="max-w-xs">
+                          {t('settings.gitIdentities.editor.field.sshKeyPathTooltip')}
+                        </SettingsInfoHint>
                       </div>
                       <Input
                         value={sshKey}
@@ -400,25 +385,17 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   )}
 
                   <div className="border-t border-border/40 pt-3 space-y-3">
-                    <div className="flex items-start gap-2">
-                      <Checkbox
-                        checked={signCommits}
-                        onChange={setSignCommits}
-                        ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
-                      />
-                      <div className="min-w-0">
-                        <div className="typography-ui-label text-foreground">
-                          {t('settings.gitIdentities.editor.field.signCommits')}
-                        </div>
-                        <div className="typography-micro text-muted-foreground/70">
-                          {t('settings.gitIdentities.editor.section.commitSigning')}
-                        </div>
-                      </div>
-                    </div>
+                    <SettingsCheckboxRow
+                      checked={signCommits}
+                      onChange={setSignCommits}
+                      label={t('settings.gitIdentities.editor.field.signCommits')}
+                      info={t('settings.gitIdentities.editor.section.commitSigning')}
+                      ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
+                    />
 
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className="typography-ui-label text-foreground">
+                        <label className={SETTINGS_FIELD_LABEL_CLASS}>
                           {t('settings.gitIdentities.editor.field.signingKey')}
                         </label>
                       </div>
@@ -435,16 +412,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   {authType === 'token' && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.host')}</label>
+                        <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.host')}</label>
                         <span className="text-[var(--status-error)] text-xs">*</span>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                          </TooltipTrigger>
-                          <TooltipContent sideOffset={8} className="max-w-xs">
-                            {t('settings.gitIdentities.editor.field.hostTooltip')}
-                          </TooltipContent>
-                        </Tooltip>
+                        <SettingsInfoHint contentClassName="max-w-xs">
+                          {t('settings.gitIdentities.editor.field.hostTooltip')}
+                        </SettingsInfoHint>
                       </div>
                       <Input
                         value={host}

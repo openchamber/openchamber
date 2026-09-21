@@ -1,0 +1,68 @@
+---
+title: Połącz urządzenie
+description: Sparuj telefon, komputer lub inną przeglądarkę ze swoim serwerem OpenChamber za pomocą jednorazowego kodu QR.
+---
+
+# Połącz urządzenie
+
+Sparuj inne urządzenie — aplikację mobilną, aplikację desktopową lub przeglądarkę na innej maszynie — ze swoim serwerem OpenChamber, skanując jednorazowy kod QR. To zalecany sposób łączenia urządzeń: nie ma portów do otwierania ani adresów do wpisywania.
+
+## Sparuj urządzenie
+
+1. Na maszynie z uruchomionym OpenChamber otwórz **Settings → Remote Instances → Połącz z tym serwerem** i naciśnij **Dodaj urządzenie**.
+2. Nadaj urządzeniu nazwę (np. *Mój iPhone*), by później je rozpoznać.
+3. Wybierz, gdzie będziesz go używać:
+   - **Tylko ten komputer** — dla aplikacji działających na tej samej maszynie
+   - **Tylko sieć domowa** — łączy się bezpośrednio przez Wi-Fi; nie działa poza tą siecią
+   - **Wszędzie** — działa w domu i poza nim; poza domem ruch przechodzi przez [Private Relay](/pl/private-relay/), szyfrowany end-to-end tunel bez żadnej konfiguracji
+4. Naciśnij **Utwórz kod QR**.
+5. Na drugim urządzeniu zeskanuj kod:
+   - **aplikacja mobilna** — stuknij **Skanuj kod QR** na ekranie łączenia (lub na liście instancji)
+   - **aplikacja desktopowa** — zamiast tego skopiuj link połączenia i wklej go w **Settings → Remote Instances → Inne serwery OpenChamber → Importuj link**
+
+Okno dialogowe zamknie się samo, gdy tylko urządzenie się połączy, a urządzenie pojawi się na liście z bieżącym statusem. To wszystko — jesteście sparowani.
+
+## Dlaczego parowanie jest bezpieczne
+
+- **Kod QR jest jednorazowy.** Przestaje działać w momencie, gdy urządzenie go wykorzysta, a jeśli nikt go nie użyje — sam wygasa.
+- **Każde urządzenie dostaje własny token.** Zeskanowanie kodu nigdy nie ujawnia Twojego hasła UI, a token jednego urządzenia nie pozwala podszyć się pod inne.
+- **Kontrola zostaje u Ciebie.** Każde sparowane urządzenie jest widoczne na liście z nazwą, platformą i statusem połączenia — możesz unieważnić dowolne z nich w każdej chwili.
+- **Ruch poza domem jest szyfrowany end-to-end.** Przy opcji **Wszędzie** ruch spoza Twojej sieci przechodzi przez [Private Relay](/pl/private-relay/), który nie może odczytać tego, co przez niego przepływa.
+
+## Zarządzaj sparowanymi urządzeniami
+
+**Settings → Remote Instances → Połącz z tym serwerem** pokazuje każde urządzenie, które może dotrzeć do tego serwera — z zieloną kropką, gdy jest online, oraz informacją, czy łączy się przez sieć lokalną, czy przez relay.
+
+- **Unieważnij** natychmiast odcina urządzenie. Jeśli zmienisz zdanie, sparuj je ponownie nowym kodem QR.
+- **Wyczyść unieważnione** porządkuje listę.
+
+To samo fizyczne urządzenie zachowuje jeden wpis, nawet jeśli zaloguje się ponownie później — duplikaty się nie mnożą.
+
+## Połącz z wiersza poleceń
+
+Jeśli serwer działa headless (bez otwartego UI), utwórz link połączenia z terminala na tej maszynie.
+
+Dla urządzenia w tej samej sieci:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Dla urządzenia, które ma łączyć się **z dowolnego miejsca** — odpowiednik wybrania opcji **Wszędzie** w oknie dialogowym:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+Link `--relay` zawiera obie trasy, dokładnie jak okno dialogowe: urządzenie łączy się bezpośrednio przez sieć lokalną, gdy może dotrzeć do serwera, a poza domem przełącza się na [Private Relay](/pl/private-relay/). Relay uruchamia się sam: działająca instancja podejmuje link w ciągu minuty, a zatrzymana — przy następnym starcie.
+
+> Trasa bezpośrednia działa tylko wtedy, gdy serwer rzeczywiście nasłuchuje w Twojej sieci. Domyślnie OpenChamber nasłuchuje wyłącznie na samej maszynie — uruchom go z `--lan`, aby był osiągalny przez Wi-Fi. Polecenie ostrzega (`[LAN_UNREACHABLE]`), gdy trasa bezpośrednia linku nie będzie użyteczna z innych urządzeń; link `--relay` nadal wtedy działa, tyle że zawsze przez relay.
+
+Wypisany link i kod QR działają dokładnie tak samo jak te z okna ustawień — są jednorazowe, wygasają i można je unieważnić.
+
+## Powiązane
+
+- [Private Relay](/pl/private-relay/) — jak działają połączenia „Wszędzie" i co relay może, a czego nie może zobaczyć
+- [Aplikacje mobilne](/pl/mobile/) — zainstaluj aplikację na iOS lub Androida
+- [Zdalne instancje](/pl/remote-instances/) — połącz aplikację desktopową z serwerami przez SSH lub linki
+- [Dostęp zdalny](/pl/troubleshooting/remote-access/) — gdy urządzenie nie chce się połączyć

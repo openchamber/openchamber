@@ -8,20 +8,27 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
-import { useSwitcherItems, type SwitcherItem } from '@/components/session/sidebar/hooks/useSwitcherItems';
+import {
+  findSwitcherItemAncestorIds,
+  useSwitcherItems,
+  type SwitcherItem,
+} from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useUIStore } from '@/stores/useUIStore';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { formatSessionCompactDateLabel } from './sidebar/utils';
 import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SecondaryMeta = SwitcherItem['secondaryMeta'];
 
 type SwitcherVariant = 'default' | 'compact';
+const NEW_SESSION_SWITCHER_TARGET = 'new-session';
 
 type SessionSwitcherDropdownProps = {
   children: React.ReactNode;
@@ -40,7 +47,7 @@ export function SessionSwitcherDropdown({
   const setOpen = useUIStore((state) => state.setSessionDropdownOpen);
 
   return (
-    <DropdownMenu open={isOpen} onOpenChange={setOpen} modal={false}>
+    <DropdownMenu open={isOpen} onOpenChange={setOpen} modal={false} disableGlobalShortcuts>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent
         align={align}
@@ -69,18 +76,21 @@ type SwitcherContentProps = {
 };
 
 function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentProps): React.ReactElement {
-  const items = useSwitcherItems(true, { scopeProjectId });
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const isNewSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open === true);
+  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId });
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const { t } = useI18n();
 
   const handleNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
     onSelect();
     openNewSessionDraft();
-  }, [onSelect, openNewSessionDraft, setActiveMainTab]);
+  }, [onSelect, openNewSessionDraft]);
 
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
+  const contentRef = React.useRef<HTMLElement>(null);
+  const initialFocusCompleteRef = React.useRef(false);
+  const initialTarget = isNewSessionDraftOpen ? NEW_SESSION_SWITCHER_TARGET : currentSessionId;
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {
       const next = new Set(prev);
@@ -93,10 +103,40 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
     });
   }, []);
 
+  React.useLayoutEffect(() => {
+    if (initialFocusCompleteRef.current || !initialTarget) return;
+
+    const ancestorIds = initialTarget === NEW_SESSION_SWITCHER_TARGET
+      ? []
+      : findSwitcherItemAncestorIds(items, initialTarget);
+    if (!ancestorIds) return;
+
+    if (ancestorIds.some((id) => !expandedParents.has(id))) {
+      setExpandedParents((previous) => new Set([...previous, ...ancestorIds]));
+      return;
+    }
+
+    const animationFrame = requestAnimationFrame(() => {
+      const item = Array.from(
+        contentRef.current?.querySelectorAll<HTMLElement>('[data-switcher-item-id]') ?? [],
+      ).find((element) => element.dataset.switcherItemId === initialTarget);
+      if (!item) return;
+      item.focus();
+      item.scrollIntoView({ block: 'nearest' });
+      initialFocusCompleteRef.current = true;
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [expandedParents, initialTarget, items]);
+
   return (
-    <div className="max-h-[60vh] overflow-y-auto">
+    <ScrollableOverlay
+      ref={contentRef}
+      outerClassName="max-h-[60vh]"
+      disableHorizontal
+    >
       <div className="space-y-0.5">
         <BaseMenu.Item
+          data-switcher-item-id={NEW_SESSION_SWITCHER_TARGET}
           onClick={handleNewSession}
           className={cn(
             'group relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
@@ -104,7 +144,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
           )}
         >
           <Icon name="chat-new" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          <span className="truncate text-[14px] font-normal leading-tight text-foreground">
+          <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
             {t('sessions.sidebar.header.actions.newSession')}
           </span>
         </BaseMenu.Item>
@@ -126,7 +166,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
           ))
         )}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 }
 
@@ -229,9 +269,11 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         handleSelect();
       }}
       data-slot="session-switcher-item"
+      data-switcher-item-id={session.id}
       className={cn(
         'group relative flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
         'data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover',
+        isActive && 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection data-[highlighted]:bg-interactive-selection',
       )}
       style={{ paddingLeft: 8 + depth * 12 }}
     >
@@ -253,7 +295,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
               {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
             </span>
           ) : null}
-          <span className={cn('truncate text-[14px] font-normal leading-tight', isActive ? 'text-primary' : 'text-foreground')}>
+          <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
             {sessionTitle}
           </span>
         </div>
@@ -292,19 +334,13 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
 
       {isStreaming || showUnreadDot ? (
         <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
-          {isStreaming ? (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-              aria-label={t('sessions.sidebar.session.status.active')}
-              title={t('sessions.sidebar.session.status.active')}
-            />
-          ) : (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-              aria-label={t('sessions.sidebar.session.status.unread')}
-              title={t('sessions.sidebar.session.status.unread')}
-            />
-          )}
+          <SessionActivityIndicator
+            state={isStreaming ? 'running' : 'unread'}
+            label={isStreaming
+              ? t('sessions.sidebar.session.status.active')
+              : t('sessions.sidebar.session.status.unread')}
+            runningDotClassName="animate-busy-pulse"
+          />
         </span>
       ) : null}
     </BaseMenu.Item>

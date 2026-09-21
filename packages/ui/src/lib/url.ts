@@ -20,6 +20,61 @@ export const isExternalHttpUrl = (url: string): boolean => {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 };
 
+/** Lowercased URL scheme without the trailing colon, or null when unparseable. */
+export const getUrlScheme = (url: string): string | null => {
+  const parsed = parseUrlSafely(url.trim());
+  if (!parsed) {
+    return null;
+  }
+  return parsed.protocol.replace(/:$/, '').toLowerCase();
+};
+
+/**
+ * Schemes the browser or OS communication apps already handle natively
+ * (mailto:, tel:, sms:, ...). They are not application deep links.
+ */
+const BROWSER_HANDLED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel', 'sms', 'callto', 'cid', 'xmpp', 'irc', 'news', 'nntp', 'feed', 'webcal']);
+
+/**
+ * Schemes that must never be preserved or opened from rendered chat content.
+ */
+const BLOCKED_APP_LINK_SCHEMES = new Set([
+  // Scriptable or web-content schemes
+  'javascript', 'data', 'vbscript', 'blob', 'filesystem', 'about',
+  // WebView/Electron internal schemes
+  'chrome', 'chrome-extension', 'devtools', 'moz-extension', 'ms-browser-extension',
+  // Local files flow through the dedicated file-link handling
+  'file',
+  // Network protocols that are not application links
+  'ws', 'wss', 'ftp', 'ftps',
+  // Android intent URIs can launch arbitrary components with extras
+  'intent',
+  // Historically abused Windows handlers can invoke diagnostic, shell, or
+  // file-search flows that must not be offered from untrusted chat content.
+  'ms-msdt', 'search-ms', 'shell',
+  // OpenChamber's own schemes must not be re-launched from chat content
+  'openchamber', 'openchamber-ui', 'capacitor',
+]);
+
+const APP_LINK_SCHEME_RE = /^[a-z][a-z0-9+.-]{1,31}$/;
+
+/**
+ * True for custom application deep links such as `obsidian://`, `linear://`,
+ * or `vscode://`. Browser-handled and dangerous/internal schemes are excluded,
+ * so a true result means the link may be offered to the user behind a
+ * confirmation the first time its scheme appears.
+ */
+export const isAppLinkUrl = (url: string): boolean => {
+  const scheme = getUrlScheme(url);
+  if (!scheme) {
+    return false;
+  }
+  if (BROWSER_HANDLED_SCHEMES.has(scheme) || BLOCKED_APP_LINK_SCHEMES.has(scheme)) {
+    return false;
+  }
+  return APP_LINK_SCHEME_RE.test(scheme);
+};
+
 export const getExternalFaviconUrl = (url: string): string | null => {
   const parsed = parseUrlSafely(url.trim());
   if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
@@ -88,7 +143,7 @@ export const extractLoopbackUrls = (text: string): string[] => {
  * @param url - The URL to open
  * @returns Promise<boolean> - true if the URL was opened successfully
  */
-export const openExternalUrl = async (url: string): Promise<boolean> => {
+const openValidatedExternalUrl = async (url: string): Promise<boolean> => {
   if (typeof window === 'undefined') {
     return false;
   }
@@ -100,10 +155,6 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
 
   const parsed = parseUrlSafely(target);
   if (!parsed) {
-    return false;
-  }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return false;
   }
 
@@ -136,3 +187,10 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
     return false;
   }
 };
+
+export const openExternalUrl = (url: string): Promise<boolean> =>
+  isExternalHttpUrl(url) ? openValidatedExternalUrl(url) : Promise.resolve(false);
+
+/** Opens a classified app link after the caller has completed confirmation. */
+export const openConfirmedAppLinkUrl = (url: string): Promise<boolean> =>
+  isAppLinkUrl(url) ? openValidatedExternalUrl(url) : Promise.resolve(false);

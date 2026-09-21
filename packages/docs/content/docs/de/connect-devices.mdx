@@ -1,0 +1,68 @@
+---
+title: Ein Gerät verbinden
+description: Kopple dein Telefon, deinen Desktop oder einen anderen Browser mit deinem OpenChamber-Server über einen einmaligen QR-Code.
+---
+
+# Ein Gerät verbinden
+
+Kopple ein weiteres Gerät — die Mobile App, die Desktop-App oder einen Browser auf einem anderen Rechner — mit deinem OpenChamber-Server, indem du einen einmaligen QR-Code scannst. Das ist der empfohlene Weg, Geräte zu verbinden; du musst keine Ports öffnen und keine Adressen eintippen.
+
+## Gerät koppeln
+
+1. Öffne auf dem Rechner mit OpenChamber **Settings → Remote Instances → Connect to this server** und drücke **Add a device**.
+2. Gib dem Gerät einen Namen (z. B. *Mein iPhone*), damit du es später wiedererkennst.
+3. Wähle, wo du das Gerät nutzen wirst:
+   - **This computer only** — für Apps, die auf genau diesem Rechner laufen
+   - **Home network only** — verbindet sich direkt über dein WLAN; funktioniert außerhalb dieses Netzwerks nicht
+   - **Anywhere** — funktioniert zu Hause und unterwegs; Daten außerhalb deines Netzwerks laufen über das [Private Relay](/private-relay/), ein Ende-zu-Ende-verschlüsselter Tunnel ohne zusätzliche Einrichtung
+4. Drücke **Create QR code**.
+5. Scanne den Code auf dem anderen Gerät:
+   - **mobile app** — tippe auf dem Verbindungsbildschirm (oder in der Instanzliste) auf **Scan QR code**
+   - **desktop app** — kopiere stattdessen den Verbindungslink und füge ihn unter **Settings → Remote Instances → Other OpenChamber servers → Import Link** ein
+
+Der Dialog schließt sich von selbst, sobald das Gerät verbunden ist, und das Gerät erscheint mit Live-Status in der Liste. Das war’s — die Kopplung ist abgeschlossen.
+
+## So bleibt die Kopplung sicher
+
+- **Der QR-Code ist nur einmal verwendbar.** Er funktioniert in dem Moment nicht mehr, in dem ein Gerät ihn einlöst, und läuft von selbst ab, wenn er nie benutzt wird.
+- **Jedes Gerät erhält sein eigenes Token.** Beim Scannen wird niemals dein UI-Passwort offengelegt, und das Token eines Geräts kann nicht verwendet werden, um sich als ein anderes auszugeben.
+- **Du behältst die Kontrolle.** Jedes gekoppelte Gerät wird mit Name, Plattform und Verbindungsstatus angezeigt — du kannst jedes davon jederzeit widerrufen.
+- **Verkehr von unterwegs ist Ende-zu-Ende verschlüsselt.** Bei **Anywhere** läuft Verkehr außerhalb deines Netzwerks über das [Private Relay](/private-relay/), das nicht lesen kann, was hindurchläuft.
+
+## Gekoppelte Geräte verwalten
+
+**Settings → Remote Instances → Connect to this server** listet jedes Gerät, das diesen Server erreichen kann, mit einem grünen Punkt, wenn es online ist, und zeigt an, ob es über das lokale Netzwerk oder das Relay verbunden ist.
+
+- **Revoke** trennt ein Gerät sofort. Kopple es mit einem neuen QR-Code erneut, wenn du es dir anders überlegst.
+- **Clear revoked** räumt die Liste auf.
+
+Dasselbe physische Gerät bleibt nur in einem Eintrag, auch wenn es sich später erneut anmeldet — du sammelst keine Duplikate an.
+
+## Über die Kommandozeile verbinden
+
+Wenn der Server ohne UI läuft (also headless), erstelle einen Verbindungslink in einem Terminal auf diesem Rechner.
+
+Für ein Gerät im selben Netzwerk:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Für ein Gerät, das sich von **überall** verbinden soll — das entspricht der Wahl von **Anywhere** im Dialog:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+Ein `--relay`-Link enthält beide Routen, genau wie der Dialog: Das Gerät verbindet sich direkt über dein lokales Netzwerk, wenn es den Server erreichen kann, und fällt auf das [Private Relay](/private-relay/) zurück, wenn es unterwegs ist. Das Relay startet von selbst: Eine laufende Instanz übernimmt den Link innerhalb einer Minute, eine gestoppte Instanz beim nächsten Start.
+
+> Die direkte Route funktioniert nur, wenn der Server tatsächlich im Netzwerk lauscht. Standardmäßig lauscht OpenChamber nur auf dem Rechner selbst — starte es mit `--lan`, damit es über WLAN erreichbar ist. Der Befehl warnt dich (`[LAN_UNREACHABLE]`), wenn die direkte Route des Links von anderen Geräten nicht nutzbar ist; ein `--relay`-Link funktioniert dann trotzdem, nur immer über das Relay.
+
+Der ausgegebene Link und QR-Code funktionieren genau wie die aus dem Einstellungsdialog — nur einmal verwendbar, mit Ablaufzeit und widerrufbar.
+
+## Verwandt
+
+- [Private Relay](/private-relay/) — wie "Anywhere"-Verbindungen funktionieren
+- [Mobile Apps](/mobile/) — die iOS- oder Android-App installieren
+- [Remote Instances](/remote-instances/) — die Desktop-App per SSH oder Link mit Servern verbinden
+- [Remote access](/troubleshooting/remote-access/) — wenn sich ein Gerät nicht verbinden kann

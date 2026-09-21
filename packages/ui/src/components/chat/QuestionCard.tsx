@@ -15,6 +15,7 @@ import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
+import { QuestionMarkdown } from './QuestionMarkdown';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -79,7 +80,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
       onKeyDown={onKeyDown}
       style={{ height }}
       className={cn(
-        'w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none',
+        'oc-surface-elevated w-full bg-surface-elevated border border-border/30 focus:border-interactive-border-focus rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none',
         isScrollable ? 'overflow-y-auto' : 'overflow-hidden'
       )}
       autoFocus
@@ -423,7 +424,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               </div>
             ) : activeQuestion ? (
               <>
-                <div className="typography-meta font-medium text-foreground mb-1.5">{activeQuestion.question}</div>
+                <QuestionMarkdown
+                  content={activeQuestion.question}
+                  size="meta"
+                  className="font-medium text-foreground mb-1.5"
+                />
 
                 {isMultiple ? (
                   <div className="typography-micro text-muted-foreground mb-1.5">{t('chat.questionCard.selectMultiple')}</div>

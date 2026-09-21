@@ -1,5 +1,5 @@
 import React from 'react';
-import { Virtualizer } from 'virtua';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 import {
   parseJsonToTree,
@@ -118,7 +118,7 @@ const JsonRow = React.memo(
 
     return (
       <div
-        className="flex items-center py-0.5 px-2 hover:bg-[var(--surface-hover)] rounded-sm cursor-default font-mono text-xs leading-5 whitespace-nowrap"
+        className="flex items-center py-0.5 px-2 rounded-sm cursor-default font-mono text-xs leading-5 whitespace-nowrap"
         style={{ paddingLeft: `${indent + 8}px` }}
         onContextMenu={handleContextMenu}
       >
@@ -146,17 +146,17 @@ const JsonRow = React.memo(
             >
               {/^\d+$/.test(node.key) ? node.key : `"${node.key}"`}
             </span>
-            <span className="mr-1 text-[var(--surface-foreground)]">:</span>
+            <span className="mr-1 text-[var(--syntax-foreground)]">:</span>
           </>
         )}
 
         {node.isExpandable ? (
           isExpanded ? (
-            <span className="text-[var(--surface-foreground)]">
+            <span className="text-[var(--syntax-foreground)]">
               {node.type === 'object' ? '{' : '['}
             </span>
           ) : (
-            <span style={{ color: 'var(--surface-mutedForeground)' }}>
+            <span className="text-muted-foreground">
               {getCollapsedPreview(node)}
             </span>
           )
@@ -203,6 +203,14 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
 
     const shouldVirtualize = flatNodes.length > VIRTUALIZE_THRESHOLD;
     const parentRef = React.useRef<HTMLDivElement>(null);
+    const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+      count: flatNodes.length,
+      enabled: shouldVirtualize,
+      getScrollElement: () => parentRef.current,
+      estimateSize: () => ROW_HEIGHT,
+      overscan: 20,
+      getItemKey: (index) => flatNodes[index]?.node.id ?? index,
+    });
 
     const handleToggle = React.useCallback((id: string) => {
       setCollapsedPaths((prev) => {
@@ -238,21 +246,26 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
           className={className}
           style={{ maxHeight, overflow: 'auto' }}
         >
-          <Virtualizer
-            data={flatNodes}
-            itemSize={ROW_HEIGHT}
-            bufferSize={ROW_HEIGHT * 20}
-            scrollRef={parentRef}
-          >
-            {(flatNode) => (
-              <JsonRow
-                key={flatNode.node.id}
-                flatNode={flatNode}
-                onToggle={handleToggle}
-                onCopyPath={onCopyPath}
-              />
-            )}
-          </Virtualizer>
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const flatNode = flatNodes[item.index];
+              if (!flatNode) return null;
+              return (
+                <div
+                  key={flatNode.node.id}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start}px)` }}
+                >
+                  <JsonRow
+                    flatNode={flatNode}
+                    onToggle={handleToggle}
+                    onCopyPath={onCopyPath}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       );
     }

@@ -1,13 +1,16 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
+import { GuestHosts } from '@/components/layout/GuestHosts';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { toContextUsageReading } from '@/components/ui/contextUsageReading';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { useSessionMessages, useSessions } from '@/sync/sync-context';
@@ -17,7 +20,9 @@ import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tokenUtils';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -49,6 +54,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const draftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
   const draftProjectId = useSessionUIStore((state) => state.newSessionDraft?.selectedProjectId ?? null);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const projects = useProjectsStore((state) => state.projects);
@@ -69,9 +75,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const [pinned, setPinned] = React.useState(false);
   const macosMajor = typeof window !== 'undefined' ? window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0 : 0;
   const hasMacTrafficLights = Number.isFinite(macosMajor) && macosMajor > 0;
-  const isWindowsElectronDesktop = typeof window !== 'undefined'
-    && Boolean(window.__OPENCHAMBER_ELECTRON__)
-    && window.__OPENCHAMBER_PLATFORM__ === 'win32';
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const macosHeaderSizeClass = hasMacTrafficLights
     ? macosMajor >= 26
       ? 'h-12'
@@ -99,6 +103,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const worktreeDirectory = normalizePath(worktreePath || sessionWorktreeMetadata?.path || worktreeAttachment?.cwd || worktreeAttachment?.worktreeRoot || '');
   const currentDirectoryNormalized = normalizePath(currentDirectory);
   const openDirectory = worktreeDirectory || sessionDirectory || draftDirectory || currentDirectoryNormalized;
+  const isChatContext = draftOpen ? draftTarget === 'chat' : isChatDirectoryPath(sessionDirectory);
   const directoryLabel = compactPath(openDirectory);
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalizePath(worktreeDirectory || sessionDirectory || '');
@@ -111,9 +116,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     return null;
   });
   React.useEffect(() => {
-    if (!openDirectory) return;
+    if (!openDirectory || isChatContext) return;
     void ensureGitStatus(openDirectory, runtimeApis.git).catch(() => {});
-  }, [ensureGitStatus, openDirectory, runtimeApis.git]);
+  }, [ensureGitStatus, isChatContext, openDirectory, runtimeApis.git]);
 
   const pathMatchedProject = React.useMemo(() => {
     const projectDirectory = normalizePath(sessionWorktreeMetadata?.projectDirectory ?? worktreeAttachment?.worktreeRoot ?? null);
@@ -125,13 +130,14 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       .sort((left, right) => right.path.length - left.path.length)[0] ?? null;
   }, [openDirectory, projects, sessionWorktreeMetadata?.projectDirectory, worktreeAttachment?.worktreeRoot]);
   const projectLabel = React.useMemo(() => {
+    if (isChatContext) return null;
     const project = pathMatchedProject ?? activeProject;
     if (!project) return directoryLabel || 'OpenChamber';
     const label = project.label?.trim();
     if (label) return label;
     const segments = project.path.split(/[\\/]/).filter(Boolean);
     return segments.at(-1) ?? project.path;
-  }, [activeProject, directoryLabel, pathMatchedProject]);
+  }, [activeProject, directoryLabel, isChatContext, pathMatchedProject]);
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const rawBranchLabel = gitBranchForDirectory || worktreeMetadataBranch || sessionWorktreeMetadata?.branch?.trim() || worktreeAttachment?.branch?.trim() || catalogWorktreeBranch;
   const branchLabel = rawBranchLabel && rawBranchLabel !== 'HEAD' ? rawBranchLabel : null;
@@ -153,47 +159,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     : null;
   const contextLimit = limit && typeof limit.context === 'number' ? limit.context : 0;
   const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
-  const contextUsage = React.useMemo<SessionContextUsage | null>(() => {
-    if (!currentSessionId || currentSessionMessages.length === 0) {
-      return null;
-    }
-
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-    let lastTokens: AssistantTokens | undefined;
-    let lastMessageId: string | undefined;
-
-    for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i];
-      if (message.role !== 'assistant') continue;
-      const tokens = (message as { tokens?: AssistantTokens }).tokens;
-      if (!tokens) continue;
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
-      if (total > 0) {
-        lastTokens = tokens;
-        lastMessageId = message.id;
-        break;
-      }
-    }
-
-    if (!lastTokens) {
-      return null;
-    }
-
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0);
-    const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
-    const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
-    const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
-
-    return {
-      totalTokens,
-      percentage,
-      contextLimit: contextLimit || 0,
-      outputLimit: outputLimit || undefined,
-      normalizedOutput,
-      thresholdLimit,
-      lastMessageId,
-    };
-  }, [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
+  const contextUsage = React.useMemo<SessionContextUsage | null>(() => (
+    currentSessionId ? buildSessionContextUsage(currentSessionMessages, contextLimit, outputLimit) : null
+  ), [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
@@ -204,31 +172,14 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return;
     }
 
-    if (contextUsage && contextUsage.totalTokens > 0) {
-      setStableContextUsage((prev) => {
-        if (
-          prev
-          && prev.totalTokens === contextUsage.totalTokens
-          && prev.percentage === contextUsage.percentage
-          && prev.contextLimit === contextUsage.contextLimit
-          && (prev.outputLimit ?? 0) === (contextUsage.outputLimit ?? 0)
-          && (prev.normalizedOutput ?? 0) === (contextUsage.normalizedOutput ?? 0)
-          && prev.thresholdLimit === contextUsage.thresholdLimit
-          && prev.lastMessageId === contextUsage.lastMessageId
-        ) {
-          return prev;
-        }
-        return contextUsage;
-      });
+    if (contextUsage) {
+      setStableContextUsage((prev) => (isSameContextUsage(prev, contextUsage) ? prev : contextUsage));
       return;
     }
 
     setStableContextUsage((prev) => (prev === null ? prev : null));
   }, [contextUsage, currentSessionId]);
 
-  const displayContextPercentage = stableContextUsage && stableContextUsage.contextLimit > 0
-    ? Math.min(999, (stableContextUsage.totalTokens / stableContextUsage.contextLimit) * 100)
-    : 0;
 
   const handleTogglePinned = React.useCallback(() => {
     const nextPinned = !pinned;
@@ -241,7 +192,11 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const handleOpenMainApp = React.useCallback(() => {
     const payload = currentSessionId
       ? { sessionId: currentSessionId, directory: (session as { directory?: string | null } | null)?.directory ?? currentDirectory ?? '' }
-      : { mode: 'draft', directory: openDirectory || currentDirectory || '', projectId: draftProjectId };
+      : {
+          mode: 'draft',
+          directory: isChatContext ? '' : openDirectory || currentDirectory || '',
+          projectId: isChatContext ? null : draftProjectId,
+        };
     void invokeDesktop<{ focused?: boolean }>('desktop_focus_main_window', payload)
       .then((result) => {
         if (result?.focused === true) {
@@ -249,17 +204,22 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
         }
         return null;
       });
-  }, [currentDirectory, currentSessionId, draftProjectId, openDirectory, session]);
+  }, [currentDirectory, currentSessionId, draftProjectId, isChatContext, openDirectory, session]);
 
   return (
     <header
       className={cn(
-        'flex items-center gap-3 bg-background pr-3',
-        hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
-        isWindowsElectronDesktop ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
+        'flex items-center gap-3 bg-background',
+        usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
+        // Native traffic lights are fixed-size OS chrome, not scaled UI.
+        hasMacTrafficLights ? 'pl-[88px]' : 'pl-3',
+        usesFramelessChrome ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
       style={dragRegionStyle}
     >
+      {usesFramelessChrome && windowControlsSide === 'left' ? (
+        <WindowsWindowControls visible position="left" />
+      ) : null}
       <SessionSwitcherDropdown>
         <button
           type="button"
@@ -270,7 +230,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
           <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
             {title}
           </span>
-          <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+          {!isChatContext ? <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
             <span className="truncate">{projectLabel}</span>
             {branchLabel ? (
               <span className="inline-flex min-w-0 items-center gap-0.5">
@@ -278,15 +238,13 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
                 <span className="truncate">{branchLabel}</span>
               </span>
             ) : null}
-          </span>
+          </span> : null}
         </button>
       </SessionSwitcherDropdown>
       <div className="min-w-0 flex-1" />
-      {stableContextUsage && stableContextUsage.totalTokens > 0 ? (
+      {stableContextUsage ? (
         <ContextUsageDisplay
-          totalTokens={stableContextUsage.totalTokens}
-          percentage={displayContextPercentage}
-          colorPercentage={stableContextUsage.percentage}
+          reading={toContextUsageReading(stableContextUsage)}
           contextLimit={stableContextUsage.contextLimit}
           outputLimit={stableContextUsage.outputLimit ?? 0}
           className="h-9 shrink-0 pl-1 pr-1 typography-ui-label"
@@ -318,7 +276,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       >
         <Icon name="external-link" className="h-4 w-4" />
       </Button>
-      <WindowsWindowControls visible={isWindowsElectronDesktop} />
+      <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
     </header>
   );
 };
@@ -343,6 +301,7 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDr
           </ChatSurfaceProvider>
         )}
       </main>
+      <GuestHosts />
     </div>
   );
 };

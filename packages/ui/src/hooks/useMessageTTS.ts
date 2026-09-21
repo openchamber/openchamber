@@ -9,8 +9,39 @@ import { useCallback, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
+import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { sanitizeForTTS } from '@/lib/voice/summarize';
+import { requestSmallModel } from '@/lib/smallModelRequest';
+
+// Below this length the reply is comfortable to listen to as-is; summarizing
+// would only add latency.
+const TTS_SUMMARIZE_MIN_CHARS = 600;
+
+const SUMMARIZE_SYSTEM_PROMPT = 'Summarize the assistant reply for text-to-speech listening. Reply with 2-4 sentences of plain spoken prose in the same language as the reply. No markdown, no lists, no code — mention code changes briefly in words instead.';
+
+async function summarizeForSpeech(
+    text: string,
+    preferred: { providerID?: string; modelID?: string },
+): Promise<string | null> {
+    try {
+        const response = await requestSmallModel({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: text,
+                system: SUMMARIZE_SYSTEM_PROMPT,
+                ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
+                ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
+            }),
+        });
+        if (!response.ok) return null;
+        const payload = await response.json().catch(() => null) as { text?: unknown } | null;
+        return typeof payload?.text === 'string' && payload.text.trim() ? payload.text.trim() : null;
+    } catch {
+        return null;
+    }
+}
 
 export interface UseMessageTTSReturn {
     /** Whether TTS is currently playing for this message */
@@ -29,6 +60,9 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const speechPitch = useConfigStore((state) => state.speechPitch);
     const speechVolume = useConfigStore((state) => state.speechVolume);
     const sayVoice = useConfigStore((state) => state.sayVoice);
+    const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
+    const localTtsModelId = useConfigStore((state) => state.localTtsModelId);
+    const ttsFollowTextLanguage = useConfigStore((state) => state.ttsFollowTextLanguage);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
@@ -48,13 +82,15 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable } = useSayTTS({
         enabled: shouldCheckSayAvailability,
     });
+    const { speak: speakLocalTTS, stop: stopLocalTTS } = useLocalTTS();
     
     const stop = useCallback(() => {
         setIsPlaying(false);
         stopServerTTS();
         stopSayTTS();
+        stopLocalTTS();
         browserVoiceService.cancelSpeech();
-    }, [stopServerTTS, stopSayTTS]);
+    }, [stopServerTTS, stopSayTTS, stopLocalTTS]);
     
     const play = useCallback(async (text: string) => {
         if (!text.trim()) return;
@@ -65,9 +101,24 @@ export function useMessageTTS(): UseMessageTTSReturn {
         setIsPlaying(true);
         
         try {
+            // Summarized mode: replace long replies with a short spoken-prose
+            // summary from the small model; fall back to the sanitized
+            // original when summarization is unavailable.
+            let sourceText = text;
+            if (ttsInputMode === 'summarized' && text.length >= TTS_SUMMARIZE_MIN_CHARS) {
+                const { currentProviderId, currentModelId } = useConfigStore.getState();
+                const summary = await summarizeForSpeech(text, {
+                    providerID: currentProviderId || undefined,
+                    modelID: currentModelId || undefined,
+                });
+                if (summary) {
+                    sourceText = summary;
+                }
+            }
+
             const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
-            const sanitizedText = sanitizeForTTS(text);
-            const textToSpeak = shouldUseRaw ? text : sanitizedText;
+            const sanitizedText = sanitizeForTTS(sourceText);
+            const textToSpeak = shouldUseRaw ? sourceText : sanitizedText;
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
@@ -84,11 +135,21 @@ export function useMessageTTS(): UseMessageTTSReturn {
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
+            } else if (voiceProvider === 'local') {
+                await speakLocalTTS(sanitizedText, {
+                    model: localTtsModelId,
+                    speakerId: localTtsVoiceId,
+                    speed: speechRate,
+                    language: ttsFollowTextLanguage ? 'auto' : undefined,
+                    onEnd: () => setIsPlaying(false),
+                    onError: () => setIsPlaying(false),
+                });
             } else if (voiceProvider === 'say' && isSayTTSAvailable) {
                 const wordsPerMinute = Math.round(100 + (speechRate - 0.5) * 200);
                 await speakSayTTS(sanitizedText, {
                     voice: sayVoice,
                     rate: wordsPerMinute,
+                    language: ttsFollowTextLanguage ? 'auto' : undefined,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
@@ -129,6 +190,10 @@ export function useMessageTTS(): UseMessageTTSReturn {
         ttsInputMode,
         speakServerTTS,
         speakSayTTS,
+        speakLocalTTS,
+        localTtsVoiceId,
+        localTtsModelId,
+        ttsFollowTextLanguage,
         stop,
     ]);
     

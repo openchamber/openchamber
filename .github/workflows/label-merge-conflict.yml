@@ -1,0 +1,31 @@
+name: label-merge-conflict
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  label:
+    if: ${{ github.repository == 'openchamber/openchamber' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Generate bot app token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+
+      - name: Label pull requests with merge conflicts
+        uses: eps1lon/actions-label-merge-conflict@0273be72a0bbd58fcd71d0d6c02c209b50d1e5e1 # v3.1.0
+        with:
+          dirtyLabel: "merge-conflict:true"
+          repoToken: ${{ steps.app-token.outputs.token }}
