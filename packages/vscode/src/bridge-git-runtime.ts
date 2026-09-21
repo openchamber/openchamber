@@ -1,10 +1,55 @@
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import * as gitService from './gitService';
-import type { BridgeResponse } from './bridge';
+import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
   id: string;
   type: string;
   payload?: unknown;
+};
+
+// A removal should not hang on an unresponsive OpenCode server: disposal is
+// best-effort and `gitService.removeWorktree` swallows its failure.
+const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
+
+type OpenCodeDisposalFailure =
+  | Error
+  | {
+      data?: {
+        message?: string;
+      };
+    };
+
+const formatOpenCodeDisposalError = (error: OpenCodeDisposalFailure): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return error.data?.message || 'OpenCode instance disposal failed';
+};
+
+/**
+ * Builds the best-effort disposal hook for the extension's active runtime. The
+ * API URL and auth headers are read at call time, and the client is created
+ * per call so a restarted managed process is always addressed correctly.
+ */
+const createWorktreeInstanceDisposer = (ctx?: BridgeContext) => {
+  return async (worktreeDirectory: string): Promise<void> => {
+    const apiUrl = ctx?.manager?.getApiUrl();
+    if (!apiUrl) {
+      throw new Error('OpenCode API URL is not available');
+    }
+    const client = createOpencodeClient({
+      baseUrl: apiUrl.replace(/\/+$/, ''),
+      headers: ctx?.manager?.getOpenCodeAuthHeaders() || {},
+    });
+    const result = await client.instance.dispose(
+      { directory: worktreeDirectory },
+      { signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) },
+    );
+    if (result?.error) {
+      throw new Error(formatOpenCodeDisposalError(result.error));
+    }
+  };
 };
 
 const requireDirectory = (id: string, type: string, directory?: string): BridgeResponse | null => {
@@ -18,7 +63,7 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
-export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
+export async function handleStandardGitBridgeMessage(message: BridgeMessageInput, ctx?: BridgeContext): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
   switch (type) {
@@ -156,6 +201,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         const removed = await gitService.removeWorktree(directory!, {
           directory: worktreeDirectory,
           deleteLocalBranch: removePayload?.body?.deleteLocalBranch === true || removePayload?.deleteLocalBranch === true,
+          disposeInstance: createWorktreeInstanceDisposer(ctx),
         });
         return { id, type, success: true, data: { success: Boolean(removed) } };
       }

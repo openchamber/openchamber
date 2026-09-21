@@ -8,6 +8,9 @@ const cleanups: Array<() => void> = []
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup() })
 const flush = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve() }
 const IDLE_TTL_MS = 40
+// Idle eviction must not fire during tests that assert the count limit or pure
+// cache reuse: their loops outlive the 40 ms test TTL on slower machines.
+const NO_IDLE_EVICTION_MS = 60_000
 const waitIdle = async () => { await new Promise((resolve) => setTimeout(resolve, IDLE_TTL_MS * 2)); await flush() }
 
 function transcript(sessionID: string, turns = 8, steps = 12) {
@@ -36,7 +39,7 @@ function transcript(sessionID: string, turns = 8, steps = 12) {
   return records
 }
 
-function setup(surface: "desktop" | "mobile" | "vscode" = "desktop", recordsFor = transcript) {
+function setup(surface: "desktop" | "mobile" | "vscode" = "desktop", recordsFor = transcript, idleTtlMs = IDLE_TTL_MS) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   Object.defineProperty(globalThis, "window", { configurable: true, value: {
     __OPENCHAMBER_SURFACE__: surface === "mobile" ? "mobile" : "desktop",
@@ -82,7 +85,7 @@ function setup(surface: "desktop" | "mobile" | "vscode" = "desktop", recordsFor 
   const releases: SessionMessageTarget[] = []
   const active = new Set<string>()
   loader.startCacheRetention({
-    idleTtlMs: IDLE_TTL_MS,
+    idleTtlMs,
     isCurrent: () => current,
     isViewed: (target) => target.directory === viewed.directory && target.sessionID === viewed.sessionID,
     isActive: (target) => target.directory === "/repo" && active.has(target.sessionID),
@@ -139,7 +142,7 @@ describe("session cache retention", () => {
     })
 
     test(`${surface}: count limit evicts the least recently visited session first`, async () => {
-      const env = setup(surface)
+      const env = setup(surface, transcript, NO_IDLE_EVICTION_MS)
       const limit = surface === "desktop" ? 20 : 6
       for (let index = 0; index < limit; index += 1) await env.select(`s${index}`)
       expect(Object.keys(env.childStores.getChild("/repo")!.getState().message)).toHaveLength(limit)
@@ -235,7 +238,7 @@ describe("session cache retention", () => {
   })
 
   test("protected sessions may overflow the limit and settle without another navigation", async () => {
-    const env = setup("mobile")
+    const env = setup("mobile", transcript, NO_IDLE_EVICTION_MS)
     for (let index = 0; index < 8; index += 1) {
       await env.select(`s${index}`)
       const store = env.childStores.getChild("/repo")!
@@ -271,7 +274,7 @@ describe("session cache retention", () => {
   })
 
   test("many warm switches keep whole transcripts without repeating HTTP", async () => {
-    const env = setup()
+    const env = setup("desktop", transcript, NO_IDLE_EVICTION_MS)
     for (let index = 0; index < 7; index += 1) {
       await env.select(`s${index}`)
       await env.loader.loadComplete(env.target(`s${index}`))
@@ -283,7 +286,7 @@ describe("session cache retention", () => {
   })
 
   test("sidebar neighbor prefetch cannot displace visited sessions or promote recency", async () => {
-    const env = setup("mobile")
+    const env = setup("mobile", transcript, NO_IDLE_EVICTION_MS)
     for (let index = 0; index < 6; index += 1) {
       await env.select(`s${index}`)
       await Promise.all([1].map((offset) => env.loader.prefetch(env.target(`s${index + offset}`))))
@@ -305,7 +308,7 @@ describe("session cache retention", () => {
   })
 
   test("concurrent speculative loads reserve their capacity before responses arrive", async () => {
-    const env = setup("mobile")
+    const env = setup("mobile", transcript, NO_IDLE_EVICTION_MS)
     for (let index = 0; index < 5; index += 1) await env.select(`s${index}`)
     let finish!: () => void
     env.holdRequests(new Promise<void>((resolve) => { finish = resolve }))
@@ -415,7 +418,7 @@ describe("session cache retention", () => {
 
 describe("evicted history after background events", () => {
   test("a background message on an evicted session reloads history on the next visit", async () => {
-    const env = setup("mobile")
+    const env = setup("mobile", transcript, NO_IDLE_EVICTION_MS)
     for (const id of ["s0", "s1", "s2", "s3", "s4", "s5", "overflow"]) await env.select(id)
     expect(env.messages("s0")).toBeUndefined()
     // A background turn lands for the evicted session through the event

@@ -1,4 +1,43 @@
-export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+
+// A removal should not hang on an unresponsive OpenCode server: disposal is
+// best-effort and `removeWorktree` swallows its failure.
+const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
+
+const formatOpenCodeDisposalError = (error) => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error?.data?.message) {
+    return error.data.message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'OpenCode instance disposal failed';
+  }
+};
+
+/**
+ * Builds the best-effort disposal hook handed to `removeWorktree`. The URL and
+ * auth headers are route dependencies, so this module never resolves the
+ * OpenCode runtime itself, and both are read at call time.
+ */
+const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+  return async (worktreeDirectory) => {
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const client = createOpencodeClient({ baseUrl, headers: getOpenCodeAuthHeaders() });
+    const result = await client.instance.dispose(
+      { directory: worktreeDirectory },
+      { signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) }
+    );
+    if (result?.error) {
+      throw new Error(formatOpenCodeDisposalError(result.error));
+    }
+  };
+};
+
+export function registerGitRoutes(app, { emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders } = {}) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
@@ -41,6 +80,8 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   };
 
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+
+  const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
 
   const nonRepoStatusPayload = () => ({
     isGitRepository: false,
@@ -1222,6 +1263,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
+        disposeInstance: canDisposeWorktreeInstance
+          ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
+          : undefined,
       });
       res.json({ success: Boolean(result) });
     } catch (error) {

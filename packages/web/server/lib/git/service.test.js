@@ -1685,11 +1685,135 @@ describe('removeWorktree', () => {
       runGit(repo, ['commit', '-m', 'Initial commit']);
       fs.writeFileSync(canary, 'sentinel');
 
+      const disposeInstance = vi.fn();
       await expect(removeWorktree(repo, {
         directory: sentinel,
         deleteLocalBranch: false,
+        disposeInstance,
       })).resolves.toBe(true);
       expect(fs.existsSync(canary)).toBe(true);
+      expect(disposeInstance).not.toHaveBeenCalled();
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('disposes the registered worktree instance before git removes the directory', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/dispose-order',
+        worktreeName: 'dispose-order',
+      });
+      const targetRealPath = fs.realpathSync(created.path);
+
+      let observed = null;
+      const disposeInstance = vi.fn(async (worktreeDirectory) => {
+        observed = {
+          realPath: fs.realpathSync(worktreeDirectory),
+          directoryExists: fs.existsSync(worktreeDirectory),
+        };
+      });
+
+      await expect(removeWorktree(repo, {
+        directory: created.path,
+        disposeInstance,
+      })).resolves.toBe(true);
+
+      expect(disposeInstance).toHaveBeenCalledTimes(1);
+      expect(observed).toEqual({ realPath: targetRealPath, directoryExists: true });
+      expect(fs.existsSync(created.path)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('warns about a failed instance disposal and still removes the worktree', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/dispose-failure',
+        worktreeName: 'dispose-failure',
+      });
+
+      const disposeInstance = vi.fn(async () => {
+        throw new Error('OpenCode API URL is not available');
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await expect(removeWorktree(repo, {
+          directory: created.path,
+          disposeInstance,
+        })).resolves.toBe(true);
+
+        expect(disposeInstance).toHaveBeenCalledTimes(1);
+        expect(fs.existsSync(created.path)).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(created.path),
+          'OpenCode API URL is not available'
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('never disposes the primary workspace', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+
+      const disposeInstance = vi.fn();
+      await expect(removeWorktree(repo, {
+        directory: repo,
+        disposeInstance,
+      })).rejects.toThrow('Cannot remove the primary workspace');
+      expect(disposeInstance).not.toHaveBeenCalled();
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;

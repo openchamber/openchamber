@@ -879,6 +879,11 @@ export interface CreateGitWorktreePayload {
 export interface RemoveGitWorktreePayload {
   directory: string;
   deleteLocalBranch?: boolean;
+  /**
+   * Releases the OpenCode instance that served the worktree while its path
+   * still resolves. The bridge injects it; the webview payload never carries it.
+   */
+  disposeInstance?: (worktreeDirectory: string) => Promise<void>;
 }
 
 const OPENCODE_ADJECTIVES = [
@@ -2155,6 +2160,28 @@ export async function getWorktreeBootstrapStatus(directory: string): Promise<Wor
   };
 }
 
+/**
+ * Releases the OpenCode instance that served a removed worktree. The bridge
+ * injects `disposeInstance`; disposal is best-effort, so a failure is warned
+ * about and never fails or rolls back the removal.
+ */
+const disposeWorktreeInstanceBestEffort = async (
+  disposeInstance: RemoveGitWorktreePayload['disposeInstance'],
+  worktreeDirectory: string,
+): Promise<void> => {
+  if (!disposeInstance) {
+    return;
+  }
+  try {
+    await disposeInstance(worktreeDirectory);
+  } catch (error) {
+    console.warn(
+      `Failed to dispose the OpenCode instance for removed worktree ${worktreeDirectory}:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+};
+
 export async function removeWorktree(directory: string, input: RemoveGitWorktreePayload): Promise<boolean> {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
@@ -2196,6 +2223,10 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
 
     return true;
   }
+
+  // The directory is a registered linked worktree and still exists here, which
+  // is the only point where its OpenCode instance can be released by path.
+  await disposeWorktreeInstanceBestEffort(input?.disposeInstance, matchedEntry.worktree);
 
   await runGitCommandOrThrow(
     context.primaryWorktree,

@@ -5013,6 +5013,25 @@ export async function getWorktreeBootstrapStatus(directory) {
   );
 }
 
+/**
+ * Releases the OpenCode instance that served a removed worktree. The owning
+ * runtime injects `disposeInstance`; disposal is best-effort, so a failure is
+ * warned about and never fails or rolls back the removal.
+ */
+const disposeWorktreeInstanceBestEffort = async (disposeInstance, worktreeDirectory) => {
+  if (!disposeInstance) {
+    return;
+  }
+  try {
+    await disposeInstance(worktreeDirectory);
+  } catch (error) {
+    console.warn(
+      `Failed to dispose the OpenCode instance for removed worktree ${worktreeDirectory}:`,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+};
+
 export async function removeWorktree(directory, input = {}) {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
@@ -5058,6 +5077,10 @@ export async function removeWorktree(directory, input = {}) {
 
     return true;
   }
+
+  // The directory is a registered linked worktree and still exists here, which
+  // is the only point where its OpenCode instance can be released by path.
+  await disposeWorktreeInstanceBestEffort(input?.disposeInstance, matchedEntry.worktree);
 
   await runGitCommandOrThrow(
     context.primaryWorktree,
