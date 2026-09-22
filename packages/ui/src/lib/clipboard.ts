@@ -15,6 +15,12 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
   }
 
   if (typeof document !== 'undefined' && document.body) {
+    const activeElement = document.activeElement;
+    const HTMLElementConstructor = document.defaultView?.HTMLElement;
+    const previousActiveElement =
+      activeElement && HTMLElementConstructor && activeElement instanceof HTMLElementConstructor
+        ? activeElement
+        : null;
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
@@ -22,13 +28,31 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
     textarea.style.top = '-1000px';
     textarea.style.left = '-1000px';
     document.body.appendChild(textarea);
-    textarea.select();
-    textarea.setSelectionRange(0, textarea.value.length);
-    const copied = document.execCommand('copy');
-    document.body.removeChild(textarea);
+    try {
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand('copy');
 
-    if (copied) {
-      return { ok: true, method: 'execCommand' };
+      if (copied) {
+        return { ok: true, method: 'execCommand' };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: clipboardError ?? (error instanceof Error ? error.message : String(error)),
+      };
+    } finally {
+      try {
+        document.body.removeChild(textarea);
+      } finally {
+        if (previousActiveElement?.isConnected) {
+          try {
+            previousActiveElement.focus({ preventScroll: true });
+          } catch {
+            // Focus restoration is best effort and must not change the copy result.
+          }
+        }
+      }
     }
   }
 

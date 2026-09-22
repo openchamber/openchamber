@@ -2,13 +2,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import { marked } from 'marked';
 
-import { copyMarkdownToClipboard } from './clipboard';
+import { copyMarkdownToClipboard, copyTextToClipboard } from './clipboard';
 import { flattenAssistantTextParts } from './messages/messageText';
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 const originalClipboardItem = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
 
-const restoreGlobal = (name: 'navigator' | 'ClipboardItem', descriptor?: PropertyDescriptor): void => {
+const restoreGlobal = (name: 'navigator' | 'ClipboardItem' | 'document', descriptor?: PropertyDescriptor): void => {
   if (descriptor) {
     Object.defineProperty(globalThis, name, descriptor);
   } else {
@@ -19,6 +20,121 @@ const restoreGlobal = (name: 'navigator' | 'ClipboardItem', descriptor?: Propert
 afterEach(() => {
   restoreGlobal('navigator', originalNavigator);
   restoreGlobal('ClipboardItem', originalClipboardItem);
+  restoreGlobal('document', originalDocument);
+});
+
+describe('copyTextToClipboard', () => {
+  test('restores focus and removes the fallback textarea after a successful copy', async () => {
+    const appendedTextareas: Array<{ value: string }> = [];
+    const removedTextareas: Array<{ value: string }> = [];
+    const focusOptions: FocusOptions[] = [];
+    class FakeHTMLElement {
+      isConnected = true;
+
+      focus(options?: FocusOptions): void {
+        focusOptions.push(options ?? {});
+      }
+    }
+    const previouslyFocusedElement = new FakeHTMLElement();
+    const textarea = {
+      value: '',
+      setAttribute: () => {},
+      style: { position: '', top: '', left: '' },
+      select: () => {},
+      setSelectionRange: () => {},
+    };
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {},
+    });
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        activeElement: previouslyFocusedElement,
+        defaultView: { HTMLElement: FakeHTMLElement },
+        body: {
+          appendChild: (element: typeof textarea) => {
+            appendedTextareas.push(element);
+          },
+          removeChild: (element: typeof textarea) => {
+            removedTextareas.push(element);
+          },
+        },
+        createElement: (tagName: string) => {
+          expect(tagName).toBe('textarea');
+          return textarea;
+        },
+        execCommand: (command: string) => {
+          expect(command).toBe('copy');
+          return true;
+        },
+      },
+    });
+
+    const result = await copyTextToClipboard('text');
+
+    expect(result).toEqual({ ok: true, method: 'execCommand' });
+    expect(appendedTextareas).toEqual([textarea]);
+    expect(removedTextareas).toEqual([textarea]);
+    expect(focusOptions).toEqual([{ preventScroll: true }]);
+  });
+
+  test('removes the fallback textarea when execCommand throws', async () => {
+    const appendedTextareas: Array<{ value: string }> = [];
+    const removedTextareas: Array<{ value: string }> = [];
+    const focusOptions: FocusOptions[] = [];
+    class FakeHTMLElement {
+      isConnected = true;
+
+      focus(options?: FocusOptions): void {
+        focusOptions.push(options ?? {});
+      }
+    }
+    const previouslyFocusedElement = new FakeHTMLElement();
+    const textarea = {
+      value: '',
+      setAttribute: () => {},
+      style: { position: '', top: '', left: '' },
+      select: () => {},
+      setSelectionRange: () => {},
+    };
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {},
+    });
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        activeElement: previouslyFocusedElement,
+        defaultView: { HTMLElement: FakeHTMLElement },
+        body: {
+          appendChild: (element: typeof textarea) => {
+            appendedTextareas.push(element);
+          },
+          removeChild: (element: typeof textarea) => {
+            removedTextareas.push(element);
+          },
+        },
+        createElement: (tagName: string) => {
+          expect(tagName).toBe('textarea');
+          return textarea;
+        },
+        execCommand: (command: string) => {
+          expect(command).toBe('copy');
+          throw new Error('copy failed');
+        },
+      },
+    });
+
+    const result = await copyTextToClipboard('text');
+
+    expect(result).toEqual({ ok: false, error: 'copy failed' });
+    expect(appendedTextareas).toEqual([textarea]);
+    expect(removedTextareas).toEqual([textarea]);
+    expect(focusOptions).toEqual([{ preventScroll: true }]);
+  });
 });
 
 describe('copyMarkdownToClipboard', () => {

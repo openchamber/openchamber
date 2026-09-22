@@ -1,5 +1,15 @@
 const MAX_SYNTHETIC_TERMINAL_CELLS = 100_000;
 
+const hasTerminalControlCharacter = (output: string): boolean => {
+    for (let index = 0; index < output.length; index += 1) {
+        const code = output.charCodeAt(index);
+        if (code <= 0x08 || code === 0x0B || code === 0x0C || code === 0x0D || (code >= 0x0E && code <= 0x1F) || code === 0x7F || (code >= 0x80 && code <= 0x9F)) {
+            return true;
+        }
+    }
+    return false;
+};
+
 interface TerminalRenderBudget {
     syntheticCells: number;
 }
@@ -36,8 +46,22 @@ const writeTerminalCharacter = (
     return column;
 };
 
+const findTerminalStringTerminator = (
+    output: string,
+    start: number,
+    allowBell: boolean,
+): { index: number; length: number } | undefined => {
+    for (let index = start; index < output.length; index += 1) {
+        const code = output.charCodeAt(index);
+        if (allowBell && code === 0x07) return { index, length: 1 };
+        if (code === 0x9C) return { index, length: 1 };
+        if (code === 0x1B && output.charCodeAt(index + 1) === 0x5C) return { index, length: 2 };
+    }
+    return undefined;
+};
+
 export const renderTerminalOutput = (output: string): string => {
-    if (!output.includes('\u001B') && !output.includes('\r') && !output.includes('\b')) {
+    if (!hasTerminalControlCharacter(output)) {
         return output;
     }
 
@@ -48,6 +72,7 @@ export const renderTerminalOutput = (output: string): string => {
 
     for (let index = 0; index < output.length; index += 1) {
         const character = output[index];
+        const code = output.charCodeAt(index);
 
         if (character === '\n') {
             row += 1;
@@ -63,17 +88,37 @@ export const renderTerminalOutput = (output: string): string => {
             column = Math.max(0, column - 1);
             continue;
         }
-        if (character !== '\u001B') {
+        if (character === '\t' || (code >= 0x20 && code < 0x7F) || code > 0x9F) {
             column = writeTerminalCharacter(lines, row, column, character, budget) + 1;
             continue;
         }
 
-        const nextCharacter = output[index + 1];
-        if (nextCharacter === '[') {
-            const sequenceStart = index + 2;
+        const nextCode = output.charCodeAt(index + 1);
+        if ((code === 0x1B && nextCode === 0x5B) || code === 0x9B) {
+            const sequenceStart = code === 0x9B ? index + 1 : index + 2;
             let sequenceEnd = sequenceStart;
-            while (sequenceEnd < output.length && !/[\x40-\x7E]/.test(output[sequenceEnd])) {
-                sequenceEnd += 1;
+            let hasIntermediate = false;
+            let sequenceMalformed = false;
+            while (sequenceEnd < output.length) {
+                const sequenceCode = output.charCodeAt(sequenceEnd);
+                if (!hasIntermediate && sequenceCode >= 0x30 && sequenceCode <= 0x3F) {
+                    sequenceEnd += 1;
+                    continue;
+                }
+                if (sequenceCode >= 0x20 && sequenceCode <= 0x2F) {
+                    hasIntermediate = true;
+                    sequenceEnd += 1;
+                    continue;
+                }
+                if (sequenceCode >= 0x40 && sequenceCode <= 0x7E) break;
+                sequenceMalformed = true;
+                break;
+            }
+            if (sequenceMalformed) {
+                // Drop the ESC/CSI introducer and recognized prefix, then let
+                // the invalid byte be handled by the normal output loop.
+                index = sequenceEnd - 1;
+                continue;
             }
             if (sequenceEnd === output.length) {
                 break;
@@ -112,26 +157,59 @@ export const renderTerminalOutput = (output: string): string => {
             continue;
         }
 
-        if (nextCharacter === ']') {
-            const terminator = output.indexOf('\u0007', index + 2);
-            const stringTerminator = output.indexOf('\u001B\\', index + 2);
-            const end = terminator === -1
-                ? stringTerminator
-                : stringTerminator === -1
-                    ? terminator
-                    : Math.min(terminator, stringTerminator);
-            if (end === -1) {
+        if ((code === 0x1B && nextCode === 0x5D) || code === 0x9D) {
+            const terminator = findTerminalStringTerminator(output, code === 0x9D ? index + 1 : index + 2, true);
+            if (!terminator) {
                 break;
             }
-            index = output[end] === '\u0007' ? end : end + 1;
+            index = terminator.index + terminator.length - 1;
             continue;
         }
 
-        index += 1;
+        if ((code === 0x1B && (nextCode === 0x50 || nextCode === 0x58 || nextCode === 0x5E || nextCode === 0x5F))
+            || code === 0x90 || code === 0x98 || code === 0x9E || code === 0x9F) {
+            const terminator = findTerminalStringTerminator(output, code >= 0x80 ? index + 1 : index + 2, false);
+            if (!terminator) {
+                break;
+            }
+            index = terminator.index + terminator.length - 1;
+            continue;
+        }
+
+        // Drop unknown ESC sequences and every other C0/C1 control rather than
+        // allowing their payload or introducer bytes into copied output.
+        if (code === 0x1B) {
+            let sequenceEnd = index + 1;
+            while (sequenceEnd < output.length) {
+                const sequenceCode = output.charCodeAt(sequenceEnd);
+                if (sequenceCode >= 0x30 && sequenceCode <= 0x7E) {
+                    index = sequenceEnd;
+                    break;
+                }
+                if (sequenceCode < 0x20 || sequenceCode > 0x2F) {
+                    break;
+                }
+                sequenceEnd += 1;
+            }
+            if (sequenceEnd === output.length) {
+                break;
+            }
+            if (output.charCodeAt(sequenceEnd) < 0x30 || output.charCodeAt(sequenceEnd) > 0x7E) {
+                // A non-ASCII or control byte cannot be the final byte of an
+                // ESC sequence. Drop the introducer and intermediate bytes,
+                // then let the normal loop process the following byte as
+                // output or another control sequence.
+                index = sequenceEnd - 1;
+                continue;
+            }
+            continue;
+        }
     }
 
     return lines.map((line) => line.join('')).join('\n');
 };
+
+export const getShellClipboardText = (output: string): string => renderTerminalOutput(output);
 
 export const getToolOutput = (
     tool: string,
