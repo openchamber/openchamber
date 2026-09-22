@@ -2318,6 +2318,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': 'Wybierz skrót wysyłania dla standardowego komponentu. W rozszerzonym komponencie Enter zawsze dodaje nowy wiersz, a Ctrl/Cmd+Enter wysyła.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Wyślij klawiszem Enter',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Wyślij klawiszami Ctrl/Cmd+Enter',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': 'Wyślij prawym Shift/Ctrl+Enter',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': 'Rozszerzony komponent i karty pytań również wysyłają prawym skrótem. Enter i lewe modyfikatory wstawiają nowy wiersz.',
   ...linearIntegrationI18n.pl,
   ...guestIntegrationsI18n.pl,
   ...extensionsSettingsI18n.pl,

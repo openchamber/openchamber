@@ -8,6 +8,7 @@ import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import type { EnterSendMode } from '@/lib/enterSendMode';
 import type { LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus, TerminalShell } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
@@ -1000,6 +1001,7 @@ interface UIStore {
   largeTextPasteBehavior: LargeTextPasteBehavior;
   enterToSend: boolean;
   enterToSendConfigured: boolean;
+  enterToSendMode?: EnterSendMode;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
@@ -1195,6 +1197,7 @@ interface UIStore {
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
   setEnterToSend: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
+  setEnterToSendMode: (value: EnterSendMode) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
@@ -2727,6 +2730,9 @@ export const useUIStore = create<UIStore>()(
         setEnterToSendConfigured: (value) => {
           set({ enterToSendConfigured: value });
         },
+        setEnterToSendMode: (value) => {
+          set({ enterToSendMode: value });
+        },
         setWideChatLayoutEnabled: (value) => {
           set({ wideChatLayoutEnabled: value });
         },
@@ -3171,6 +3177,7 @@ export const useUIStore = create<UIStore>()(
           largeTextPasteBehavior: state.largeTextPasteBehavior,
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
+          enterToSendMode: state.enterToSendMode,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,

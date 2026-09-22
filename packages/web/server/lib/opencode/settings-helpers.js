@@ -62,6 +62,7 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const ENTER_SEND_MODE_VALUES = new Set(['enter', 'modifier', 'right-modifier']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
   const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
@@ -592,6 +593,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
       result.enterToSendConfigured = candidate.enterToSendConfigured;
+    }
+    if (typeof candidate.enterToSendMode === 'string') {
+      const mode = candidate.enterToSendMode.trim();
+      if (ENTER_SEND_MODE_VALUES.has(mode)) {
+        result.enterToSendMode = mode;
+      }
     }
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;

@@ -518,6 +518,18 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ enterToSendConfigured: 1 })).toEqual({});
   });
 
+  it('accepts known Enter-to-send modes and rejects unknown ones', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: 'enter' })).toEqual({ enterToSendMode: 'enter' });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: 'modifier' })).toEqual({ enterToSendMode: 'modifier' });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: ' right-modifier ' })).toEqual({ enterToSendMode: 'right-modifier' });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: 'right' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: '' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: 1 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendMode: null })).toEqual({});
+  });
+
   it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -782,7 +794,7 @@ describe('settings registry gate', () => {
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', autoSaveEnabled: true, autoCreateWorktree: true, sessionTabsEnabled: true, showOpenCodeRestartConfirm: true,
-    allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, persistChatDraft: true,
+    allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, enterToSendMode: 'right-modifier', persistChatDraft: true,
     largeTextPasteBehavior: 'attach', followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', padding: 100, cornerRadius: 8,

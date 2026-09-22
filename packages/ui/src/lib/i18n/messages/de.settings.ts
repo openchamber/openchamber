@@ -2093,6 +2093,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': 'Wählen Sie das Tastenkürzel zum Senden im Standard-Composer. Im erweiterten Composer fügt Enter immer eine neue Zeile ein, und Strg/Cmd+Enter sendet.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Mit Enter senden',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Mit Strg/Cmd+Enter senden',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': 'Mit rechtem Umschalt/Strg+Enter senden',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': 'Der erweiterte Composer und Fragekarten nutzen ebenfalls das rechte Kürzel. Enter und linke Modifikatortasten fügen eine neue Zeile ein.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Verhalten bei großem Texteinfügen',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Großes Texteinfügen: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Jedes Mal fragen',

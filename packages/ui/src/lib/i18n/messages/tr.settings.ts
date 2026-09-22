@@ -2034,6 +2034,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': 'Standart oluşturucu için gönderme kısayolunu seçin. Genişletilmiş oluşturucuda Enter her zaman yeni satır ekler, Ctrl/Cmd+Enter gönderir.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Enter ile gönder',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter ile gönder',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': 'Sağ Shift/Ctrl+Enter ile gönder',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': 'Genişletilmiş oluşturucu ve soru kartları da sağ kısayolu kullanır. Enter ve sol değiştiriciler yeni satır ekler.',
   'settings.openchamber.visual.actions.resetInputBarOffsetAria': 'Giriş çubuğu ofsetini sıfırla',
   'settings.openchamber.visual.field.terminalQuickKeysAria': 'Terminal hızlı tuşları',
   'settings.openchamber.visual.field.terminalQuickKeys': 'Terminal Hızlı Tuşları',

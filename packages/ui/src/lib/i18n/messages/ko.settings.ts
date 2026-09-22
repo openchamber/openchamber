@@ -2325,6 +2325,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': '일반 작성기의 전송 단축키를 선택하세요. 확장 작성기에서는 Enter가 항상 줄바꿈을 하고 Ctrl/Cmd+Enter로 전송합니다.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Enter로 전송',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter로 전송',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': '오른쪽 Shift/Ctrl+Enter로 전송',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': '확장 작성기와 질문 카드도 오른쪽 단축키로 전송합니다. Enter와 왼쪽 보조 키는 줄바꿈합니다.',
   ...linearIntegrationI18n.ko,
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,

@@ -2325,6 +2325,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.enterToSendHint": "Elige el atajo de envío para el compositor estándar. En el compositor expandido, Intro siempre añade una nueva línea y Ctrl/Cmd+Intro envía.",
   "settings.openchamber.visual.option.enterToSend.enter.label": "Enviar con Intro",
   "settings.openchamber.visual.option.enterToSend.modifier.label": "Enviar con Ctrl/Cmd+Intro",
+  "settings.openchamber.visual.option.enterToSend.rightModifier.label": "Enviar con Mayús derecha/Ctrl derecho+Intro",
+  "settings.openchamber.visual.field.enterToSendHintRightModifier": "El compositor expandido y las tarjetas de pregunta también usan el atajo derecho. Intro y los modificadores izquierdos añaden una nueva línea.",
   ...linearIntegrationI18n.es,
   ...guestIntegrationsI18n.es,
   ...extensionsSettingsI18n.es,

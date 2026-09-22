@@ -58,6 +58,7 @@ import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import { shouldSubmitEnter } from './composer/keyboardPolicy';
+import { useRightModifierHeld } from './composer/rightModifierKeys';
 import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
@@ -575,6 +576,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const hasHardwareKeyboard = useHardwareKeyboard();
     const enterToSend = useUIStore((state) => state.enterToSend);
     const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
+    const enterToSendMode = useUIStore((state) => state.enterToSendMode);
+    const getRightModifierHeld = useRightModifierHeld();
     const { enabled: isTabletLayout } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -2300,15 +2303,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // Mobile and expanded desktop require Ctrl/Cmd+Enter to send from the
         // keyboard. The standard desktop composer follows the setting.
+        const rightModifierHeld = getRightModifierHeld(e);
         const isCtrlEnter = e.ctrlKey || e.metaKey;
+        // The configured right-hand shortcut is an explicit send gesture, so it
+        // sends immediately instead of steering or queueing into a running turn.
+        const sendsNow = isCtrlEnter
+            || (enterToSendMode === 'right-modifier' && rightModifierHeld && !e.altKey);
         if (e.key === 'Enter' && shouldSubmitEnter({
             isMobile,
             isDesktopExpanded,
             enterToSend,
             enterToSendConfigured,
+            enterToSendMode,
+            rightModifierHeld,
             shiftKey: e.shiftKey,
             ctrlKey: e.ctrlKey,
             metaKey: e.metaKey,
+            altKey: e.altKey,
         })) {
             e.preventDefault();
 
@@ -2317,14 +2328,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
 
             if (followUpBehavior === 'queue') {
-                if (isCtrlEnter || !canQueue) {
+                if (sendsNow || !canQueue) {
                     handleSubmit();
                 } else {
                     void handleQueueMessage();
                 }
             } else {
-                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
-                if (isCtrlEnter || !canQueue) {
+                // steer: the configured send gesture and Ctrl/Cmd+Enter send
+                // now; a plain Enter steers into the running turn.
+                if (sendsNow || !canQueue) {
                     handleSubmit();
                 } else {
                     handleSubmit({ delivery: 'steer' });

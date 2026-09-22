@@ -1,28 +1,27 @@
-export interface EnterKeyPolicyInput {
+import { resolveEnterSendMode, type EnterSendModeSettings } from '@/lib/enterSendMode';
+
+export interface EnterKeyPolicyInput extends EnterSendModeSettings {
     isMobile: boolean;
     isDesktopExpanded: boolean;
-    enterToSend: boolean;
-    enterToSendConfigured: boolean;
     shiftKey: boolean;
     ctrlKey: boolean;
     metaKey: boolean;
+    altKey?: boolean;
+    rightModifierHeld?: boolean;
 }
 
 export const shouldSubmitEnter = (input: EnterKeyPolicyInput): boolean => {
     const isCtrlEnter = input.ctrlKey || input.metaKey;
     if (input.isMobile) return isCtrlEnter;
-    if (input.isDesktopExpanded) return isCtrlEnter;
 
-    const enterSendsByDefault = !input.isMobile;
-    if (!input.enterToSendConfigured) {
-        return !input.shiftKey && (enterSendsByDefault || isCtrlEnter);
+    const mode = resolveEnterSendMode(input);
+    if (mode === 'right-modifier') {
+        return Boolean(input.rightModifierHeld) && !input.altKey;
     }
-    const enterSends = input.enterToSend;
-    const sendsWithEnter = enterSends
-        ? !input.shiftKey
-        : input.shiftKey;
+    if (input.isDesktopExpanded) return isCtrlEnter;
+    if (mode === 'default') return !input.shiftKey;
 
-    return isCtrlEnter || sendsWithEnter;
+    return isCtrlEnter || (mode === 'enter' && !input.shiftKey);
 };
 
 export interface EnterModifierState {

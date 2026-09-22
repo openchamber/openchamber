@@ -22,6 +22,7 @@ import type { DesktopWindowControlsPosition, DesktopWindowControlsStyle } from '
 import { getDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
+import { ENTER_SEND_MODES, type EnterSendMode } from '@/lib/enterSendMode';
 import { getFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
@@ -187,6 +188,7 @@ const parseDraftStarters: SettingsParser<DraftStarterRef[]> = mapParser(fromSche
 const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSchema(z.array(z.unknown())), (value) => sanitizeWorkStatusHiddenSections(value));
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
+const parseEnterSendMode: SettingsParser<EnterSendMode> = parseOneOf(ENTER_SEND_MODES);
 
 /**
  * Removing a built-in starter must stay a durable choice, so the list is only
@@ -382,6 +384,15 @@ export const SETTINGS_REGISTRY = {
   inputSpellcheckEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('inputSpellcheckEnabled', (v) => useUIStore.getState().setInputSpellcheckEnabled(v)) }),
   enterToSend: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('enterToSend', (v) => useUIStore.getState().setEnterToSend(v)) }),
   enterToSendConfigured: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('enterToSendConfigured', (v) => useUIStore.getState().setEnterToSendConfigured(v)) }),
+  enterToSendMode: field({
+    scope: 'profile',
+    parse: parseEnterSendMode,
+    ui: {
+      read: () => useUIStore.getState().enterToSendMode,
+      write: (value) => useUIStore.getState().setEnterToSendMode(value),
+      autoSave: true,
+    },
+  }),
   persistChatDraft: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('persistChatDraft', (v) => useUIStore.getState().setPersistChatDraft(v)) }),
   largeTextPasteBehavior: field({ scope: 'profile', parse: parseLargeTextPasteBehavior, ui: uiStore('largeTextPasteBehavior', (v) => useUIStore.getState().setLargeTextPasteBehavior(v)) }),
   followUpBehavior: field({
