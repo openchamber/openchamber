@@ -269,3 +269,30 @@ export const getProviderModelDisplayName = (
   const model = getProviderModel(provider, normalizedModelId);
   return getModelDisplayName(model, normalizedModelId, options);
 };
+
+type SortableModel = {
+  id?: unknown;
+  name?: unknown;
+};
+
+const getModelSortName = (model: SortableModel): string => {
+  const name = normalizeString(model?.name);
+  if (name) {
+    return name;
+  }
+  return humanizeModelId(normalizeString(model?.id));
+};
+
+const compareAlphabetical = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
+
+const compareModelsByDisplayName = (a: SortableModel, b: SortableModel): number => {
+  const result = compareAlphabetical(getModelSortName(a), getModelSortName(b));
+  if (result !== 0) {
+    return result;
+  }
+  return compareAlphabetical(normalizeString(a?.id), normalizeString(b?.id));
+};
+
+export const sortModelsByDisplayName = <T extends SortableModel>(models: T[]): T[] =>
+  [...models].sort(compareModelsByDisplayName);

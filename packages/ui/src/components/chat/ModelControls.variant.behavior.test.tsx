@@ -177,6 +177,7 @@ const useUIStore = create(() => ({
   isModelSelectorOpen: false,
   hiddenModels: [],
   providerOrder: [],
+  disabledProviders: [],
   shortcutOverrides: {},
   isFavoriteModel: () => false,
   toggleFavoriteModel: () => undefined,
