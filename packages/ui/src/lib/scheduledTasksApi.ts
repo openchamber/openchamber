@@ -1,6 +1,7 @@
 import { runtimeFetch } from './runtime-fetch';
+import { z } from 'zod';
 
-export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
+export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'denied';
 
 export type ScheduledTask = {
   id: string;
@@ -38,6 +39,45 @@ export type ScheduledTask = {
     lastSessionId?: string;
     nextRunAt?: number;
   };
+};
+
+export class ScheduledTaskRunError extends Error {
+  readonly persistError?: string;
+  readonly task?: Pick<ScheduledTask, 'id' | 'state'>;
+
+  constructor(message: string, persistError?: string, task?: Pick<ScheduledTask, 'id' | 'state'>) {
+    super(message);
+    this.name = 'ScheduledTaskRunError';
+    this.persistError = persistError;
+    this.task = task;
+  }
+}
+
+const scheduledTaskRunTaskSchema = z.object({
+  id: z.string().min(1),
+  state: z.object({
+    createdAt: z.number(),
+    updatedAt: z.number(),
+    lastRunAt: z.number().optional(),
+    lastStatus: z.enum(['idle', 'running', 'success', 'error', 'denied']).optional(),
+    lastError: z.string().optional(),
+    lastDurationMs: z.number().optional(),
+    lastSessionId: z.string().optional(),
+    nextRunAt: z.number().optional(),
+  }),
+});
+
+const scheduledTaskRunResponseSchema = z.object({
+  error: z.string().trim().min(1).optional(),
+  persistError: z.string().trim().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  task: scheduledTaskRunTaskSchema.optional(),
+});
+
+const parseScheduledTaskRunResponse = async (response: Response) => {
+  const parsed = await response.json().catch(() => null);
+  const result = scheduledTaskRunResponseSchema.safeParse(parsed);
+  return result.success ? result.data : undefined;
 };
 
 const parseErrorMessage = async (response: Response, fallback: string) => {
@@ -156,13 +196,12 @@ export const runScheduledTaskNow = async (
     },
   });
   if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, 'Failed to run scheduled task'));
+    const parsed = await parseScheduledTaskRunResponse(response);
+    throw new ScheduledTaskRunError(parsed?.error ?? 'Failed to run scheduled task', parsed?.persistError, parsed?.task);
   }
-  const parsed = await response.json().catch(() => null);
+  const parsed = await parseScheduledTaskRunResponse(response);
   return {
-    sessionId: typeof parsed?.sessionId === 'string' && parsed.sessionId.length > 0 ? parsed.sessionId : undefined,
-    persistError: typeof parsed?.persistError === 'string' && parsed.persistError.trim().length > 0
-      ? parsed.persistError.trim()
-      : undefined,
+    sessionId: parsed?.sessionId,
+    persistError: parsed?.persistError,
   };
 };
