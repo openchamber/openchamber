@@ -18,6 +18,10 @@ type MessageLike = Message & {
 
 /**
  * Extract agent/model selection metadata from a user message, if present.
+ *
+ * `readUserMessageModelFields` in `components/chat/userMessageModelFields.ts`
+ * reads the same message shape for assistant footer attribution; keep both in
+ * step if that shape changes.
  */
 export const extractUserModelChoice = (message: MessageLike): UserModelChoice | null => {
   if (message.role !== 'user') {
