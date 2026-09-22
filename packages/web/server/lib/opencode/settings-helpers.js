@@ -627,6 +627,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showExpandedEditTools === 'boolean') {
       result.showExpandedEditTools = candidate.showExpandedEditTools;
     }
+    if (typeof candidate.showExpandedTodoTools === 'boolean') {
+      result.showExpandedTodoTools = candidate.showExpandedTodoTools;
+    }
     if (typeof candidate.timeFormatPreference === 'string') {
       const mode = candidate.timeFormatPreference.trim();
       if (mode === 'auto' || mode === '12h' || mode === '24h') {

@@ -344,6 +344,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['tools', 'files', 'icons'],
   },
   {
+    id: 'chat.expanded-tools-todo',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.todoList',
+    keywords: ['todo', 'todos', 'tasks', 'expanded', 'open by default'],
+  },
+  {
     id: 'chat.tools-and-files',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.toolsAndFiles',
