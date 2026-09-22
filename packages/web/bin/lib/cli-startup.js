@@ -250,6 +250,12 @@ ${envXml}  <key>ProcessType</key>
 function buildSystemdUserService(options = {}) {
   const args = buildStartupArgs(options).map((arg) => `"${systemdEscapeArg(arg)}"`).join(' ');
   const envFilePath = getStartupEnvFilePath();
+  // Bound the service cgroup so systemd-oomd does not kill OpenChamber and
+  // every in-flight OpenCode turn together (#3732). MemoryHigh=50% throttles
+  // reclaim, MemoryMax=75% is the hard cap, OOMScoreAdjust=-200 prefers
+  // killing heavier descendants, OOMPolicy=continue keeps the unit up if a
+  // child is OOM-killed, and ManagedOOMPreference=omit keeps MemoryHigh
+  // reclaim from making oomd select this whole cgroup.
   return `[Unit]
 Description=OpenChamber web server
 After=network-online.target
@@ -261,6 +267,11 @@ ExecStart="${systemdEscapeArg(process.execPath)}" ${args}
 WorkingDirectory=${systemdUnitPath(os.homedir())}
 Restart=always
 RestartSec=5
+MemoryHigh=50%
+MemoryMax=75%
+OOMScoreAdjust=-200
+OOMPolicy=continue
+ManagedOOMPreference=omit
 
 [Install]
 WantedBy=default.target
@@ -436,4 +447,5 @@ export {
   enableStartupService,
   disableStartupService,
   buildWindowsStartupTaskCommand,
+  buildSystemdUserService,
 };

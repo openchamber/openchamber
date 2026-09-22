@@ -413,10 +413,32 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       signalCode: observedSignalCode ?? child.signalCode ?? null,
       stderrTail: getBoundedTextTail(sanitizeDiagnosticText(runtimeStderrTail), MANAGED_STDERR_TAIL_MAX_BYTES),
     });
+    let closing = false;
+    let unexpectedExitRecoveryStarted = false;
+    let becameReady = false;
     const recordManagedProcessExit = (code, signal) => {
       if (code !== null && code !== undefined) observedExitCode = code;
       if (signal !== null && signal !== undefined) observedSignalCode = signal;
       state.lastManagedOpenCodeProcess = getManagedProcessSnapshot();
+      // Intentional close, pre-ready crashes, and in-flight start retries have
+      // their own paths. A ready child that dies after startOpenCode has
+      // returned must settle busy sessions immediately; waiting for the
+      // periodic health check leaves tools marked running (#3732).
+      if (closing || unexpectedExitRecoveryStarted || !becameReady) return;
+      if (state.isShuttingDown || state.isRestartingOpenCode || isStartingOpenCode) return;
+      unexpectedExitRecoveryStarted = true;
+      lastHealthProbeResult = null;
+      console.warn(
+        `[lifecycle] managed OpenCode process exited (code=${code} signal=${signal}); recovering sessions`,
+      );
+      try {
+        onOpenCodeRestarted?.();
+      } catch (error) {
+        console.warn('Failed to reconcile sessions after managed OpenCode exit:', error?.message ?? error);
+      }
+      void restartOpenCode('managed-process-exited').catch((error) => {
+        console.error(`[lifecycle] managed OpenCode exit recovery failed: ${error.message}`);
+      });
     };
     const attachRuntimeStderrCapture = () => {
       if (runtimeStderrAttached) return;
@@ -448,6 +470,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       get signalCode() { return observedSignalCode ?? child.signalCode; },
       get stderrTail() { return getManagedProcessSnapshot().stderrTail; },
       close() {
+        closing = true;
         if (!closePromise) closePromise = registration.then(() => closeManagedOpenCodeChild(child));
         return closePromise;
       },
@@ -521,6 +544,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     state.openCodeProcess = serverProcess;
     syncToHmrState();
     serverProcess.url = await readiness;
+    becameReady = true;
     await registration;
     return serverProcess;
   };
@@ -663,6 +687,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const START_OPEN_CODE_MAX_ATTEMPTS = 2;
+  let isStartingOpenCode = false;
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -776,30 +801,35 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const startOpenCode = async () => {
-    let lastError = null;
-    for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
-      try {
-        return await startOpenCodeOnce(attempt);
-      } catch (error) {
-        lastError = error;
-        if (state.isShuttingDown || error?.code === 'OPENCODE_BINARY_INVALID') {
-          break;
-        }
-        if (attempt >= START_OPEN_CODE_MAX_ATTEMPTS) {
-          break;
-        }
+    isStartingOpenCode = true;
+    try {
+      let lastError = null;
+      for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          return await startOpenCodeOnce(attempt);
+        } catch (error) {
+          lastError = error;
+          if (state.isShuttingDown || error?.code === 'OPENCODE_BINARY_INVALID') {
+            break;
+          }
+          if (attempt >= START_OPEN_CODE_MAX_ATTEMPTS) {
+            break;
+          }
 
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[OpenCode] Managed server startup failed on attempt ${attempt}/${START_OPEN_CODE_MAX_ATTEMPTS}; retrying: ${message}`);
-        state.openCodePort = null;
-        state.isOpenCodeReady = false;
-        state.openCodeNotReadySince = Date.now();
-        syncToHmrState();
-        await delay(750 * attempt);
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[OpenCode] Managed server startup failed on attempt ${attempt}/${START_OPEN_CODE_MAX_ATTEMPTS}; retrying: ${message}`);
+          state.openCodePort = null;
+          state.isOpenCodeReady = false;
+          state.openCodeNotReadySince = Date.now();
+          syncToHmrState();
+          await delay(750 * attempt);
+        }
       }
-    }
 
-    throw lastError;
+      throw lastError;
+    } finally {
+      isStartingOpenCode = false;
+    }
   };
 
   const restartOpenCode = async (reason = 'managed-restart') => {

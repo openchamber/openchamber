@@ -124,6 +124,7 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-startup.js`
   - Native startup service detection, install/uninstall/status helpers, and platform-specific startup command execution.
+  - Linux systemd user units (`buildSystemdUserService`) set `MemoryHigh=50%`, `MemoryMax=75%`, `OOMScoreAdjust=-200`, `OOMPolicy=continue`, and `ManagedOOMPreference=omit` so `systemd-oomd` does not kill the whole `openchamber.service` cgroup when managed OpenCode children spike memory (#3732). Re-run `openchamber startup enable` to rewrite an already-installed unit.
 
 - `cli-tunnel-profiles.js`
   - Tunnel profile normalization, token resolution/redaction, profile storage, migration, file-permission warnings, and managed-remote pair persistence.

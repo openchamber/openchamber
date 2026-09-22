@@ -433,6 +433,110 @@ describe('OpenCode lifecycle', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
+  it('recovers busy sessions immediately when a ready managed OpenCode process exits', async () => {
+    const firstChild = createMockChild();
+    const replacement = createMockChild();
+    const onOpenCodeRestarted = vi.fn();
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        firstChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return firstChild;
+    });
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return replacement;
+    });
+    const runtime = createRuntime({ onOpenCodeRestarted });
+    const server = await runtime.startOpenCode();
+
+    firstChild.exitCode = 1;
+    firstChild.emit('exit', 1, null);
+
+    // Overlay recovery must not wait for the periodic health check: the UI
+    // otherwise keeps tools marked running until OpenCode is replaced (#3732).
+    expect(onOpenCodeRestarted).toHaveBeenCalledTimes(1);
+
+    await vi.waitFor(() => {
+      expect(spawnMock).toHaveBeenCalledTimes(2);
+    });
+
+    await runtime.testState.openCodeProcess.close();
+    expect(server.exitCode).toBe(1);
+  });
+
+  it('does not spawn a duplicate OpenCode when the child dies during waitForReady', async () => {
+    const firstChild = createMockChild();
+    const onOpenCodeRestarted = vi.fn();
+    let markWaitForReadyEntered;
+    const waitForReadyEntered = new Promise((resolve) => {
+      markWaitForReadyEntered = resolve;
+    });
+    let releaseReady;
+    const readyGate = new Promise((resolve) => {
+      releaseReady = resolve;
+    });
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        firstChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return firstChild;
+    });
+    const runtime = createRuntime({
+      onOpenCodeRestarted,
+      waitForReady: vi.fn(async () => {
+        markWaitForReadyEntered();
+        await readyGate;
+        return true;
+      }),
+    });
+
+    const starting = runtime.startOpenCode();
+    await waitForReadyEntered;
+
+    firstChild.exitCode = 1;
+    firstChild.emit('exit', 1, null);
+
+    // becameReady is already true here (listen URL printed) but startOpenCode
+    // still owns the attempt. Exit recovery must not race a second spawn.
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    releaseReady();
+    const server = await starting;
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('does not treat an intentional managed close as unexpected death', async () => {
+    const child = createMockChild();
+    const onOpenCodeRestarted = vi.fn();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const runtime = createRuntime({ onOpenCodeRestarted });
+    const server = await runtime.startOpenCode();
+
+    await server.close();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it('calls onOpenCodeRestarted after a successful managed restart', async () => {
     const close = vi.fn(async () => {});
     const replacement = createMockChild();
@@ -503,10 +607,12 @@ describe('OpenCode lifecycle', () => {
     expect(server.stderrTail).not.toContain('runtime-secret');
     expect(server.stderrTail).toContain('runtime worker failed after startup');
 
-    await runtime.triggerHealthCheck();
+    await vi.waitFor(() => {
+      expect(runtime.testState.lastOpenCodeRestartDiagnostics?.reason).toBe('managed-process-exited');
+    });
 
     expect(runtime.testState.lastOpenCodeRestartDiagnostics).toEqual({
-      reason: 'immediate-process-exited',
+      reason: 'managed-process-exited',
       healthFailure: null,
       process: {
         pid: 12345,
@@ -571,7 +677,9 @@ describe('OpenCode lifecycle', () => {
     expect(server.stderrTail).toContain('falling back to basic health monitor');
     expect(server.stderrTail).toContain('runtime worker failed after startup');
 
-    await runtime.triggerHealthCheck();
+    await vi.waitFor(() => {
+      expect(runtime.testState.lastOpenCodeRestartDiagnostics?.reason).toBe('managed-process-exited');
+    });
 
     const diagnosticsTail = runtime.testState.lastOpenCodeRestartDiagnostics.process.stderrTail;
     expect(diagnosticsTail).not.toContain('dXNlcjpwYXNz');
