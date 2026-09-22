@@ -17,7 +17,7 @@ import { AuthExpiredBanner } from './AuthExpiredBanner';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
-import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
+import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -509,14 +509,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         return;
       }
       console.warn('Failed to check session status:', error);
-      if (resolveStatusCheckFailureState({ shouldUseDesktopShellPasswordLogin: shouldUseDesktopShellPasswordLogin() }) === 'locked') {
-        setState('locked');
-        setRetryAfter(undefined);
-        setIsTunnelLocked(false);
-        return;
-      }
       // Network-level failure — over the relay this is typically the initial
       // tunnel attempt racing this request; it self-heals within seconds.
+      // No server answer exists here (the request never reached the wire),
+      // so this is never evidence of a password requirement; 401 above is.
       if (scheduleTransientRetry()) return;
       setState('error');
       setIsTunnelLocked(false);
