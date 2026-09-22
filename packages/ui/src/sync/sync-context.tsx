@@ -95,6 +95,7 @@ import { sessionEvents } from "@/lib/sessionEvents"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
+import { createSessionUserModelChoiceSource } from "./session-user-model-choice"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
   SessionMessageLoader,
@@ -2998,6 +2999,13 @@ export function useSessionMessageLoadState(sessionID: string, directory?: string
 export function useDirectorySync<T>(selector: (state: State) => T, directory?: string): T {
   const store = useDirectoryStore(directory)
   return useStore(store, selector)
+}
+
+/** Observe real user prompts, including parts delivered after their metadata. */
+export function useSessionUserModelChoice(sessionID: string, directory?: string) {
+  const store = useDirectoryStore(directory)
+  const source = useMemo(() => createSessionUserModelChoiceSource(store, sessionID), [store, sessionID])
+  return React.useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
 }
 
 /** Get session messages for a specific session */

@@ -347,6 +347,22 @@ Directory stores also own session-keyed sidecar notification channels for permis
 
 Message sidecar consumers also filter targeted updates by purpose before notifying React. Suspended live-tail text/reasoning changes do not rebuild visible message records, but structural Task session identity changes bypass suspension so a parent can link a newly created subagent immediately. Assistant-only part changes do not rebuild user input history, and targeted updates that preserve authoritative part buckets do not recheck a session that is already renderable. Message replacements, removed final part buckets, and conservative resets always notify.
 
+Composer model reconciliation uses `useSessionUserModelChoice`. Its session-scoped
+source watches the latest real user prompt and newer incomplete or synthetic
+prompts, so a text part arriving after metadata can complete the choice without
+assistant output. Targeted assistant part updates do not inspect user buckets or
+notify the consumer. Bulk resets recheck the snapshot; unchanged choices retain
+their reference.
+
+`ModelControls` remembers prompt identity and `time.created` in at most 150
+runtime/directory/session entries. A newer real prompt can replace a manual
+selection even when the previous prompt has paged out. Initial history and
+same-message late updates keep the manual override guard. Older history exposed
+by rollback or removal cannot move the remembered chronology backward. The
+processed restore key is separate from that chronological baseline. Saved Auto
+and explicit effort choices retain their existing precedence; controlled BTW
+selections do not subscribe to main-session history.
+
 ## Session directory resolution
 
 `session-directory-resolution.ts` owns the precedence used to answer "which directory does this session belong to". Every send, message fetch, message-queue key, and send-confirmation lookup is routed by that answer, so a wrong value is not a display problem: the prompt is posted against a directory that does not own the session, the request is rejected, and the optimistic message is rolled back with no visible error.

@@ -32,7 +32,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useSessionMessages, useSessionRenderable } from '@/sync/sync-context';
+import { useSessionUserModelChoice, useSessionRenderable, useSyncRuntime } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
@@ -45,10 +45,10 @@ import { markStartupTrace } from '@/lib/startupTrace';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import {
-    findLatestUserModelChoice,
+    rememberLoadedUserChoiceRestore,
+    type LoadedUserChoiceRestore,
     shouldPreserveManualModelOverride,
 } from '@/lib/messages/userModelChoice';
-import { getSyncParts } from '@/sync/sync-refs';
 import type { BtwSelection } from '@/stores/useBtwStore';
 
 type IconComponent = IconName;
@@ -667,24 +667,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ];
 
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
-    const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
+    const loadedUserChoiceRestoreBySessionRef = React.useRef(new Map<string, LoadedUserChoiceRestore>());
     const restoredSessionSelectionRef = React.useRef<string | null>(null);
 
+    const { runtimeKey } = useSyncRuntime();
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
     const hasRenderableCurrentSessionSnapshot = useSessionRenderable(
         currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
     );
-    const currentSessionMessagesFromSync = useSessionMessages(currentSessionId ?? '', currentSessionDirectory ?? undefined);
-    // Skip synthetic subagent-completion nudges — restoring from them resets a
-    // manual model override back to the agent default (issue #2404).
-    const latestLoadedUserChoice = React.useMemo(() => {
-        if (selection) return null;
-        return findLatestUserModelChoice(
-            currentSessionMessagesFromSync,
-            (messageId) => getSyncParts(messageId, currentSessionDirectory ?? undefined),
-        );
-    }, [currentSessionDirectory, currentSessionMessagesFromSync, selection]);
+    const currentSessionScope = JSON.stringify([runtimeKey, currentSessionDirectory, currentSessionId]);
+    const latestLoadedUserChoice = useSessionUserModelChoice(
+        currentSessionId ?? '', currentSessionDirectory ?? undefined,
+    );
 
     const tryApplyModelSelection = React.useCallback(
         (providerId: string, modelId: string, agentName?: string): ModelApplyResult => {
@@ -883,7 +878,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     React.useEffect(() => {
         if (!currentSessionId) {
-            latestLoadedUserChoiceRestoreRef.current = null;
             return;
         }
 
@@ -894,13 +888,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const restoreKey = [
             currentSessionId,
             latestLoadedUserChoice.id,
+            latestLoadedUserChoice.time.created,
             latestLoadedUserChoice.agent ?? '',
             latestLoadedUserChoice.providerID,
             latestLoadedUserChoice.modelID,
             latestLoadedUserChoice.variant ?? '',
         ].join('|');
+        const previousRestore = loadedUserChoiceRestoreBySessionRef.current.get(currentSessionScope);
 
-        if (latestLoadedUserChoiceRestoreRef.current === restoreKey) {
+        if (previousRestore?.restoreKey === restoreKey) {
             return;
         }
 
@@ -913,7 +909,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (savedSessionModel && isAutoModel(savedSessionModel.providerId, savedSessionModel.modelId)) {
             if (!autoReady) return;
             tryApplyModelSelection(AUTO_PROVIDER_ID, AUTO_MODEL_ID, currentAgentName || undefined);
-            latestLoadedUserChoiceRestoreRef.current = restoreKey;
+            rememberLoadedUserChoiceRestore(loadedUserChoiceRestoreBySessionRef.current, currentSessionScope, {
+                message: { id: latestLoadedUserChoice.id, time: latestLoadedUserChoice.time },
+                restoreKey,
+            });
             return;
         }
 
@@ -921,6 +920,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (shouldPreserveManualModelOverride({
             selectionSource: useConfigStore.getState().selectionSource,
             savedSessionModel,
+            previousMessage: previousRestore?.message,
             candidate: latestLoadedUserChoice,
         })) {
             if (savedSessionModel) {
@@ -931,7 +931,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     currentAgentName || undefined,
                 );
             }
-            latestLoadedUserChoiceRestoreRef.current = restoreKey;
+            rememberLoadedUserChoiceRestore(loadedUserChoiceRestoreBySessionRef.current, currentSessionScope, {
+                message: { id: latestLoadedUserChoice.id, time: latestLoadedUserChoice.time },
+                restoreKey,
+            });
             // The saved-selections effect must still get its one-time run so the
             // persisted session agent is applied via setAgent; only the model
             // was restored here.
@@ -975,8 +978,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             saveSessionAgentSelection(currentSessionId, latestLoadedUserChoice.agent);
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
-        latestLoadedUserChoiceRestoreRef.current = restoreKey;
-        restoredSessionSelectionRef.current = currentSessionId;
+        rememberLoadedUserChoiceRestore(loadedUserChoiceRestoreBySessionRef.current, currentSessionScope, {
+            message: { id: latestLoadedUserChoice.id, time: latestLoadedUserChoice.time },
+            restoreKey,
+        });
+        restoredSessionSelectionRef.current = currentSessionScope;
 
     }, [
         currentSessionId,
@@ -984,6 +990,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         contextHydrated,
         providers,
         hasRenderableCurrentSessionSnapshot,
+        currentSessionScope,
         latestLoadedUserChoice,
         autoReady,
         setAgent,
@@ -999,14 +1006,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     React.useEffect(() => {
         if (!currentSessionId) {
-            latestLoadedUserChoiceRestoreRef.current = null;
             restoredSessionSelectionRef.current = null;
             return;
         }
 
         // Persisted selections hydrate a session once. Live agent changes are
         // resolved by setAgent and must not be overwritten by session history.
-        if (restoredSessionSelectionRef.current === currentSessionId) {
+        if (restoredSessionSelectionRef.current === currentSessionScope) {
             return;
         }
 
@@ -1120,7 +1126,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const savedOutcome = applySavedSelections();
         if (savedOutcome === 'resolved') {
-            restoredSessionSelectionRef.current = currentSessionId;
+            restoredSessionSelectionRef.current = currentSessionScope;
             return;
         }
         if (savedOutcome === 'waiting') {
@@ -1139,9 +1145,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         applyFallbackAgent();
-        restoredSessionSelectionRef.current = currentSessionId;
+        restoredSessionSelectionRef.current = currentSessionScope;
     }, [
         currentSessionId,
+        currentSessionScope,
         hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         agents,

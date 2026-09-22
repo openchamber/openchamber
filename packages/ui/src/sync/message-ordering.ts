@@ -1,8 +1,10 @@
 import type { Message } from "@opencode-ai/sdk/v2/client"
 
-const getCreatedAt = (message: Message): number => {
-  const value = (message as { time?: { created?: unknown } }).time?.created
-  return typeof value === "number" && Number.isFinite(value) ? value : 0
+type MessageChronology = Pick<Message, "id" | "time">
+
+const getCreatedAt = (message: MessageChronology): number => {
+  const value = message.time?.created
+  return Number.isFinite(value) ? value : 0
 }
 
 /**
@@ -11,7 +13,7 @@ const getCreatedAt = (message: Message): number => {
  * `msg_fff...`. Creation time is the authoritative transcript order, with ID
  * used only to make equal timestamps deterministic.
  */
-export const compareMessagesChronologically = (left: Message, right: Message): number => {
+export const compareMessagesChronologically = (left: MessageChronology, right: MessageChronology): number => {
   const createdAtDifference = getCreatedAt(left) - getCreatedAt(right)
   if (createdAtDifference !== 0) return createdAtDifference
   if (left.id < right.id) return -1

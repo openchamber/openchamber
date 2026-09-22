@@ -7,6 +7,9 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getThemeById } from '@/lib/theme/themes';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import type { Part, UserMessage } from '@opencode-ai/sdk/v2';
+import { ChildStoreManager, markDirectorySessionPartChanged } from '@/sync/child-store';
+import { createSessionUserModelChoiceSource } from '@/sync/session-user-model-choice';
 
 /**
  * Restoring a session must not invent an effort choice.
@@ -51,6 +54,8 @@ const agent: Agent = { name: AGENT, mode: 'primary' };
 
 let latestUserChoice: UserModelChoice | null = null;
 let forcePreserveManualOverride: boolean | null = null;
+let liveChoiceSource: ReturnType<typeof createSessionUserModelChoiceSource> | null = null;
+const noSubscribe = () => () => undefined;
 
 /** Every effort written for the session, in order, including `undefined`. */
 const variantWrites: VariantChoice[] = [];
@@ -194,11 +199,12 @@ const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</
 
 // Captured by value before the module is replaced: reading it back off the
 // namespace afterwards would resolve to the replacement and recurse.
-const { shouldPreserveManualModelOverride: realShouldPreserveManualModelOverride } =
+const { shouldPreserveManualModelOverride: realShouldPreserveManualModelOverride, rememberLoadedUserChoiceRestore, findLatestUserModelChoice } =
   await import('@/lib/messages/userModelChoice');
 
 mock.module('@/lib/messages/userModelChoice', () => ({
-  findLatestUserModelChoice: () => latestUserChoice,
+  rememberLoadedUserChoiceRestore,
+  findLatestUserModelChoice,
   // The real guard, unless a test opts out: whether it fires decides which
   // restore branch runs, and the branch that erased a recorded Default is the
   // one it declines to protect.
@@ -219,7 +225,12 @@ mock.module('@/stores/contextStore', () => ({
 }));
 
 mock.module('@/sync/sync-context', () => ({
-  useSessionMessages: () => [],
+  useSessionUserModelChoice: () => {
+    const choice = latestUserChoice;
+    const fallback = React.useMemo(() => choice && ({ ...choice, time: { created: 1 } }), [choice]);
+    return React.useSyncExternalStore(liveChoiceSource?.subscribe ?? noSubscribe, liveChoiceSource?.getSnapshot ?? (() => fallback));
+  },
+  useSyncRuntime: () => ({ runtimeKey: 'test-runtime' }),
   useSessionRenderable: () => true,
 }));
 mock.module('@/sync/use-sync', () => ({ useSync: () => ({ sessions: [] }) }));
@@ -362,6 +373,7 @@ describe('ModelControls effort restore', () => {
     overrideWrites.length = 0;
     latestUserChoice = null;
     forcePreserveManualOverride = null;
+    liveChoiceSource = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
     useSelectionStore.setState({ savedVariant: undefined });
@@ -380,6 +392,65 @@ describe('ModelControls effort restore', () => {
       selectionSource: 'auto',
     });
   });
+
+  for (const paged of [false, true]) {
+    test(`a real Build text part reconciles the rendered controls without assistant output (predecessor paged out: ${paged})`, async () => {
+      const manager = new ChildStoreManager();
+      const store = manager.ensureChild('/workspace/project', { bootstrap: false });
+      const plan: UserMessage = {
+        id: 'msg_fff', sessionID: SESSION_ID, role: 'user', time: { created: 10 },
+        agent: 'plan', model: { providerID: PROVIDER_ID, modelID: 'plan-model' },
+      };
+      const build: UserMessage = {
+        ...plan, id: 'msg_000', time: { created: 20 }, agent: AGENT,
+        model: { providerID: PROVIDER_ID, modelID: MODEL_ID },
+      };
+      const part = (messageID: string): Part => ({
+        id: `part-${messageID}`, messageID, sessionID: SESSION_ID, type: 'text', text: 'Execute the plan',
+      });
+      store.setState({ message: { [SESSION_ID]: [plan] }, part: { [plan.id]: [part(plan.id)] } });
+      liveChoiceSource = createSessionUserModelChoiceSource(store, SESSION_ID);
+      useConfigStore.setState({
+        providers: [{ ...provider, models: [model, { ...model, id: 'plan-model', name: 'Planner' }] }],
+        agents: [agent, { name: 'plan', mode: 'primary' }],
+        currentModelId: 'plan-model', currentAgentName: 'plan', selectionSource: 'manual',
+      });
+      const selections = useSelectionStore.getState();
+      let saved = { providerId: PROVIDER_ID, modelId: 'plan-model' };
+      const getSaved = spyOn(selections, 'getSessionModelSelection').mockImplementation(() => saved);
+      const saveModel = spyOn(selections, 'saveSessionModelSelection').mockImplementation((_session, providerId, modelId) => {
+        saved = { providerId, modelId };
+      });
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await act(async () => {
+          store.setState({ message: { [SESSION_ID]: paged ? [build] : [plan, build] } });
+        });
+        expect(useConfigStore.getState().currentModelId).toBe('plan-model');
+        await act(async () => {
+          markDirectorySessionPartChanged(store, SESSION_ID, build.id);
+          store.setState({ part: { ...store.getState().part, [build.id]: [part(build.id)] } });
+        });
+        expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+        expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
+        expect(dom.container.querySelector('.model-controls__model-label')?.textContent).toBe(MODEL_ID);
+        expect(saved.modelId).toBe(MODEL_ID);
+        // Definite send failure and message.removed both expose the older bucket.
+        await act(async () => {
+          store.setState({ message: { [SESSION_ID]: [plan] }, part: { [plan.id]: [part(plan.id)] } });
+        });
+        expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
+        expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+      } finally {
+        await cleanup();
+        getSaved.mockRestore();
+        saveModel.mockRestore();
+        useSelectionStore.setState(selections);
+        manager.disposeAll();
+        liveChoiceSource = null;
+      }
+    });
+  }
 
   test('a draft inherits a pinned agent variant over the settings default', async () => {
     useSessionUIStore.setState({ currentSessionId: null });
