@@ -342,7 +342,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     return deriveRecentActivitySections({
       sessions: recentSessions,
       getSessionLocation: (sessionId) => locations.get(sessionId) ?? null,
-      getSessionNode: (session) => buildActiveSessionNode(collection.childrenMap, session),
+      // Recent rows derive their tooltip branch fallback and PR lookup key
+      // from node.worktree, so leaving it null reduces worktree sessions to
+      // title+date. Attach the session's resolved worktree like Timeline does;
+      // unlike Timeline the subtree stays intact so rows still expand.
+      getSessionNode: (session) => ({
+        ...buildActiveSessionNode(collection.childrenMap, session),
+        worktree: locations.get(session.id)?.worktree ?? null,
+      }),
       query: view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '',
     });
   }, [collection.childrenMap, ownership.bySessionId, recentSessions, topology.availableWorktreesByProject, topology.gitBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
