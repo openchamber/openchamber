@@ -2968,6 +2968,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubPrPicker.includeDiffAria': 'Dołącz diff PR do załączonego kontekstu',
   'session.githubPrPicker.loading.more': 'Ładowanie...',
   'session.githubPrPicker.loading.pullRequests': 'Ładowanie pull requestów...',
+  'session.githubPrPicker.notice.incomplete': 'To wyszukiwanie jest niekompletne. Nie udało się w pełni załadować niektórych pasujących pull requestów.',
   'session.githubPrPicker.searchPlaceholder': 'Szukaj używając składni wyszukiwania kodu GitHub',
   'session.githubPrPicker.title': 'Połącz pull request GitHub',
   'session.githubPrPicker.toast.loadDetailsFailed': 'Nie udało się załadować szczegółów pull requesta',
