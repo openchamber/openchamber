@@ -3,7 +3,7 @@ import http from 'node:http';
 
 import { createGracefulShutdownRuntime } from './shutdown-runtime.js';
 
-const createRuntime = (server) => createGracefulShutdownRuntime({
+const createRuntime = (server, overrides = {}) => createGracefulShutdownRuntime({
   process: { exit: vi.fn() },
   shutdownTimeoutMs: 1000,
   getExitOnShutdown: () => false,
@@ -31,6 +31,8 @@ const createRuntime = (server) => createGracefulShutdownRuntime({
   getActiveTunnelController: () => null,
   setActiveTunnelController: vi.fn(),
   tunnelAuthController: { clearActiveTunnel: vi.fn() },
+  stopAllGuestServices: vi.fn(),
+  ...overrides,
 });
 
 describe('graceful shutdown runtime', () => {
@@ -78,5 +80,41 @@ describe('graceful shutdown runtime', () => {
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it('stops guest services during shutdown', async () => {
+    const server = {
+      close: vi.fn((callback) => {
+        callback();
+      }),
+    };
+    const stopAllGuestServices = vi.fn(async () => {});
+
+    const runtime = createRuntime(server, { stopAllGuestServices });
+    await runtime.gracefulShutdown({ exitProcess: false });
+
+    expect(stopAllGuestServices).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues shutdown when stopping guest services fails', async () => {
+    const server = {
+      close: vi.fn((callback) => {
+        callback();
+      }),
+    };
+    const stopAllGuestServices = vi.fn(async () => {
+      throw new Error('guest teardown failed');
+    });
+    const terminalRuntime = { shutdown: vi.fn(async () => {}) };
+
+    const runtime = createRuntime(server, {
+      stopAllGuestServices,
+      getTerminalRuntime: () => terminalRuntime,
+    });
+    await runtime.gracefulShutdown({ exitProcess: false });
+
+    expect(stopAllGuestServices).toHaveBeenCalledTimes(1);
+    expect(terminalRuntime.shutdown).toHaveBeenCalledTimes(1);
+    expect(server.close).toHaveBeenCalled();
   });
 });

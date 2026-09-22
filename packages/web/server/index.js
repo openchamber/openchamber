@@ -1588,6 +1588,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   tunnelAuthController,
   scheduledTasksRuntime,
+  stopAllGuestServices,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);

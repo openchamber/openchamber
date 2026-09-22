@@ -31,6 +31,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getActiveTunnelController,
     setActiveTunnelController,
     tunnelAuthController,
+    stopAllGuestServices,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -50,6 +51,14 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     contextObligatoryRuntime?.stop?.();
     messageQueueRuntime?.stop?.();
     scheduledTasksRuntime?.stop?.();
+
+    // Daemon-mode exits (signal handlers, POST /api/system/shutdown) reach this
+    // function without passing through stop(); guests left here would outlive
+    // the host with no parent. Best-effort: a teardown failure must not block it.
+    try {
+      await stopAllGuestServices();
+    } catch {
+    }
 
     const healthCheckInterval = getHealthCheckInterval();
     if (healthCheckInterval) {
