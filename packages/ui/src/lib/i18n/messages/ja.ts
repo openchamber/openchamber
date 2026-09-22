@@ -1576,6 +1576,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.outputLimit': '出力制限: {tokens}',
   'contextUsage.tooltip.cost': 'コスト: {cost}',
   'contextUsage.compacted.description': 'コンテキストを圧縮しました。使用量は次の応答後に更新されます。',
+  'contextUsage.compact.summary': '{percent}使用 · {used} / {limit} コンテキスト上限',
   'contextSidebar.session.untitled': '無題のセッション',
   'contextSidebar.empty.openSession': 'セッションを開いてコンテキストを確認します。',
   'contextSidebar.section.context': 'コンテキスト',

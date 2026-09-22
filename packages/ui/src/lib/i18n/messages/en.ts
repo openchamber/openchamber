@@ -1580,6 +1580,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'Output limit: {tokens}',
   'contextUsage.tooltip.cost': 'Cost: {cost}',
   'contextUsage.compacted.description': 'Context compacted. Usage updates after the next response.',
+  'contextUsage.compact.summary': '{percent} used · {used} / {limit} context limit',
   'contextSidebar.session.untitled': 'Untitled Session',
   'contextSidebar.empty.openSession': 'Open a session to inspect context.',
   'contextSidebar.section.context': 'Context',

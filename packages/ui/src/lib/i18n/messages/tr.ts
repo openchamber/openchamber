@@ -1555,6 +1555,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'Çıktı limiti: {tokens}',
   'contextUsage.tooltip.cost': 'Maliyet: {cost}',
   'contextUsage.compacted.description': 'Bağlam sıkıştırıldı. Kullanım bir sonraki yanıttan sonra güncellenecek.',
+  'contextUsage.compact.summary': '{percent} kullanıldı · {used} / {limit} bağlam sınırı',
   'contextSidebar.session.untitled': 'Adsız Session',
   'contextSidebar.empty.openSession': 'Bağlamı incelemek için bir session açın.',
   'contextSidebar.section.context': 'Bağlam',

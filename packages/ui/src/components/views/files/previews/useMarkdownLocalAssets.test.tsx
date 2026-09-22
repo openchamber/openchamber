@@ -28,17 +28,17 @@ function Preview({ container, filePath, onOpenFile, enabled }: {
   return null;
 }
 
-const flush = async () => {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-};
-
 describe('useMarkdownLocalAssets', () => {
   let windowInstance: Window;
   let root: Root;
   let container: HTMLDivElement;
   let created: string[];
+
+  const flush = async () => {
+    await act(async () => {
+      await windowInstance.happyDOM.waitUntilComplete();
+    });
+  };
 
   beforeEach(() => {
     windowInstance = new Window();
@@ -81,7 +81,10 @@ describe('useMarkdownLocalAssets', () => {
     const image = document.createElement('img');
     image.setAttribute('src', './shots/a.png');
     container.appendChild(image);
-    await flush();
+    // happy-dom can report idle before the delayed MutationObserver rewrite runs.
+    while (!image.hasAttribute('data-oc-local-asset')) {
+      await windowInstance.happyDOM.waitUntilComplete();
+    }
     await flush();
 
     expect(fetchCalls).toEqual(['/api/fs/raw?path=%2Frepo%2Fdocs%2Fshots%2Fa.png&directory=%2Frepo']);

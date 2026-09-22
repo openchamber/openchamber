@@ -16,6 +16,14 @@ const mock = Object.assign(
     module: vi.mock,
   },
 );
+const setSystemTime = (time?: Date | number) => {
+  if (time === undefined) {
+    vi.useRealTimers();
+    return;
+  }
+  vi.useFakeTimers();
+  vi.setSystemTime(time);
+};
 const spyOn = vi.spyOn;
 
 export {
@@ -27,6 +35,7 @@ export {
   expect,
   it,
   mock,
+  setSystemTime,
   spyOn,
   test,
   vi,

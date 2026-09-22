@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { ModelControls } from '../../ModelControls';
 import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { CompactContextButton } from './CompactContextButton';
 import { FocusModeButton } from './FocusModeButton';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
 import type { BtwSelection } from '@/stores/useBtwStore';
@@ -64,6 +65,7 @@ export interface ComposerFooterProps {
     onOpenAttachSheet: () => void;
     onToggleExpandedInput: () => void;
     onTogglePermissionAutoAccept: () => void;
+    onCompact: () => void;
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
     onAbort: () => void;
@@ -111,6 +113,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         onOpenAttachSheet,
         onToggleExpandedInput,
         onTogglePermissionAutoAccept,
+        onCompact,
         onPrimaryAction,
         onQueueMessage,
         onAbort,
@@ -123,7 +126,6 @@ export function ComposerFooter(props: ComposerFooterProps) {
         modelSessionId,
         btwSelection,
     } = props;
-
     return (
         <div
             className={cn(
@@ -235,6 +237,16 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             isExpandedInput={isExpandedInput}
                             onToggle={onToggleExpandedInput}
                         /> : null}
+                        {!isBtw && currentSessionId ? (
+                            <CompactContextButton
+                                key={`${directory ?? ''}\u0000${currentSessionId}`}
+                                sessionId={currentSessionId}
+                                directory={directory}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                                onCompact={onCompact}
+                            />
+                        ) : null}
                         <PermissionAutoAcceptButton
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}

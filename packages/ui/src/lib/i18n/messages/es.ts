@@ -1546,6 +1546,7 @@ export const dict: Record<I18nKey, string> = {
   "contextUsage.tooltip.outputLimit": "Límite de salida: {tokens}",
   "contextUsage.tooltip.cost": "Costo: {cost}",
   "contextUsage.compacted.description": "Contexto compactado. El uso se actualizará tras la próxima respuesta.",
+  "contextUsage.compact.summary": "{percent} usado · {used} / {limit} límite de contexto",
   "contextSidebar.session.untitled": "Sesión sin título",
   "contextSidebar.empty.openSession": "Abrir una sesión para inspeccionar el contexto.",
   "contextSidebar.section.context": "Contexto",

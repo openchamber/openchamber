@@ -156,6 +156,7 @@ import {
     toServerFileUrl,
 } from './composer/attachments/filePaths';
 import { buildComposerContext, buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
+import { executeCompactAction } from './composer/submit/compactAction';
 import {
     buildCommandVariables,
     canRunCommand,
@@ -1226,6 +1227,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         queuedOnly?: boolean;
         queuedMessageId?: string;
         delivery?: 'steer';
+        /** Run a local action without replacing or consuming the composer draft. */
+        action?: 'compact';
         /** Submit this text instead of the composer input. Used by preset
             starter chips: on mobile the collapsed pill has no mounted textarea,
             so the DOM-first input snapshot would read empty content. */
@@ -1482,6 +1485,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const submitRuntimeKey = getRuntimeKey();
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
+        const isCompactAction = options?.action === 'compact';
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const capturedTarget = messageQueueTarget;
         // Snapshot the draft and current-session identity before the first
@@ -1499,17 +1503,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (queuedOnly) {
             if (!queuedMessages.some((message) => !queuedMessageId || message.id === queuedMessageId) || !currentSessionId) return;
+        } else if (isCompactAction) {
+            if (!currentSessionId) return;
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
 
-        // Local slash commands are planned before anything is taken or
-        // consumed. An action command must leave the queue and the attached
-        // context where they are; a prompt command must send that context with
-        // the prompt it produces. A command the composer cannot run here is not
-        // a local command at all and goes out as typed.
-        let commandPlan = !queuedOnly && inputSnapshot.hasContent
-            ? planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, Boolean(currentSessionId))
+        // Local slash commands and system actions are planned before anything
+        // is taken or consumed. An action command must leave the queue and the
+        // attached context where they are; a prompt command must send that
+        // context with the prompt it produces. A command the composer cannot
+        // run here is not a local command at all and goes out as typed.
+        let commandPlan = !queuedOnly
+            ? isCompactAction
+                ? planLocalSlashCommand('/compact', 'normal', hasDrafts, Boolean(currentSessionId))
+                : inputSnapshot.hasContent
+                    ? planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, Boolean(currentSessionId))
+                    : null
             : null;
         if (commandPlan?.kind === 'prompt') {
             const magicCommand = findMagicPromptCommand(commandPlan.command.name);
@@ -1562,7 +1572,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // An extension command never reaches the model: the extension turns
         // `/name args` into a chip, which lands through the same pending slot
         // a guest panel's `attach` uses. Nothing else in the composer moves.
-        const guestRoute = !queuedOnly && !isBtwActive && inputSnapshot.hasContent
+        const guestRoute = !isCompactAction && !queuedOnly && !isBtwActive && inputSnapshot.hasContent
             ? routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)
             : null;
         if (guestRoute) {
@@ -1632,17 +1642,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
-        // Action commands change session or UI state and send nothing. The
-        // command text goes; the queue and whatever the composer had attached
-        // stay exactly where they are.
+        // Action commands change session or UI state and send nothing. A typed
+        // command is consumed; a button-triggered action leaves the queue and
+        // composer state exactly where they are.
         if (commandPlan?.kind === 'action' && currentSessionId) {
             const actionName = commandPlan.command.name;
-            setMessage('');
-            confirmedMentionsRef.current.clear();
-            persistDraftImmediately(chatDraftIdentity, '');
-            messageHistory.reset();
-            if (!isBtwActive) setExpandedInput(false);
-            if (isMobile) composerRef.current?.blur();
+            const consumeTypedCommand = () => {
+                setMessage('');
+                confirmedMentionsRef.current.clear();
+                persistDraftImmediately(chatDraftIdentity, '');
+                messageHistory.reset();
+                if (!isBtwActive) setExpandedInput(false);
+                if (isMobile) composerRef.current?.blur();
+            };
+            if (actionName !== 'compact') consumeTypedCommand();
             try {
                 if (actionName === 'undo') {
                     await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
@@ -1655,12 +1668,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 } else if (actionName === 'handoff-review') {
                     setReviewDialogOpen(true);
                 } else if (actionName === 'compact') {
-                    await sessionActions.waitForConnectionOrThrow();
-                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.summarizeSession(currentSessionId, providerIdToSend, modelIdToSend, compactDirectory);
+                    await executeCompactAction({
+                        buttonTriggered: isCompactAction,
+                        sessionId: currentSessionId,
+                        providerId: providerIdToSend,
+                        modelId: modelIdToSend,
+                        currentDirectory,
+                        getSessionDirectory: (sessionId) => useSessionUIStore.getState().getDirectoryForSession(sessionId),
+                        consumeTypedCommand,
+                        waitForConnectionOrThrow: sessionActions.waitForConnectionOrThrow,
+                        summarizeSession: opencodeClient.summarizeSession.bind(opencodeClient),
+                    });
                 }
             } catch (error) {
-                restoreComposerText();
+                if (!isCompactAction) restoreComposerText();
                 if (actionName !== 'compact') throw error;
                 toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
             }
@@ -2087,6 +2108,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
+
+    const handleCompact = React.useCallback(() => {
+        void handleSubmitRef.current({ action: 'compact' });
+    }, []);
 
     // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
@@ -3904,6 +3929,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
+                        onCompact={handleCompact}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}
                         onAbort={handleAbort}
