@@ -3,6 +3,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import type { DirectoryOwner } from '../sessions/sessionOwnership';
 import { formatDirectoryName } from '@/lib/utils';
 import { formatProjectLabel, normalizePath } from '../utils';
+import { buildWorktreeByPathIndex, findPrefixWorktreeEntry, resolveBranchLiveFirst } from '../worktreeIndex';
 
 type SidebarSessionLocationProject = {
   id: string;
@@ -57,6 +58,10 @@ export const resolveSidebarSessionLocations = ({
   hideBranchMatchingProjectLabel,
 }: ResolveArgs): Map<string, SidebarSessionLocation> => {
   const locations = new Map<string, SidebarSessionLocation>();
+  // Canonical exact worktree index (normalized keys, project-root exclusion,
+  // first-wins dedupe) shared with grouping and the switcher. One build per
+  // resolve pass; the longest-prefix walk below reuses it for subdirectories.
+  const worktreeByPath = buildWorktreeByPathIndex(availableWorktreesByProject, projects);
   for (const session of sessions) {
     const directory = normalizePath(session.directory ?? null);
     if (!directory) continue;
@@ -75,12 +80,22 @@ export const resolveSidebarSessionLocations = ({
       }
     }
     if (!owner) continue;
-    const worktree = availableWorktreesByProject.get(owner.normalizedPath)?.find((entry) => normalizePath(entry.path) === directory) ?? null;
+    // The resolved owner stays authoritative: a containing worktree only
+    // labels this session when it belongs to that same project. The longest
+    // prefix covers sessions inside `<worktree>/sub`.
+    const worktreeHit = findPrefixWorktreeEntry(directory, worktreeByPath);
+    const worktree = worktreeHit && worktreeHit.project.id === owner.id ? worktreeHit.meta : null;
     const projectLabel = formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath);
     const rootBranch = normalizePath(owner.normalizedPath) === directory
       ? rootBranchByProjectId?.get(owner.id)?.trim() || null
       : null;
-    const branch = worktree?.branch?.trim() || gitBranches.get(directory)?.trim() || rootBranch || null;
+    // Live-first: a live git status wins over discovered worktree metadata.
+    const branch = resolveBranchLiveFirst(
+      directory,
+      worktree ? normalizePath(worktree.path) : null,
+      worktree?.branch,
+      gitBranches,
+    ) ?? rootBranch;
     const hidden = !branch
       || branch === 'HEAD'
       || (hideBranchMatchingProjectLabel && branch === projectLabel);

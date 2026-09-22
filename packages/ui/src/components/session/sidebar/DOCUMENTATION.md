@@ -146,12 +146,18 @@ renders `projects`.
   row menu hides `Move to folder`. Their archive/delete actions still
   cover the full subtree, because `collectSessionSubtreeIds` resolves
   descendants from the global cache at action time.
-- `recent/sessionLocation.ts` is the single owner of a session's project,
-  directory, worktree and branch label. It resolves the project through the
-  session ownership index first (managed worktrees live outside the project
-  path) and falls back to a path-prefix match. Recent hides a branch equal to the
-  project label; Timeline shows the branch on every row, using the live project
-  root branch for root-directory sessions and the worktree branch otherwise.
+- `worktreeIndex.ts` is the shared exact worktree index (normalized keys,
+  project-root exclusion, first-wins dedupe) for Recent/Timeline, project
+  grouping, and the session switcher. `recent/sessionLocation.ts` is the single
+  owner of a session's project, directory, worktree and branch label: it resolves
+  the project through the session ownership index first (managed worktrees live
+  outside the project path), falls back to a path-prefix match, and finds the
+  containing worktree by longest prefix so a session in `<worktree>/sub` keeps
+  that worktree's branch and PR key. Branch labels are live-first: live git
+  status wins over discovered worktree metadata. Recent hides a branch equal to
+  the project label; Timeline shows the branch on every row, using the live
+  project root branch for root-directory sessions and the worktree branch
+  otherwise.
 - Search filters Timeline with the same rule as Recent (exact `ses_` id, else
   title contains) and counts one match per listed row.
 

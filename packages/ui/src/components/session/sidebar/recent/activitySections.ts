@@ -81,8 +81,11 @@ export const deriveRecentActivitySections = ({
   items: sessions.flatMap((session) => {
     if (!matchesSidebarSessionQuery(session, query)) return [];
     const location = getSessionLocation(session.id);
+    const node = getSessionNode?.(session) ?? { session, children: [], worktree: null };
     return [{
-      node: getSessionNode?.(session) ?? { session, children: [], worktree: null },
+      // Recent rows carry the location's worktree the same way Timeline rows
+      // do, so the row can derive its branch fallback and PR lookup key.
+      node: location?.worktree ? { ...node, worktree: location.worktree } : node,
       projectId: location?.projectId ?? null,
       groupDirectory: location?.groupDirectory ?? session.directory ?? null,
       secondaryMeta: location ? {

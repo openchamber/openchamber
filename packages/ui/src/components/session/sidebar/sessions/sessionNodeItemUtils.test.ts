@@ -2,13 +2,17 @@ import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getGitHubPrStatusKey } from '@/stores/useGitHubPrStatusStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import {
   computeNodeStructureKey,
   canShowSessionWorktreeMenu,
   getSessionWorktreeMenuDisabled,
   nodeHasPinnedMembershipChange,
+  resolveSessionPrLookupKey,
+  resolveTooltipBranchLabel,
   selectFolderRootNodes,
   selectQuestionBadgeSessionScopes,
   selectRowBadgeVisibilityClass,
@@ -250,6 +254,41 @@ describe('canShowSessionWorktreeMenu', () => {
       isVSCode: false,
       sessionDirectory: '/repo',
     })).toBe(true);
+  });
+});
+
+describe('resolveTooltipBranchLabel', () => {
+  test('keeps a deliberate null branch filtered instead of leaking the raw worktree branch', () => {
+    // Recent/Timeline rows carry secondaryMeta: HEAD and the project-label
+    // duplicate are filtered there, so the raw branch must stay hidden.
+    expect(resolveTooltipBranchLabel({ projectLabel: 'App', branchLabel: null }, 'HEAD')).toBeNull();
+    expect(resolveTooltipBranchLabel({ projectLabel: 'App', branchLabel: null }, 'App')).toBeNull();
+    expect(resolveTooltipBranchLabel({ projectLabel: 'App', branchLabel: 'feature-1' }, 'stored-1')).toBe('feature-1');
+  });
+
+  test('falls back to the worktree branch only when secondaryMeta is absent', () => {
+    // Project and Chats rows pass no secondaryMeta and keep the fallback.
+    expect(resolveTooltipBranchLabel(null, 'HEAD')).toBe('HEAD');
+    expect(resolveTooltipBranchLabel(undefined, 'App')).toBe('App');
+    expect(resolveTooltipBranchLabel(null, null)).toBeNull();
+    expect(resolveTooltipBranchLabel(undefined, undefined)).toBeNull();
+  });
+});
+
+describe('resolveSessionPrLookupKey', () => {
+  const worktree = (path: string, branch: string): WorktreeMetadata => ({
+    path, projectDirectory: '/repo', branch, label: branch,
+  });
+
+  test('derives the PR key from the row worktree directory and branch', () => {
+    expect(resolveSessionPrLookupKey(worktree('/worktrees/feature', 'feature-1'), false))
+      .toBe(getGitHubPrStatusKey('/worktrees/feature', 'feature-1'));
+  });
+
+  test('rejects rows with no worktree, no branch, or a VS Code runtime', () => {
+    expect(resolveSessionPrLookupKey(null, false)).toBeNull();
+    expect(resolveSessionPrLookupKey(worktree('/worktrees/feature', '   '), false)).toBeNull();
+    expect(resolveSessionPrLookupKey(worktree('/worktrees/feature', 'feature-1'), true)).toBeNull();
   });
 });
 

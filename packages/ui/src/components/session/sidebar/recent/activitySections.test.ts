@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { WorktreeMetadata } from '@/types/worktree';
+import { getGitHubPrStatusKey } from '@/stores/useGitHubPrStatusStore';
+import { resolveSessionPrLookupKey } from '../sessions/sessionNodeItemUtils';
 import { deriveRecentActivitySections, deriveRecentSessions } from './activitySections';
 
 const NOW = 200_000_000;
@@ -90,5 +93,46 @@ describe('deriveRecentActivitySections', () => {
         secondaryMeta: { projectLabel: 'App', branchLabel: 'release' },
       }],
     }]);
+  });
+
+  test('attaches the location worktree to the node so the row derives its PR key', () => {
+    const record = { ...session('worktree', { updated: RECENT }), directory: '/worktrees/feature' };
+    const worktree: WorktreeMetadata = {
+      path: '/worktrees/feature', projectDirectory: '/workspace/app', branch: 'feature-1', label: 'feature',
+    };
+
+    const sections = deriveRecentActivitySections({
+      sessions: [record],
+      getSessionLocation: (sessionId) => sessionId === record.id ? {
+        projectId: 'app',
+        groupDirectory: '/worktrees/feature',
+        projectLabel: 'App',
+        branchLabel: 'feature-1',
+        worktree,
+      } : null,
+      // `buildActiveSessionNode` hands Recent rows a null worktree; the Recent
+      // projection must carry the resolved one onto the node.
+      getSessionNode: (target) => ({ session: target, children: [], worktree: null }),
+      query: '',
+    });
+
+    const node = sections[0].items[0]?.node;
+    expect(node?.worktree).toBe(worktree);
+    expect(resolveSessionPrLookupKey(node?.worktree, false))
+      .toBe(getGitHubPrStatusKey('/worktrees/feature', 'feature-1'));
+  });
+
+  test('keeps the node unchanged when no location resolved a worktree', () => {
+    const record = session('plain', { updated: RECENT });
+    const node = { session: record, children: [], worktree: null };
+
+    const sections = deriveRecentActivitySections({
+      sessions: [record],
+      getSessionLocation: () => null,
+      getSessionNode: () => node,
+      query: '',
+    });
+
+    expect(sections[0].items[0]?.node).toBe(node);
   });
 });
