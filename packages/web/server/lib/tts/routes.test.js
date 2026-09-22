@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-import { registerTtsRoutes } from './routes.js';
+import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 const createApp = (sayTTSCapability = null) => {
@@ -52,11 +52,19 @@ describe('tts routes', () => {
     // allows the request to proceed.
     if (process.platform === 'darwin') {
       expect(response.status).toBe(200);
-      expect(response.headers['x-speech-voice']).toBe('Lesya (Enhanced)');
+      expect(response.headers['x-speech-voice']).toBe('Lesya%20(Enhanced)');
       expect(response.headers['x-speech-language']).toBe('uk');
     } else {
       expect(response.status).toBe(503);
     }
+  });
+
+  it('keeps localized say voice names HTTP-header-safe', () => {
+    const encoded = speechVoiceHeaderValue('Milena (Русский (Россия))');
+    // Header values must stay printable ASCII or Node rejects the response outright.
+    expect(encoded).toMatch(/^[\x21-\x7E]*$/);
+    expect(decodeURIComponent(encoded)).toBe('Milena (Русский (Россия))');
+    expect(speechVoiceHeaderValue('Samantha')).toBe('Samantha');
   });
 
   it('returns local note fallback while model summarization is retired', async () => {

@@ -4,6 +4,13 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 
+// HTTP header values must be printable latin1; macOS voice names can be localized
+// (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
+// outright. Percent-encode so the X-Speech-Voice header is always safe.
+export function speechVoiceHeaderValue(voice) {
+  return encodeURIComponent(voice);
+}
+
 export function registerTtsRoutes(app, { sayTTSCapability }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
@@ -215,7 +222,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       
       // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
-      res.setHeader('X-Speech-Voice', voice);
+      res.setHeader('X-Speech-Voice', speechVoiceHeaderValue(voice));
       if (resolvedLanguage) res.setHeader('X-Speech-Language', resolvedLanguage);
       res.setHeader('Content-Length', audioBuffer.length);
       res.send(audioBuffer);

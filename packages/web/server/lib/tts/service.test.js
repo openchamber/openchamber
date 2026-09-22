@@ -39,9 +39,11 @@ describe('OpenAI audio SDK compatibility', () => {
       text: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1.2, baseURL,
     });
 
+    // OpenRouter and other strict OpenAI-compatible servers reject /audio/speech
+    // requests without an explicit response_format; mp3 is the documented default.
     expect(received).toEqual({
       url: '/v1/audio/speech', method: 'POST',
-      body: { input: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1.2 },
+      body: { input: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1.2, response_format: 'mp3' },
     });
     expect(result).toEqual({ buffer: audio, contentType: 'audio/mpeg' });
   });

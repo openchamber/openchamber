@@ -2108,3 +2108,9 @@ describe('useConfigStore provider persistence', () => {
     expect(state.selectionSource).toBe('manual');
   });
 });
+
+describe('ttsChunkedMode default', () => {
+  test('defaults to disabled until the user enables it', () => {
+    expect(useConfigStore.getState().ttsChunkedMode).toBe(false);
+  });
+});

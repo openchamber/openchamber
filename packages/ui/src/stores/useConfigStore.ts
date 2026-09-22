@@ -1158,6 +1158,7 @@ interface ConfigStore {
     sttLanguage: string;
     showMessageTTSButtons: boolean;
     ttsInputMode: 'sanitized' | 'raw' | 'summarized';
+    ttsChunkedMode: boolean;
     // Summarization settings
     summarizeMessageTTS: boolean;
     summarizeVoiceConversation: boolean;
@@ -1186,6 +1187,7 @@ interface ConfigStore {
     setSttLanguage: (lang: string) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
     setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => void;
+    setTtsChunkedMode: (enabled: boolean) => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
     setSummarizeCharacterThreshold: (threshold: number) => void;
@@ -1521,6 +1523,14 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved === 'summarized') return 'summarized' as const;
                     }
                     return 'sanitized' as const;
+                })(),
+                // Sentence-by-sentence server TTS synthesis - disabled by default
+                ttsChunkedMode: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('ttsChunkedMode');
+                        if (saved === 'true') return true;
+                    }
+                    return false;
                 })(),
                 // Summarization settings
                 summarizeMessageTTS: (() => {
@@ -3315,6 +3325,13 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ ttsInputMode: mode });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('ttsInputMode', mode);
+                    }
+                },
+
+                setTtsChunkedMode: (enabled: boolean) => {
+                    set({ ttsChunkedMode: enabled });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('ttsChunkedMode', String(enabled));
                     }
                 },
 

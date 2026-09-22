@@ -11,7 +11,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
 - `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
-- `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` and `X-Speech-Language`) and by the dictation module's local TTS model choice.
+- `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` — percent-encoded, because macOS voice names may be localized — and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 
 ## Public exports
 
@@ -49,6 +49,7 @@ Returns boolean indicating whether OpenAI API key is configured (checks environm
 ### `generateSpeechStream(options)`
 Generates speech and returns as a web stream for direct streaming to clients.
 - Options: `text` (required), `voice`, `model`, `speed`, `instructions`, `apiKey`.
+- Upstream `/v1/audio/speech` requests always carry `response_format: 'mp3'` (the documented default; strict servers such as OpenRouter reject requests without it). With a custom baseURL the request omits `instructions` because compatible servers do not universally support it.
 - Returns: `{ stream: ReadableStream, contentType: 'audio/mpeg' }`.
 - Throws: Error if API key not configured or text is empty.
 
