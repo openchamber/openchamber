@@ -7,15 +7,24 @@ import {
   parseRequestPathname,
   readTerminalWsControlFrame,
 } from './terminal-ws-protocol.js';
-import { sanitizeTerminalHistoryChunk } from './history.js';
+import {
+  MAX_HISTORY_BYTES,
+  appendTerminalHistory,
+  createTerminalHistory,
+  resetTerminalHistory,
+  sanitizeTerminalHistoryChunk,
+  terminalHistoryText,
+} from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
 
 const MAX_SESSIONS = 20;
-const MAX_HISTORY_BYTES = 512 * 1024;
 const MAX_INPUT_CHARS = 65_536;
+const OUTPUT_COALESCE_MS = 12;
+const OUTPUT_COALESCE_MAX_BYTES = 32 * 1024;
+const WS_BACKPRESSURE_BYTES = 256 * 1024;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const TERMINATION_GRACE_MS = 1000;
 const INTERACTIVE_TERMINAL_MODE = 'interactive';
@@ -81,18 +90,12 @@ const findPendingActionCreate = (pendingSessionCreates, resolvedCwd, purpose) =>
   }
   return null;
 };
-const trimHistory = (history) => {
-  const bytes = Buffer.from(history);
-  if (bytes.byteLength <= MAX_HISTORY_BYTES) return history;
-  let start = bytes.byteLength - MAX_HISTORY_BYTES;
-  while (start < bytes.byteLength && (bytes[start] & 0xc0) === 0x80) start += 1;
-  return bytes.subarray(start).toString('utf8');
-};
-
 export function createTerminalRuntime({
   app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS, shutdownProcesses = shutdownTerminalProcesses,
+  outputCoalesceMs = OUTPUT_COALESCE_MS,
+  isSocketBackpressured = (socket) => (socket.bufferedAmount ?? 0) >= WS_BACKPRESSURE_BYTES,
 }) {
   const sessions = new Map();
   const pendingSessionCreates = new Map();
@@ -186,7 +189,7 @@ export function createTerminalRuntime({
   };
 
   const snapshot = (session) => ({
-    t: 'snapshot', v: 3, s: session.id, q: session.sequence, history: session.history,
+    t: 'snapshot', v: 3, s: session.id, q: session.sequence, history: terminalHistoryText(session.history),
     // The PTY size the history was drawn for: a client replays history at this
     // size before fitting its own viewport, so shell output wrapped for one
     // width never gets re-laid-out at another.
@@ -198,12 +201,83 @@ export function createTerminalRuntime({
 
   const publish = (session, event) => {
     session.sequence += 1;
-    const message = { ...event, v: 3, s: session.id, q: session.sequence };
+    deliver(session, { ...event, v: 3, s: session.id, q: session.sequence });
+  };
+
+  const deliver = (session, message) => {
     for (const connection of connections) {
       const attachment = connection.attachments.get(session.id);
       if (!attachment) continue;
       if (attachment.initializing) attachment.pending.push(message);
       else send(connection.socket, message);
+    }
+  };
+
+  const sessionHasBackpressure = (session) => {
+    for (const connection of connections) {
+      const attachment = connection.attachments.get(session.id);
+      if (!attachment || attachment.initializing) continue;
+      if (isSocketBackpressured(connection.socket)) return true;
+    }
+    return false;
+  };
+
+  const discardPendingOutput = (session) => {
+    if (session.outputFlushTimer) {
+      clearTimeout(session.outputFlushTimer);
+      session.outputFlushTimer = null;
+    }
+    session.pendingOutput = null;
+  };
+
+  const flushPendingOutput = (session, { force = false } = {}) => {
+    if (session.outputFlushTimer) {
+      clearTimeout(session.outputFlushTimer);
+      session.outputFlushTimer = null;
+    }
+    const pending = session.pendingOutput;
+    if (!pending) return;
+    if (!force && sessionHasBackpressure(session) && pending.bytes < MAX_HISTORY_BYTES) {
+      session.outputFlushTimer = setTimeout(() => flushPendingOutput(session), outputCoalesceMs);
+      return;
+    }
+    session.pendingOutput = null;
+    const message = {
+      t: 'output',
+      v: 3,
+      s: session.id,
+      q: pending.q,
+      d: pending.d,
+    };
+    if (pending.hasReplayDiff) message.r = pending.visible;
+    deliver(session, message);
+  };
+
+  const queueOutput = (session, raw, visible) => {
+    const chunkBytes = Buffer.byteLength(raw);
+    if (!session.pendingOutput) {
+      session.sequence += 1;
+      session.pendingOutput = {
+        q: session.sequence,
+        d: raw,
+        visible,
+        hasReplayDiff: visible !== raw,
+        bytes: chunkBytes,
+      };
+    } else {
+      session.pendingOutput.d += raw;
+      session.pendingOutput.visible += visible;
+      session.pendingOutput.hasReplayDiff ||= visible !== raw;
+      session.pendingOutput.bytes += chunkBytes;
+    }
+    const pending = session.pendingOutput;
+    const shouldFlushNow = pending.bytes >= OUTPUT_COALESCE_MAX_BYTES && !sessionHasBackpressure(session);
+    if (shouldFlushNow) {
+      flushPendingOutput(session);
+      return;
+    }
+    if (!session.outputFlushTimer) {
+      session.outputFlushTimer = setTimeout(() => flushPendingOutput(session), outputCoalesceMs);
     }
   };
 
@@ -226,10 +300,11 @@ export function createTerminalRuntime({
           for (const response of theme.responses) session.process?.write(response);
           const sanitized = sanitizeTerminalHistoryChunk(session.pendingHistoryControlSequence, event.data);
           session.pendingHistoryControlSequence = sanitized.pending;
-          session.history = trimHistory(session.history + sanitized.visible);
+          appendTerminalHistory(session.history, sanitized.visible);
           session.lastActivity = Date.now();
-          publish(session, { t: 'output', d: event.data, ...(sanitized.visible !== event.data ? { r: sanitized.visible } : {}) });
+          queueOutput(session, event.data, sanitized.visible);
         } else {
+          flushPendingOutput(session, { force: true });
           session.status = 'exited';
           session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
           session.signal = Number.isInteger(event.signal) ? event.signal : null;
@@ -272,7 +347,13 @@ export function createTerminalRuntime({
   const startSession = async (session, { cwd, cols, rows, themeMode = 'dark', terminalBackground, terminalForeground, shell, loginShell, mode = INTERACTIVE_TERMINAL_MODE, command = null, purpose = TERMINAL_PURPOSE }, clear = true) => {
     await validateCwd(cwd);
     const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell, mode, command });
-    if (clear) { session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; }
+    if (clear) {
+      resetTerminalHistory(session.history);
+      discardPendingOutput(session);
+      session.pendingHistoryControlSequence = '';
+      session.pendingThemeControlSequence = '';
+      session.themeModeEnabled = false;
+    }
     session.cwd = cwd; session.cols = cols; session.rows = rows; session.process = spawned.process;
     session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.status = 'running'; session.exitCode = null; session.signal = null;
     session.shellExecutable = spawned.shellExecutable;
@@ -336,7 +417,18 @@ export function createTerminalRuntime({
     if (!existing && sessions.size - superseded.length + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
     const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, mode: launchMode.mode, command: launchMode.command, purpose: normalizedPurpose, cancelled: false, promise: null };
     const creation = (async () => {
-      const session = existing ?? { id, sequence: 0, history: '', pendingHistoryControlSequence: '', pendingThemeControlSequence: '', eventQueue: [], draining: false, createdAt: Date.now() };
+      const session = existing ?? {
+        id,
+        sequence: 0,
+        history: createTerminalHistory(),
+        pendingHistoryControlSequence: '',
+        pendingThemeControlSequence: '',
+        eventQueue: [],
+        draining: false,
+        createdAt: Date.now(),
+        pendingOutput: null,
+        outputFlushTimer: null,
+      };
       const ptyProcess = await startSession(session, { cwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell, mode: launchMode.mode, command: launchMode.command, purpose: normalizedPurpose });
       if (pendingEntry.cancelled) {
         session.process = null;
@@ -374,6 +466,7 @@ export function createTerminalRuntime({
       const session = sessions.get(id);
       if (!session) { send(socket, { t: 'error', v: 3, s: id, code: 'SESSION_NOT_FOUND', message: 'Terminal session not found', fatal: true }); return; }
       if (message.t === 'attach') {
+        flushPendingOutput(session, { force: true });
         const attachment = { initializing: true, pending: [] };
         connection.attachments.set(id, attachment);
         const initial = snapshot(session);
@@ -522,7 +615,9 @@ export function createTerminalRuntime({
       }
       session.process = spawned.process; session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.cwd = cwd; session.cols = cols; session.rows = rows;
       session.shellExecutable = spawned.shellExecutable;
-      session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
+      resetTerminalHistory(session.history);
+      discardPendingOutput(session);
+      session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
       session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
        wire(session, spawned.process); void terminateProcess(oldProcess); publish(session, { t: 'restarted', history: '' });
     });
@@ -546,6 +641,7 @@ export function createTerminalRuntime({
       return res.json({ success: true });
     }
     sessions.delete(session.id);
+    discardPendingOutput(session);
     closeAttachments(session.id, 'CLOSED', 'Terminal closed');
     await terminateProcess(session.process);
     res.json({ success: true });
@@ -555,7 +651,7 @@ export function createTerminalRuntime({
     const killedSessionIds = [];
     for (const [id, session] of sessions) {
       if ((sessionId && id !== sessionId) || (!sessionId && cwd && session.cwd !== cwd)) continue;
-      sessions.delete(id); closeAttachments(id, 'KILLED', 'Terminal was killed'); void terminateProcess(session.process, true); killedSessionIds.push(id); killedCount += 1;
+      sessions.delete(id); discardPendingOutput(session); closeAttachments(id, 'KILLED', 'Terminal was killed'); void terminateProcess(session.process, true); killedSessionIds.push(id); killedCount += 1;
     }
     res.json({ success: true, killedCount, killedSessionIds });
   });
@@ -565,7 +661,7 @@ export function createTerminalRuntime({
     for (const [id, session] of sessions) {
       const attached = [...connections].some((connection) => connection.attachments.has(id));
       if (!attached && now - session.lastActivity > IDLE_TIMEOUT_MS) {
-        sessions.delete(id); closeAttachments(id, 'IDLE_TIMEOUT', 'Terminal expired after being idle'); void terminateProcess(session.process, true);
+        sessions.delete(id); discardPendingOutput(session); closeAttachments(id, 'IDLE_TIMEOUT', 'Terminal expired after being idle'); void terminateProcess(session.process, true);
       }
     }
   }, 5 * 60 * 1000);
@@ -581,6 +677,7 @@ export function createTerminalRuntime({
     const terminals = [...sessions.values()]
       .filter(session => session.status === 'running' && session.process)
       .map(session => ({ process: session.process, shellExecutable: session.shellExecutable }));
+    for (const session of sessions.values()) discardPendingOutput(session);
     sessions.clear();
     await shutdownProcesses(terminals);
     await Promise.allSettled([...pendingTerminations]);

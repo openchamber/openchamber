@@ -763,7 +763,7 @@ describe('terminal runtime', () => {
       first.socket.send(createTerminalWsControlFrame({ t: 'detach', v: 3, s: 'term-second' }));
       await new Promise((resolve) => setTimeout(resolve, 5));
       processes[1].emitData('detached\r\n');
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setTimeout(resolve, 30));
       expect(first.messages.some((message) => message?.t === 'output' && message.s === 'term-second')).toBe(false);
 
       processes[0].emitData('ok\r\n');
@@ -1190,4 +1190,173 @@ describe('terminal runtime', () => {
       expect(harness.processes[0].killed).toBe(false);
     } finally { await harness.runtime.shutdown(); }
   });
+
+  async function withLiveTerminal(overrides, run) {
+    const app = createHttpTestApp();
+    const server = http.createServer(app);
+    const processes = [];
+    const loadPtyProvider = async () => ({
+      backend: 'fake-pty',
+      spawn: () => {
+        const data = new Set();
+        const exits = new Set();
+        const ptyProcess = {
+          pid: 88000 + processes.length,
+          killed: false,
+          writes: [],
+          write(value) { this.writes.push(value); },
+          resize() {},
+          kill() { this.killed = true; },
+          onData(handler) { data.add(handler); return { dispose: () => data.delete(handler) }; },
+          onExit(handler) { exits.add(handler); return { dispose: () => exits.delete(handler) }; },
+          emitData(value) { for (const handler of data) handler(value); },
+          emitExit(exitCode) { for (const handler of exits) handler({ exitCode, signal: 0 }); },
+        };
+        processes.push(ptyProcess);
+        return ptyProcess;
+      },
+    });
+    const runtime = createRuntime(server, {
+      app,
+      loadPtyProvider,
+      terminalTerminationGraceMs: 10,
+      fs: { promises: { stat: async () => ({ isDirectory: () => true }) } },
+      searchPathFor: () => '/bin/sh',
+      isExecutable: () => true,
+      ...overrides,
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const sockets = [];
+    try {
+      await run({
+        base: `http://127.0.0.1:${port}`,
+        processes,
+        openSocket: async () => {
+          const client = await openTerminalSocket(`ws://127.0.0.1:${port}/api/terminal/ws`);
+          sockets.push(client.socket);
+          return client;
+        },
+      });
+    } finally {
+      for (const socket of sockets) socket.terminate();
+      await runtime.shutdown();
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  it('coalesces PTY output into one sequenced frame and flushes before exit', async () => {
+    await withLiveTerminal({ outputCoalesceMs: 20 }, async ({ base, processes, openSocket }) => {
+      const created = await fetch(`${base}/api/terminal/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'term-coalesce', cwd: '/repo' }),
+      });
+      expect(created.status).toBe(200);
+      const client = await openSocket();
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-coalesce' }));
+      expect(await client.next('snapshot', 'term-coalesce')).toMatchObject({ s: 'term-coalesce', q: 0, history: '' });
+
+      processes[0].emitData('one');
+      processes[0].emitData('two');
+      processes[0].emitData('three');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(client.messages.filter((message) => message?.t === 'output')).toEqual([]);
+
+      const output = await client.next('output', 'term-coalesce');
+      expect(output).toMatchObject({ s: 'term-coalesce', q: 1, d: 'onetwothree' });
+      expect(client.messages.filter((message) => message?.t === 'output')).toEqual([]);
+
+      processes[0].emitData('bye');
+      processes[0].emitExit(0);
+      expect(await client.next('output', 'term-coalesce')).toMatchObject({ q: 2, d: 'bye' });
+      expect(await client.next('exit', 'term-coalesce')).toMatchObject({ q: 3, exitCode: 0 });
+    });
+  }, 15_000);
+
+  it('merges PTY output instead of queueing frames while a socket is backpressured', async () => {
+    let backpressured = false;
+    await withLiveTerminal({
+      outputCoalesceMs: 10,
+      isSocketBackpressured: () => backpressured,
+    }, async ({ base, processes, openSocket }) => {
+      await fetch(`${base}/api/terminal/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'term-hold', cwd: '/repo' }),
+      });
+      const client = await openSocket();
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-hold' }));
+      await client.next('snapshot', 'term-hold');
+
+      backpressured = true;
+      processes[0].emitData('a');
+      processes[0].emitData('b');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(client.messages.filter((message) => message?.t === 'output')).toEqual([]);
+
+      backpressured = false;
+      const output = await client.next('output', 'term-hold');
+      expect(output).toMatchObject({ q: 1, d: 'ab' });
+      expect(client.messages.filter((message) => message?.t === 'output')).toEqual([]);
+    });
+  }, 15_000);
+
+  it('keeps attach snapshots consistent with unflushed coalesced output', async () => {
+    await withLiveTerminal({ outputCoalesceMs: 50 }, async ({ base, processes, openSocket }) => {
+      await fetch(`${base}/api/terminal/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'term-snap', cwd: '/repo' }),
+      });
+      processes[0].emitData('hello');
+      processes[0].emitData(' world');
+      const client = await openSocket();
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-snap' }));
+      expect(await client.next('snapshot', 'term-snap')).toMatchObject({
+        s: 'term-snap',
+        q: 1,
+        history: 'hello world',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(client.messages.some((message) => message?.t === 'output')).toBe(false);
+    });
+  }, 15_000);
+
+  it('does not copy the retained 512 KiB history when appending a small chunk', async () => {
+    const originalFrom = Buffer.from;
+    const largeCopies = [];
+    await withLiveTerminal({ outputCoalesceMs: 5 }, async ({ base, processes, openSocket }) => {
+      await fetch(`${base}/api/terminal/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'term-trim', cwd: '/repo' }),
+      });
+      const client = await openSocket();
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-trim' }));
+      await client.next('snapshot', 'term-trim');
+      processes[0].emitData('a'.repeat(512 * 1024));
+      await client.next('output', 'term-trim');
+
+      Buffer.from = (...args) => {
+        const first = args[0];
+        if (String(first) === first && first.length >= 512 * 1024) largeCopies.push(first.length);
+        return originalFrom(...args);
+      };
+      try {
+        processes[0].emitData('tail');
+        await client.next('output', 'term-trim');
+      } finally {
+        Buffer.from = originalFrom;
+      }
+      expect(largeCopies).toEqual([]);
+
+      const late = await openSocket();
+      late.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-trim' }));
+      const snapshot = await late.next('snapshot', 'term-trim');
+      expect(snapshot.history.endsWith('tail')).toBe(true);
+      expect(Buffer.byteLength(snapshot.history)).toBe(512 * 1024);
+    });
+  }, 15_000);
 });
