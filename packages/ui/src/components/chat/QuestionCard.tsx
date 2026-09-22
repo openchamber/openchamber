@@ -13,6 +13,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
+import { shouldSubmitEnter } from './composer/keyboardPolicy';
+import { useRightModifierHeld } from './composer/rightModifierKeys';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
 import { QuestionMarkdown } from './QuestionMarkdown';
@@ -93,6 +95,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const respondToQuestion = sessionActions.respondToQuestion;
   const rejectQuestion = sessionActions.rejectQuestion;
   const isMobile = useUIStore((state) => state.isMobile);
+  const enterToSend = useUIStore((state) => state.enterToSend);
+  const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
+  const enterToSendMode = useUIStore((state) => state.enterToSendMode);
+  const getRightModifierHeld = useRightModifierHeld();
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isFromSubagent = React.useMemo(() => {
@@ -267,17 +273,30 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (isIMECompositionEvent(e)) return;
+      if (e.key !== 'Enter') return;
 
-      if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        if (requiredSatisfied) {
-          handleConfirm();
-        } else {
-          handleNextUnanswered();
-        }
+      const shouldSubmit = shouldSubmitEnter({
+        isMobile,
+        isDesktopExpanded: false,
+        enterToSend,
+        enterToSendConfigured,
+        enterToSendMode,
+        rightModifierHeld: getRightModifierHeld(e),
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+      });
+      if (!shouldSubmit) return;
+
+      e.preventDefault();
+      if (requiredSatisfied) {
+        handleConfirm();
+      } else {
+        handleNextUnanswered();
       }
     },
-    [handleConfirm, handleNextUnanswered, isMobile, requiredSatisfied]
+    [enterToSend, enterToSendConfigured, enterToSendMode, getRightModifierHeld, handleConfirm, handleNextUnanswered, isMobile, requiredSatisfied]
   );
 
   const handleDismiss = React.useCallback(async () => {

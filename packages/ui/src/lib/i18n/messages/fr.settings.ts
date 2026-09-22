@@ -2325,6 +2325,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': 'Choisissez le raccourci d\'envoi pour le composeur standard. Dans le composeur étendu, Entrée ajoute toujours une nouvelle ligne et Ctrl/Cmd+Entrée envoie.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Envoyer avec Entrée',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Envoyer avec Ctrl/Cmd+Entrée',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': 'Envoyer avec Maj droite/Ctrl droit + Entrée',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': 'Le composeur étendu et les cartes de question utilisent aussi le raccourci de droite. Entrée et les modificateurs gauches ajoutent une nouvelle ligne.',
   ...linearIntegrationI18n.fr,
   ...guestIntegrationsI18n.fr,
   ...extensionsSettingsI18n.fr,

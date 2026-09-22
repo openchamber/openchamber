@@ -15,6 +15,8 @@ const policy = (overrides: Partial<EnterKeyPolicyInput>): EnterKeyPolicyInput =>
     shiftKey: false,
     ctrlKey: false,
     metaKey: false,
+    altKey: false,
+    rightModifierHeld: false,
     ...overrides,
 });
 
@@ -25,7 +27,7 @@ const enterPolicyCases: Array<[string, Partial<EnterKeyPolicyInput>, boolean]> =
         ['configured enabled Enter sends on desktop', { enterToSendConfigured: true, enterToSend: true }, true],
         ['configured enabled Shift+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: true, shiftKey: true }, false],
         ['configured disabled Enter inserts a newline', { enterToSendConfigured: true, enterToSend: false }, false],
-        ['configured disabled Shift+Enter sends', { enterToSendConfigured: true, enterToSend: false, shiftKey: true }, true],
+        ['configured disabled Shift+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: false, shiftKey: true }, false],
         ['configured Ctrl+Enter sends on desktop', { enterToSendConfigured: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
         ['configured Meta+Enter sends on desktop', { enterToSendConfigured: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
         ['expanded composer Enter inserts a newline when Enter-to-send is enabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: true }, false],
@@ -34,6 +36,19 @@ const enterPolicyCases: Array<[string, Partial<EnterKeyPolicyInput>, boolean]> =
         ['expanded composer Cmd+Enter sends despite Enter-to-send being enabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: true, metaKey: true }, true],
         ['mobile expanded Ctrl+Enter sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
         ['mobile expanded Meta+Enter sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
+        ['explicit Enter mode overrides a disabled Enter-to-send preference', { enterToSendMode: 'enter', enterToSendConfigured: true, enterToSend: false }, true],
+        ['explicit modifier mode overrides an enabled Enter-to-send preference', { enterToSendMode: 'modifier', enterToSendConfigured: true, enterToSend: true }, false],
+        ['right-hand mode Enter inserts a newline', { enterToSendMode: 'right-modifier' }, false],
+        ['right-hand mode right Shift+Enter sends', { enterToSendMode: 'right-modifier', rightModifierHeld: true }, true],
+        ['right-hand mode right Control+Enter sends', { enterToSendMode: 'right-modifier', rightModifierHeld: true, ctrlKey: true }, true],
+        ['right-hand mode left Shift+Enter inserts a newline', { enterToSendMode: 'right-modifier', shiftKey: true }, false],
+        ['right-hand mode left Ctrl+Enter inserts a newline', { enterToSendMode: 'right-modifier', ctrlKey: true }, false],
+        ['right-hand mode ignores AltGr-style Ctrl+Alt chords', { enterToSendMode: 'right-modifier', rightModifierHeld: true, ctrlKey: true, altKey: true }, false],
+        ['right-hand mode overrides a synced Enter-to-send preference', { enterToSendMode: 'right-modifier', enterToSendConfigured: true, enterToSend: true, rightModifierHeld: true }, true],
+        ['expanded composer right Shift+Enter sends in right-hand mode', { isDesktopExpanded: true, enterToSendMode: 'right-modifier', rightModifierHeld: true }, true],
+        ['expanded composer left Ctrl+Enter inserts a newline in right-hand mode', { isDesktopExpanded: true, enterToSendMode: 'right-modifier', ctrlKey: true }, false],
+        ['mobile ignores the right-hand mode and keeps Ctrl/Cmd', { isMobile: true, enterToSendMode: 'right-modifier', rightModifierHeld: true }, false],
+        ['mobile still sends with Ctrl in right-hand mode', { isMobile: true, enterToSendMode: 'right-modifier', ctrlKey: true }, true],
 ];
 
 describe('Enter key policy', () => {

@@ -414,7 +414,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.enterToSend',
     descriptionKey: 'settings.openchamber.visual.field.enterToSendHint',
-    keywords: ['enter', 'shift enter', 'ctrl enter', 'cmd enter', 'mod enter', 'send', 'newline'],
+    keywords: ['enter', 'shift enter', 'ctrl enter', 'cmd enter', 'mod enter', 'right shift', 'right ctrl', 'send', 'newline'],
     isAvailable: (ctx) => !ctx.isMobile,
   },
   {

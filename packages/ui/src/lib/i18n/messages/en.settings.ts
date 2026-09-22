@@ -2176,6 +2176,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': 'Choose the send shortcut for the standard composer. In the expanded composer, Enter always adds a new line and Ctrl/Cmd+Enter sends.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Send with Enter',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Send with Ctrl/Cmd+Enter',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': 'Send with right Shift/Ctrl+Enter',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': 'The expanded composer and question cards use the right-hand shortcut too. Enter and left-hand modifiers add a new line.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Large text paste behavior',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Large text paste: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Ask each time',

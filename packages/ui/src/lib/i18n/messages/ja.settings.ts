@@ -2325,6 +2325,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': '標準コンポーザーの送信ショートカットを選択します。拡張コンポーザーでは、Enter は常に改行し、Ctrl/Cmd+Enter で送信します。',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Enter で送信',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter で送信',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': '右 Shift/Ctrl+Enter で送信',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': '拡張コンポーザーと質問カードも右側のショートカットで送信します。Enter と左側の修飾キーは改行します。',
   ...linearIntegrationI18n.ja,
   ...guestIntegrationsI18n.ja,
   ...extensionsSettingsI18n.ja,

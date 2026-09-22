@@ -73,6 +73,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
+import { resolveEnterSendMode, type EnterSendMode } from '@/lib/enterSendMode';
 
 interface Option<T extends string> {
     id: T;
@@ -410,7 +411,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setEnterToSend = useUIStore(state => state.setEnterToSend);
     const enterToSendConfigured = useUIStore(state => state.enterToSendConfigured);
     const setEnterToSendConfigured = useUIStore(state => state.setEnterToSendConfigured);
-    const enterSendSelected = enterToSendConfigured ? enterToSend : !isMobile;
+    const enterToSendMode = useUIStore(state => state.enterToSendMode);
+    const setEnterToSendMode = useUIStore(state => state.setEnterToSendMode);
+    const resolvedEnterSendMode = resolveEnterSendMode({ enterToSend, enterToSendConfigured, enterToSendMode });
+    const enterSendSelection: EnterSendMode = resolvedEnterSendMode === 'default' ? 'enter' : resolvedEnterSendMode;
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
@@ -572,11 +576,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
     }, [setInputSpellcheckEnabled]);
 
-    const handleEnterToSendChange = React.useCallback((enabled: boolean) => {
-        setEnterToSend(enabled);
+    const handleEnterSendModeChange = React.useCallback((mode: EnterSendMode) => {
+        setEnterToSendMode(mode);
+        setEnterToSend(mode === 'enter');
         setEnterToSendConfigured(true);
-        void updateDesktopSettings({ enterToSend: enabled, enterToSendConfigured: true });
-    }, [setEnterToSend, setEnterToSendConfigured]);
+        void updateDesktopSettings({
+            enterToSendMode: mode,
+            enterToSend: mode === 'enter',
+            enterToSendConfigured: true,
+        });
+    }, [setEnterToSendMode, setEnterToSend, setEnterToSendConfigured]);
 
     const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
         setChatRenderMode(mode);
@@ -2175,21 +2184,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 {shouldShow('enterToSend') && (
                                     <SettingsControlGroup
                                         title={t('settings.openchamber.visual.field.enterToSend')}
-                                        info={t('settings.openchamber.visual.field.enterToSendHint')}
+                                        info={enterSendSelection === 'right-modifier'
+                                            ? t('settings.openchamber.visual.field.enterToSendHintRightModifier')
+                                            : t('settings.openchamber.visual.field.enterToSendHint')}
                                         settingsItem="chat.enter-to-send"
                                     >
                                         <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.enterToSend')}>
                                             <SettingsRadioOption
-                                                selected={enterSendSelected}
-                                                onSelect={() => handleEnterToSendChange(true)}
+                                                selected={enterSendSelection === 'enter'}
+                                                onSelect={() => handleEnterSendModeChange('enter')}
                                                 label={t('settings.openchamber.visual.option.enterToSend.enter.label')}
                                                 ariaLabel={t('settings.openchamber.visual.option.enterToSend.enter.label')}
                                             />
                                             <SettingsRadioOption
-                                                selected={!enterSendSelected}
-                                                onSelect={() => handleEnterToSendChange(false)}
+                                                selected={enterSendSelection === 'modifier'}
+                                                onSelect={() => handleEnterSendModeChange('modifier')}
                                                 label={t('settings.openchamber.visual.option.enterToSend.modifier.label')}
                                                 ariaLabel={t('settings.openchamber.visual.option.enterToSend.modifier.label')}
+                                            />
+                                            <SettingsRadioOption
+                                                selected={enterSendSelection === 'right-modifier'}
+                                                onSelect={() => handleEnterSendModeChange('right-modifier')}
+                                                label={t('settings.openchamber.visual.option.enterToSend.rightModifier.label')}
+                                                ariaLabel={t('settings.openchamber.visual.option.enterToSend.rightModifier.label')}
                                             />
                                         </SettingsRadioGroup>
                                     </SettingsControlGroup>

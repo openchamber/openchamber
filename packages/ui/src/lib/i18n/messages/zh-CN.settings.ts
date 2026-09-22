@@ -2325,6 +2325,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enterToSendHint': '请选择标准输入框的发送快捷键。在展开的输入框中，Enter 始终换行，Ctrl/Cmd+Enter 发送。',
   'settings.openchamber.visual.option.enterToSend.enter.label': '按 Enter 发送',
   'settings.openchamber.visual.option.enterToSend.modifier.label': '按 Ctrl/Cmd+Enter 发送',
+  'settings.openchamber.visual.option.enterToSend.rightModifier.label': '按右侧 Shift/Ctrl+Enter 发送',
+  'settings.openchamber.visual.field.enterToSendHintRightModifier': '展开的输入框和问题卡片也使用右侧快捷键发送。Enter 和左侧修饰键会换行。',
   ...linearIntegrationI18n['zh-CN'],
   ...guestIntegrationsI18n['zh-CN'],
   ...extensionsSettingsI18n['zh-CN'],

@@ -2325,6 +2325,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.enterToSendHint": "Виберіть комбінацію для надсилання у стандартному композері. У розгорнутому композері Enter завжди додає новий рядок, а Ctrl/Cmd+Enter надсилає.",
   "settings.openchamber.visual.option.enterToSend.enter.label": "Надсилати клавішею Enter",
   "settings.openchamber.visual.option.enterToSend.modifier.label": "Надсилати за допомогою Ctrl/Cmd+Enter",
+  "settings.openchamber.visual.option.enterToSend.rightModifier.label": "Надсилати за допомогою правого Shift/Ctrl+Enter",
+  "settings.openchamber.visual.field.enterToSendHintRightModifier": "Розгорнутий композер і картки запитань теж використовують праве скорочення. Enter і ліві модифікатори додають новий рядок.",
   ...linearIntegrationI18n.uk,
   ...guestIntegrationsI18n.uk,
   ...extensionsSettingsI18n.uk,
