@@ -58,6 +58,31 @@ All providers should return results via shared helpers to preserve API shape:
 Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigured(auth?)`, and `fetchQuota()`.
 `fetchQuota()` should return a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `daily`) and optional provider-specific `usage.models` data.
 
+### Command-backed account usage
+
+A local quota source can replace a registered provider's built-in fetcher through
+`~/.config/openchamber/usage-providers.json` (or `$OPENCHAMBER_DATA_DIR/usage-providers.json`):
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["usage-helper", "limits", "--json"]
+  }
+}
+```
+
+Commands run directly without a shell, with the active session directory as
+their working directory, a 30-second timeout, and a 1 MiB output limit. The
+file is deliberately separate from OpenChamber settings so remote settings
+clients cannot configure executable commands. Output must be JSON with
+`version: 1` and an `accounts` array. Accounts may provide `id`, `label`,
+`email`, `current`, `available`, `status`, `planType`, `credits`, `error`, and
+`limits`; each limit may provide `windowMinutes`, `usedPercent`, and
+`resetAtMs`. Multi-account results are rendered under the existing provider,
+and collapsed usage selects the shortest window from the current available
+account.
+
 exe.dev, Ollama Cloud, and Cursor credentials are explicitly managed through Settings. exe.dev usage uses a separately generated HTTPS API token restricted to `billing credits usage` and aggregates every `exe-*` model provider into one monthly credit window. Generate the token with `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`. OpenCode Go usage uses `GET https://opencode.ai/zen/go/v1/usage` with the `opencode-go` API key from OpenCode `auth.json` as a bearer token and the stable `x-opencode-session: openchamber-usage` workload id. The server validates managed credentials before atomic `0600` writes and never returns secrets through its API. OpenChamber never scans browser cookie stores or automatically reads Cursor storage; Cursor import is an explicit one-time user action and never modifies Cursor's database.
 
 Command Code usage resolves account scope through `GET /alpha/whoami`, then reads server-backed credit balances and five-hour/weekly limits from `GET /alpha/billing/credits?orgId=...`. Personal accounts return `org: null` and use `/alpha/billing/credits` without an `orgId`; organization accounts include their organization id. Web/Electron and VS Code read the standard `command-code` OpenCode auth entry (including OAuth `access`) or `COMMAND_CODE_API_KEY`; credentials remain in the owning runtime and are never returned to shared UI.

@@ -1,0 +1,73 @@
+---
+title: Niestandardowi dostawcy danych o zużyciu
+description: Dostarczaj dane o kontach i limitach za pomocą zaufanego polecenia lokalnego.
+---
+
+# Niestandardowi dostawcy danych o zużyciu
+
+OpenChamber może używać polecenia lokalnego zamiast wbudowanego pobierania limitów dla istniejącego dostawcy. Jest to przydatne, gdy wtyczka uwierzytelniania, pośrednik poświadczeń lub pula kont posiada dane o zużyciu, których OpenChamber nie potrafi odczytać bezpośrednio.
+
+Utwórz plik `usage-providers.json` w katalogu danych OpenChamber:
+
+- macOS i Linux: `~/.config/openchamber/usage-providers.json`
+- Niestandardowy katalog danych serwera: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+Skonfiguruj tablicę argv pod identyfikatorem dostawcy:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+W repozytorium znajduje się wykonywalny skrypt referencyjny `scripts/example-usage-provider.mjs`. Możesz wskazać w konfiguracji bezpośrednio ten skrypt, aby sprawdzić renderowanie wielu kont:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+Użyj ścieżki bezwzględnej do pliku wykonywalnego, gdy uruchamiasz OpenChamber poza terminalem, ponieważ aplikacje desktopowe mogą nie dziedziczyć zmiennej `PATH` Twojej powłoki.
+
+Polecenie jest wykonywane bez powłoki i otrzymuje katalog aktywnej sesji jako katalog roboczy. Musi wypisać na stdout jeden obiekt JSON:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Każde konto może też podać zamaskowany `email` jako tekst pomocniczy oraz `error`, gdy zawiodło tylko to konto. `current` wskazuje konto używane w zwartym widoku zużycia; konta niedostępne nigdy nie są przedstawiane jako bieżące.
+
+Polecenia mają limit czasu 30 sekund i limit wyjścia 1 MiB. Konfiguracja jest przechowywana poza zwykłymi ustawieniami OpenChamber, więc połączeni klienci nie mogą dodawać ani zmieniać wykonywalnych poleceń.

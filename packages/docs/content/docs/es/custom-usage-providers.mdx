@@ -1,0 +1,73 @@
+---
+title: Proveedores de uso personalizados
+description: Proporciona datos de cuentas y cuotas desde un comando local de confianza.
+---
+
+# Proveedores de uso personalizados
+
+OpenChamber puede usar un comando local en lugar de su obtención de cuotas integrada para un proveedor existente. Esto es útil cuando un plugin de autenticación, un intermediario de credenciales o un grupo de cuentas posee datos de uso que OpenChamber no puede leer directamente.
+
+Crea `usage-providers.json` en el directorio de datos de OpenChamber:
+
+- macOS y Linux: `~/.config/openchamber/usage-providers.json`
+- Directorio de datos personalizado del servidor: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+Configura un array argv bajo el ID del proveedor:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+El repositorio incluye un script de referencia ejecutable en `scripts/example-usage-provider.mjs`. Puedes apuntar tu configuración directamente a él para inspeccionar el renderizado multi-cuenta:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+Usa una ruta absoluta al ejecutable cuando inicies OpenChamber fuera de una terminal, porque las aplicaciones de escritorio pueden no heredar el `PATH` de tu shell.
+
+El comando se ejecuta sin shell y recibe el directorio de la sesión activa como su directorio de trabajo. Debe imprimir un objeto JSON en stdout:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Cada cuenta también puede proporcionar un `email` enmascarado como texto secundario y un `error` cuando solo esa cuenta falla. `current` identifica la cuenta usada para el uso compacto; las cuentas no disponibles nunca se presentan como actuales.
+
+Los comandos tienen un tiempo de espera de 30 segundos y un límite de salida de 1 MiB. La configuración se guarda fuera de los ajustes normales de OpenChamber para que los clientes conectados no puedan añadir ni cambiar comandos ejecutables.

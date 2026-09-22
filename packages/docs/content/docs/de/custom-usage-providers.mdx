@@ -1,0 +1,73 @@
+---
+title: Benutzerdefinierte Nutzungsanbieter
+description: Konto- und Kontingentdaten über einen vertrauenswürdigen lokalen Befehl liefern.
+---
+
+# Benutzerdefinierte Nutzungsanbieter
+
+OpenChamber kann für einen bestehenden Anbieter einen lokalen Befehl statt seines integrierten Kontingent-Abrufs verwenden. Das ist nützlich, wenn ein Authentifizierungs-Plugin, ein Anmeldedaten-Broker oder ein Konto-Pool Nutzungsdaten besitzt, die OpenChamber nicht direkt lesen kann.
+
+Erstelle `usage-providers.json` im OpenChamber-Datenverzeichnis:
+
+- macOS und Linux: `~/.config/openchamber/usage-providers.json`
+- Benutzerdefiniertes Server-Datenverzeichnis: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+Konfiguriere ein argv-Array unter der Anbieter-ID:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+Im Repository liegt ein ausführbares Referenzskript unter `scripts/example-usage-provider.mjs`. Du kannst deine Konfiguration direkt darauf zeigen lassen, um das Multi-Konto-Rendering zu prüfen:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+Verwende einen absoluten Pfad zur ausführbaren Datei, wenn du OpenChamber außerhalb eines Terminals startest, da Desktop-Anwendungen deine Shell-`PATH`-Variable möglicherweise nicht erben.
+
+Der Befehl läuft ohne Shell und erhält das aktive Sitzungsverzeichnis als Arbeitsverzeichnis. Er muss ein JSON-Objekt auf stdout ausgeben:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Jedes Konto kann zusätzlich eine maskierte `email` für sekundären Anzeigetext und ein `error` bereitstellen, wenn nur dieses Konto fehlgeschlagen ist. `current` kennzeichnet das Konto, das für die kompakte Nutzungsanzeige verwendet wird; nicht verfügbare Konten werden niemals als aktuell dargestellt.
+
+Befehle haben ein Timeout von 30 Sekunden und ein Ausgabelimit von 1 MiB. Die Konfiguration liegt außerhalb der normalen OpenChamber-Einstellungen, damit verbundene Clients keine ausführbaren Befehle hinzufügen oder ändern können.

@@ -1,0 +1,73 @@
+---
+title: 用量与配额的自定义提供方
+description: 通过受信任的本地命令提供账户与配额数据。
+---
+
+# 自定义用量提供方
+
+OpenChamber 可以使用本地命令来替代内置的配额获取器，用于已有的提供商。当身份验证插件、凭据代理或账户池拥有 OpenChamber 无法直接读取的用量数据时，这会很有用。
+
+在 OpenChamber 数据目录中创建 `usage-providers.json`：
+
+- macOS 和 Linux：`~/.config/openchamber/usage-providers.json`
+- 自定义服务器数据目录：`$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+在提供商 ID 下配置一个 argv 数组：
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+仓库中提供了一个可运行的参考脚本 `scripts/example-usage-provider.mjs`。你可以将配置直接指向它，以检查多账户渲染效果：
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+在终端之外启动 OpenChamber 时请使用可执行文件的绝对路径，因为桌面应用可能不会继承你的 shell `PATH`。
+
+该命令在没有 shell 的情况下运行，并接收当前会话目录作为其工作目录。它必须向 stdout 输出一个 JSON 对象：
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+每个账户还可以提供一个脱敏后的 `email` 用于辅助显示，并在只有该账户失败时提供 `error`。`current` 标识用于折叠用量显示的账户；不可用的账户永远不会被显示为当前账户。
+
+命令有 30 秒的超时时间和 1 MiB 的输出上限。配置保存在正常的 OpenChamber 设置之外，因此已连接的客户端无法添加或更改可执行命令。

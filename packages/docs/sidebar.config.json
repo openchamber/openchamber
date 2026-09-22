@@ -484,6 +484,22 @@
             "de": "Nutzung und Kontingente",
             "tr": "Kullanım ve kotalar"
           }
+        },
+        {
+          "label": "Custom usage providers",
+          "link": "/custom-usage-providers/",
+          "translations": {
+            "uk": "Власні джерела використання",
+            "zh-CN": "自定义用量提供方",
+            "es": "Proveedores de uso personalizados",
+            "pt-BR": "Provedores de uso personalizados",
+            "ko": "사용자 지정 사용량 제공자",
+            "pl": "Niestandardowi dostawcy danych o zużyciu",
+            "fr": "Fournisseurs d'utilisation personnalisés",
+            "ja": "カスタム使用量プロバイダー",
+            "de": "Benutzerdefinierte Nutzungsanbieter",
+            "tr": "Özel kullanım sağlayıcıları"
+          }
         }
       ]
     },

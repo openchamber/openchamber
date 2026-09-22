@@ -1,0 +1,73 @@
+---
+title: Özel kullanım sağlayıcıları
+description: Güvenilir bir yerel komuttan hesap ve kota verilerini sağlayın.
+---
+
+# Özel kullanım sağlayıcıları
+
+OpenChamber, mevcut bir sağlayıcı için yerleşik kota alıcısı yerine yerel bir komut kullanabilir. Bu, bir kimlik doğrulama eklentisi, kimlik bilgisi aracısı veya hesap havuzu, OpenChamber'ın doğrudan okuyamadığı kullanım verilerine sahip olduğunda faydalıdır.
+
+OpenChamber veri dizininde `usage-providers.json` dosyasını oluşturun:
+
+- macOS ve Linux: `~/.config/openchamber/usage-providers.json`
+- Özel sunucu veri dizini: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+Sağlayıcı kimliği altında bir argv dizisi yapılandırın:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+Depoda `scripts/example-usage-provider.mjs` konumunda çalıştırılabilir bir referans betiği bulunur. Çok hesaplı gösterimi incelemek için yapılandırmanızı doğrudan bu betiğe yönlendirebilirsiniz:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+OpenChamber'ı terminal dışında başlatırken çalıştırılabilir dosya için mutlak bir yol kullanın, çünkü masaüstü uygulamaları kabuk `PATH` değişkeninizi devralmayabilir.
+
+Komut kabuk olmadan çalışır ve etkin oturum dizinini çalışma dizini olarak alır. stdout'a tek bir JSON nesnesi yazdırmalıdır:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Her hesap, ikincil görüntü metni olarak maskelenmiş bir `email` ve yalnızca o hesap başarısız olduğunda bir `error` da sağlayabilir. `current`, daraltılmış kullanım görünümünde kullanılan hesabı belirtir; kullanılamayan hesaplar asla geçerli hesap olarak gösterilmez.
+
+Komutların 30 saniyelik zaman aşımı ve 1 MiB çıktı sınırı vardır. Yapılandırma, bağlanan istemcilerin çalıştırılabilir komutları ekleyememesi veya değiştirememesi için normal OpenChamber ayarlarının dışında tutulur.

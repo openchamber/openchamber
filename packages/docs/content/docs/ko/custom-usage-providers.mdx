@@ -1,0 +1,73 @@
+---
+title: 사용자 지정 사용량 제공자
+description: 신뢰할 수 있는 로컬 명령으로 계정 및 할당량 데이터를 제공합니다.
+---
+
+# 사용자 지정 사용량 제공자
+
+OpenChamber는 기존 제공자에 대해 내장 할당량 가져오기 대신 로컬 명령을 사용할 수 있습니다. 인증 플러그인, 자격 증명 브로커, 계정 풀이 OpenChamber가 직접 읽을 수 없는 사용량 데이터를 보유하고 있을 때 유용합니다.
+
+OpenChamber 데이터 디렉터리에 `usage-providers.json` 파일을 만듭니다:
+
+- macOS 및 Linux: `~/.config/openchamber/usage-providers.json`
+- 사용자 지정 서버 데이터 디렉터리: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+제공자 ID 아래에 argv 배열을 설정합니다:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+저장소에는 `scripts/example-usage-provider.mjs` 경로에 실행 가능한 참조 스크립트가 포함되어 있습니다. 멀티 계정 렌더링을 확인하기 위해 설정을 이 스크립트에 직접 지정할 수 있습니다:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+터미널 밖에서 OpenChamber를 실행할 때는 실행 파일의 절대 경로를 사용하세요. 데스크톱 애플리케이션은 셸의 `PATH`를 상속받지 않을 수 있습니다.
+
+명령은 셸 없이 실행되며 활성 세션 디렉터리를 작업 디렉터리로 받습니다. stdout에 JSON 객체 하나를 출력해야 합니다:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+각 계정은 보조 표시용으로 마스킹된 `email`과, 해당 계정만 실패했을 때의 `error`를 함께 제공할 수 있습니다. `current`는 접힌 사용량 표시에 사용되는 계정을 식별합니다. 사용할 수 없는 계정은 current로 표시되지 않습니다.
+
+명령에는 30초 타임아웃과 1 MiB 출력 제한이 있습니다. 설정은 일반 OpenChamber 설정 외부에 보관되므로 연결된 클라이언트는 실행 가능한 명령을 추가하거나 변경할 수 없습니다.

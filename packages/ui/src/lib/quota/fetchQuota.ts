@@ -14,10 +14,22 @@ const windowSchema = z.object({
 });
 const windowsSchema = z.record(z.string(), windowSchema);
 
+const accountSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  detail: z.string().optional(),
+  current: z.boolean(),
+  available: z.boolean(),
+  status: z.string().optional(),
+  error: z.string().optional(),
+  planLabel: z.string().optional(),
+  windows: windowsSchema,
+});
+
 /** The deadline covers response bodies too, including transports that ignore abort. */
 export const fetchQuota = async (
   providerId: QuotaProviderId,
-  { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
+  { signal, timeoutMs = 30_000, directory }: { signal?: AbortSignal; timeoutMs?: number; directory?: string } = {},
 ): Promise<ProviderResult> => {
   const controller = new AbortController();
   const abort = () => controller.abort(new DOMException('The operation was aborted.', 'AbortError'));
@@ -32,7 +44,8 @@ export const fetchQuota = async (
   });
   const readResult = async () => {
     controller.signal.throwIfAborted();
-    const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}`, { signal: controller.signal });
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+    const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}${query}`, { signal: controller.signal });
     const payload = await response.json();
     if (!response.ok) {
       const failure = z.object({ error: z.string() }).safeParse(payload);
@@ -45,7 +58,11 @@ export const fetchQuota = async (
       configured: z.boolean(),
       error: z.string().optional(),
       planLabel: z.string().nullable().optional(),
-      usage: z.object({ windows: windowsSchema, models: z.record(z.string(), z.object({ windows: windowsSchema })).optional() }).nullable(),
+      usage: z.object({
+        windows: windowsSchema,
+        models: z.record(z.string(), z.object({ windows: windowsSchema })).optional(),
+        accounts: z.array(accountSchema).optional(),
+      }).nullable(),
       fetchedAt: z.number(),
     }).parse(payload);
   };

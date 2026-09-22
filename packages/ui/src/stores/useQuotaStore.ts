@@ -9,6 +9,8 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { fetchQuota } from '@/lib/quota/fetchQuota';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const QUOTA_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
 // Quotas and their display settings are read from the connected OpenChamber
@@ -19,6 +21,17 @@ let inFlightRuntimeLoad: Promise<void> | null = null;
 const quotaRequests = new Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>();
 let quotaAutoRefreshConsumers = 0;
 let quotaAutoRefreshInterval: number | null = null;
+
+/** The directory quota requests are scoped to: the active session's
+    authoritative worktree directory when a session is open, otherwise the
+    app's current directory. One owner keeps fetch and refresh-trigger
+    resolution in step. */
+export const resolveQuotaDirectory = (): string | null => {
+  const sessionState = useSessionUIStore.getState();
+  return sessionState.currentSessionId
+    ? sessionState.getDirectoryForSession(sessionState.currentSessionId)
+    : useDirectoryStore.getState().currentDirectory;
+};
 
 interface QuotaSettingsState {
   displayMode: 'usage' | 'remaining';
@@ -152,7 +165,11 @@ export const useQuotaStore = create<QuotaStore>()(
         const controller = new AbortController();
         const promise = Promise.resolve().then(async () => {
           try {
-            const result = await fetchQuota(providerId, { signal: controller.signal });
+            const directory = resolveQuotaDirectory();
+            const result = await fetchQuota(providerId, {
+              signal: controller.signal,
+              directory: directory ?? undefined,
+            });
             if (generation !== quotaGeneration) return false;
             // A reachable instance can still report that its provider request
             // failed. Configuration is known, but there is no new usage sample.
@@ -329,4 +346,23 @@ export const useQuotaAutoRefresh = () => {
       }
     };
   }, []);
+
+  // Command-backed usage can be directory-specific, so a session or worktree
+  // switch must not wait up to the next interval tick to see the new
+  // directory's sample. The store's per-provider request sharing keeps this
+  // from racing the interval.
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const resolvedDirectory = currentSessionId
+    ? getDirectoryForSession(currentSessionId)
+    : currentDirectory;
+
+  const lastDirectoryRef = React.useRef(resolvedDirectory);
+  React.useEffect(() => {
+    if (lastDirectoryRef.current === resolvedDirectory) return;
+    lastDirectoryRef.current = resolvedDirectory;
+    const { dropdownProviderIds, fetchQuotas } = useQuotaStore.getState();
+    if (dropdownProviderIds.length > 0) void fetchQuotas(dropdownProviderIds);
+  }, [resolvedDirectory]);
 };

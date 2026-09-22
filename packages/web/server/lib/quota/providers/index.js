@@ -6,6 +6,7 @@
  */
 
 import { buildResult } from '../utils/index.js';
+import { fetchCommandQuota, readUsageProviderCommand, readUsageProviderCommands } from '../external-command.js';
 
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
@@ -170,10 +171,18 @@ const pendingFetches = new Map();
 
 export const listConfiguredQuotaProviders = () => {
   const configured = [];
+  let commands;
+  try {
+    commands = readUsageProviderCommands();
+  } catch {
+    // A malformed usage-providers.json must not erase every provider from the
+    // list; the fetch path reports the per-provider error instead.
+    commands = {};
+  }
 
   for (const [id, provider] of Object.entries(registry)) {
     try {
-      if (provider.isConfigured()) {
+      if (commands[id] || provider.isConfigured()) {
         configured.push(id);
       }
     } catch {
@@ -184,7 +193,7 @@ export const listConfiguredQuotaProviders = () => {
   return configured;
 };
 
-const fetchQuotaForProviderUncoalesced = async (providerId) => {
+const fetchQuotaForProviderUncoalesced = async (providerId, options = {}) => {
   const provider = registry[providerId];
 
   if (!provider) {
@@ -198,6 +207,15 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 
   try {
+    const command = options.command ?? readUsageProviderCommand(providerId);
+    if (command) {
+      return await fetchCommandQuota({
+        providerId,
+        providerName: provider.providerName,
+        command,
+        directory: options.directory,
+      });
+    }
     return await provider.fetchQuota();
   } catch (error) {
     return buildResult({
@@ -210,14 +228,22 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 };
 
-export const fetchQuotaForProvider = (providerId) => {
-  const existing = pendingFetches.get(providerId);
+export const fetchQuotaForProvider = (providerId, options = {}) => {
+  let command = null;
+  try {
+    command = registry[providerId] ? readUsageProviderCommand(providerId) : null;
+  } catch {
+    // Let the uncoalesced fetch below surface the config error as a
+    // per-provider result; built-in providers must keep working.
+  }
+  const fetchKey = command ? `${providerId}\0${options.directory ?? ''}` : providerId;
+  const existing = pendingFetches.get(fetchKey);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
-    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
+  const pending = fetchQuotaForProviderUncoalesced(providerId, { ...options, command }).finally(() => {
+    if (pendingFetches.get(fetchKey) === pending) pendingFetches.delete(fetchKey);
   });
-  pendingFetches.set(providerId, pending);
+  pendingFetches.set(fetchKey, pending);
   return pending;
 };
 

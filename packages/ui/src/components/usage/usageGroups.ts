@@ -12,11 +12,23 @@ export type UsageLimitRow = {
   window: UsageWindow;
 };
 
+export type UsageAccountGroup = {
+  id: string;
+  label: string;
+  detail?: string;
+  current: boolean;
+  available: boolean;
+  status?: string;
+  planLabel?: string;
+  rows: UsageLimitRow[];
+};
+
 export type UsageProviderGroup = {
   providerId: QuotaProviderId;
   providerName: string;
   planLabel?: string | null;
   rows: UsageLimitRow[];
+  accounts: UsageAccountGroup[];
   /** Provider-level message: a fetch error, or "nothing reported". */
   status: string | null;
 };
@@ -49,6 +61,20 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
       .map((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
         const rows: UsageLimitRow[] = [];
+        const accounts: UsageAccountGroup[] = (result?.usage?.accounts ?? []).map((account) => ({
+          id: account.id,
+          label: account.label,
+          detail: account.detail,
+          current: account.current,
+          available: account.available,
+          status: account.error ?? account.status,
+          planLabel: account.planLabel,
+          rows: Object.entries(account.windows).map(([label, window]) => ({
+            key: `account-${account.id}-${label}`,
+            label: formatWindowLabel(label),
+            window,
+          })),
+        }));
 
         for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
           rows.push({ key: `window-${label}`, label: formatWindowLabel(label), window });
@@ -71,6 +97,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           });
         }
 
+        const hasRows = rows.length > 0 || accounts.some((account) => account.rows.length > 0);
         const refreshError = refreshErrors[providerMeta.id];
         let status: string | null = null;
         if (refreshError) {
@@ -79,15 +106,16 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
             : refreshError;
         } else if (!result?.ok && result?.error) {
           status = result.error;
-        } else if (rows.length === 0) {
+        } else if (!hasRows) {
           status = t('header.services.noRateLimitsReported');
         }
 
         return {
           providerId: providerMeta.id,
-          providerName: providerMeta.name,
+          providerName: result?.providerName || providerMeta.name,
           planLabel: result?.planLabel,
           rows,
+          accounts,
           status,
         };
       });
