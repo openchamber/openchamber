@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import { resolveNpmRegistryRequest } from './npm-registry';
 
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
@@ -1133,8 +1134,9 @@ const NPM_CACHE_TTL_MS = 3_600_000;
 
 const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
   try {
-    const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name).replace(/^%40/, '@')}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'openchamber-vscode/dev' },
+    const request = resolveNpmRegistryRequest(name);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'openchamber-vscode/dev', ...request.headers },
       signal: AbortSignal.timeout(5000),
     });
     if (response.ok) {

@@ -1,3 +1,5 @@
+import { resolveNpmRegistryRequest } from './npm-registry';
+
 type UpgradeCapability = {
   supported: boolean;
   manager: 'opencode' | 'external' | 'openchamber' | null;
@@ -59,12 +61,13 @@ const getApiUrl = (manager?: OpenCodeUpgradeManager): string | null => {
 
 const fetchLatestVersion = async (): Promise<string> => {
   const results = await Promise.allSettled([
-    fetch('https://registry.npmjs.org/opencode-ai/latest', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`OpenCode npm registry responded with ${response.status}`);
-        const payload = await response.json() as { version?: unknown };
-        return typeof payload.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
-      }),
+    (async () => {
+      const npmRequest = resolveNpmRegistryRequest('opencode-ai', 'latest');
+      const response = await fetch(npmRequest.url, { headers: { Accept: 'application/json', ...npmRequest.headers }, signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`OpenCode npm registry responded with ${response.status}`);
+      const payload = await response.json() as { version?: unknown };
+      return typeof payload.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
+    })(),
     fetch('https://api.github.com/repos/anomalyco/opencode/releases/latest', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
       .then(async (response) => {
         if (!response.ok) throw new Error(`OpenCode releases responded with ${response.status}`);
