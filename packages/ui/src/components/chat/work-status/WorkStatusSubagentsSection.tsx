@@ -1,7 +1,13 @@
 import React from 'react';
+import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { useI18n } from '@/lib/i18n';
 import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
@@ -18,6 +24,11 @@ type Props = {
 
 const SECTION_ID = 'subagents';
 
+const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
+  const hasDuration = useHasSessionActivityDuration(sessionId, true);
+  return hasDuration ? <SessionActivityDuration sessionId={sessionId} running /> : null;
+};
+
 /**
  * Running subagents and, more importantly, their blockers: a permission request
  * raised by a child session has no representation in the transcript, so this
@@ -26,6 +37,7 @@ const SECTION_ID = 'subagents';
 export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const providers = useConfigStore((state) => state.providers);
 
   const liveSessions = useAllLiveSessions();
   const statuses = useAllSessionStatuses();
@@ -43,6 +55,10 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // store subscriptions by the number of subagents.
   const permissions = useDirectorySync(React.useCallback((state: State) => state.permission, []));
   const questions = useDirectorySync(React.useCallback((state: State) => state.question, []));
+  const statusReady = useDirectorySync(
+    React.useCallback((state: State) => state.sessionStatusReady, []),
+    directory ?? undefined,
+  );
 
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -79,7 +95,10 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   if (children.length === 0) return null;
 
-  const busyChildren = children.filter((child) => statuses[child.id]?.type === 'busy').length;
+  const busyChildren = children.filter((child) => {
+    const status = statuses[child.id]?.type;
+    return status === 'busy' || status === 'retry';
+  }).length;
 
   return (
     <WorkStatusCollapsibleSection
@@ -93,26 +112,46 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
         {children.map((child) => {
           const blocked = (permissions[child.id]?.length ?? 0) > 0;
           const asked = (questions[child.id]?.length ?? 0) > 0;
-          const busy = statuses[child.id]?.type === 'busy';
+          const status = statuses[child.id]?.type;
+          const busy = status === 'busy' || status === 'retry';
+          const done = status === 'idle' || (!status && statusReady && child.directory === directory);
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
+          let icon: IconName = 'time';
+          let iconColor: string | undefined;
+          let statusLabel = '';
+          if (blocked || asked) {
+            icon = 'alert';
+            iconColor = 'var(--status-warning)';
+            statusLabel = t(blocked ? 'chat.workStatus.subagent.needsPermission' : 'chat.workStatus.subagent.askedQuestion');
+          } else if (busy) {
+            icon = 'record-circle';
+            iconColor = 'var(--status-info)';
+            statusLabel = t('chat.workStatus.subagent.working');
+          } else if (done) {
+            icon = 'checkbox-circle';
+            iconColor = 'var(--status-success)';
+            statusLabel = t('chat.workStatus.subagent.done');
+          }
           const childCost = perChildCost.get(child.id) ?? 0;
+          const modelName = getProviderModelDisplayName(
+            providers.find((provider) => provider.id === child.model?.providerID),
+            child.model?.id,
+          );
           return (
             <WorkStatusRow
               key={child.id}
               onClick={directory ? () => openChildSession(child.id, label) : undefined}
-              ariaLabel={t('chat.workStatus.action.openSubagent', { name: label })}
+              ariaLabel={[t('chat.workStatus.action.openSubagent', { name: label }), statusLabel].filter(Boolean).join('. ')}
+              leading={<Icon name={icon} className="size-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />}
               label={label}
+              tooltip={modelName || undefined}
               value={(
                 <>
                   {blocked ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
                   ) : asked ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
-                  ) : busy ? (
-                    <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>
-                  ) : (
-                    <WorkStatusValue tone="muted">{t('chat.workStatus.subagent.done')}</WorkStatusValue>
-                  )}
+                  ) : busy ? <SubagentDuration sessionId={child.id} /> : null}
                   {childCost > 0 ? <WorkStatusValue tone="muted">{formatCost(childCost)}</WorkStatusValue> : null}
                 </>
               )}

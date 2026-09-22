@@ -110,6 +110,21 @@ which requests only providers enabled for this panel.
 | Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 
+### Subagent rows
+
+Subagent status uses the Tasks section's leading icons: blue for busy/retrying,
+green for idle, and a neutral clock while status is unknown. A successful status
+snapshot also establishes idle for omitted sessions in that same directory.
+Permission requests and questions take precedence with a warning icon and text.
+Running rows reuse `SessionActivityDuration` and its shared one-second ticker
+for the current turn's elapsed time, including retries and waiting within that
+turn. No timer is shown until the activity store has an observed start; blocked,
+settled, and collapsed rows do not mount a running counter.
+
+Hovering or focusing a row shows its session model's catalog display name,
+falling back to the formatted model ID. Missing model metadata produces no
+tooltip. Model-only session updates invalidate the live-session comparison.
+
 ### Turn stats
 
 The section follows Usage by default and reuses the panel's existing rows. Only its header
