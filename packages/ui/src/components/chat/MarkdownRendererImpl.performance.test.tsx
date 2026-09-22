@@ -420,21 +420,23 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
       expect(table).not.toBeNull();
       expect(table?.getAttribute('data-md-table-layout')).toBe('fixed');
       expect(table?.style.tableLayout).toBe('fixed');
-      expect(table?.style.width).toBe('626px');
-      expect(columnWidths).toEqual(['120px', '186px', '320px']);
+      expect(table?.style.width).toBe('100%');
+      expect(table?.style.minWidth).toBe('1106px');
+      expect(columnWidths).toEqual(['120px', '186px', '800px']);
       expect(table?.classList.contains('w-max')).toBe(true);
       expect(table?.classList.contains('min-w-full')).toBe(false);
       expect(table?.classList.contains('w-full')).toBe(false);
       expect(table?.parentElement?.classList.contains('overflow-x-auto')).toBe(true);
       const wrapper = table?.closest('[data-markdown="table-wrapper"]');
-      expect(wrapper?.classList.contains('w-fit')).toBe(true);
+      expect(wrapper?.classList.contains('w-full')).toBe(true);
       expect(wrapper?.classList.contains('max-w-full')).toBe(true);
       expect(cells.length).toBeGreaterThan(0);
       expect(cells.every((cell) => cell.classList.contains('min-w-[120px]'))).toBe(true);
-      expect(cells.every((cell) => cell.classList.contains('max-w-[320px]'))).toBe(true);
+      expect(cells.every((cell) => cell.classList.contains('max-w-[320px]'))).toBe(false);
       expect(cells.every((cell) => (
         cell.classList.contains('whitespace-normal')
-        && cell.classList.contains('[overflow-wrap:anywhere]')
+        && cell.classList.contains('break-words')
+        && !cell.classList.contains('[overflow-wrap:anywhere]')
       ))).toBe(true);
       expect(counts.tableProbeReads).toBe(tableProbeReads);
     } finally {

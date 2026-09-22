@@ -1208,6 +1208,12 @@ html:not(.dark) .chat-scroll {
   overflow-wrap: break-word;
 }
 
+/* Table cells size to content and can grow; keep identifiers unbroken. */
+.markdown-content [data-markdown="table"] code[data-markdown="inline-code"] {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
 @supports (color: color-mix(in lab, red, red)) {
   .markdown-content code[data-markdown="inline-code"] {
     background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;

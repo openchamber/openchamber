@@ -11,7 +11,7 @@ const GUEST_TOOL_TABLE_CELL_MAX = 200;
 
 // Same classes the markdown decorator puts on assistant tables
 // (`components/chat/markdown/decorate.ts`), minus the copy/download toolbar.
-const TABLE_CELL_CLASS = 'min-w-[120px] max-w-[320px] whitespace-normal [overflow-wrap:anywhere] border-r border-border/60 px-4 py-2.5 align-middle last:border-r-0';
+const TABLE_CELL_CLASS = 'min-w-[120px] whitespace-normal break-words border-r border-border/60 px-4 py-2.5 align-middle last:border-r-0';
 
 interface GuestToolTableProps {
     rows: readonly JsonValue[];
@@ -29,9 +29,9 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
     const hiddenCount = rows.length - visibleRows.length;
 
     return (
-        <div className="flex w-fit max-w-full flex-col gap-1">
+        <div className="flex w-full max-w-full flex-col gap-1">
             <div className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]">
-                <table className="w-max border-collapse text-sm">
+                <table className="w-max min-w-full border-collapse text-sm">
                     <thead>
                         <tr className="border-b border-border/60">
                             {columns.map((column) => (
