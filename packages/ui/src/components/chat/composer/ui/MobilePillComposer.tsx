@@ -20,6 +20,7 @@ import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { PromptEnhanceButton } from './PromptEnhanceButton';
 
 export interface MobilePillComposerProps {
     message: string;
@@ -39,6 +40,10 @@ export interface MobilePillComposerProps {
     attachments?: React.ReactNode;
     /** Rendered as the pill's own last row (mobile model/agent controls). */
     bottomRow?: React.ReactNode;
+    canEnhance: boolean;
+    isEnhancing: boolean;
+    onEnhance: () => void;
+    onCancelEnhance?: () => void;
     onExpand: () => void;
     onPrimaryAction: () => void;
     /** While a turn runs, the trailing action queues, as the expanded composer does. */
@@ -70,6 +75,10 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         topRow,
         attachments,
         bottomRow,
+        canEnhance,
+        isEnhancing,
+        onEnhance,
+        onCancelEnhance,
         onExpand,
         onPrimaryAction,
         onQueueMessage,
@@ -119,6 +128,14 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     showLinearPicker={showLinearPicker}
                     openLinearPicker={onOpenLinearPicker}
                     onOpenMobileSheet={onOpenAttachSheet}
+                />
+                <PromptEnhanceButton
+                    footerIconButtonClass={footerIconButtonClass}
+                    iconSizeClass={iconSizeClass}
+                    canEnhance={canEnhance}
+                    isEnhancing={isEnhancing}
+                    onEnhance={onEnhance}
+                    onCancel={onCancelEnhance}
                 />
                 <button
                     type="button"

@@ -12,6 +12,7 @@ declare module "bun:test" {
     toBeNull(): void;
     toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): void;
     toContain(expected: unknown): void;
+    toMatch(expected: string | RegExp): void;
     toBeDefined(): void;
     toBeUndefined(): void;
     toMatchObject(expected: unknown): void;

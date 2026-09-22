@@ -17,6 +17,7 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
+import { getSessionLastAssistantModel } from '@/sync/session-actions';
 // Guest surfaces load on demand: VS Code and mobile never mount them, and the
 // composer must not pay for the guest bridge before an extension is installed.
 const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
@@ -105,6 +106,7 @@ import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { ENHANCE_FAILURE_TOAST_KEYS, usePromptEnhancer } from './composer/enhance/usePromptEnhancer';
 import {
     assignImageAttachmentFilenames,
     buildAttachmentCitationText,
@@ -1212,6 +1214,96 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const canSend = (hasContent || hasQueuedMessages) && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
 
     const canAbort = sessionPhase !== 'idle';
+
+    // ---- Enhance Prompt (issue #3599) --------------------------------------
+    // The hook owns the request lifecycle, generations, and validation; this
+    // is the seam: decide whether an enhance may run, hand it the same
+    // context the send path would use, apply the rewrite to the unchanged
+    // draft (the controlled writeback produces the native undo entry), and
+    // map the few reasons that need their own copy to toasts. The operation
+    // is scoped: it is invalidated when the draft identity moves (session/
+    // directory/runtime switch) or the draft itself is edited, so it always
+    // settles promptly and the new scope can enhance immediately.
+    const { isEnhancing, enhance, cancel: cancelEnhance, noteDraftChanged } = usePromptEnhancer({
+        languageContext,
+        // The draft identity string is the enhance's scope key: identical
+        // scope → same draft the apply-side backstop compares against; a
+        // different scope cannot share a rewrite.
+        scopeKey: chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null,
+    });
+    // The session's last assistant model is the authoritative provider when
+    // one is known (same resolution as summarizeSelectionForNotes); the
+    // composer picker serves as the fallback.
+    const sessionModel = currentSessionId ? getSessionLastAssistantModel(currentSessionId) : null;
+    const preferredProviderId = sessionModel?.providerID ?? currentProviderId ?? '';
+    const preferredModelId = sessionModel?.modelID ?? currentModelId ?? '';
+    const isLocalCommandDraft = React.useMemo(
+        () => Boolean(
+            inputMode === 'normal'
+            && (planLocalSlashCommand(message, inputMode, hasDrafts, Boolean(currentSessionId))
+                || routeGuestSlashCommand(message, inputMode, guestCommands)),
+        ),
+        [currentSessionId, guestCommands, hasDrafts, inputMode, message],
+    );
+    const canEnhance = Boolean(
+        message.trim().length > 0
+        && !isEnhancing
+        && inputMode === 'normal'
+        && !isBtwActive
+        && !isLocalCommandDraft,
+    );
+    const handleEnhance = React.useCallback(() => {
+        const runEnhance = async () => {
+            const draft = messageRef.current;
+            if (!draft.trim() || isEnhancing) return;
+            const directory = currentSessionDirectoryForSync ?? currentDirectory ?? '';
+            if (!directory) return;
+            const targetSessionId = isBtwActive ? btwComposerSessionId : currentSessionId;
+            const result = await enhance(draft, {
+                directory,
+                sessionId: targetSessionId ?? null,
+                preferredProviderId,
+                preferredModelId,
+            });
+            if (result.outcome === 'applied') {
+                // Apply only to the exact draft the request was started from: a
+                // response may land after the user typed on or the draft identity
+                // moved. Read the live editor document (the same precedence
+                // getCurrentInputSnapshot uses) rather than the effect-synced
+                // ref, so a keystroke that has not reached the ref yet still
+                // counts. The controlled writeback below produces the native
+                // undo entry (Cmd/Ctrl+Z restores the pre-enhance draft).
+                const liveDraft = composerRef.current?.getValue() ?? messageRef.current;
+                if (result.sourceSnapshot === liveDraft && chatDraftIdentity === currentChatDraftIdentityRef.current) {
+                    setMessage(result.text);
+                }
+                return;
+            }
+            if (result.outcome === 'stale') return;
+            const toastKey = ENHANCE_FAILURE_TOAST_KEYS[result.reason] ?? undefined;
+            if (toastKey) {
+                toast.error(t(toastKey));
+            }
+        };
+        // A void-returning callback keeps the prop identity stable for the
+        // memoized PromptEnhanceButton (same shape as handleAbort); the
+        // promise is swallowed here.
+        void runEnhance();
+    }, [
+        btwComposerSessionId,
+        chatDraftIdentity,
+        currentDirectory,
+        currentSessionDirectoryForSync,
+        currentSessionId,
+        enhance,
+        isBtwActive,
+        isEnhancing,
+        preferredModelId,
+        preferredProviderId,
+        t,
+    ]);
+    React.useEffect(() => () => cancelEnhance(), [cancelEnhance]);
+    // ---- Enhance Prompt ------------------------------------------------------
 
     const getCurrentInputSnapshot = React.useCallback(() => {
         const currentMessage = composerRef.current?.getValue() ?? message;
@@ -2470,9 +2562,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     const handleComposerChange = ({ value, selection, fromPaste, insertedText }: ComposerChange) => {
+        // Scoped-enhance notification: a draft edit invalidates the running
+        // Enhance operation (the rewrite would answer for a draft that no
+        // longer exists). Cheap and unconditional — the hook itself ignores
+        // the notification when nothing is active or the text still matches
+        // the draft the operation was started from. Every branch that applies
+        // a value notifies with that same value.
         if (shellTriggerNormalizationRef.current) {
             shellTriggerNormalizationRef.current = false;
             setMessage(value);
+            noteDraftChanged(value);
             return;
         }
 
@@ -2514,6 +2613,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         setMessage(value);
         updateAutocompleteState(value, selection.start, inputSource, pastedInsertedText);
+        noteDraftChanged(value);
     };
 
     React.useEffect(() => {
@@ -3702,6 +3802,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             </div>
                         )}
                         bottomRow={mobileModelAgentRow}
+                        canEnhance={canEnhance}
+                        isEnhancing={isEnhancing}
+                        onEnhance={handleEnhance}
+                        onCancelEnhance={cancelEnhance}
                         onExpand={mobileShell.expand}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={() => { void handleQueueMessage(); }}
@@ -3893,6 +3997,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
                         dictationActive={mobileShell.dictationActive}
+                        canEnhance={canEnhance}
+                        isEnhancing={isEnhancing}
+                        onEnhance={handleEnhance}
+                        onCancelEnhance={cancelEnhance}
                         onOpenSettings={onOpenSettings}
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenIssuePicker={openIssuePicker}
