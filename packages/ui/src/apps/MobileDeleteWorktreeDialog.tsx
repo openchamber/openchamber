@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2/client';
 
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Radio } from '@/components/ui/radio';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -22,6 +23,8 @@ type MobileDeleteWorktreeDialogProps = {
   onDeleted?: () => void;
 };
 
+type WorktreeSessionDisposition = 'archive' | 'delete';
+
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
@@ -34,8 +37,9 @@ const getSessionDirectory = (session: Session): string => {
  * Mobile worktree-deletion confirmation. Built directly on the shared
  * primitives (getWorktreeStatus / removeProjectWorktree / archiveSessions) so
  * it mirrors the desktop SessionDialogs worktree flow without mounting it:
- * linked sessions are archived, the worktree is removed, and remote/local
- * branch deletion are optional.
+ * linked sessions are archived by default or permanently deleted when that
+ * disposition is chosen, the worktree is removed, and remote/local branch
+ * deletion are optional.
  */
 export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProps> = ({
   open,
@@ -48,18 +52,20 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
+  const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const [deleteLocalBranch, setDeleteLocalBranch] = React.useState(false);
   const [deleteRemoteBranch, setDeleteRemoteBranch] = React.useState(false);
+  const [disposition, setDisposition] = React.useState<WorktreeSessionDisposition>('archive');
   const [isDirty, setIsDirty] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
 
   const worktreePath = normalizePath(worktree?.path);
   const hasBranch = typeof worktree?.branch === 'string' && worktree.branch.trim().length > 0;
 
-  // Sessions attached to this worktree — archived (not deleted) on removal,
-  // matching the desktop behavior.
+  // Sessions attached to this worktree — archived by default, or permanently
+  // deleted when that disposition is chosen on removal.
   const linkedSessions = React.useMemo(() => {
     if (!worktreePath) return [] as Session[];
     const merged = new Map<string, Session>();
@@ -73,6 +79,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     if (!open) {
       setDeleteLocalBranch(false);
       setDeleteRemoteBranch(false);
+      setDisposition('archive');
       setIsDirty(false);
       setIsProcessing(false);
       return;
@@ -91,20 +98,27 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     };
   }, [open, worktree?.path, worktree?.status?.isDirty]);
 
-  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
+  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[], sessionDisposition: WorktreeSessionDisposition) => {
     const name = getWorktreeDisplayName(target);
     const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
     void (async () => {
       try {
         if (sessionIds.length > 0) {
-          const { failedIds } = await archiveSessions(sessionIds);
+          const { failedIds } = sessionDisposition === 'delete'
+            ? await deleteSessions(sessionIds)
+            : await archiveSessions(sessionIds);
           if (failedIds.length > 0) {
-            toast.error(
-              failedIds.length === 1
+            const failureMessage = sessionDisposition === 'delete'
+              ? (failedIds.length === 1
+                ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
+                : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }))
+              : (failedIds.length === 1
                 ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-                : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }),
-              { id: toastId, description: t('sessions.sidebar.dialogs.deleteResult.tryAgain') },
-            );
+                : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
+            toast.error(failureMessage, {
+              id: toastId,
+              description: t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
+            });
             return;
           }
         }
@@ -134,18 +148,52 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         });
       }
     })();
-  }, [archiveSessions, currentDirectory, deleteLocalBranch, deleteRemoteBranch, hasBranch, onDeleted, project, t, worktreePath]);
+  }, [archiveSessions, currentDirectory, deleteLocalBranch, deleteRemoteBranch, deleteSessions, hasBranch, onDeleted, project, t, worktreePath]);
 
   const handleConfirm = () => {
     if (!worktree || isProcessing) return;
     setIsProcessing(true);
-    removeWorktreeInBackground(worktree, linkedSessions.map((session) => session.id));
+    removeWorktreeInBackground(worktree, linkedSessions.map((session) => session.id), disposition);
     onClose();
   };
 
   if (!worktree) return null;
 
   const worktreeName = worktree.branch || worktree.label || worktree.path;
+
+  const linkedSessionsDescription = linkedSessions.length === 1
+    ? (disposition === 'delete'
+      ? t('sessions.sidebar.dialogs.worktreeDelete.deleteDescriptionOneLinked', { count: linkedSessions.length })
+      : t('sessions.sidebar.dialogs.worktreeDelete.descriptionOneLinked', { count: linkedSessions.length }))
+    : (disposition === 'delete'
+      ? t('sessions.sidebar.dialogs.worktreeDelete.deleteDescriptionManyLinked', { count: linkedSessions.length })
+      : t('sessions.sidebar.dialogs.worktreeDelete.descriptionManyLinked', { count: linkedSessions.length }));
+
+  const dispositionOption = (value: WorktreeSessionDisposition, label: string) => {
+    const checked = disposition === value;
+    return (
+      <div
+        role="presentation"
+        onClick={() => {
+          if (!isProcessing) setDisposition(value);
+        }}
+        className={cn(
+          'flex w-full items-start gap-3 rounded-xl border border-border/70 px-3.5 py-3 text-left transition-colors',
+          isProcessing ? 'opacity-45' : 'cursor-pointer hover:bg-interactive-hover',
+        )}
+        style={{ touchAction: 'manipulation' }}
+      >
+        <Radio
+          checked={checked}
+          disabled={isProcessing}
+          onChange={() => setDisposition(value)}
+          ariaLabel={label}
+          className="mt-0.5"
+        />
+        <span className="typography-ui-label text-foreground">{label}</span>
+      </div>
+    );
+  };
 
   const toggle = (checked: boolean, onChange: (value: boolean) => void, label: string, disabled?: boolean) => (
     <button
@@ -211,9 +259,19 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         ) : null}
 
         {linkedSessions.length > 0 ? (
-          <p className="typography-meta text-muted-foreground">
-            {t('mobile.projectEdit.deleteWorktreeArchiveNote', { count: linkedSessions.length })}
-          </p>
+          <div className="flex flex-col gap-3">
+            <p className="typography-meta text-muted-foreground">
+              {linkedSessionsDescription}
+            </p>
+            <div
+              role="radiogroup"
+              aria-label={t('sessions.sidebar.dialogs.worktreeDelete.disposition.label')}
+              className="flex flex-col gap-2"
+            >
+              {dispositionOption('archive', t('sessions.sidebar.dialogs.worktreeDelete.disposition.archive'))}
+              {dispositionOption('delete', t('sessions.sidebar.dialogs.worktreeDelete.disposition.delete'))}
+            </div>
+          </div>
         ) : null}
 
         {hasBranch ? (

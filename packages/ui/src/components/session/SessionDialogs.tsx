@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Radio } from '@/components/ui/radio';
 import { toast } from '@/components/ui';
 
 import {
@@ -48,6 +49,8 @@ type DeleteDialogState = {
     worktree?: WorktreeMetadata | null;
 };
 
+type WorktreeSessionDisposition = 'archive' | 'delete';
+
 export const SessionDialogs: React.FC = () => {
     const { t } = useI18n();
     const [isDirectoryDialogOpen, setIsDirectoryDialogOpen] = React.useState(false);
@@ -56,6 +59,7 @@ export const SessionDialogs: React.FC = () => {
     const [deleteDialogSummaries, setDeleteDialogSummaries] = React.useState<Array<{ session: Session; metadata: WorktreeMetadata }>>([]);
     const [deleteDialogShouldRemoveRemote, setDeleteDialogShouldRemoveRemote] = React.useState(false);
     const [deleteDialogShouldDeleteLocalBranch, setDeleteDialogShouldDeleteLocalBranch] = React.useState(false);
+    const [deleteDialogDisposition, setDeleteDialogDisposition] = React.useState<WorktreeSessionDisposition>('archive');
     const [isProcessingDelete, setIsProcessingDelete] = React.useState(false);
     const [hasCompletedDirtyCheck, setHasCompletedDirtyCheck] = React.useState(false);
     const [dirtyWorktreePaths, setDirtyWorktreePaths] = React.useState<Set<string>>(new Set());
@@ -129,6 +133,7 @@ export const SessionDialogs: React.FC = () => {
     ]);
 
     const openDeleteDialog = React.useCallback((payload: { sessions: Session[]; dateLabel?: string; mode?: 'session' | 'worktree'; worktree?: WorktreeMetadata | null }) => {
+        setDeleteDialogDisposition('archive');
         setDeleteDialog({
             sessions: payload.sessions,
             dateLabel: payload.dateLabel,
@@ -142,6 +147,7 @@ export const SessionDialogs: React.FC = () => {
         setDeleteDialogSummaries([]);
         setDeleteDialogShouldRemoveRemote(false);
         setDeleteDialogShouldDeleteLocalBranch(false);
+        setDeleteDialogDisposition('archive');
         setIsProcessingDelete(false);
         setHasCompletedDirtyCheck(false);
         setDirtyWorktreePaths(new Set());
@@ -211,6 +217,7 @@ export const SessionDialogs: React.FC = () => {
             setDeleteDialogSummaries([]);
             setDeleteDialogShouldRemoveRemote(false);
             setDeleteDialogShouldDeleteLocalBranch(false);
+            setDeleteDialogDisposition('archive');
             setHasCompletedDirtyCheck(false);
             setDirtyWorktreePaths(new Set());
             return;
@@ -377,18 +384,26 @@ export const SessionDialogs: React.FC = () => {
     const removeSelectedWorktreeInBackground = React.useCallback((
         worktree: WorktreeMetadata,
         sessionIds: string[],
-        deleteLocalBranch: boolean
+        deleteLocalBranch: boolean,
+        disposition: WorktreeSessionDisposition,
     ): void => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
         const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name: getWorktreeDisplayName(worktree) }));
         void (async () => {
             try {
                 if (sessionIds.length > 0) {
-                    const { failedIds } = await archiveSessions(sessionIds);
+                    const { failedIds } = disposition === 'delete'
+                        ? await deleteSessions(sessionIds)
+                        : await archiveSessions(sessionIds);
                     if (failedIds.length > 0) {
-                        toast.error(failedIds.length === 1
-                            ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-                            : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }), {
+                        const failureMessage = disposition === 'delete'
+                            ? (failedIds.length === 1
+                                ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
+                                : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }))
+                            : (failedIds.length === 1
+                                ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
+                                : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
+                        toast.error(failureMessage, {
                             id: toastId,
                             description: renderToastDescription(t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
                         });
@@ -414,7 +429,7 @@ export const SessionDialogs: React.FC = () => {
                 });
             }
         })();
-    }, [archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, removeSelectedWorktree, t]);
+    }, [archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, deleteSessions, removeSelectedWorktree, t]);
 
     const handleConfirmDelete = React.useCallback(async () => {
         if (!deleteDialog) {
@@ -432,6 +447,7 @@ export const SessionDialogs: React.FC = () => {
                     deleteDialog.worktree,
                     deleteDialog.sessions.map((session) => session.id),
                     deleteLocalBranch,
+                    deleteDialogDisposition,
                 );
                 closeDeleteDialog();
                 return;
@@ -510,6 +526,7 @@ export const SessionDialogs: React.FC = () => {
         }
     }, [
         deleteDialog,
+        deleteDialogDisposition,
         deleteDialogShouldRemoveRemote,
         deleteDialogShouldDeleteLocalBranch,
         deleteSession,
@@ -522,13 +539,19 @@ export const SessionDialogs: React.FC = () => {
     ]);
 
     const targetWorktree = deleteDialog?.worktree ?? deleteDialogSummaries[0]?.metadata ?? null;
+    const linkedSessionCount = deleteDialog?.sessions.length ?? 0;
+    const worktreeDeleteLinkedDescription = deleteDialogDisposition === 'delete'
+        ? (linkedSessionCount === 1
+            ? t('sessions.sidebar.dialogs.worktreeDelete.deleteDescriptionOneLinked', { count: linkedSessionCount })
+            : t('sessions.sidebar.dialogs.worktreeDelete.deleteDescriptionManyLinked', { count: linkedSessionCount }))
+        : (linkedSessionCount === 1
+            ? t('sessions.sidebar.dialogs.worktreeDelete.descriptionOneLinked', { count: linkedSessionCount })
+            : t('sessions.sidebar.dialogs.worktreeDelete.descriptionManyLinked', { count: linkedSessionCount }));
     const deleteDialogDescription = deleteDialog
             ? deleteDialog.mode === 'worktree'
-                ? deleteDialog.sessions.length === 0
+                ? linkedSessionCount === 0
                     ? t('sessions.sidebar.dialogs.worktreeDelete.descriptionNoLinked')
-                    : (deleteDialog.sessions.length === 1
-                        ? t('sessions.sidebar.dialogs.worktreeDelete.descriptionOneLinked', { count: deleteDialog.sessions.length })
-                        : t('sessions.sidebar.dialogs.worktreeDelete.descriptionManyLinked', { count: deleteDialog.sessions.length }))
+                    : worktreeDeleteLinkedDescription
                 : (deleteDialog.sessions.length === 1
                     ? (deleteDialog.dateLabel
                         ? t('sessions.sidebar.dialogs.sessionDelete.descriptionOneWithDate', {
@@ -591,6 +614,48 @@ export const SessionDialogs: React.FC = () => {
                             </li>
                         )}
                     </ul>
+                    {isWorktreeDelete && (
+                        <div
+                            role="radiogroup"
+                            aria-label={t('sessions.sidebar.dialogs.worktreeDelete.disposition.label')}
+                            className="mt-2 space-y-0.5"
+                        >
+                            {([
+                                { value: 'archive' as const, label: t('sessions.sidebar.dialogs.worktreeDelete.disposition.archive') },
+                                { value: 'delete' as const, label: t('sessions.sidebar.dialogs.worktreeDelete.disposition.delete') },
+                            ]).map((option) => {
+                                const selected = deleteDialogDisposition === option.value;
+                                return (
+                                    <div
+                                        key={option.value}
+                                        role="presentation"
+                                        className={cn(
+                                            'flex items-start gap-2 rounded-md px-2.5 py-1.5 transition-colors',
+                                            isProcessingDelete
+                                                ? 'opacity-45'
+                                                : 'cursor-pointer hover:bg-interactive-hover'
+                                        )}
+                                        onClick={() => {
+                                            if (!isProcessingDelete) {
+                                                setDeleteDialogDisposition(option.value);
+                                            }
+                                        }}
+                                    >
+                                        <Radio
+                                            checked={selected}
+                                            disabled={isProcessingDelete}
+                                            onChange={() => setDeleteDialogDisposition(option.value)}
+                                            ariaLabel={option.label}
+                                            className="mt-0.5"
+                                        />
+                                        <span className={cn('typography-meta', selected ? 'text-foreground' : 'text-foreground/70')}>
+                                            {option.label}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
 
