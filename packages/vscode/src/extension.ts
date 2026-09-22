@@ -322,7 +322,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!workspace) {
         return;
       }
-      sessionEditorProvider?.createOrShowNewSession(workspace);
+      sessionEditorProvider?.createOrShowNewSession(workspace.directory);
     })
   );
 
@@ -624,8 +624,8 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.newSession', async () => {
-      const workspace = await selectNewSessionWorkspace();
+    vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
+      const workspace = await selectNewSessionWorkspace(typeof directory === 'string' ? directory : undefined);
       if (!workspace) {
         return;
       }

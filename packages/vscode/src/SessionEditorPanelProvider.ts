@@ -8,7 +8,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
-import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 import { pickActivePanelId } from './activePanelRouting';
 import { broadcastRemoval, drainPending } from './inlineCommentSelection';
 
@@ -110,7 +110,7 @@ export class SessionEditorPanelProvider {
     );
   }
 
-  public createOrShowNewSession(workspace?: { directory: string; workspaceFolders: WorkspaceFolderCandidate[] }): void {
+  public createOrShowNewSession(directory?: string): void {
     // Without an open workspace folder there is no directory to start the
     // session against; opening a draft would fall back to the last session's
     // directory in shared UI state (the bug this fixes). Mirror the sidebar
@@ -123,7 +123,7 @@ export class SessionEditorPanelProvider {
 
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this._createPanel(panelId, t('New Session'), null, workspace);
+    this._createPanel(panelId, t('New Session'), null, directory);
   }
 
   public createOrShow(sessionId: string, title?: string): void {
@@ -143,12 +143,7 @@ export class SessionEditorPanelProvider {
     this._createPanel(sessionId, sessionTitle, sessionId);
   }
 
-  private _createPanel(
-    panelId: string,
-    title: string,
-    initialSessionId: string | null,
-    workspace?: { directory: string; workspaceFolders: WorkspaceFolderCandidate[] }
-  ): void {
+  private _createPanel(panelId: string, title: string, initialSessionId: string | null, directory?: string): void {
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
     const panel = vscode.window.createWebviewPanel(
@@ -178,7 +173,7 @@ export class SessionEditorPanelProvider {
     this._panels.set(panelId, state);
     this._lastActivePanelId = panelId;
 
-    panel.webview.html = this._getHtmlForWebview(panel.webview, initialSessionId, workspace);
+    panel.webview.html = this._getHtmlForWebview(panel.webview, initialSessionId, directory);
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedStateToPanel(state);
@@ -675,15 +670,11 @@ export class SessionEditorPanelProvider {
     return { id, type, success: true, data: { stopped: true } };
   }
 
-  private _getHtmlForWebview(
-    webview: vscode.Webview,
-    sessionId: string | null,
-    workspace?: { directory: string; workspaceFolders: WorkspaceFolderCandidate[] }
-  ) {
+  private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null, directory?: string) {
     const workspaceFolder = normalizeWindowsDriveLetter(
-      workspace?.directory ?? (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '')
+      directory ?? (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '')
     );
-    const workspaceFolders = workspace?.workspaceFolders ?? resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
