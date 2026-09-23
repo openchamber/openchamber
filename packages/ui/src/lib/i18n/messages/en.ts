@@ -3487,6 +3487,22 @@ export const dict = {
   'settings.mcp.page.connection.kindLink': 'Link',
   'settings.mcp.page.connection.hintCommand': 'Runs on this machine. Paste a whole command and it is split into one argument per line.',
   'settings.mcp.page.connection.hintLink': 'Connects to a server someone else hosts. Paste its https address.',
+  'workspace.move.left': 'Move to left',
+  'workspace.move.center': 'Move to center',
+  'workspace.move.right': 'Move to right',
+  'workspace.move.bottom': 'Move to bottom',
+  'workspace.zone.collapse': 'Collapse zone',
+  'workspace.zone.label.left': 'Left zone',
+  'workspace.zone.label.center': 'Center zone',
+  'workspace.zone.label.right': 'Right zone',
+  'workspace.zone.label.bottom': 'Bottom zone',
+  'workspace.zone.resize.left': 'Resize left zone',
+  'workspace.zone.resize.bottom': 'Resize bottom zone',
+  'workspace.preset.title': 'Layout',
+  'workspace.preset.default': 'Default',
+  'workspace.preset.developer': 'Developer',
+  'workspace.preset.codeAgent': 'Code + agent',
+  'workspace.preset.reset': 'Reset layout',
 } as const;
 
 export type I18nKey = keyof typeof dict;

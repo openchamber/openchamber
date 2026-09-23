@@ -15,6 +15,29 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
+import {
+  applyWorkspacePreset,
+  clampWorkspaceZoneSize,
+  createDefaultWorkspaceLayout,
+  isAuxiliaryWorkspaceZone,
+  isWorkspaceZone,
+  moveSurfaceToZone,
+  parseStoredOpenZones,
+  parseStoredWorkspaceLayout,
+  parseStoredWorkspaceZoneSizes,
+  mainChatZone,
+  MAIN_CHAT_TAB_ID,
+  parseStoredActiveTabIdByZone,
+  readPersistedWorkspace,
+  WORKSPACE_ZONE_DEFAULT_SIZE,
+  WORKSPACE_ZONES,
+  zoneOfMode,
+  type ActiveTabIdByZone,
+  type WorkspaceLayout,
+  type WorkspaceZoneSizes,
+  type WorkspacePresetId,
+  type WorkspaceZone,
+} from '@/lib/workspace/layout';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusSectionId } from '@/components/chat/work-status/sections';
 
@@ -140,6 +163,14 @@ type ContextPanelTab = {
   touchedAt: number;
 };
 
+type CloseContextPanelTabsOptions = {
+  /**
+   * Files itself is leaving its zone, not files inside it, so no explorer
+   * placeholder is left behind.
+   */
+  closesFilesSurface?: boolean;
+};
+
 type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
@@ -154,17 +185,38 @@ type ContextPanelTabDescriptor = {
   diffScope?: PendingDiffScope | null;
 };
 
-type ContextPanelDirectoryState = {
-  isOpen: boolean;
+export type ContextPanelDirectoryState = {
+  /**
+   * Workspace zones the user currently has open, per directory. Before the
+   * workspace zones existed this was a single `isOpen` flag for the one right
+   * panel; the v21 -> v22 migration turns that flag into `['right']`, which is
+   * where every panel surface starts.
+   */
+  openZones: WorkspaceZone[];
   expanded: boolean;
   tabs: ContextPanelTab[];
+  /** The tab the user last activated, in any zone. Always a real tab id. */
   activeTabId: string | null;
+  /**
+   * What each zone is showing, as the user last chose it there. Zones keep
+   * independent selections so that working in one never changes what another
+   * shows. `MAIN_CHAT_TAB_ID` in the conversation's zone means the
+   * conversation. A missing or stale entry falls back (see
+   * `activeContextTabForZone`), which also covers state saved before this.
+   */
+  activeTabIdByZone: ActiveTabIdByZone;
   // Legacy pixel widths and the last resize value, used until the panel's
   // available area is known and a responsive ratio can be captured.
   widthByMode: Partial<Record<ContextPanelMode, number>>;
   // Ratios captured when a user resizes a surface. These remain responsive
   // across window sizes while widthByMode preserves older persisted values.
   widthFractionByMode: Partial<Record<ContextPanelMode, number>>;
+  /**
+   * File tabs of a Files surface the user closed from its zone. Closing Files
+   * hides it rather than closing its files: they wait here, out of every zone,
+   * and come back when Files reopens (`restoreHiddenFiles`).
+   */
+  hiddenFileTabs?: ContextPanelTab[];
   touchedAt: number;
 };
 
@@ -517,42 +569,270 @@ const resolveActiveContextPanelTabID = (tabs: ContextPanelTab[], activeTabId: st
 
 const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanelDirectoryState => {
   if (prev) {
-    const tabs = sanitizeContextPanelTabs(prev.tabs);
+    // Also regroups file tabs saved apart at the current store version, which
+    // loads without passing through `migrate`.
+    const tabs = groupFileTabs(sanitizeContextPanelTabs(prev.tabs));
     const activeTabId = resolveActiveContextPanelTabID(tabs, prev.activeTabId);
     return {
       ...prev,
       tabs,
       activeTabId,
+      activeTabIdByZone: prev.activeTabIdByZone ?? {},
       touchedAt: Date.now(),
     };
   }
 
   return {
-    isOpen: false,
+    openZones: [],
     expanded: false,
     tabs: [],
     activeTabId: null,
+    activeTabIdByZone: {},
     widthByMode: {},
     widthFractionByMode: {},
     touchedAt: Date.now(),
   };
 };
 
+/** Resolves the workspace zone a panel tab belongs to, from the live layout. */
+type ZoneResolver = (mode: ContextPanelMode) => WorkspaceZone;
+
+const withZoneOpen = (openZones: readonly WorkspaceZone[], zone: WorkspaceZone): WorkspaceZone[] =>
+  openZones.includes(zone) ? [...openZones] : [...openZones, zone];
+
+const withZoneActive = (selection: ActiveTabIdByZone | undefined, zone: WorkspaceZone, tabId: string): ActiveTabIdByZone =>
+  ({ ...selection, [zone]: tabId });
+
+/** Most recently touched tab; `>=` so same-millisecond opens resolve to the later one. */
+const mostRecentTab = (tabs: readonly ContextPanelTab[]): ContextPanelTab | null =>
+  (tabs.length === 0 ? null : tabs.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best)));
+
+/**
+ * After tabs close, every zone that was showing one of them moves to the most
+ * recent remaining tab of the same surface in that zone, or drops its
+ * selection so the zone falls back (to the conversation, in its zone).
+ */
+const repairZoneSelections = (
+  selection: ActiveTabIdByZone | undefined,
+  closedTabs: readonly ContextPanelTab[],
+  remainingTabs: readonly ContextPanelTab[],
+  zoneOf: ZoneResolver,
+): ActiveTabIdByZone => {
+  const next: ActiveTabIdByZone = { ...selection };
+  for (const zone of WORKSPACE_ZONES) {
+    const closed = closedTabs.find((tab) => tab.id === next[zone]);
+    if (!closed) continue;
+    const sibling = mostRecentTab(remainingTabs.filter((tab) => tab.mode === closed.mode && zoneOf(tab.mode) === zone));
+    if (sibling) next[zone] = sibling.id;
+    else delete next[zone];
+  }
+  return next;
+};
+
+/**
+ * Applies a placement change to one project's panel: what was on screen stays
+ * on screen, and nothing else changes.
+ *
+ * Placement and open state are separate. A surface its zone was showing
+ * follows its move: the new zone opens with it in front, and the zone it left
+ * collapses once nothing is left in it. A surface that was not on screen —
+ * closed, never opened or a background tab — only
+ * changes where it will appear next time: no zone opens and no tab is
+ * activated. The conversation counts as shown when its zone shows it.
+ */
+const carryVisibleSurfaces = (
+  panel: ContextPanelDirectoryState,
+  before: WorkspaceLayout,
+  after: WorkspaceLayout,
+): ContextPanelDirectoryState => {
+  const zoneBefore: ZoneResolver = (mode) => zoneOfMode(before, mode);
+  const zoneAfter: ZoneResolver = (mode) => zoneOfMode(after, mode);
+  const chatBefore = mainChatZone(before);
+  const chatAfter = mainChatZone(after);
+  let openZones: WorkspaceZone[] = [...panel.openZones];
+  const selection: ActiveTabIdByZone = { ...panel.activeTabIdByZone };
+
+  for (const zone of WORKSPACE_ZONES) {
+    const zoneWasOpen = zone === 'center' || zone === chatBefore || panel.openZones.includes(zone);
+    if (!zoneWasOpen) continue;
+    const shown = activeContextTabForZone(panel, zone, zoneBefore, chatBefore);
+    if (shown === null) {
+      // Null in the conversation's zone means the conversation is shown.
+      if (zone === chatBefore && chatAfter !== chatBefore) {
+        selection[chatAfter] = MAIN_CHAT_TAB_ID;
+        if (selection[zone] === MAIN_CHAT_TAB_ID) delete selection[zone];
+      }
+      continue;
+    }
+    const target = zoneAfter(shown.mode);
+    if (target === zone) continue;
+    openZones = withZoneOpen(openZones, target);
+    selection[target] = shown.id;
+    if (selection[zone] === shown.id) delete selection[zone];
+  }
+
+  return {
+    ...panel,
+    openZones: pruneEmptyZones(openZones, panel.tabs, zoneAfter),
+    activeTabIdByZone: selection,
+  };
+};
+
+/**
+ * Drops zones that no longer hold a tab. A zone with nothing in it must not
+ * keep consuming layout space, and reopening it later would show a blank pane.
+ */
+const pruneEmptyZones = (
+  openZones: readonly WorkspaceZone[],
+  tabs: readonly ContextPanelTab[],
+  zoneOf: ZoneResolver,
+): WorkspaceZone[] => openZones.filter((zone) => tabs.some((tab) => zoneOf(tab.mode) === zone));
+
+const carryVisibleSurfacesForAll = (
+  byDirectory: Record<string, ContextPanelDirectoryState>,
+  before: WorkspaceLayout,
+  after: WorkspaceLayout,
+) => Object.fromEntries(Object.entries(byDirectory)
+  .map(([directory, panel]) => [directory, carryVisibleSurfaces(panel, before, after)]));
+
+/**
+ * The tab a zone shows, or null when it shows the conversation (in the
+ * conversation's zone) or nothing. The zone's own selection wins; without a
+ * valid one the conversation's zone shows the conversation, and any other zone
+ * shows the tab last activated anywhere if it lives there, else its most
+ * recently touched tab.
+ */
+export const activeContextTabForZone = (
+  panel: { tabs: readonly ContextPanelTab[]; activeTabId: string | null; activeTabIdByZone?: ActiveTabIdByZone } | undefined,
+  zone: WorkspaceZone,
+  zoneOf: ZoneResolver,
+  chatZone: WorkspaceZone | null,
+): ContextPanelTab | null => {
+  if (!panel) return null;
+  const selected = panel.activeTabIdByZone?.[zone];
+  if (selected === MAIN_CHAT_TAB_ID && zone === chatZone) return null;
+
+  const zoneTabs = panel.tabs.filter((tab) => zoneOf(tab.mode) === zone);
+  const chosen = selected ? zoneTabs.find((tab) => tab.id === selected) : undefined;
+  if (chosen) return chosen;
+  if (zone === chatZone) return null;
+
+  return zoneTabs.find((tab) => tab.id === panel.activeTabId) ?? mostRecentTab(zoneTabs);
+};
+
+/**
+ * The workspace state a consumer needs to answer "what is on screen": where
+ * each surface is docked, and what each directory has open.
+ */
+export type WorkspaceView = {
+  contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
+  workspaceLayout: WorkspaceLayout;
+};
+
+export const selectIsContextZoneOpen = (state: WorkspaceView, directoryKey: string, zone: WorkspaceZone): boolean =>
+  state.contextPanelByDirectory[directoryKey]?.openZones.includes(zone) ?? false;
+
+/** The tab a zone would show, whether or not the zone is currently open. */
+export const selectContextZoneTab = (
+  state: WorkspaceView,
+  directoryKey: string,
+  zone: WorkspaceZone,
+): ContextPanelTab | null => activeContextTabForZone(
+  state.contextPanelByDirectory[directoryKey],
+  zone,
+  (mode) => zoneOfMode(state.workspaceLayout, mode),
+  mainChatZone(state.workspaceLayout),
+);
+
+/** The tab a zone is showing right now; null while the zone is collapsed. */
+export const selectVisibleContextZoneTab = (
+  state: WorkspaceView,
+  directoryKey: string,
+  zone: WorkspaceZone,
+): ContextPanelTab | null => (selectIsContextZoneOpen(state, directoryKey, zone)
+  ? selectContextZoneTab(state, directoryKey, zone)
+  : null);
+
+/**
+ * Every surface mode visible somewhere on screen. Several zones can each show
+ * a different one, which is the whole point of the workspace, so the rail
+ * highlights a set rather than a single active surface.
+ *
+ * Takes the panel and the layout rather than the whole store because it builds
+ * a fresh array: a store selector returning one would re-render its consumer on
+ * every unrelated change. Callers memoize it on these two inputs.
+ */
+export const visibleContextModes = (
+  panel: ContextPanelDirectoryState | undefined,
+  layout: WorkspaceLayout,
+): ContextPanelMode[] => {
+  if (!panel) return [];
+  const zoneOf = (mode: ContextPanelMode) => zoneOfMode(layout, mode);
+  const chatZone = mainChatZone(layout);
+  const modes: ContextPanelMode[] = [];
+  for (const zone of panel.openZones) {
+    const tab = activeContextTabForZone(panel, zone, zoneOf, chatZone);
+    if (tab && !modes.includes(tab.mode)) modes.push(tab.mode);
+  }
+  return modes;
+};
+
+const isFilesPlaceholder = (tab: ContextPanelTab): boolean => tab.mode === 'file' && !tab.targetPath;
+
+const lastFileTabIndex = (tabs: readonly ContextPanelTab[]): number => {
+  for (let index = tabs.length - 1; index >= 0; index -= 1) {
+    if (tabs[index]?.mode === 'file') return index;
+  }
+  return -1;
+};
+
+/**
+ * Files is one entry in its zone's strip, drawn where its file tabs are, so
+ * they are kept as one contiguous group: a new file opens after the others,
+ * and a first file takes the explorer placeholder's place. Opening, closing
+ * or reordering files then never moves Files among its neighbours.
+ */
+const withFileTabAdded = (tabs: readonly ContextPanelTab[], fileTab: ContextPanelTab): ContextPanelTab[] => {
+  const placeholderIndex = fileTab.targetPath ? tabs.findIndex(isFilesPlaceholder) : -1;
+  if (placeholderIndex !== -1) {
+    return tabs.map((tab, index) => (index === placeholderIndex ? fileTab : tab));
+  }
+  const lastFileIndex = lastFileTabIndex(tabs);
+  return lastFileIndex === -1
+    ? [...tabs, fileTab]
+    : [...tabs.slice(0, lastFileIndex + 1), fileTab, ...tabs.slice(lastFileIndex + 1)];
+};
+
+/**
+ * Pulls file tabs saved before the group invariant together, at the place of
+ * the first one, keeping their order.
+ */
+const groupFileTabs = (tabs: ContextPanelTab[]): ContextPanelTab[] => {
+  const firstFileIndex = tabs.findIndex((tab) => tab.mode === 'file');
+  if (firstFileIndex === -1) return tabs;
+  const fileTabs = tabs.filter((tab) => tab.mode === 'file');
+  if (lastFileTabIndex(tabs) - firstFileIndex + 1 === fileTabs.length) return tabs;
+  const others = tabs.filter((tab) => tab.mode !== 'file');
+  const before = tabs.slice(0, firstFileIndex).filter((tab) => tab.mode !== 'file').length;
+  return [...others.slice(0, before), ...fileTabs, ...others.slice(before)];
+};
+
 const upsertContextPanelTab = (
   current: ContextPanelDirectoryState,
   descriptor: ContextPanelTabDescriptor,
+  zoneOf: ZoneResolver,
   options?: { reveal?: boolean },
 ): ContextPanelDirectoryState => {
   const reveal = options?.reveal !== false;
   const nextTab = createContextPanelTab(descriptor);
   // A real file tab replaces the empty editor placeholder ('file' with no
   // target) that the rail can open before any file is picked.
-  const baseTabs = nextTab.mode === 'file' && nextTab.targetPath
-    ? current.tabs.filter((tab) => !(tab.mode === 'file' && !tab.targetPath))
+  const baseTabs = nextTab.mode === 'file' && nextTab.targetPath && current.tabs.some((tab) => tab.id === nextTab.id)
+    ? current.tabs.filter((tab) => !isFilesPlaceholder(tab))
     : current.tabs;
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
   const tabs = existingIndex === -1
-    ? [...baseTabs, nextTab]
+    ? (nextTab.mode === 'file' ? withFileTabAdded(baseTabs, nextTab) : [...baseTabs, nextTab])
     : baseTabs.map((tab, index) => (index === existingIndex
       ? {
           ...tab,
@@ -582,7 +862,13 @@ const upsertContextPanelTab = (
 
   return {
     ...current,
-    isOpen: reveal ? true : current.isOpen,
+    // Revealing opens only the zone this surface lives in; the other zones
+    // keep whatever the user left them at.
+    openZones: reveal ? withZoneOpen(current.openZones, zoneOf(nextTab.mode)) : current.openZones,
+    // Revealing a tab brings it to the front of its own zone only.
+    activeTabIdByZone: reveal
+      ? withZoneActive(current.activeTabIdByZone, zoneOf(nextTab.mode), nextTab.id)
+      : current.activeTabIdByZone,
     tabs: clampedTabs,
     activeTabId: resolveActiveContextPanelTabID(clampedTabs, activeTabId),
     touchedAt: Date.now(),
@@ -592,13 +878,30 @@ const upsertContextPanelTab = (
 const closeContextPanelTabs = (
   current: ContextPanelDirectoryState,
   tabIds: readonly string[],
+  zoneOf: ZoneResolver,
+  options?: CloseContextPanelTabsOptions,
 ): ContextPanelDirectoryState => {
   const closed = new Set(tabIds);
   const closedTabs = current.tabs.filter((tab) => closed.has(tab.id));
-  const nextTabs = current.tabs.filter((tab) => !closed.has(tab.id));
-  if (nextTabs.length === current.tabs.length) {
+  const remainingTabs = current.tabs.filter((tab) => !closed.has(tab.id));
+  if (remainingTabs.length === current.tabs.length) {
     return current;
   }
+
+  // The Files surface outlives its files: closing the last open file leaves
+  // the same empty placeholder the rail opens, so Files falls back to its tree
+  // in its zone instead of leaving it. This holds whichever zone the user last
+  // clicked in. Only closing Files itself, or the placeholder, removes it.
+  const leavesExplorer = !options?.closesFilesSurface
+    && closedTabs.some((tab) => tab.mode === 'file' && tab.targetPath)
+    && !remainingTabs.some((tab) => tab.mode === 'file');
+  // The placeholder takes the closed files' place, so Files keeps its spot.
+  const placeholderAt = current.tabs
+    .slice(0, current.tabs.findIndex((tab) => closed.has(tab.id) && tab.mode === 'file'))
+    .filter((tab) => !closed.has(tab.id)).length;
+  const nextTabs = leavesExplorer
+    ? [...remainingTabs.slice(0, placeholderAt), createContextPanelTab({ mode: 'file' }), ...remainingTabs.slice(placeholderAt)]
+    : remainingTabs;
 
   const activeClosed = current.activeTabId ? closed.has(current.activeTabId) : false;
   if (!activeClosed) {
@@ -606,42 +909,56 @@ const closeContextPanelTabs = (
       ...current,
       tabs: nextTabs,
       activeTabId: resolveActiveContextPanelTabID(nextTabs, current.activeTabId),
-      isOpen: nextTabs.length > 0 ? current.isOpen : false,
+      activeTabIdByZone: repairZoneSelections(current.activeTabIdByZone, closedTabs, nextTabs, zoneOf),
+      openZones: pruneEmptyZones(current.openZones, nextTabs, zoneOf),
       touchedAt: Date.now(),
     };
   }
 
   // Closing the active tab stays inside its surface: activate the most recent
-  // remaining tab of the same mode, and when none remain just close the panel
-  // instead of jumping to another surface.
+  // remaining tab of the same mode. When none remain, fall back to the most
+  // recent tab still in the same zone — the zone's other surfaces are visible
+  // tabs beside it, so jumping to one is what the strip shows. Only an empty
+  // zone closes, and `pruneEmptyZones` is what closes it.
   const activeMode = closedTabs.find((tab) => tab.id === current.activeTabId)?.mode ?? null;
   const sameModeTabs = activeMode ? nextTabs.filter((tab) => tab.mode === activeMode) : [];
   const nextSameModeTab = sameModeTabs.length > 0
     ? sameModeTabs.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best))
     : null;
 
-  // The file surface outlives its files: closing the last real file tab leaves
-  // the same empty editor placeholder the rail opens, so the surface falls
-  // back to its file tree instead of taking the whole panel down with it.
-  // Closing the placeholder itself still closes the surface.
-  if (activeMode === 'file' && !nextSameModeTab && closedTabs.some((tab) => tab.mode === 'file' && tab.targetPath)) {
-    const placeholder = createContextPanelTab({ mode: 'file' });
-    return {
-      ...current,
-      tabs: [...nextTabs, placeholder],
-      activeTabId: placeholder.id,
-      isOpen: current.isOpen,
-      touchedAt: Date.now(),
-    };
-  }
+  const activeZone = activeMode ? zoneOf(activeMode) : null;
+  const nextZoneTab = nextSameModeTab
+    ?? (activeZone ? mostRecentTab(nextTabs.filter((tab) => zoneOf(tab.mode) === activeZone)) : null);
 
   return {
     ...current,
     tabs: nextTabs,
-    activeTabId: nextSameModeTab?.id ?? resolveActiveContextPanelTabID(nextTabs, null),
-    isOpen: nextSameModeTab ? current.isOpen : false,
+    activeTabId: nextZoneTab?.id ?? resolveActiveContextPanelTabID(nextTabs, null),
+    activeTabIdByZone: repairZoneSelections(current.activeTabIdByZone, closedTabs, nextTabs, zoneOf),
+    openZones: pruneEmptyZones(current.openZones, nextTabs, zoneOf),
     touchedAt: Date.now(),
   };
+};
+
+/**
+ * Takes Files out of its zone and keeps its files. Its file tabs, the explorer
+ * placeholder included, leave the panel the way any closed tab does, so zone
+ * selection and open zones repair as usual, but they are kept aside instead of
+ * dropped, and the editor's own open-file list is left alone.
+ */
+const hideFiles = (current: ContextPanelDirectoryState, zoneOf: ZoneResolver): ContextPanelDirectoryState => {
+  const fileTabs = current.tabs.filter((tab) => tab.mode === 'file');
+  if (fileTabs.length === 0) return current;
+  const next = closeContextPanelTabs(current, fileTabs.map((tab) => tab.id), zoneOf, { closesFilesSurface: true });
+  return { ...next, hiddenFileTabs: fileTabs };
+};
+
+/** Brings hidden files back, as they were. Callers activate the one to show. */
+const restoreHiddenFiles = (current: ContextPanelDirectoryState): ContextPanelDirectoryState => {
+  const hidden = current.hiddenFileTabs ?? [];
+  if (hidden.length === 0) return current;
+  const present = new Set(current.tabs.map((tab) => tab.id));
+  return { ...current, tabs: [...current.tabs, ...hidden.filter((tab) => !present.has(tab.id))], hiddenFileTabs: [] };
 };
 
 const reorderContextPanelTabs = (
@@ -703,8 +1020,11 @@ const sanitizeContextPanelByDirectory = (
 
     const candidate = rawState as {
       isOpen?: unknown;
+      openZones?: unknown;
+      activeTabIdByZone?: unknown;
       expanded?: unknown;
       tabs?: unknown;
+      hiddenFileTabs?: unknown;
       activeTabId?: unknown;
       widthByMode?: unknown;
       touchedAt?: unknown;
@@ -715,7 +1035,7 @@ const sanitizeContextPanelByDirectory = (
       label?: unknown;
     };
 
-    let tabs = sanitizeContextPanelTabs(candidate.tabs);
+    let tabs = groupFileTabs(sanitizeContextPanelTabs(candidate.tabs));
     let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
 
     // Legacy single-tab state can name a saved project plan, but it carries
@@ -748,13 +1068,22 @@ const sanitizeContextPanelByDirectory = (
       if (fraction !== undefined) widthFractionByMode[mode] = fraction;
     }
 
+    // `openZones` is the current shape; `isOpen` is what installs older than
+    // the workspace zones stored, and it only ever described the right panel.
+    // Either way an unreadable value means "nothing open", never a guess.
+    const openZones = candidate.openZones === undefined
+      ? (candidate.isOpen === true ? ['right' as const] : [])
+      : parseStoredOpenZones(candidate.openZones);
+
     next[directory] = {
-      isOpen: candidate.isOpen === true,
+      openZones,
       expanded: candidate.expanded === true,
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
+      activeTabIdByZone: parseStoredActiveTabIdByZone(candidate.activeTabIdByZone),
       widthByMode,
       widthFractionByMode,
+      hiddenFileTabs: sanitizeContextPanelTabs(candidate.hiddenFileTabs).filter((tab) => tab.mode === 'file'),
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -789,6 +1118,23 @@ interface UIStore {
   isSidebarOpen: boolean;
   sidebarWidth: number;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
+  /**
+   * Which workspace zone each surface is docked in, and their order inside it.
+   *
+   * Deliberately global rather than per-directory: the zones are a way of
+   * working, like the sidebar width or the rail order beside it, and a layout
+   * that rearranged itself when the user switched project would be a surprise
+   * rather than a feature. Per-directory state stays what it always was — the
+   * open tabs and which zones are open there.
+   */
+  workspaceLayout: WorkspaceLayout;
+  /**
+   * Pixel size of each auxiliary zone: width for left and right, height for
+   * bottom. The right zone additionally keeps its existing per-surface widths
+   * (`widthFractionByMode`), which take precedence there so a resize made
+   * before this feature is still honoured.
+   */
+  workspaceZoneSizes: WorkspaceZoneSizes;
   contextRailOrder: string[];
   /** Surface ids the user hid from the context rail; stored as the hidden set
       so surfaces added later appear for everyone. */
@@ -1042,7 +1388,21 @@ interface UIStore {
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
+  /** Closes Files from its zone but keeps its open files for when it reopens. */
+  hideFilesSurface: (directory: string) => void;
   closeContextPanel: (directory: string) => void;
+  focusMainChat: (directory: string) => void;
+  closeContextZone: (directory: string, zone: WorkspaceZone) => void;
+  openContextZone: (directory: string, zone: WorkspaceZone) => void;
+  /**
+   * Sets where a surface is docked. Only placement changes: a surface that is
+   * on screen moves there and stays on screen; one that is not stays closed
+   * until it is opened (see `carryVisibleSurfaces`).
+   */
+  moveWorkspaceSurface: (surfaceId: string, zone: WorkspaceZone, options?: { index?: number }) => void;
+  setWorkspaceZoneSize: (zone: WorkspaceZone, size: number) => void;
+  applyWorkspaceLayoutPreset: (preset: WorkspacePresetId) => void;
+  resetWorkspaceLayout: () => void;
   toggleContextPanelExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number, availableWidth?: number) => void;
   setNotesPanelHeight: (height: number) => void;
@@ -1234,6 +1594,8 @@ export const useUIStore = create<UIStore>()(
         isSidebarOpen: true,
         sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
         contextPanelByDirectory: {},
+        workspaceLayout: createDefaultWorkspaceLayout(),
+        workspaceZoneSizes: { ...WORKSPACE_ZONE_DEFAULT_SIZE },
         contextRailOrder: [],
         contextRailHiddenSurfaces: [],
         contextEditorTreeVisible: true,
@@ -1439,9 +1801,10 @@ export const useUIStore = create<UIStore>()(
           set({ contextEditorTreeWidth: clampContextEditorTreeWidth(width) });
         },
 
-        // Rail entry point: activates the most recent tab of the requested
-        // mode, opens a fresh singleton tab when none exists, and toggles the
-        // panel closed when the requested mode is already active and visible.
+        // Rail entry point: reveals the zone the surface is docked in,
+        // activates the most recent tab of the requested mode, opens a fresh
+        // singleton tab when none exists, and toggles that zone closed when
+        // the requested mode is already showing there.
         openContextSurface: (directory, mode) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
@@ -1451,7 +1814,6 @@ export const useUIStore = create<UIStore>()(
           const state = get();
           const panelState = state.contextPanelByDirectory[normalizedDirectory];
           const tabs = panelState?.tabs ?? [];
-          const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
           const clearTerminalTarget = () => {
             if (mode === 'terminal') {
               const terminalTab = tabs.find((tab) => tab.mode === 'terminal') ?? null;
@@ -1466,9 +1828,26 @@ export const useUIStore = create<UIStore>()(
             }
           };
 
-          if (panelState?.isOpen && activeTab?.mode === mode) {
+          // Toggling off closes only the surface's own zone: a terminal at the
+          // bottom must not take the chat or the editor down with it.
+          const zone = zoneOfMode(state.workspaceLayout, mode);
+          const zoneActiveTab = activeContextTabForZone(
+            panelState,
+            zone,
+            (tabMode) => zoneOfMode(state.workspaceLayout, tabMode),
+            mainChatZone(state.workspaceLayout),
+          );
+          if (zoneActiveTab?.mode === mode && zone === 'center' && mainChatZone(state.workspaceLayout) !== 'center') {
+            // The center never collapses, so toggling off what it shows closes
+            // that surface instead; Files hides, keeping its files.
             clearTerminalTarget();
-            state.closeContextPanel(normalizedDirectory);
+            if (mode === 'file') state.hideFilesSurface(normalizedDirectory);
+            else state.closeContextPanelTab(normalizedDirectory, zoneActiveTab.id);
+            return;
+          }
+          if (panelState?.openZones.includes(zone) && zoneActiveTab?.mode === mode) {
+            clearTerminalTarget();
+            state.closeContextZone(normalizedDirectory, zone);
             return;
           }
 
@@ -1478,7 +1857,19 @@ export const useUIStore = create<UIStore>()(
             set({ contextEditorTreeVisible: true });
           }
 
-          const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
+          // Reopening Files brings back the files it was closed with, after
+          // the toggle check above (a hidden Files is never the one shown);
+          // the most recent of them comes to the front below.
+          if (mode === 'file' && panelState?.hiddenFileTabs?.length) {
+            set((current) => ({
+              contextPanelByDirectory: {
+                ...current.contextPanelByDirectory,
+                [normalizedDirectory]: restoreHiddenFiles(touchContextPanelState(current.contextPanelByDirectory[normalizedDirectory])),
+              },
+            }));
+          }
+
+          const tabsOfMode = (get().contextPanelByDirectory[normalizedDirectory]?.tabs ?? []).filter((tab) => tab.mode === mode);
           if (tabsOfMode.length > 0) {
             clearTerminalTarget();
             // `>=` so equal timestamps (same-millisecond opens) resolve to the
@@ -1518,10 +1909,19 @@ export const useUIStore = create<UIStore>()(
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
-            const current = touchContextPanelState(prev);
+            // Opening a file while Files is hidden reopens Files with the
+            // files it had, plus this one.
+            const current = nextTab.mode === 'file' && nextTab.targetPath
+              ? restoreHiddenFiles(touchContextPanelState(prev))
+              : touchContextPanelState(prev);
             const byDirectory = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: upsertContextPanelTab(current, nextTab, options),
+              [normalizedDirectory]: upsertContextPanelTab(
+                current,
+                nextTab,
+                (mode) => zoneOfMode(state.workspaceLayout, mode),
+                options,
+              ),
             };
 
             return {
@@ -1662,7 +2062,13 @@ export const useUIStore = create<UIStore>()(
             // Picking a file tab shows its editor, even if the editor was hidden.
             const showsFile = targetTab.mode === 'file' && Boolean(targetTab.targetPath);
 
-            if (current.activeTabId === normalizedTabID && current.isOpen) {
+            const targetZone = zoneOfMode(state.workspaceLayout, targetTab.mode);
+
+            if (
+              current.activeTabId === normalizedTabID
+              && current.activeTabIdByZone[targetZone] === normalizedTabID
+              && current.openZones.includes(targetZone)
+            ) {
               return showsFile ? { contextEditorVisible: true } : state;
             }
 
@@ -1670,7 +2076,8 @@ export const useUIStore = create<UIStore>()(
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: {
                 ...current,
-                isOpen: true,
+                openZones: withZoneOpen(current.openZones, targetZone),
+                activeTabIdByZone: withZoneActive(current.activeTabIdByZone, targetZone, normalizedTabID),
                 activeTabId: normalizedTabID,
                 touchedAt: Date.now(),
                 tabs: current.tabs.map((tab) => (tab.id === normalizedTabID
@@ -1739,9 +2146,12 @@ export const useUIStore = create<UIStore>()(
               return state;
             }
 
-            const next = closeContextPanelTabs(current, normalizedTabIds);
-            const activeTab = next.tabs.find((tab) => tab.id === next.activeTabId);
-            const returnedToTree = next.isOpen && activeTab?.mode === 'file' && !activeTab.targetPath;
+            const zoneOf = (mode: ContextPanelMode) => zoneOfMode(state.workspaceLayout, mode);
+            const next = closeContextPanelTabs(current, normalizedTabIds, zoneOf);
+            // Files fell back to its explorer: show the tree, or it would be
+            // an empty surface.
+            const returnedToTree = next.tabs.some((tab) => tab.mode === 'file' && !tab.targetPath)
+              && !current.tabs.some((tab) => tab.mode === 'file' && !tab.targetPath);
             const byDirectory = {
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: next,
@@ -1762,6 +2172,29 @@ export const useUIStore = create<UIStore>()(
           }
         },
 
+        /** Hides the Files surface and keeps its file tabs aside, so reopening Files restores them. */
+        hideFilesSurface: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          set((state) => {
+            const current = touchContextPanelState(state.contextPanelByDirectory[normalizedDirectory]);
+            const next = hideFiles(current, (mode) => zoneOfMode(state.workspaceLayout, mode));
+            if (next === current) {
+              return state;
+            }
+
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: next,
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
         closeContextPanel: (directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
@@ -1770,7 +2203,7 @@ export const useUIStore = create<UIStore>()(
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
-            if (!prev || !prev.isOpen) {
+            if (!prev || prev.openZones.length === 0) {
               return state;
             }
 
@@ -1778,11 +2211,151 @@ export const useUIStore = create<UIStore>()(
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: {
                 ...touchContextPanelState(prev),
-                isOpen: false,
+                openZones: [],
               },
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        /**
+         * Brings the session conversation to the front of the zone it is
+         * docked in. Only needed where the chat shares a zone with panel
+         * surfaces; in the default layout it is the whole center zone and
+         * nothing ever has to select it.
+         */
+        focusMainChat: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const current = touchContextPanelState(prev);
+            const zone = mainChatZone(state.workspaceLayout);
+            if (current.activeTabIdByZone[zone] === MAIN_CHAT_TAB_ID) {
+              return state;
+            }
+
+            // Only the conversation's own zone changes; the global active tab
+            // stays a real tab for everything that reads it.
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: {
+                ...current,
+                activeTabIdByZone: withZoneActive(current.activeTabIdByZone, zone, MAIN_CHAT_TAB_ID),
+              },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        closeContextZone: (directory, zone) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory || !isWorkspaceZone(zone)) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            if (!prev || !prev.openZones.includes(zone)) {
+              return state;
+            }
+
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: {
+                ...touchContextPanelState(prev),
+                openZones: prev.openZones.filter((entry) => entry !== zone),
+              },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        /**
+         * Reopening a zone restores the surface it last showed, at the size it
+         * was left at — both are already stored, so nothing extra is recorded
+         * when it collapses.
+         */
+        openContextZone: (directory, zone) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory || !isWorkspaceZone(zone)) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const current = touchContextPanelState(prev);
+            if (current.openZones.includes(zone)) {
+              return state;
+            }
+
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: { ...current, openZones: withZoneOpen(current.openZones, zone) },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        /**
+         * Changes placement only. The surface keeps its tabs and its place in
+         * the rail. Opening it stays the rail's job (`openContextSurface`), so
+         * configuring where a closed surface will appear never opens it.
+         */
+        moveWorkspaceSurface: (surfaceId, zone, options) => {
+          const id = (surfaceId || '').trim();
+          if (!id || !isWorkspaceZone(zone)) {
+            return;
+          }
+
+          set((state) => {
+            const workspaceLayout = moveSurfaceToZone(state.workspaceLayout, id, zone, options?.index);
+            if (workspaceLayout === state.workspaceLayout) {
+              return state;
+            }
+
+            return {
+              workspaceLayout,
+              contextPanelByDirectory: carryVisibleSurfacesForAll(state.contextPanelByDirectory, state.workspaceLayout, workspaceLayout),
+            };
+          });
+        },
+
+        setWorkspaceZoneSize: (zone, size) => {
+          if (!isWorkspaceZone(zone) || !isAuxiliaryWorkspaceZone(zone) || !Number.isFinite(size)) {
+            return;
+          }
+
+          set((state) => ({
+            workspaceZoneSizes: { ...state.workspaceZoneSizes, [zone]: clampWorkspaceZoneSize(zone, size) },
+          }));
+        },
+
+        applyWorkspaceLayoutPreset: (preset) => {
+          set((state) => {
+            const workspaceLayout = applyWorkspacePreset(state.workspaceLayout, preset);
+            return {
+              workspaceLayout,
+              contextPanelByDirectory: carryVisibleSurfacesForAll(state.contextPanelByDirectory, state.workspaceLayout, workspaceLayout),
+            };
+          });
+        },
+
+        resetWorkspaceLayout: () => {
+          set((state) => {
+            const workspaceLayout = createDefaultWorkspaceLayout();
+            return {
+              workspaceLayout,
+              workspaceZoneSizes: { ...WORKSPACE_ZONE_DEFAULT_SIZE },
+              contextPanelByDirectory: carryVisibleSurfacesForAll(state.contextPanelByDirectory, state.workspaceLayout, workspaceLayout),
+            };
           });
         },
 
@@ -2817,7 +3390,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 21,
+        version: 22,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3005,6 +3578,16 @@ export const useUIStore = create<UIStore>()(
 
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
 
+          // v21 -> v22: the modular workspace. Nothing to convert for an
+          // existing install — the default layout is the old one (chat in the
+          // main area, every other surface in the right panel), and the old
+          // `isOpen` flag becomes `openZones: ['right']` in the per-directory
+          // sanitizer above. Anything stored, missing, or malformed goes
+          // through `sanitizeWorkspaceLayout`, which always yields a layout
+          // holding every registered surface exactly once.
+          state.workspaceLayout = parseStoredWorkspaceLayout(state.workspaceLayout);
+          state.workspaceZoneSizes = parseStoredWorkspaceZoneSizes(state.workspaceZoneSizes);
+
           if (version < 5) {
             if (!state.shortcutOverrides || typeof state.shortcutOverrides !== 'object') {
               state.shortcutOverrides = {};
@@ -3070,6 +3653,8 @@ export const useUIStore = create<UIStore>()(
           isSidebarOpen: state.isSidebarOpen,
           sidebarWidth: state.sidebarWidth,
           contextPanelByDirectory: state.contextPanelByDirectory,
+          workspaceLayout: state.workspaceLayout,
+          workspaceZoneSizes: state.workspaceZoneSizes,
           contextRailOrder: state.contextRailOrder,
           contextRailHiddenSurfaces: state.contextRailHiddenSurfaces,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
@@ -3191,3 +3776,38 @@ export const useUIStore = create<UIStore>()(
     }
   )
 );
+
+/**
+ * Keeps this window's workspace layout in step with the other windows of the
+ * app (browser tabs, desktop windows on the same UI origin).
+ *
+ * They share one persisted `ui-store`, and each writes its whole state on any
+ * change, so without this a window that was open while the layout changed
+ * elsewhere would write its stale layout back on its next unrelated update,
+ * silently undoing the user's placement. The layout and zone sizes are
+ * preferences for every window; what each window has open is its own and is
+ * not adopted. A surface this window is showing stays on screen, the same
+ * rule as a move made here.
+ */
+export const followWorkspaceLayoutOfOtherWindows = (): (() => void) => {
+  if (!('window' in globalThis)) return () => undefined;
+  // Only the fields read here, which is all a storage event needs to carry.
+  const onStorage = (event: Pick<StorageEvent, 'storageArea' | 'key' | 'newValue'>) => {
+    if (event.storageArea !== window.localStorage || event.key !== 'ui-store') return;
+    const incoming = readPersistedWorkspace(event.newValue);
+    if (!incoming) return;
+    useUIStore.setState((state) => {
+      const next: Partial<UIStore> = {};
+      if (JSON.stringify(incoming.layout) !== JSON.stringify(state.workspaceLayout)) {
+        next.workspaceLayout = incoming.layout;
+        next.contextPanelByDirectory = carryVisibleSurfacesForAll(state.contextPanelByDirectory, state.workspaceLayout, incoming.layout);
+      }
+      if (incoming.sizes && JSON.stringify(incoming.sizes) !== JSON.stringify(state.workspaceZoneSizes)) {
+        next.workspaceZoneSizes = incoming.sizes;
+      }
+      return Object.keys(next).length > 0 ? next : state;
+    });
+  };
+  window.addEventListener('storage', onStorage);
+  return () => window.removeEventListener('storage', onStorage);
+};

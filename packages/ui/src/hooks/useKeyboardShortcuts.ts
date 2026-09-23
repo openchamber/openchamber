@@ -6,7 +6,8 @@ import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabA
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, selectVisibleContextZoneTab, useUIStore } from '@/stores/useUIStore';
+import { zoneOfMode } from '@/lib/workspace/layout';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { useKeybinds } from '@/hooks/useKeybind';
@@ -115,11 +116,14 @@ export const useKeyboardShortcuts = () => {
     if (!currentDirectory) return;
     const key = normalizeContextPanelDirectoryKey(currentDirectory);
     const state = useUIStore.getState();
-    const panel = state.contextPanelByDirectory[key];
-    if (panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode !== 'terminal' : true) {
+    // The terminal may be docked at the bottom or on the right; ask its own
+    // zone what it is showing rather than assuming one panel.
+    const zone = zoneOfMode(state.workspaceLayout, 'terminal');
+    if (selectVisibleContextZoneTab(state, key, zone)?.mode !== 'terminal') {
       state.openContextSurface(key, 'terminal');
     }
-    state.toggleContextPanelExpanded(key);
+    // Only the right zone can expand over the center.
+    if (zone === 'right') state.toggleContextPanelExpanded(key);
   };
 
   useKeybinds({

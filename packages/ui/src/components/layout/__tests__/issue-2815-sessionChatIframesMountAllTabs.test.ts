@@ -78,7 +78,7 @@ const installIssueScenario = () => {
   useUIStore.setState({
     contextPanelByDirectory: {
       [DIRECTORY]: {
-        isOpen: true,
+        openZones: ['right'],
         expanded: false,
         tabs: issueScenarioTabs,
         activeTabId: sessionChatTabs[0].id,
@@ -204,9 +204,9 @@ describe('issue #2815 persisted scenario', () => {
 
     const panel = useUIStore.getState().contextPanelByDirectory[DIRECTORY];
     const chatTabs = panel.tabs.filter((tab) => tab.mode === 'chat');
-    const activeTabID = panel.isOpen ? panel.activeTabId : null;
+    const activeTabID = panel.openZones.includes('right') ? panel.activeTabId : null;
 
-    expect(panel.isOpen).toBe(false);
+    expect(panel.openZones).not.toContain('right');
     expect(getActiveEmbeddedSessionChatTab(chatTabs, activeTabID)).toBeNull();
   });
 });

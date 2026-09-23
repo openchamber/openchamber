@@ -536,6 +536,8 @@ export const LOCAL_DEVICE_KEYS = [
   'isSidebarOpen',
   'sidebarWidth',
   'contextPanelByDirectory',
+  'workspaceLayout',
+  'workspaceZoneSizes',
   'contextRailOrder',
   'contextRailHiddenSurfaces',
   'contextEditorTreeVisible',

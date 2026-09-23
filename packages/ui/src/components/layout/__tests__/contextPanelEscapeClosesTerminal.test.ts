@@ -25,7 +25,7 @@ describe('issue #2644: Escape in terminal must not close the context panel', () 
   test('the capture handler skips closing when the event target is inside the terminal', () => {
     const start = contextPanelSource.indexOf('const handlePanelKeyDownCapture = React.useCallback(');
     expect(start).toBeGreaterThan(-1);
-    const end = contextPanelSource.indexOf('}, [handleClose]);', start);
+    const end = contextPanelSource.indexOf('}, [handleClose, isPermanentZone]);', start);
     expect(end).toBeGreaterThan(start);
     const handler = contextPanelSource.slice(start, end);
 

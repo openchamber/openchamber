@@ -20,8 +20,10 @@ const sliceFn = (source: string, marker: string, length: number) => {
 
 describe('Linear panel review guards', () => {
   test('disconnect-close waits for Linear auth to resolve', () => {
-    const effect = sliceFn(railSource, 'if (!directoryKey || !linearAuthChecked || linearConnected || activeMode !== \'linear\')', 240);
-    expect(effect).toContain('closeContextPanel(directoryKey)');
+    // Closes the Linear surface's own workspace zone, not every panel: an
+    // unrelated zone must survive a disconnect.
+    const effect = sliceFn(railSource, 'if (!directoryKey || !linearAuthChecked || linearConnected || !visibleModes.includes(\'linear\'))', 260);
+    expect(effect).toContain('closeContextZone(directoryKey, zoneOfMode(workspaceLayout, \'linear\'))');
     expect(railSource).toContain('state.hasChecked');
   });
 

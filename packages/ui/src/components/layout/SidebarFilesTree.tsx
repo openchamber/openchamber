@@ -33,6 +33,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useGuardFileLeave } from './workspace/filesEditorWorkspace';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { DirectoryRequests } from '@/components/views/files/directoryRequests';
@@ -546,6 +547,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   const showGitignored = useFilesViewShowGitignored();
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const openContextFile = useUIStore((state) => state.openContextFile);
+  const guardFileLeave = useGuardFileLeave();
   const gitStatus = useGitStatus(visible ? currentDirectory : null);
 
   const [searchQuery, setSearchQuery] = React.useState('');
@@ -986,10 +988,15 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
       return;
     }
 
-    setSelectedPath(root, node.path);
-    addOpenPath(root, node.path);
-    openContextFile(root, node.path);
-  }, [addOpenPath, files, openContextFile, root, setSelectedPath]);
+    const open = () => {
+      setSelectedPath(root, node.path);
+      addOpenPath(root, node.path);
+      openContextFile(root, node.path);
+    };
+    // Leaving the file in the editor lets it offer to save an unsaved edit.
+    if (selectedPath && selectedPath !== node.path) guardFileLeave(selectedPath, open);
+    else open();
+  }, [addOpenPath, files, guardFileLeave, openContextFile, root, selectedPath, setSelectedPath]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);

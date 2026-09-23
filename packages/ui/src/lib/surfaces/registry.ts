@@ -4,6 +4,9 @@ import {
   isPluginContextPanelMode,
   type ContextPanelMode,
 } from '@/lib/surfaces/modes';
+// Type-only, so this erases at build time: `lib/workspace/layout` reads this
+// registry at runtime and nothing flows back the other way.
+import type { WorkspaceZone } from '@/lib/workspace/layout';
 
 export type BuiltInContextSurfaceId =
   | 'editor'
@@ -45,6 +48,19 @@ export type ContextSurfaceDescriptor = {
    * until the user manually resizes this surface.
    */
   defaultWidthFraction: number;
+  /**
+   * Workspace zones this surface may be docked in. Omitted means every zone,
+   * which is the rule: a zone that feels cramped can be resized, and a user
+   * who wants the terminal on the left should get it there. Set this only
+   * when the surface cannot work in a zone, and say why beside it.
+   */
+  allowedZones?: readonly WorkspaceZone[];
+  /**
+   * Zone this surface occupies in a fresh install, after Reset Layout, and
+   * when a stored layout never mentioned it. Omitted means `right`, which is
+   * where every panel surface lived before the workspace zones existed.
+   */
+  defaultZone?: WorkspaceZone;
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
@@ -158,6 +174,16 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     icon: 'chat-4',
     labelKey: 'contextPanel.mode.chat',
     availability: 'has-content',
+    // The session conversation. It owned the main area before the workspace
+    // zones existed, which is why `center` is its default placement; split
+    // session chats open as further tabs in whichever zone it sits in.
+    // Kept to center and right on purpose, unlike the other surfaces: those are
+    // the zones the conversation (composer, work-status panel, split-session
+    // chats opening beside it) was built and tested in. Left and bottom are not
+    // known to break, but a full conversation there is untested, and widening
+    // the conversation's placement is a separate decision.
+    allowedZones: ['center', 'right'],
+    defaultZone: 'center',
   },
 ];
 

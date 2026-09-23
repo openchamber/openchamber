@@ -3,7 +3,7 @@ import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
-import { ContextPanel } from './ContextPanel';
+import { WorkspaceLayout } from './workspace/WorkspaceLayout';
 import { ContextPanelRail } from './ContextPanelRail';
 import { GuestHosts } from './GuestHosts';
 import { PluginPane } from './PluginPane';
@@ -26,7 +26,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useDeviceInfo } from '@/lib/device';
-import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 
@@ -35,10 +34,13 @@ import { ChatView } from '@/components/views/ChatView';
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 
 /**
- * Desktop-surface layout: the chat owns the main area, and every other
- * surface (git, diff, files, terminal, ...) opens in the ContextPanel via the
- * rail. Phone-sized viewports run the separate MobileApp shell — a viewport
- * crossing the threshold reloads into it (see watchHostedSurfaceViewport).
+ * Desktop-surface composition root.
+ *
+ * The sidebar, header and surface rail are fixed chrome; everything between
+ * them is the modular workspace, which decides where each surface is drawn
+ * (see `workspace/WorkspaceLayout`). Phone-sized viewports run the separate
+ * MobileApp shell — a viewport crossing the threshold reloads into it (see
+ * watchHostedSurfaceViewport).
  */
 export const MainLayout: React.FC = () => {
     useSessionListSync({ isVSCode: false });
@@ -130,39 +132,41 @@ export const MainLayout: React.FC = () => {
                         <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
                             <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
                                 <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
-                                    {/* Holds the chat and the context panel together, so its
-                                        width does not move when the context panel opens. The
-                                        work-status panel measures this rather than the chat,
-                                        which the context panel animates. */}
-                                    <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
-                                        <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                            <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
-                                                <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
-                                            </div>
-                                            {isMultiRunLauncherOpen && (
-                                                <div className="absolute inset-0 z-10 bg-background">
-                                                    <ErrorBoundary>
-                                                        {/* isWindowed: the app Header already shows the surface
-                                                            title, so skip the launcher's own title bar. */}
-                                                        <MultiRunLauncher
-                                                            isWindowed
-                                                            initialPrompt={multiRunLauncherPrefillPrompt}
-                                                            onCreated={() => setMultiRunLauncherOpen(false)}
-                                                            onCancel={() => setMultiRunLauncherOpen(false)}
-                                                        />
-                                                    </ErrorBoundary>
-                                                </div>
-                                            )}
-                                            <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
-                                            <ErrorBoundary><ArchiveView /></ErrorBoundary>
-                                            <ErrorBoundary><WorktreesView /></ErrorBoundary>
-                                            {guestPage && <div className="absolute inset-0 z-10 bg-background">
-                                                <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
-                                                    onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
-                                            </div>}
-                                        </main>
-                                        <ContextPanel />
-                                    </div>
+                                    {/* The workspace owns the arrangement: which surfaces sit
+                                        left, center, right and bottom, their sizes and which
+                                        of them are open. This file only says what goes into
+                                        it. */}
+                                    <WorkspaceLayout
+                                        isSurfacePageOpen={isSurfacePageOpen}
+                                        mainChat={
+                                            <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
+                                        }
+                                        overlays={
+                                            <>
+                                                {isMultiRunLauncherOpen && (
+                                                    <div className="absolute inset-0 z-10 bg-background">
+                                                        <ErrorBoundary>
+                                                            {/* isWindowed: the app Header already shows the surface
+                                                                title, so skip the launcher's own title bar. */}
+                                                            <MultiRunLauncher
+                                                                isWindowed
+                                                                initialPrompt={multiRunLauncherPrefillPrompt}
+                                                                onCreated={() => setMultiRunLauncherOpen(false)}
+                                                                onCancel={() => setMultiRunLauncherOpen(false)}
+                                                            />
+                                                        </ErrorBoundary>
+                                                    </div>
+                                                )}
+                                                <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                                                <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                                                <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                                                {guestPage && <div className="absolute inset-0 z-10 bg-background">
+                                                    <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
+                                                        onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
+                                                </div>}
+                                            </>
+                                        }
+                                    />
                                 </div>
                             </div>
                             <div className="border-t border-border" data-page-scroll-lock="true">

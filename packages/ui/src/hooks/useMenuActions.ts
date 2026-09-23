@@ -4,7 +4,14 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncSessions } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import {
+  normalizeContextPanelDirectoryKey,
+  selectContextZoneTab,
+  selectIsContextZoneOpen,
+  selectVisibleContextZoneTab,
+  useUIStore,
+} from '@/stores/useUIStore';
+import { zoneOfMode } from '@/lib/workspace/layout';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -215,11 +222,12 @@ export const useMenuActions = (
           if (!directory) break;
           const uiState = useUIStore.getState();
           const directoryKey = normalizeContextPanelDirectoryKey(directory);
-          const panelState = uiState.contextPanelByDirectory[directoryKey];
-          if (panelState?.isOpen) {
-            uiState.closeContextPanel(directoryKey);
-          } else if (panelState?.activeTabId) {
-            uiState.setActiveContextPanelTab(directoryKey, panelState.activeTabId);
+          // The right sidebar is the right zone now; other zones keep what
+          // the user left them at.
+          if (selectIsContextZoneOpen(uiState, directoryKey, 'right')) {
+            uiState.closeContextZone(directoryKey, 'right');
+          } else if (selectContextZoneTab(uiState, directoryKey, 'right')) {
+            uiState.openContextZone(directoryKey, 'right');
           } else {
             uiState.openContextSurface(directoryKey, 'git');
           }
@@ -252,12 +260,12 @@ export const useMenuActions = (
           if (!directory) break;
           const key = normalizeContextPanelDirectoryKey(directory);
           const uiState = useUIStore.getState();
-          const panel = uiState.contextPanelByDirectory[key];
-          const activeMode = panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
-          if (activeMode !== 'terminal') {
+          const zone = zoneOfMode(uiState.workspaceLayout, 'terminal');
+          if (selectVisibleContextZoneTab(uiState, key, zone)?.mode !== 'terminal') {
             uiState.openContextSurface(key, 'terminal');
           }
-          uiState.toggleContextPanelExpanded(key);
+          // Only the right zone can expand over the center.
+          if (zone === 'right') uiState.toggleContextPanelExpanded(key);
           break;
         }
 

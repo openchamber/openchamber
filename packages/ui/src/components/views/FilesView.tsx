@@ -95,6 +95,7 @@ import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useRegisterFileLeaveGuard, type FilesEditorLeaveGuard } from '@/components/layout/workspace/filesEditorWorkspace';
 
 type FileNode = {
   name: string;
@@ -988,6 +989,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
   const pendingClosePathRef = React.useRef<string | null>(null);
+  // A navigation the workspace asked for (another file tab, closing this
+  // one), held until the user saves or discards.
+  const pendingLeaveRef = React.useRef<(() => void) | null>(null);
   const skipDirtyOnceRef = React.useRef(false);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
   const copiedPathTimeoutRef = React.useRef<number | null>(null);
@@ -2104,6 +2108,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
+  const loadedFilePathRef = React.useRef(loadedFilePath);
+  loadedFilePathRef.current = loadedFilePath;
+
+  // In the workspace, file tabs and the tree live outside this view. They ask
+  // here before leaving the loaded file, so an unsaved edit gets the same
+  // save-or-discard choice as this view's own tabs.
+  const leaveGuard = React.useCallback<FilesEditorLeaveGuard>((leavingPath, proceed) => {
+    const loaded = loadedFilePathRef.current;
+    if (!isDirtyRef.current || !loaded || toComparablePath(loaded) !== toComparablePath(leavingPath)) {
+      proceed();
+      return;
+    }
+    pendingLeaveRef.current = proceed;
+    setConfirmDiscardOpen(true);
+  }, []);
+  useRegisterFileLeaveGuard(leaveGuard);
 
   React.useEffect(() => subscribeToFileContentInvalidation(({ runtimeKey, paths }) => {
     const selectedPath = selectedFile?.path;
@@ -2219,6 +2239,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [applyLoadedTextContent, contentDetectedBinary, loadedFilePath, readFile, readFileStat, selectedFile?.path, visible]);
 
   const discardAndContinue = React.useCallback(() => {
+    const leave = pendingLeaveRef.current;
+    if (leave) {
+      pendingLeaveRef.current = null;
+      setConfirmDiscardOpen(false);
+      setDraftContent(fileContent);
+      leave();
+      return;
+    }
     const nextFile = pendingSelectFileRef.current;
     const closePath = pendingClosePathRef.current;
 
@@ -2264,6 +2292,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [fileContent, handleSelectFile, isMobile, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
 
   const saveAndContinue = React.useCallback(async () => {
+    const leave = pendingLeaveRef.current;
+    if (leave) {
+      if (!(await saveDraft())) return;
+      pendingLeaveRef.current = null;
+      setConfirmDiscardOpen(false);
+      leave();
+      return;
+    }
     const nextFile = pendingSelectFileRef.current;
     const closePath = pendingClosePathRef.current;
 

@@ -598,6 +598,14 @@
       "scope": "device",
       "local": true
     },
+    "workspaceLayout": {
+      "scope": "device",
+      "local": true
+    },
+    "workspaceZoneSizes": {
+      "scope": "device",
+      "local": true
+    },
     "contextRailOrder": {
       "scope": "device",
       "local": true

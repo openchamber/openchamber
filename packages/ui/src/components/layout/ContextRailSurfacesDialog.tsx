@@ -12,6 +12,15 @@ import {
 } from '@/components/ui/dialog';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { sortContextSurfaces } from '@/lib/surfaces/registry';
+import { WORKSPACE_PRESET_IDS, type WorkspacePresetId } from '@/lib/workspace/layout';
+import { WorkspaceZonePicker } from './workspace/WorkspaceZonePicker';
+import type { I18nKey } from '@/lib/i18n';
+
+const WORKSPACE_PRESET_LABELS = {
+  default: 'workspace.preset.default',
+  developer: 'workspace.preset.developer',
+  'code-agent': 'workspace.preset.codeAgent',
+} satisfies Record<WorkspacePresetId, I18nKey>;
 
 /**
  * Which surfaces the context rail shows. Everything is on by default and the
@@ -29,6 +38,8 @@ export const ContextRailSurfacesDialog: React.FC<{
   const hidden = useUIStore((state) => state.contextRailHiddenSurfaces);
   const setSurfaceVisible = useUIStore((state) => state.setContextRailSurfaceVisible);
   const setHiddenSurfaces = useUIStore((state) => state.setContextRailHiddenSurfaces);
+  const applyWorkspaceLayoutPreset = useUIStore((state) => state.applyWorkspaceLayoutPreset);
+  const resetWorkspaceLayout = useUIStore((state) => state.resetWorkspaceLayout);
 
   // The full registry in the user's rail order — including surfaces a runtime
   // filter currently drops, so a choice made on desktop is editable anywhere.
@@ -58,8 +69,31 @@ export const ContextRailSurfacesDialog: React.FC<{
               onChange={(checked) => setSurfaceVisible(surface.id, checked)}
               label={surface.label ?? t(surface.labelKey)}
               ariaLabel={surface.label ?? t(surface.labelKey)}
+              labelAccessory={<WorkspaceZonePicker surfaceId={surface.id} />}
             />
           ))}
+        </div>
+
+        {/* Starting points for the workspace zones. A preset writes a layout
+            once; the user keeps rearranging from there, and Default is the
+            way back to the original arrangement. */}
+        <div className="flex flex-col gap-2 border-t pt-3">
+          <span className="typography-ui-label text-muted-foreground">{t('workspace.preset.title')}</span>
+          <div className="flex flex-wrap gap-2">
+            {WORKSPACE_PRESET_IDS.map((preset) => (
+              <Button
+                key={preset}
+                variant="outline"
+                size="xs"
+                onClick={() => applyWorkspaceLayoutPreset(preset)}
+              >
+                {t(WORKSPACE_PRESET_LABELS[preset])}
+              </Button>
+            ))}
+            <Button variant="ghost" size="xs" onClick={resetWorkspaceLayout}>
+              {t('workspace.preset.reset')}
+            </Button>
+          </div>
         </div>
 
         {!allVisible ? (

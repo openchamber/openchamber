@@ -1,5 +1,5 @@
 import React from 'react';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, selectVisibleContextZoneTab, useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 
 /**
@@ -66,18 +66,12 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
     [effectiveDirectory],
   );
 
-  // Mirrors ContextPanel's own derivation: a panel with `isOpen` but no
-  // resolvable active tab renders nothing, and must not displace this panel.
+  // This panel shares the row with the right workspace zone, so only that zone
+  // can displace it. An open zone with no resolvable tab renders nothing and
+  // does not count, matching how the zone itself decides whether to draw.
   const contextPanelOpen = useUIStore(
     React.useCallback(
-      (state) => {
-        const panel = directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined;
-        if (!panel?.isOpen) return false;
-        const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId)
-          ?? panel.tabs[panel.tabs.length - 1]
-          ?? null;
-        return Boolean(activeTab);
-      },
+      (state) => (directoryKey ? Boolean(selectVisibleContextZoneTab(state, directoryKey, 'right')) : false),
       [directoryKey],
     ),
   );

@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type PanelState = {
-  isOpen: boolean;
+  openZones: string[];
   tabs: { id: string; mode: string }[];
   activeTabId: string | null;
 };
@@ -12,10 +12,18 @@ let panelByDirectory: Record<string, PanelState> = {};
 let panelEnabled = true;
 let effectiveDirectory: string | undefined = '/repo';
 
+const { createDefaultWorkspaceLayout } = await import('@/lib/workspace/layout');
+const { selectVisibleContextZoneTab } = await import('@/stores/useUIStore');
+
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
-    selector({ contextPanelByDirectory: panelByDirectory, workStatusPanelEnabled: panelEnabled }),
+    selector({
+      contextPanelByDirectory: panelByDirectory,
+      workspaceLayout: createDefaultWorkspaceLayout(),
+      workStatusPanelEnabled: panelEnabled,
+    }),
   normalizeContextPanelDirectoryKey: (value: string) => value,
+  selectVisibleContextZoneTab,
 }));
 
 mock.module('@/hooks/useEffectiveDirectory', () => ({
@@ -227,7 +235,7 @@ describe('useWorkStatusVisibility', () => {
     // reveals it. Stopping cost a frame: closing the context panel widened the
     // chat, and only then did the panel reappear and narrow it again.
     panelByDirectory = {
-      '/repo': { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' },
+      '/repo': { openZones: ['right'], tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' },
     };
     const { result, rowNode, teardown } = renderVisibility(
       { isMobile: false, isVSCode: false },
@@ -243,7 +251,7 @@ describe('useWorkStatusVisibility', () => {
     // directory. The context panel is still keyed by the directory the app is
     // on, and looking it up under the chat's empty one answered "closed".
     panelByDirectory = {
-      '/repo': { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' },
+      '/repo': { openZones: ['right'], tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' },
     };
     const { result, teardown } = renderVisibility({ isMobile: false, isVSCode: false }, REQUIRED);
     expect(result.visible).toBe(false);
@@ -252,7 +260,7 @@ describe('useWorkStatusVisibility', () => {
 
   test('ignores an open context panel that has no resolvable tab', () => {
     // ContextPanel renders nothing in that state, so it displaces nothing.
-    panelByDirectory = { '/repo': { isOpen: true, tabs: [], activeTabId: null } };
+    panelByDirectory = { '/repo': { openZones: ['right'], tabs: [], activeTabId: null } };
     const { result, teardown } = renderVisibility(
       { isMobile: false, isVSCode: false },
       REQUIRED,

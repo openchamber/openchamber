@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { useUIStore } from '@/stores/useUIStore';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const contextPanelSource = readFileSync(join(__dirname, '..', 'ContextPanel.tsx'), 'utf-8');
+// The opener is registered once per window, not by each zone's panel.
+const openersSource = readFileSync(join(__dirname, '..', 'workspace', 'useWorkspaceOpeners.ts'), 'utf-8');
 const browserPaneSource = readFileSync(join(__dirname, '..', '..', 'browser', 'BrowserPane.tsx'), 'utf-8');
 const DIRECTORY = '/path/to/repository';
 
@@ -23,15 +24,15 @@ beforeEach(() => {
 });
 
 describe('issue #3175 browser capture while the agent works in the background', () => {
-  test('an agent browser.open creates the tab without revealing the panel', () => {
-    expect(contextPanelSource).toContain(
+  test('an agent browser.open creates the tab without revealing its zone', () => {
+    expect(openersSource).toContain(
       'openContextBrowser(effectiveDirectory, url, { reveal: false })',
     );
 
     useUIStore.getState().openContextBrowser(DIRECTORY, 'https://example.com', { reveal: false });
 
     const panel = useUIStore.getState().contextPanelByDirectory[DIRECTORY];
-    expect(panel.isOpen).toBe(false);
+    expect(panel.openZones).toEqual([]);
     expect(panel.tabs).toHaveLength(1);
     expect(panel.tabs[0]?.mode).toBe('browser');
     expect(panel.tabs[0]?.targetPath).toBe('https://example.com');
@@ -42,7 +43,7 @@ describe('issue #3175 browser capture while the agent works in the background', 
     expect(browserPaneSource).toContain('restorePanel();');
   });
 
-  test('restoring after capture puts a closed panel and the prior tab back', () => {
+  test('restoring after capture puts a collapsed zone and the prior tab back', () => {
     const store = useUIStore.getState();
     store.openContextPanelTab(DIRECTORY, { mode: 'terminal', targetDirectory: null });
     const terminalTab = useUIStore.getState().contextPanelByDirectory[DIRECTORY].activeTabId;
@@ -51,14 +52,15 @@ describe('issue #3175 browser capture while the agent works in the background', 
     const browserTab = useUIStore.getState().contextPanelByDirectory[DIRECTORY].tabs
       .find((tab) => tab.mode === 'browser')!.id;
 
-    // What the capture does: show the tab, then restore the saved view.
+    // What the capture does: show the tab, then restore the saved view of
+    // the browser's zone (the right one by default).
     store.setActiveContextPanelTab(DIRECTORY, browserTab);
-    expect(useUIStore.getState().contextPanelByDirectory[DIRECTORY].isOpen).toBe(true);
+    expect(useUIStore.getState().contextPanelByDirectory[DIRECTORY].openZones).toContain('right');
     store.setActiveContextPanelTab(DIRECTORY, terminalTab!);
-    store.closeContextPanel(DIRECTORY);
+    store.closeContextZone(DIRECTORY, 'right');
 
     const panel = useUIStore.getState().contextPanelByDirectory[DIRECTORY];
-    expect(panel.isOpen).toBe(false);
+    expect(panel.openZones).toEqual([]);
     expect(panel.activeTabId).toBe(terminalTab);
   });
 });

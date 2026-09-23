@@ -14,7 +14,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { selectVisibleContextZoneTab, useUIStore, type WorkspaceView } from '@/stores/useUIStore';
+import { zoneOfMode } from '@/lib/workspace/layout';
 import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
@@ -250,17 +251,15 @@ const normalize = (value: string): string => {
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
 
-const getActiveContextMode = (panelState: {
-  isOpen: boolean;
-  activeTabId: string | null;
-  tabs: Array<{ id: string; mode: ContextPanelMode }>;
-} | undefined): ContextPanelMode | null => {
-  if (!panelState?.isOpen || !Array.isArray(panelState.tabs) || panelState.tabs.length === 0) {
-    return null;
-  }
-
-  const activeTab = panelState.tabs.find((tab) => tab.id === panelState.activeTabId) ?? panelState.tabs[panelState.tabs.length - 1];
-  return activeTab?.mode ?? null;
+/**
+ * Whether the project-context overview is on screen, in whichever zone it is
+ * docked in. The header button toggles that one surface, so it asks about that
+ * surface rather than about a panel.
+ */
+const isContextOverviewVisible = (state: WorkspaceView, directoryKey: string): boolean => {
+  if (!directoryKey) return false;
+  const zone = zoneOfMode(state.workspaceLayout, 'context');
+  return selectVisibleContextZoneTab(state, directoryKey, zone)?.mode === 'context';
 };
 
 
@@ -277,7 +276,7 @@ export const Header: React.FC = () => {
   const { t } = useI18n();
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
-  const closeContextPanel = useUIStore((state) => state.closeContextPanel);
+  const closeContextZone = useUIStore((state) => state.closeContextZone);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
 
@@ -700,10 +699,10 @@ export const Header: React.FC = () => {
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
-  const activeContextMode = useUIStore(React.useCallback((state) => {
-    const directory = normalize(openDirectory || '');
-    return directory ? getActiveContextMode(state.contextPanelByDirectory[directory]) : null;
-  }, [openDirectory]));
+  const isContextPanelActive = useUIStore(React.useCallback(
+    (state) => isContextOverviewVisible(state, normalize(openDirectory || '')),
+    [openDirectory],
+  ));
 
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
@@ -1025,16 +1024,15 @@ export const Header: React.FC = () => {
       return;
     }
 
-    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'context') {
-      closeContextPanel(directory);
+    const state = useUIStore.getState();
+    if (isContextOverviewVisible(state, directory)) {
+      closeContextZone(directory, zoneOfMode(state.workspaceLayout, 'context'));
       return;
     }
 
     openContextOverview(directory);
-  }, [closeContextPanel, openContextOverview, openDirectory]);
+  }, [closeContextZone, openContextOverview, openDirectory]);
 
-  const isContextPanelActive = activeContextMode === 'context';
 
 
 

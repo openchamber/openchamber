@@ -115,6 +115,97 @@ Examples:
 
 These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. Linear panel list filters (status, assignee, team, priority) live here too: the Linear rail surface remounts on switch, so those filters restore from this store rather than component state. `resetLinearIssueListFilters` restores those four defaults together; search stays local to the rail. The team filter is the one that is not a plain preference: a Linear team belongs to one workspace, and each OpenChamber instance has its own Linear login, so it is persisted per instance in `linearIssueListTeamIdByRuntime` and the flat `linearIssueListTeamId` is derived from it by `applyLinearIssueListFiltersForRuntime` — on an instance switch and when the rail mounts, since rehydration can run before the runtime endpoint is known. Carried across, a team id filters the new instance's list down to nothing. `linearIssueFocus` is a one-shot identifier so work-status can open a specific issue in that panel; it is not persisted.
 
+### Workspace zones
+
+`useUIStore.workspaceLayout` says which of the four zones — `left`, `center`,
+`right`, `bottom` — each context surface is docked in, and in what order inside
+it. It is global, not per-directory: the zones are a way of working, like the
+sidebar width beside them, and a layout that rearranged itself on a project
+switch would be a surprise rather than a feature. `workspaceZoneSizes` holds the
+left width, right width and bottom height. The right zone additionally keeps its
+older per-surface widths (`widthFractionByMode`), which take precedence there so
+a resize made before the zones existed is still honoured.
+
+What is open stays per directory, in `contextPanelByDirectory[dir].openZones`.
+Placement and open state are separate: `moveWorkspaceSurface`,
+`applyWorkspaceLayoutPreset` and `resetWorkspaceLayout` change only the layout,
+except that a surface a zone was showing is carried to its new zone and kept in
+front there (`carryVisibleSurfaces`). They never open a closed surface, never
+activate a background tab and never change `activeTabId`; opening stays with
+`openContextSurface`.
+
+Every window of the app on one origin shares the persisted `ui-store`, and
+each writes its whole state on any change. So that a window which was open
+while the layout changed elsewhere does not write the old layout back,
+`WorkspaceLayout` runs `followWorkspaceLayoutOfOtherWindows`: on another
+window's `ui-store` write it adopts `workspaceLayout` and `workspaceZoneSizes`
+(only when the write carries a complete layout, see `readPersistedWorkspace`),
+keeping what this window shows on screen. What each window has open is its
+own and is not adopted.
+Before the zones this was a single `isOpen` flag describing the one right panel;
+the v21 → v22 migration reads that flag as `['right']`, which is where every
+panel surface starts, so an existing install sees no rearrangement. A malformed
+or missing layout is rebuilt from the registry by `parseStoredWorkspaceLayout`,
+which always yields a layout holding every registered surface exactly once — a
+surface can never become unreachable because of stored data.
+
+Each zone keeps its own selection in `activeTabIdByZone`, so working in one
+zone never changes what another shows. `activeTabId` stays the last tab
+activated anywhere and is always a real tab. A missing or stale zone entry
+(state saved before this, a closed tab) falls back through
+`activeContextTabForZone`. The reserved id `MAIN_CHAT_TAB_ID` appears only in
+`activeTabIdByZone`, for the conversation's zone, and means the conversation is
+in front there; the conversation has no tab record of its own.
+
+Files is one surface in a zone, however many files are open. Its open files are
+still `mode: 'file'` tabs in `contextPanelByDirectory[dir].tabs`, the same
+records as before the zones, but a zone's strip folds them into one Files entry
+(`workspaceStripEntries` in `components/layout/workspace/filesSurfaceTabs.ts`)
+and `FilesSurface` lists them in a strip of its own. A zone whose selection is
+a file tab is showing Files. Placement is stored once, for the `editor`
+surface; files carry none.
+
+File tabs are kept as one contiguous group, and the group's place is Files'
+place in its zone: a new file opens after the others, a first file takes the
+explorer placeholder's place, and the placeholder takes the place of the last
+closed file (`withFileTabAdded`, `closeContextPanelTabs`). Opening, closing,
+switching or reordering files therefore never moves Files among its
+neighbours. Tabs saved apart by an earlier build are regrouped where the first
+one was (`groupFileTabs`, run by the sanitizer and by `touchContextPanelState`,
+because a load at the current store version skips `migrate`).
+
+Closing the last open file leaves the empty `file` placeholder, so Files stays
+in its zone showing its tree, whichever zone the user last worked in. Closing
+Files from its zone (`hideFilesSurface`) takes it out of the zone but keeps its
+file tabs in `hiddenFileTabs`, outside every zone and persisted; reopening
+Files from the rail, or opening any file, puts them back and shows the file
+used last. The center zone never collapses, so with the conversation docked
+elsewhere, closing or toggling off what the center shows closes that surface
+(Files hides) instead of collapsing the zone.
+
+Who owns what for Files:
+
+| State | Owner |
+|---|---|
+| Placement, open zones, zone selection | `useUIStore` (`workspaceLayout`, `openZones`, `activeTabIdByZone`) |
+| Which files are open, and hidden | `useUIStore` file tabs and `hiddenFileTabs` |
+| Selected file | `useUIStore` zone selection; ContextPanel mirrors it into `useFilesViewTabsStore.selectedPath` |
+| Editor open-file list | `useFilesViewTabsStore.openPaths`, which follows: selecting adds, closing a file tab removes, hiding and moving leave it alone |
+| Tree expansion | `useFilesViewTabsStore.expandedPaths` |
+| Unsaved draft, undo, cursor | the mounted `FilesView` component |
+
+The draft lives only in the mounted editor, so the editor is never remounted by
+workspace changes. `FilesEditorHost` (in `WorkspaceLayout`, scoped by
+`FilesEditorProvider`) renders the one editor while `filesEditorMounted` holds,
+and moves its DOM node into the `FilesEditorSlot` of whichever zone holds
+Files. A hidden Files keeps its zone mounted (`occupiedZones`, collapsed if
+nothing else is open there) and its container (`mountedFileTabs`). The slot
+also hands over that zone's Escape handling, since React events from the
+editor bubble through the host rather than the zone's panel. Leaving the
+loaded file from outside the editor (another file tab, closing it, opening a
+file from the tree) goes through `useGuardFileLeave`, which the editor answers
+with its own save-or-discard dialog; nothing is saved on the user's behalf.
+
 Context-panel session chats mount only the active chat iframe. After installing
 its message listener, the iframe requests its authoritative visibility from the
 parent. The parent accepts requests only from a currently mounted chat frame and

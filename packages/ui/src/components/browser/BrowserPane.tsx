@@ -7,7 +7,13 @@ import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import {
+  normalizeContextPanelDirectoryKey,
+  selectContextZoneTab,
+  selectVisibleContextZoneTab,
+  useUIStore,
+} from '@/stores/useUIStore';
+import { mainChatZone, zoneOfMode } from '@/lib/workspace/layout';
 import { BLANK_URL, isLoopbackUrl, isStartingServerFailure, normalizeBrowserUrl } from '@/lib/browser/url';
 import { probeLoopbackStatus } from '@/lib/browser/devServers';
 import {
@@ -342,24 +348,28 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
 
     if (action === 'browser.capture') {
       // Agents work the browser in the background, but Chromium keeps no
-      // composited surface for a webview in a closed panel or a hidden tab, so
-      // capturePage() fails with UnknownVizError. Show this tab only for the
-      // capture, then put the panel back the way the user left it.
+      // composited surface for a webview in a collapsed zone or a hidden tab,
+      // so capturePage() fails with UnknownVizError. Show this tab only for
+      // the capture, then put its zone back the way the user left it.
       const ui = useUIStore.getState();
       const panelKey = normalizeContextPanelDirectoryKey(directory);
-      const before = ui.contextPanelByDirectory[panelKey];
-      const wasShowing = Boolean(before?.isOpen && before.activeTabId === tabID);
+      const zone = zoneOfMode(ui.workspaceLayout, 'browser');
+      const zoneWasOpen = Boolean(ui.contextPanelByDirectory[panelKey]?.openZones.includes(zone));
+      // What the zone showed: a tab, or (null) the conversation docked there.
+      const priorTabId = selectContextZoneTab(ui, panelKey, zone)?.id ?? null;
+      const wasShowing = selectVisibleContextZoneTab(ui, panelKey, zone)?.id === tabID;
       if (!wasShowing) ui.setActiveContextPanelTab(directory, tabID);
       const restorePanel = () => {
-        if (wasShowing || !before) return;
+        if (wasShowing) return;
         const now = useUIStore.getState();
-        const current = now.contextPanelByDirectory[panelKey];
-        // The user took over the panel meanwhile: their choice stands.
-        if (!current?.isOpen || current.activeTabId !== tabID) return;
-        if (before.activeTabId && before.activeTabId !== tabID) {
-          now.setActiveContextPanelTab(directory, before.activeTabId);
+        // The user took over the zone meanwhile: their choice stands.
+        if (selectVisibleContextZoneTab(now, panelKey, zone)?.id !== tabID) return;
+        if (priorTabId && priorTabId !== tabID) {
+          now.setActiveContextPanelTab(directory, priorTabId);
+        } else if (!priorTabId && zone === mainChatZone(now.workspaceLayout)) {
+          now.focusMainChat(directory);
         }
-        if (!before.isOpen) now.closeContextPanel(directory);
+        if (!zoneWasOpen) now.closeContextZone(directory, zone);
       };
       try {
         const surfaceDeadline = Date.now() + 1_200;

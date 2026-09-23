@@ -38,7 +38,10 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore, visibleContextModes, type ContextPanelMode } from '@/stores/useUIStore';
+import { zoneOfMode, type WorkspaceZone } from '@/lib/workspace/layout';
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { WorkspaceMoveMenuItems } from './workspace/WorkspaceMoveMenuItems';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
@@ -49,6 +52,9 @@ const RAIL_TOOLTIP_DELAY_MS = 150;
 // number badges on the rail icons.
 const RAIL_NUMBER_HOLD_DELAY_MS = 500;
 const EMPTY_TABS: never[] = [];
+// Stable identity: a fresh array from the selector would re-render the rail on
+// every store change.
+const EMPTY_MODES: ContextPanelMode[] = [];
 
 type RailItemProps = {
   surface: ContextSurfaceDescriptor;
@@ -64,6 +70,8 @@ type RailItemProps = {
   badgeDescription?: string | null;
   orderNumber?: number | null;
   showOrderNumber?: boolean;
+  /** Workspace zone this surface is docked in, for its "Move to ..." menu. */
+  zone: WorkspaceZone;
   onSelect: (surface: ContextSurfaceDescriptor) => void;
 };
 
@@ -82,6 +90,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   badgeDescription,
   orderNumber,
   showOrderNumber,
+  zone,
   onSelect,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -96,6 +105,10 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn('relative', isDragging && 'z-10 opacity-70')}
     >
+      {/* Right-click docks the surface elsewhere. The rail reaches a surface
+          that has no tab yet, which the in-panel tab menu cannot. */}
+      <ContextMenu>
+        <ContextMenuTrigger render={<div className="contents" />}>
       <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
         <TooltipTrigger asChild>
           <button
@@ -160,6 +173,11 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
           </div>
         </TooltipContent>
       </Tooltip>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <WorkspaceMoveMenuItems surfaceId={surface.id} currentZone={zone} />
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   );
 };
@@ -175,7 +193,8 @@ export const ContextPanelRail: React.FC = () => {
   const contextRailHiddenSurfaces = useUIStore((state) => state.contextRailHiddenSurfaces);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
-  const closeContextPanel = useUIStore((state) => state.closeContextPanel);
+  const closeContextZone = useUIStore((state) => state.closeContextZone);
+  const workspaceLayout = useUIStore((state) => state.workspaceLayout);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
@@ -269,8 +288,12 @@ export const ContextPanelRail: React.FC = () => {
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
-  const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
-  const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
+  // Several zones can each show a surface at once, so the rail marks a set of
+  // surfaces active rather than one. A surface in a collapsed zone is not in it.
+  const visibleModes = React.useMemo(
+    () => (panelState ? visibleContextModes(panelState, workspaceLayout) : EMPTY_MODES),
+    [panelState, workspaceLayout],
+  );
   const changedFilesCount = gitStatus?.files.length ?? 0;
 
   const surfaces = React.useMemo(() => {
@@ -289,19 +312,21 @@ export const ContextPanelRail: React.FC = () => {
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
+  // Closing only that surface's own zone: a disconnected integration must not
+  // take an unrelated zone, such as a terminal at the bottom, down with it.
   React.useEffect(() => {
-    if (!directoryKey || !linearAuthChecked || linearConnected || activeMode !== 'linear') {
+    if (!directoryKey || !linearAuthChecked || linearConnected || !visibleModes.includes('linear')) {
       return;
     }
-    closeContextPanel(directoryKey);
-  }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected]);
+    closeContextZone(directoryKey, zoneOfMode(workspaceLayout, 'linear'));
+  }, [closeContextZone, directoryKey, linearAuthChecked, linearConnected, visibleModes, workspaceLayout]);
 
   React.useEffect(() => {
-    if (!directoryKey || !githubAuthChecked || githubConnected || activeMode !== 'pr') {
+    if (!directoryKey || !githubAuthChecked || githubConnected || !visibleModes.includes('pr')) {
       return;
     }
-    closeContextPanel(directoryKey);
-  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected]);
+    closeContextZone(directoryKey, zoneOfMode(workspaceLayout, 'pr'));
+  }, [closeContextZone, directoryKey, githubAuthChecked, githubConnected, visibleModes, workspaceLayout]);
 
   const [isSurfacesDialogOpen, setIsSurfacesDialogOpen] = React.useState(false);
 
@@ -341,7 +366,7 @@ export const ContextPanelRail: React.FC = () => {
             const gitChangedCount = surface.id === 'git' && !workStatusPanelVisible ? changedFilesCount : 0;
             // A guest sets its own count through `host.setBadge`; opening
             // that panel clears it, so the active surface never shows one.
-            const guestBadgeCount = isPluginContextPanelMode(surface.mode) && activeMode !== surface.mode
+            const guestBadgeCount = isPluginContextPanelMode(surface.mode) && !visibleModes.includes(surface.mode)
               ? guestBadges[pluginIdFromMode(surface.mode)] ?? 0
               : 0;
             const badgeCount = gitChangedCount > 0 ? gitChangedCount : guestBadgeCount > 0 ? guestBadgeCount : null;
@@ -350,7 +375,7 @@ export const ContextPanelRail: React.FC = () => {
               <ContextPanelRailItem
                 key={surface.id}
                 surface={surface}
-                isActive={activeMode === surface.mode}
+                isActive={visibleModes.includes(surface.mode)}
                 showActivityDot={false}
                 label={label}
                 description={t(surface.descriptionKey)}
@@ -373,6 +398,7 @@ export const ContextPanelRail: React.FC = () => {
                   : null}
                 orderNumber={index + 1}
                 showOrderNumber={revealNumbers}
+                zone={zoneOfMode(workspaceLayout, surface.mode)}
                 onSelect={(selected) => {
                   if (isPluginContextPanelMode(selected.mode)) clearGuestBadge(pluginIdFromMode(selected.mode));
                   openContextSurface(directoryKey, selected.mode);
