@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Magic Context</title>
+    <style>
+      html, body, #root { margin: 0; min-height: 100%; }
+      body {
+        background: var(--surface-background, var(--oc-bg));
+        color: var(--surface-foreground, var(--oc-fg));
+        font-family: var(--font-sans, var(--oc-font));
+        font-size: 12px;
+      }
+      #root { box-sizing: border-box; padding: 10px; }
+      .mc-shell { display: grid; gap: 9px; }
+      .mc-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .mc-brand { min-width: 0; }
+      .mc-title { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.2; }
+      .mc-subtitle { margin-top: 3px; color: var(--surface-muted-foreground, var(--oc-muted)); font-size: 11px; }
+      .mc-toolbar { display: flex; align-items: center; gap: 6px; }
+      .mc-tabs { min-width: 0; }
+      .mc-content { display: grid; gap: 10px; }
+      .mc-card { display: grid; gap: 5px; }
+      .mc-section-title { display: flex; align-items: center; justify-content: space-between; margin: 0; font-size: 12px; font-weight: 650; }
+      .mc-muted { color: var(--surface-muted-foreground, var(--oc-muted)); }
+      .mc-mono { font-family: var(--font-mono, var(--oc-mono)); font-variant-numeric: tabular-nums; }
+      .mc-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+      .mc-row-label { color: var(--surface-muted-foreground, var(--oc-muted)); overflow-wrap: anywhere; }
+      .mc-row-value { flex: 0 0 auto; text-align: right; }
+      .mc-progress { height: 7px; overflow: hidden; border-radius: var(--radius, var(--oc-radius)); background: var(--surface-subtle, var(--oc-subtle)); }
+      .mc-progress-fill { height: 100%; background: var(--primary, var(--oc-primary)); border-radius: inherit; }
+      .mc-panel-note { padding: 7px 8px; border: 1px solid var(--interactive-border, var(--oc-border)); border-radius: var(--radius, var(--oc-radius)); color: var(--surface-muted-foreground, var(--oc-muted)); line-height: 1.4; }
+      .mc-event-list { display: grid; gap: 6px; }
+      .mc-event { display: grid; gap: 3px; padding: 7px 8px; border: 1px solid var(--interactive-border, var(--oc-border)); border-radius: var(--radius, var(--oc-radius)); }
+      .mc-event-head { display: flex; justify-content: space-between; gap: 6px; }
+      .mc-event-metrics { display: flex; flex-wrap: wrap; gap: 8px; color: var(--surface-muted-foreground, var(--oc-muted)); }
+      .mc-status-good { color: var(--status-success, var(--oc-success)); }
+      .mc-status-warn { color: var(--status-warning, var(--oc-warning)); }
+      .mc-status-error { color: var(--status-error, var(--oc-error)); }
+      .mc-empty { padding: 10px 8px; text-align: center; color: var(--surface-muted-foreground, var(--oc-muted)); }
+      .mc-footer { color: var(--surface-muted-foreground, var(--oc-muted)); font-size: 10px; line-height: 1.35; }
+      .mc-content[aria-busy="true"] { opacity: .72; }
+    </style>
+  </head>
+  <body>
+    <main id="root"></main>
+    <script src="main.js"></script>
+  </body>
+</html>

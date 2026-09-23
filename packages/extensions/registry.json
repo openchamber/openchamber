@@ -1,4 +1,14 @@
 {
   "version": 1,
-  "extensions": []
+  "extensions": [
+    {
+      "id": "openchamber-builtin-magic-context",
+      "directory": "magic-context",
+      "files": ["panel/index.html"],
+      "build": [
+        { "entry": "panel/main.ts", "out": "panel/main.js", "target": "browser" },
+        { "entry": "service/main.ts", "out": "service/main.js", "target": "node" }
+      ]
+    }
+  ]
 }

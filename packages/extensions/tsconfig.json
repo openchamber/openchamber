@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../../",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["node"],
+    "paths": {
+      "@openchamber/sdk": ["packages/sdk/src/index.ts"],
+      "@openchamber/sdk/ui": ["packages/sdk/src/ui/index.ts"]
+    }
+  },
+  "include": ["magic-context/**/*.ts"],
+  "exclude": ["magic-context/**/*.test.ts"]
+}
