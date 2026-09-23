@@ -27,12 +27,17 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass } from '@/components/ui/dropdown-menu.styles';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
 import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -106,10 +111,30 @@ const SessionTabItem: React.FC<{
 
   const title = tab.session.title?.trim() || t('sessions.sidebar.session.untitled');
   const overlayVisible = !suppressControls && (menuOpen || menuVisible);
+  const sessionDirectory = resolveGlobalSessionDirectory(tab.session);
+  // The tooltip explains a title the fade mask truncates, so it only appears
+  // while the tab reads as a tab: not mid-drag, not under its own menus, and
+  // not while the active tab shows the rename form instead of the title.
+  const tooltipDisabled = isDragging || menuOpen || contextMenuOpen || suppressControls;
+
+  const projects = useProjectsStore((state) => state.projects);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+
+  // The tab's own owner, never the project that happens to be active: the
+  // directory resolves worktree sessions to their project and chats to the
+  // shared chats label. A directory that owns nothing shows its own name.
+  const projectLabel = React.useMemo(() => {
+    if (!sessionDirectory) return null;
+    if (isChatDirectoryPath(sessionDirectory)) return t('sessions.sidebar.activity.chatsTitle');
+    const owner = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, sessionDirectory);
+    if (owner) return owner.label?.trim() || formatDirectoryName(owner.path, homeDirectory);
+    return formatDirectoryName(sessionDirectory, homeDirectory);
+  }, [availableWorktreesByProject, homeDirectory, projects, sessionDirectory, t]);
 
   // Session state for the dot and the hover tooltip.
   const sessionStatus = useGlobalSessionStatus(tab.id);
-  const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
+  const isAiRenaming = useIsSessionAiRenamePending(tab.id, sessionDirectory);
   const isStreaming = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const unseenCount = useSessionUnseenCount(tab.id);
   const showUnread = unseenCount > 0 && !isActive && !isStreaming;
@@ -142,16 +167,28 @@ const SessionTabItem: React.FC<{
         onOpenChange={setContextMenuOpen}
         onOpenChangeComplete={(open) => onMenuOpenChangeComplete?.(open)}
       >
-        <ContextMenu.Trigger
+        {/* The tooltip wraps the context-menu trigger instead of the pill
+            carrying a second trigger of its own: the pill must stay the render
+            target of `ContextMenu.Trigger`, and it already contains the menu
+            and close buttons, so an extra nested <button> would break them.
+            The trigger props reach the pill through the render callback, and
+            the handlers the tooltip adds are merged into the ones below. */}
+        <Tooltip disabled={tooltipDisabled}>
+          <TooltipTrigger asChild>
+            <ContextMenu.Trigger
               render={(triggerProps) => (
                 <div
                   {...triggerProps}
                   role="tab"
                   aria-selected={isActive}
                   tabIndex={isActive ? undefined : 0}
-                  onClick={isActive ? undefined : () => onSelect(tab)}
-                  onKeyDown={isActive ? undefined : (event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
+                  onClick={(event) => {
+                    triggerProps.onClick?.(event);
+                    if (!isActive) onSelect(tab);
+                  }}
+                  onKeyDown={(event) => {
+                    triggerProps.onKeyDown?.(event);
+                    if (!isActive && (event.key === 'Enter' || event.key === ' ')) {
                       event.preventDefault();
                       onSelect(tab);
                     }
@@ -256,7 +293,20 @@ const SessionTabItem: React.FC<{
                   ) : null}
                 </div>
               )}
-        />
+            />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6} className="max-w-xs text-left">
+            <div className="flex min-w-0 flex-col gap-1 text-left">
+              <span className="line-clamp-2 break-words font-medium text-foreground">{title}</span>
+              {projectLabel ? (
+                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                  <Icon name="folder" className="h-3 w-3 flex-shrink-0" />
+                  <span className="min-w-0 truncate">{projectLabel}</span>
+                </span>
+              ) : null}
+            </div>
+          </TooltipContent>
+        </Tooltip>
         <ContextMenu.Portal>
           <ContextMenu.Positioner className="app-region-no-drag z-50">
             <ContextMenu.Popup
