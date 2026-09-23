@@ -33,8 +33,10 @@ proceeds asynchronously, so shell startup files run while the window comes up.
 Startup callers share one probe and await its result before reading
 shell-provided server flags or importing the backend. The probe tries
 interactive login, then login-only on failure, with a five-second timeout per
-attempt. Failure preserves the inherited process environment. Confirmed quit
-cancels an in-flight probe and waits for its process to exit.
+attempt. Text that shell startup files print to stdout before the environment
+is discarded, so a banner never fuses with the first variable. Failure
+preserves the inherited process environment. Confirmed quit cancels an
+in-flight probe and waits for its process to exit.
 
 `bun run profile:startup` measures a packaged build's launch in an isolated
 profile; see `scripts/perf/DOCUMENTATION.md`.
