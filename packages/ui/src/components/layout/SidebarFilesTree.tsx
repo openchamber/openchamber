@@ -50,6 +50,7 @@ import { notifyFileContentInvalidated } from '@/lib/fileContentInvalidation';
 import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { recordFileTreeDragStart, shouldTreatFileTreeDragEndAsClick } from './fileTreeDragClick';
+import { useFileTreeReveal } from './useFileTreeReveal';
 
 type FileNode = {
   name: string;
@@ -443,6 +444,9 @@ const FileRow: React.FC<FileRowProps> = ({
       )}>
       <button
         type="button"
+        // Read by fileTreeReveal to scroll this row into view when the editor
+        // switches to it; keep in sync with the attribute its selector builds.
+        data-tree-path={node.path}
         onClick={handleInteraction}
         onContextMenu={handleContextMenu}
         draggable
@@ -570,6 +574,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   const uploadingRef = React.useRef(false);
   const rootRef = React.useRef(root);
   rootRef.current = root;
+  const treeListRef = React.useRef<HTMLUListElement | null>(null);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
@@ -655,6 +660,23 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
   const collapseAllExpandedPaths = useFilesViewTabsStore((state) => state.collapseAllExpandedPaths);
+  // The file the editor beside the tree is currently showing. A primitive so
+  // the selector never needs a shallow compare; non-file tabs (diff, plan,
+  // terminal, …) resolve to null and leave the tree selection alone.
+  const activeContextFilePath = useUIStore((state) => {
+    if (!root) return null;
+    const panel = state.contextPanelByDirectory[root];
+    const activeTabId = panel?.activeTabId;
+    if (!panel || !activeTabId) return null;
+    const activeTab = panel.tabs.find((tab) => tab.id === activeTabId);
+    if (!activeTab || activeTab.mode !== 'file') return null;
+    return activeTab.targetPath || null;
+  });
+  const normalizedActiveFilePath = React.useMemo(
+    () => (activeContextFilePath ? normalizePath(activeContextFilePath) : null),
+    [activeContextFilePath],
+  );
+  const normalizedRoot = React.useMemo(() => (root ? normalizePath(root) : null), [root]);
   const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
   const openContextFilePaths = React.useMemo(() => new Set(
     contextTabs
@@ -1018,6 +1040,21 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
       await loadDirectory(normalized);
     }
   }, [loadDirectory, root, toggleExpandedPath]);
+
+  // Follow the editor: scroll to the file the active tab is showing (#3814).
+  // Its row is already selected and its directories already expanded, but the
+  // row is never scrolled to, so in a large repository the open file cannot be
+  // found in the tree.
+  useFileTreeReveal({
+    root: normalizedRoot,
+    activeFilePath: normalizedActiveFilePath,
+    enabled: visible,
+    searchActive: searchQuery.trim().length > 0,
+    listRef: treeListRef,
+    childrenByDir,
+    expandedPaths,
+    searchResultCount: searchResults.length,
+  });
 
   const uploadDroppedFiles = React.useCallback(async (
     directory: string,
@@ -1422,7 +1459,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
           onDragLeave={handleRootDragLeave}
           onDrop={handleRootDrop}
         >
-        <ul className="flex flex-col">
+        <ul ref={treeListRef} className="flex flex-col">
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
               <Icon name="loader-4" className="h-4 w-4 animate-spin" />
