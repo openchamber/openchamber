@@ -349,7 +349,6 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
 };
 
 const TABLE_COLUMN_MIN_WIDTH = 120;
-const TABLE_COLUMN_MAX_WIDTH = 320;
 const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
 
 const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
@@ -359,7 +358,7 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex w-fit max-w-full flex-col space-y-2';
+    wrapper.className = 'group my-4 flex w-full max-w-full flex-col space-y-2';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
 
     const toolbar = document.createElement('div');
@@ -402,10 +401,10 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     lastBodyRow?.classList.remove('border-b');
     lastBodyRow?.classList.add('border-0');
     for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
+      th.classList.add('min-w-[120px]', 'whitespace-normal', 'break-words', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
     }
     for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
+      td.classList.add('min-w-[120px]', 'whitespace-normal', 'break-words', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
     }
 
     scroll.appendChild(table);
@@ -479,9 +478,9 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
   root.appendChild(measurementRoot);
   const plans = probes.map(({ table, columnProbes }) => ({
     table,
-    widths: columnProbes.map((probe) => Math.min(
-      TABLE_COLUMN_MAX_WIDTH,
-      Math.max(TABLE_COLUMN_MIN_WIDTH, Math.ceil(probe.getBoundingClientRect().width)),
+    widths: columnProbes.map((probe) => Math.max(
+      TABLE_COLUMN_MIN_WIDTH,
+      Math.ceil(probe.getBoundingClientRect().width),
     )),
   }));
   measurementRoot.remove();
@@ -504,7 +503,9 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
     )) ?? null;
     table.insertBefore(colgroup, firstSection);
     table.style.tableLayout = 'fixed';
-    table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
+    // Fill leftover message width; keep the unclamped content width as a floor so overflow still scrolls.
+    table.style.width = '100%';
+    table.style.minWidth = `${widths.reduce((total, width) => total + width, 0)}px`;
     table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
   }
 };
