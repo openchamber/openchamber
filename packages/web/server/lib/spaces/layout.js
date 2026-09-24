@@ -103,8 +103,9 @@ export const IMAGE_TIMEOUT = '/usr/bin/timeout';
 export const IMAGE_ONLY_PATH = `PATH=${IMAGE_PATH};`;
 
 /**
- * The environment of a space. The password of the server inside and
- * OPENCODE_AUTH_CONTENT never go here: container env is readable through `inspect`.
+ * The environment of a space. Neither the password of the server inside nor any credential ever
+ * goes here: container env is readable through `inspect`, and the hardening check allows no
+ * variable beyond these and the base image's own.
  */
 export const SPACE_ENVIRONMENT = Object.freeze({
   HOME: SPACE_HOME,

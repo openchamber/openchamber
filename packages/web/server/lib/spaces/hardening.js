@@ -44,8 +44,19 @@ const SETUP_MEMORY_BYTES = 128 * 1024 * 1024;
 // Measured: the cache of one fill is 444 MB.
 const FILLER_MEMORY_BYTES = 2 * 1024 * 1024 * 1024;
 const FILLER_TMPFS_OPTIONS = 'rw,exec,nosuid,size=1g';
-// Variables that would put a secret where `docker inspect` shows it.
-const FORBIDDEN_ENVIRONMENT = ['OPENCHAMBER_UI_PASSWORD', 'OPENCODE_AUTH_CONTENT'];
+// The container environment is an allowlist. Anything in it is readable through `docker inspect`
+// and by every process inside, and OpenCode 2 turns some variables into a login: a provider key
+// under one of its catalog's names, or a key inside OPENCODE_CONFIG_CONTENT. So a container may
+// carry the variables we set and the base image's own, and nothing else. The server password is
+// named on its own as well, so its message stays specific.
+const FORBIDDEN_ENVIRONMENT = ['OPENCHAMBER_UI_PASSWORD'];
+// The variables the pinned base image sets itself. Docker copies them into every container made
+// from it. Read on 2026-09-24 with
+// `docker image inspect <SPACE_BASE_IMAGE> --format '{{json .Config.Env}}'`, which answered
+// PATH, NODE_VERSION=22.23.2 and YARN_VERSION=1.22.22. Read them again when the digest changes.
+const BASE_IMAGE_ENVIRONMENT_NAMES = ['PATH', 'NODE_VERSION', 'YARN_VERSION'];
+const SPACE_ENVIRONMENT_NAMES = new Set([...Object.keys(SPACE_ENVIRONMENT), ...BASE_IMAGE_ENVIRONMENT_NAMES]);
+const GATEKEEPER_ENVIRONMENT_NAMES = new Set([...Object.keys(GATEKEEPER_ENVIRONMENT), ...BASE_IMAGE_ENVIRONMENT_NAMES]);
 
 // Container output lands in a file on the Docker host. One 10 MB file, no rotation copies.
 // The `local` driver refuses max-file=1 unless compression is off.
@@ -265,7 +276,7 @@ const mentionsRuntimeSocket = (text) => String(text ?? '').includes('docker.sock
  * the tmpfs, the network the container must run on, and which mounts it may have, which
  * `mountViolations(mounts)` answers.
  */
-function findCommonViolations({ container, tmpfsOptions, networkMode, mountViolations }) {
+function findCommonViolations({ container, tmpfsOptions, networkMode, mountViolations, allowedEnvironment }) {
   const violations = [];
   const violate = (check, message) => violations.push({ check, message });
 
@@ -273,8 +284,11 @@ function findCommonViolations({ container, tmpfsOptions, networkMode, mountViola
   const host = container?.HostConfig ?? {};
   const mounts = container?.Mounts ?? [];
 
-  const secretVariables = (config.Env ?? []).map((entry) => String(entry).split('=')[0]).filter((name) => FORBIDDEN_ENVIRONMENT.includes(name));
+  const variableNames = (config.Env ?? []).map((entry) => String(entry).split('=')[0]);
+  const secretVariables = variableNames.filter((name) => FORBIDDEN_ENVIRONMENT.includes(name));
   if (secretVariables.length > 0) violate('environment', `The container environment holds a secret: ${secretVariables.join(', ')}`);
+  const unexpectedVariables = variableNames.filter((name) => !FORBIDDEN_ENVIRONMENT.includes(name) && !allowedEnvironment.has(name));
+  if (unexpectedVariables.length > 0) violate('environment', `The container environment holds variables nobody set for it: ${unexpectedVariables.join(', ')}`);
   if (config.User !== SPACE_USER) violate('user', `Runs as '${config.User ?? ''}', expected ${SPACE_USER}`);
   if (host.ReadonlyRootfs !== true) violate('read_only', 'The root filesystem is writable');
   if (host.Privileged !== false) violate('privileged', 'The container is privileged');
@@ -374,6 +388,7 @@ export function findHardeningViolations({ spaceId, owner, container, network, to
     tmpfsOptions: TMPFS_OPTIONS,
     networkMode: networkName,
     mountViolations: (mounts) => findSpaceMountViolations({ mounts, prefix, owner, toolsVolume }),
+    allowedEnvironment: SPACE_ENVIRONMENT_NAMES,
   });
   const violate = (check, message) => violations.push({ check, message });
 
@@ -427,6 +442,7 @@ export function findGatekeeperHardeningViolations({ spaceId, owner, container, o
       check: 'mounts',
       message: `The gatekeeper has ${mounts.length} mount(s) and must have none: ${mounts.map((mount) => mount.Destination).join(', ')}`,
     }]),
+    allowedEnvironment: GATEKEEPER_ENVIRONMENT_NAMES,
   });
   const violate = (check, message) => violations.push({ check, message });
 
