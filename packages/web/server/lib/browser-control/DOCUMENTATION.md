@@ -55,6 +55,10 @@ itself; it can only ask and wait.
   it can drive a page by opening its event stream with `browser=1`, which only
   a Chromium host does; the flag lives and dies with that connection, so there
   is no setting to enable and no restart to remember.
+- A successful `browser.open` result states `drivable`: whether the client that
+  opened the page can also drive it. The client knows its own host and the
+  server cannot identify the claimer, so the answer is per-claimer and never
+  inferred from configuration.
 - `emitRequest` counts only clients that can serve the action. `browser.open`
   needs any client, because opening a tab is what creates a view; every other
   action needs a declared-capable one.
