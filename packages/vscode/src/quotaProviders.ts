@@ -784,7 +784,7 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('zhipuai-coding-plan');
   }
 
-  const kimiAuth = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi']));
+  const kimiAuth = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi', 'kimi-code-plan-global']));
   if (kimiAuth && ((kimiAuth as Record<string, unknown>).key || (kimiAuth as Record<string, unknown>).token)) {
     configured.add('kimi-for-coding');
   }
@@ -1628,7 +1628,7 @@ const computeKimiUsedPercent = (
 
 const fetchKimiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi'])) as Record<string, unknown> | null;
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi', 'kimi-code-plan-global'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
   if (!apiKey) {
