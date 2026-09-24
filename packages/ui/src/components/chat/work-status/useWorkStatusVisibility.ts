@@ -9,18 +9,10 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
  */
 export const WORK_STATUS_PANEL_WIDTH = 300;
 
-/**
- * Minimum width the message column must keep for itself. Below this the panel
- * yields — a squeezed transcript costs more than the status it displaces.
- */
-const WORK_STATUS_MIN_CHAT_WIDTH = 560;
-
-/** The card's own horizontal margins (`ml-2` + `mr-4`). */
-const WORK_STATUS_PANEL_GUTTER = 8 + 16;
-
-/** Row width below which the panel gives its space back to the transcript. */
-export const WORK_STATUS_REQUIRED_ROW_WIDTH =
-  WORK_STATUS_PANEL_WIDTH + WORK_STATUS_PANEL_GUTTER + WORK_STATUS_MIN_CHAT_WIDTH;
+/** Minimum transcript width kept visible beside the floating panel. */
+const WORK_STATUS_MIN_CHAT_WIDTH = 700;
+const WORK_STATUS_PANEL_GAP = 24;
+export const WORK_STATUS_REQUIRED_CHAT_WIDTH = WORK_STATUS_PANEL_WIDTH + WORK_STATUS_PANEL_GAP + WORK_STATUS_MIN_CHAT_WIDTH;
 
 type Options = {
   isMobile: boolean;
@@ -28,28 +20,24 @@ type Options = {
 };
 
 type Result = {
-  /** Layout can host the panel inline, regardless of the user's switch. */
+  /** The chat column can host the overlay, regardless of the user's switch. */
   fits: boolean;
   /**
-   * Attach to the flex row that contains the chat column and the panel.
+   * Attach to the outer chat row so the host can be measured independently.
    *
    * A callback ref, not an object ref: an object ref gives no signal when the
-   * node attaches, so a measuring effect that reads `.current` would silently
-   * observe nothing whenever the row mounts after the effect first ran, and
-   * would only recover on the next unrelated dependency change.
+   * node attaches, so the host would not become ready when it mounts late.
    */
   rowRef: (node: HTMLDivElement | null) => void;
   visible: boolean;
 };
 
 /**
- * Decides whether the work-status panel may occupy space inside the chat.
+ * Decides whether the work-status panel may appear inside the chat.
  *
- * The width test measures the ROW (chat column + panel), never the chat column
- * alone. The chat column's width is an output of this decision: hiding the
- * panel widens it, which would re-satisfy a chat-width test and re-show the
- * panel, oscillating forever. The row width is independent of the panel, so it
- * is the only stable input.
+ * The panel is an overlay and never occupies flex space. The measured chat
+ * column provides a stable width guard so the overlay does not cover the
+ * transcript in a narrow desktop window.
  */
 export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result => {
   const [rowNode, setRowNode] = React.useState<HTMLDivElement | null>(null);
@@ -87,25 +75,15 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
   const panelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
 
   // Split from the switch: a narrow chat is a layout fact, and the header needs
-  // it to offer the panel as an overlay instead of pretending it is off.
+  // it to report that the overlay is not currently visible.
   const layoutAllows = !isMobile && !isVSCode && !contextPanelOpen;
 
-  // Measures the chat AREA — the container holding the chat and the context
-  // panel together — not the chat row inside it.
-  //
-  // The row is what the context panel squeezes, and it squeezes it over a
-  // 200ms animation. Measuring the row therefore reported a width that was
-  // still catching up while the context panel collapsed, so this panel only
-  // reappeared once that number crossed the threshold: the chat widened first
-  // and narrowed again afterwards. The chat area's width does not move when
-  // the context panel opens, so the reading is correct the instant it closes.
-  //
-  // It is also the stable input the oscillation argument needs: this panel's
-  // own visibility cannot change the width being measured.
+  // Measure the stable chat column, not a virtualized message row. The latter
+  // can be replaced while scrolling and must not change panel visibility.
   React.useEffect(() => {
     if (!rowNode || typeof ResizeObserver === 'undefined') return undefined;
 
-    const measured = rowNode.closest<HTMLElement>('[data-chat-area]') ?? rowNode;
+    const measured = rowNode.querySelector<HTMLElement>('[data-composer-bound]') ?? rowNode;
     setRowWidth(measured.getBoundingClientRect().width);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -116,7 +94,7 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
     return () => observer.disconnect();
   }, [rowNode]);
 
-  const fits = layoutAllows && rowWidth !== null && rowWidth >= WORK_STATUS_REQUIRED_ROW_WIDTH;
+  const fits = layoutAllows && rowWidth !== null && rowWidth >= WORK_STATUS_REQUIRED_CHAT_WIDTH;
   const visible = panelEnabled && fits;
 
   return { rowRef, visible, fits };

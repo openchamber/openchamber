@@ -818,14 +818,8 @@ interface UIStore {
    * reads it to stop repeating what the panel already shows.
    */
   workStatusPanelVisible: boolean;
-  /** Layout can host the panel inline. Transient, like the one above. */
+  /** The chat layout host has attached. Transient, like the one above. */
   workStatusPanelFits: boolean;
-  /**
-   * Shown over the chat because it does not fit beside it. Transient and never
-   * persisted: it is a response to the current window, not a preference, and
-   * the panel returns to its place as soon as there is room.
-   */
-  workStatusOverlayOpen: boolean;
   /**
    * Sections the user switched off. Hidden rather than visible ones are
    * stored, so a section added later appears without touching saved settings.
@@ -1053,7 +1047,6 @@ interface UIStore {
   setWorkStatusPanelEnabled: (enabled: boolean) => void;
   setWorkStatusPanelVisible: (visible: boolean) => void;
   setWorkStatusPanelFits: (fits: boolean) => void;
-  setWorkStatusOverlayOpen: (open: boolean) => void;
   setWorkStatusSectionVisible: (sectionId: string, visible: boolean) => void;
   setWorkStatusHiddenSections: (sectionIds: string[]) => void;
   setWorkStatusSectionOrder: (sectionIds: readonly string[]) => void;
@@ -1248,7 +1241,6 @@ export const useUIStore = create<UIStore>()(
         workStatusPanelEnabled: true,
         workStatusPanelVisible: false,
         workStatusPanelFits: false,
-        workStatusOverlayOpen: false,
         workStatusHiddenSections: [],
         workStatusSectionOrder: sanitizeWorkStatusSectionOrder([]),
         workStatusHiddenSectionsExplicit: false,
@@ -1878,16 +1870,8 @@ export const useUIStore = create<UIStore>()(
         setWorkStatusPanelFits: (fits) => {
           set((state) => {
             if (state.workStatusPanelFits === fits) return state;
-            // Room again: the panel goes back to its place, so an overlay left
-            // open would duplicate it.
-            return fits
-              ? { workStatusPanelFits: true, workStatusOverlayOpen: false }
-              : { workStatusPanelFits: false };
+            return { workStatusPanelFits: fits };
           });
-        },
-
-        setWorkStatusOverlayOpen: (open) => {
-          set((state) => (state.workStatusOverlayOpen === open ? state : { workStatusOverlayOpen: open }));
         },
 
         setWorkStatusSectionVisible: (sectionId, visible) => {
