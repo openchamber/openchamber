@@ -1905,6 +1905,7 @@ export const dict = {
   'session.githubPrPicker.actions.usePullRequest': 'Pull Request #{number} verwenden',
   'session.githubPrPicker.actions.openInGitHubAria': 'In GitHub öffnen',
   'session.githubPrPicker.actions.loadMore': 'Mehr laden',
+  'session.githubPrPicker.notice.incomplete': 'Diese Suche ist unvollständig. Einige passende Pull Requests konnten nicht vollständig geladen werden.',
   'session.newWorktree.title': 'Neuer Worktree',
   'session.newWorktree.mode.newBranch': 'Neue Branch',
   'session.newWorktree.mode.existingBranch': 'Vorhandener Branch',

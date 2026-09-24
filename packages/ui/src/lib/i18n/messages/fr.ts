@@ -1849,6 +1849,7 @@ export const dict = {
   'session.githubPrPicker.actions.usePullRequest': 'Utiliser la demande d\'extraction #{number}',
   'session.githubPrPicker.actions.openInGitHubAria': 'Ouvrir dans GitHub',
   'session.githubPrPicker.actions.loadMore': 'Charger plus',
+  'session.githubPrPicker.notice.incomplete': 'Cette recherche est incomplète. Certaines pull requests correspondantes n\'ont pas pu être chargées entièrement.',
   'session.newWorktree.title': 'Nouveau worktree',
   'session.newWorktree.mode.newBranch': 'Nouvelle branche',
   'session.newWorktree.mode.existingBranch': 'Branche existante',

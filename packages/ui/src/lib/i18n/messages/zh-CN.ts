@@ -2063,6 +2063,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubPrPicker.actions.usePullRequest': '使用 Pull Request #{number}',
   'session.githubPrPicker.actions.openInGitHubAria': '在 GitHub 中打开',
   'session.githubPrPicker.actions.loadMore': '加载更多',
+  'session.githubPrPicker.notice.incomplete': '这次搜索不完整。部分匹配的 Pull Request 未能完整加载。',
   'session.newWorktree.title': '新建工作树',
   'session.newWorktree.mode.newBranch': '新分支',
   'session.newWorktree.mode.existingBranch': '现有分支',

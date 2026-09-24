@@ -2075,6 +2075,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubPrPicker.actions.usePullRequest": "Використовувати PR #{number}",
   "session.githubPrPicker.actions.openInGitHubAria": "Відкрити в GitHub",
   "session.githubPrPicker.actions.loadMore": "Завантажити ще",
+  "session.githubPrPicker.notice.incomplete": "Цей пошук неповний. Деякі відповідні pull request не вдалося завантажити повністю.",
   "session.newWorktree.title": "Нове worktree",
   "session.newWorktree.mode.newBranch": "Нова гілка",
   "session.newWorktree.mode.existingBranch": "Наявна гілка",
