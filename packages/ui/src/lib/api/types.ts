@@ -308,6 +308,9 @@ export interface GitPullResult {
   files: string[];
   insertions: number;
   deletions: number;
+  /** A rebase pull stopped on conflicts and stays in progress. */
+  conflict?: boolean;
+  conflictFiles?: string[];
 }
 
 export interface GitPullOptions {

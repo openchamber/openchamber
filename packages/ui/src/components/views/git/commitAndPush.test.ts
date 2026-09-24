@@ -84,6 +84,58 @@ describe('pushCommittedChanges failures', () => {
     })).rejects.toThrow('commit or stash first');
   });
 
+  test('pulls a behind branch when only untracked files are present', async () => {
+    const calls: string[] = [];
+    const git: Pick<GitAPI, 'gitFetch' | 'getGitStatus' | 'gitPull' | 'gitPush'> = {
+      gitFetch: async () => ({ success: true }),
+      getGitStatus: async () => status({ behind: 1, files: [{ path: 'scratch.txt', index: '?', working_dir: '?' }] }),
+      gitPull: async () => {
+        calls.push('pull');
+        return { success: true, summary: { changes: 0, insertions: 0, deletions: 0 }, files: [], insertions: 0, deletions: 0 };
+      },
+      gitPush: async (directory: string) => {
+        calls.push('push');
+        return { success: true, pushed: [], repo: directory, ref: null };
+      },
+    };
+
+    await pushCommittedChanges({ git, directory: '/repo', remote: remote(), dirtyWorktreeError: 'dirty' });
+
+    expect(calls).toEqual(['pull', 'push']);
+  });
+
+  test('stops before pushing when the rebase pull hits conflicts', async () => {
+    const conflicts: string[][] = [];
+    let pulled = false;
+    const git: Pick<GitAPI, 'gitFetch' | 'getGitStatus' | 'gitPull' | 'gitPush'> = {
+      gitFetch: async () => ({ success: true }),
+      getGitStatus: async () => status({ ahead: 1, behind: 1 }),
+      gitPull: async () => ({
+        success: false,
+        summary: { changes: 0, insertions: 0, deletions: 0 },
+        files: [],
+        insertions: 0,
+        deletions: 0,
+        conflict: true,
+        conflictFiles: ['src/index.ts'],
+      }),
+      gitPush: async () => { throw new Error('unexpected push'); },
+    };
+
+    const result = await pushCommittedChanges({
+      git,
+      directory: '/repo',
+      remote: remote(),
+      dirtyWorktreeError: 'dirty',
+      onPulled: () => { pulled = true; },
+      onConflict: (files) => { conflicts.push(files); },
+    });
+
+    expect(result).toBeNull();
+    expect(pulled).toBe(false);
+    expect(conflicts).toEqual([['src/index.ts']]);
+  });
+
   test('does not report a push result when publishing fails', async () => {
     let reportedSuccess = false;
     const git: Pick<GitAPI, 'gitFetch' | 'getGitStatus' | 'gitPull' | 'gitPush'> = {

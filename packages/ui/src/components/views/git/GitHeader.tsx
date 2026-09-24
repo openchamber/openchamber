@@ -12,6 +12,7 @@ import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
+import { hasUncommittedTrackedChanges } from './changeStatus';
 import { NestedRepoPicker } from './NestedRepoPicker';
 import type {
   GitStatus,
@@ -35,6 +36,7 @@ interface GitHeaderProps {
   syncAction: SyncAction;
   remotes: GitRemote[];
   onFetch: (remote: GitRemote) => void;
+  onPull: (remote: GitRemote) => void;
   onSync: (remote: GitRemote) => void;
   onRemoveRemote: (remote: GitRemote) => void;
   removingRemoteName: string | null;
@@ -250,6 +252,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   syncAction,
   remotes,
   onFetch,
+  onPull,
   onSync,
   onRemoveRemote,
   removingRemoteName,
@@ -394,6 +397,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       syncAction={syncAction}
       remotes={remotes}
       onFetch={onFetch}
+      onPull={onPull}
       onSync={onSync}
       onRemoveRemote={onRemoveRemote}
       removingRemoteName={removingRemoteName}
@@ -403,7 +407,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       aheadCount={status.ahead}
       behindCount={status.behind}
       trackingRemoteName={status.tracking?.split('/')[0]}
-      hasUncommittedChanges={(status.files?.length ?? 0) > 0}
+      trackingBranch={status.tracking}
+      hasUncommittedChanges={hasUncommittedTrackedChanges(status.files)}
     />
   );
 
