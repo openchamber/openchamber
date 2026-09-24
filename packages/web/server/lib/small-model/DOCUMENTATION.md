@@ -11,6 +11,8 @@ The client sends a prompt. This server forwards it to OpenCode, which owns the
 credentials, the provider dispatch and the token refresh. Routes live under
 `/api/*` and are gated by the ui-auth middleware like every other runtime API.
 
+OpenCode 2.0.16 does not add `x-opencode-session` to its stateless generation request, and headers on `POST /api/experimental/generate` do not reach the provider. Managed OpenCode therefore loads `../opencode/opencode-go-session-plugin.js`. It supplies an opaque provider-level fallback; session requests override it with their real ID. External OpenCode processes need the corresponding upstream fix in [anomalyco/opencode#48358](https://github.com/anomalyco/opencode/pull/48358).
+
 ## Files
 
 - `client.js` — the connection to the running OpenCode. `server/index.js` wires

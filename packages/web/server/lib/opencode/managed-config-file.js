@@ -1,4 +1,5 @@
 import { appendManagedPlugin } from './managed-plugin-config.js';
+import { createOpenCodeGoSessionPluginRuntime } from './opencode-go-session-plugin.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -52,6 +53,7 @@ export const createManagedConfigRuntime = ({
   isAgentMemoryAvailable,
 }) => {
   const filePath = path.join(dataDir, MANAGED_CONFIG_FILE_NAME);
+  const openCodeGoSessionPluginRuntime = createOpenCodeGoSessionPluginRuntime({ fsPromises, path, dataDir });
 
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
@@ -72,9 +74,9 @@ export const createManagedConfigRuntime = ({
   };
 
   /**
-   * Materialize the plugins the current settings ask for and return their
-   * directories in load order. Directories exist on disk before the config
-   * file names them.
+   * Materialize the provider compatibility plugin and the plugins the current
+   * settings ask for, then return their directories in load order. Directories
+   * exist on disk before the config file names them.
    */
   const materializeEnabledPlugins = async () => {
     const settings = await Promise.resolve(readSettings()).catch(() => null);
@@ -83,7 +85,7 @@ export const createManagedConfigRuntime = ({
     const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
 
-    const directories = [];
+    const directories = [await openCodeGoSessionPluginRuntime.materializePlugin()];
     if (agentToolRuntime && (includeControl || includeWeb || includeMemory || includeNotify)) {
       directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeWeb, includeMemory, includeNotify }));
     }
