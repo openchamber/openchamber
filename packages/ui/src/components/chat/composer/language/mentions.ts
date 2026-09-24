@@ -124,12 +124,34 @@ export function classifyMention(
     return null;
 }
 
+/**
+ * A pasted build target or scoped npm package (`@servoy/public`,
+ * `@angular/core`) has the shape of a path — one segment, a `/`, one more
+ * segment — but names no local file. By the time a name reaches here the
+ * leading `@` has already been consumed as the mention boundary, so what
+ * remains is `scope/name`: two slash-separated segments with no extension and
+ * no deeper nesting. Real file mentions from that same paste almost always
+ * carry an extension (`@src/app.ts`) or more path depth. Skipping this shape
+ * keeps `ng build @servoy/public` as plain text instead of a phantom
+ * attachment that 400s the whole prompt (#3929). A picker-confirmed name
+ * still wins in `looksLikeFilePath`, so a deliberate `@scope/name` pick is
+ * unaffected.
+ */
+function looksLikeScopedPackage(name: string): boolean {
+    if (name.includes('\\') || name.includes('.')) return false;
+    const segments = name.split('/');
+    return segments.length === 2 && segments[0].length > 0 && segments[1].length > 0;
+}
+
 export function looksLikeFilePath(
     name: string,
     confirmedMentions: ReadonlySet<string>,
 ): boolean {
+    // A name the user confirmed through the picker, a drop, or a restored
+    // draft is a file regardless of shape.
+    if (confirmedMentions.has(name)) return true;
+    if (looksLikeScopedPackage(name)) return false;
     return name.includes('/')
         || name.includes('\\')
-        || name.includes('.')
-        || confirmedMentions.has(name);
+        || name.includes('.');
 }

@@ -129,6 +129,28 @@ describe('classifyMention', () => {
         expect(classifyMention('win\\path', classifier)).toBe('file');
     });
 
+    test('a scoped-package shape from a pasted log is not a file (#3929)', () => {
+        // `ng build @servoy/public`, `pnpm add @angular/core` — one segment, a
+        // slash, one more segment, no extension: a package/target, not a file.
+        expect(classifyMention('servoy/public', classifier)).toBeNull();
+        expect(classifyMention('angular/core', classifier)).toBeNull();
+    });
+
+    test('a scoped shape still classifies as a file when confirmed or extended', () => {
+        // A real extension or deeper nesting is a genuine path.
+        expect(classifyMention('servoy/public.ts', classifier)).toBe('file');
+        expect(classifyMention('scope/pkg/index', classifier)).toBe('file');
+        // A trailing slash names a directory (`@src/utils/`) and is a file
+        // reference, not a package: the empty final segment breaks the shape.
+        expect(classifyMention('src/utils/', classifier)).toBe('file');
+        // Picked deliberately through the composer, so honour it.
+        const confirmed = {
+            knownAgentNames: new Set<string>(),
+            confirmedMentions: new Set(['servoy/public']),
+        };
+        expect(classifyMention('servoy/public', confirmed)).toBe('file');
+    });
+
     test('a picker-confirmed extensionless name classifies as a file', () => {
         expect(classifyMention('NOTES', classifier)).toBe('file');
     });
@@ -152,7 +174,11 @@ describe('classifyMention', () => {
     });
 
     test('looksLikeFilePath is independent of the agent list', () => {
-        expect(looksLikeFilePath('a/b', new Set())).toBe(true);
+        // `a/b` is a bare two-segment shape (a scoped package), so it is not a
+        // path unless the user confirmed it.
+        expect(looksLikeFilePath('a/b', new Set())).toBe(false);
+        expect(looksLikeFilePath('a/b', new Set(['a/b']))).toBe(true);
+        expect(looksLikeFilePath('a/b.ts', new Set())).toBe(true);
         expect(looksLikeFilePath('plain', new Set())).toBe(false);
         expect(looksLikeFilePath('plain', new Set(['plain']))).toBe(true);
     });

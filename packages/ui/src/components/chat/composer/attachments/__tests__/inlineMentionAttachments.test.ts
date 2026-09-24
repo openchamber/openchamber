@@ -127,6 +127,26 @@ describe('filterMissingInlineAttachments', () => {
         expect(result.skippedNames).toEqual(['masha.conner']);
     });
 
+    test('drops a leaf that is absent even though its parent lists fine (#3929)', async () => {
+        const calls: string[] = [];
+        // `@servoy/public` resolves under an existing project root, so the
+        // parent lists without error — but the leaf is not there, so the
+        // phantom attachment must still be dropped rather than sent.
+        const phantom = inlineFile('1', '/repo/servoy/public', 'public');
+        const directoryLister: DirectoryLister = {
+            listLocalDirectory: async (directory: string) => {
+                calls.push(directory);
+                return [{ path: '/repo/servoy/existing.ts' }];
+            },
+        };
+
+        const result = await filterMissingInlineAttachments([phantom], directoryLister);
+
+        expect(result.sendable).toEqual([]);
+        expect(result.skippedNames).toEqual(['public']);
+        expect(calls).toEqual(['/repo/servoy']);
+    });
+
     test('matches directories and paths that differ only in case', async () => {
         const calls: string[] = [];
         const directory = inlineFile('1', '/repo/src/', 'src');
