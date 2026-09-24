@@ -15,7 +15,7 @@ type CapturedRequest = {
 }
 
 const requests: CapturedRequest[] = []
-const responses: Array<Response | Error | ((request: CapturedRequest) => Response | Error)> = []
+const responses: Array<Response | Error | ((request: CapturedRequest) => Response | Error | Promise<Response | Error>)> = []
 let runtimeKey = "test-runtime"
 
 const json = (value: unknown, status = 200) =>
@@ -32,7 +32,7 @@ const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
   }
   requests.push(request)
   const next = responses.shift()
-  const resolved = typeof next === "function" ? next(request) : next
+  const resolved = typeof next === "function" ? await next(request) : next
   if (resolved instanceof Error) throw resolved
   if (resolved === HANG) return hangUntilAborted(init?.signal ?? undefined)
   return resolved ?? json({})
@@ -152,6 +152,35 @@ test('a drive-root system-info fallback stays absolute', async () => {
     await opencodeClient.listAgents()
     expect(requests[0].url.pathname).toBe("/api/agent")
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
+  })
+
+  test("invalidating an agent list starts a new request without letting the old request clear it", async () => {
+    const wireAgent = (id: string) => ({
+      id,
+      name: id,
+      mode: "subagent",
+      request: { settings: {}, headers: {}, body: {} },
+      hidden: false,
+      permissions: [],
+    })
+    let releaseFirst: (response: Response) => void = () => undefined
+    const firstResponse = new Promise<Response>((resolve) => {
+      releaseFirst = resolve
+    })
+    responses.push(() => firstResponse)
+
+    const first = opencodeClient.listAgents("/repo/agents")
+    await Promise.resolve()
+    expect(requests).toHaveLength(1)
+
+    opencodeClient.invalidateAgentList("/repo/agents")
+    responses.push(json({ location: {}, data: [wireAgent("new-agent")] }))
+    const fresh = opencodeClient.listAgents("/repo/agents")
+    expect(requests).toHaveLength(2)
+
+    releaseFirst(json({ location: {}, data: [wireAgent("old-agent")] }))
+    expect((await first)[0]?.name).toBe("old-agent")
+    expect((await fresh)[0]?.name).toBe("new-agent")
   })
 })
 

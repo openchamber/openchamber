@@ -531,7 +531,7 @@ class OpencodeService {
     this.scopedClients.clear()
     this.listDirectoryInFlight.clear()
     this.providerCatalogInFlight.clear()
-    this.listAgentsInFlight.clear()
+    this.clearAgentListRequests()
     this.clearConfigCache()
     this.listDirectoryCache.clear()
   }
@@ -1601,6 +1601,17 @@ class OpencodeService {
     } finally {
       if (this.listAgentsInFlight.get(key) === request) this.listAgentsInFlight.delete(key)
     }
+  }
+
+  /** Retire a pre-change list so the next caller starts a fresh request. */
+  invalidateAgentList(directory?: string | null): void {
+    const effectiveDirectory = this.resolveDirectory(directory)
+    const key = effectiveDirectory ?? ""
+    this.listAgentsInFlight.delete(key)
+  }
+
+  clearAgentListRequests(): void {
+    this.listAgentsInFlight.clear()
   }
 
   async listCommands(directory?: string | null, signal?: AbortSignal): Promise<Command[]> {

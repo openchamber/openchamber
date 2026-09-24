@@ -111,6 +111,13 @@ client's config cache, otherwise the refresh would be answered from the copy
 cached seconds earlier. A re-read that returns an identical list keeps the
 objects already in the stores, so nothing re-renders.
 
+Catalog events retain the locations that raised them while the burst settles.
+They enter this path before directory-store routing, so an event is not lost
+when its location already has an open child store. The Settings agent store
+refreshes those locations together with the ambient project. The batch belongs
+to the runtime that received it and is discarded if the runtime changes before
+the debounce ends.
+
 **The model list.** OpenCode 2.0.8 removed the `catalog.updated` storm and
 replaced it with `provider.updated` and `model.updated`, which it publishes
 only when the list they name actually changed; `events.ts` translates them into
