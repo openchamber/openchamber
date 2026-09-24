@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
+import {
+  BUILT_IN_SKILL_LOCATION,
+  type DiscoveredSkill,
+  type SkillScope,
+  type SkillSource,
+} from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
 import {
@@ -68,8 +73,8 @@ const getProjectAncestors = (workingDirectory?: string): string[] => {
   return result;
 };
 
-const inferSkillScopeAndSourceFromLocation = (location: string, workingDirectory?: string): { scope: SkillScope; source: SkillSource } => {
-  const resolvedPath = path.resolve(location);
+const inferSkillScopeAndSourceFromPath = (skillPath: string, workingDirectory?: string): { scope: SkillScope; source: SkillSource } => {
+  const resolvedPath = path.resolve(skillPath);
   const source: SkillSource = resolvedPath.includes(`${path.sep}.agents${path.sep}skills${path.sep}`)
     ? 'agents'
     : resolvedPath.includes(`${path.sep}.claude${path.sep}skills${path.sep}`)
@@ -142,26 +147,26 @@ export const fetchOpenCodeSkillsFromApi = async (
     return skills
       .map((item) => {
         const name = typeof item?.name === 'string' ? item.name.trim() : '';
-        const location = typeof item?.location === 'string' ? item.location : '';
+        const skillPath = typeof item?.path === 'string' ? item.path : '';
         const description = typeof item?.description === 'string' ? item.description : '';
         const content = typeof item?.content === 'string' ? item.content : '';
-        if (!name || !location) {
+        if (!name || !skillPath) {
           return null;
         }
-        if (location === BUILT_IN_SKILL_LOCATION) {
+        if (skillPath === BUILT_IN_SKILL_LOCATION) {
           return {
             name,
-            path: location,
+            path: skillPath,
             scope: 'user',
             source: 'opencode',
             description,
             content,
           } as DiscoveredSkill;
         }
-        const inferred = inferSkillScopeAndSourceFromLocation(location, workingDirectory);
+        const inferred = inferSkillScopeAndSourceFromPath(skillPath, workingDirectory);
         return {
           name,
-          path: location,
+          path: skillPath,
           scope: inferred.scope,
           source: inferred.source,
           description,

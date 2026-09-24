@@ -151,26 +151,26 @@ export const registerSkillRoutes = (app, dependencies) => {
       return payload
         .map((item) => {
           const name = typeof item?.name === 'string' ? item.name.trim() : '';
-          const location = typeof item?.location === 'string' ? item.location : '';
+          const skillPath = typeof item?.path === 'string' ? item.path : '';
           const description = typeof item?.description === 'string' ? item.description : '';
           const content = typeof item?.content === 'string' ? item.content : '';
-          if (!name || !location) {
+          if (!name || !skillPath) {
             return null;
           }
-          if (location === '<built-in>') {
+          if (skillPath === '<built-in>') {
             return {
               name,
-              path: location,
+              path: skillPath,
               scope: SKILL_SCOPE.USER,
               source: 'opencode',
               description,
               content,
             };
           }
-          const inferred = inferSkillScopeAndSourceFromPath(location, workingDirectory);
+          const inferred = inferSkillScopeAndSourceFromPath(skillPath, workingDirectory);
           const skill = {
             name,
-            path: location,
+            path: skillPath,
             scope: inferred.scope,
             source: inferred.source,
             description,

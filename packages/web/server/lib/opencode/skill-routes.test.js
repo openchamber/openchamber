@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import fs from 'fs';
+import http from 'node:http';
 import os from 'os';
 import path from 'path';
 import { registerSkillRoutes } from './skill-routes.js';
@@ -28,7 +29,31 @@ const createTempProject = () => {
   return projectRoot;
 };
 
-const startSkillsApp = ({ projectRoot }) => {
+const startOpenCodeSkillFixture = (skills) => new Promise((resolve, reject) => {
+  const server = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url?.startsWith('/api/skill')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: skills }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  server.on('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    const { port } = server.address();
+    resolve({
+      port,
+      baseUrl: `http://127.0.0.1:${port}`,
+      close: () => new Promise((closeResolve, closeReject) => {
+        server.close((error) => (error ? closeReject(error) : closeResolve()));
+      }),
+    });
+  });
+});
+
+const startSkillsApp = ({ projectRoot, openCodeFixture = null }) => {
   const app = express();
   app.use(express.json());
 
@@ -51,9 +76,9 @@ const startSkillsApp = ({ projectRoot }) => {
     isUnsafeSkillRelativePath: () => false,
     refreshOpenCodeAfterConfigChange: async () => {},
     clientReloadDelayMs: 0,
-    buildOpenCodeUrl: () => 'http://127.0.0.1:9/',
+    buildOpenCodeUrl: () => `${openCodeFixture?.baseUrl ?? 'http://127.0.0.1:9'}/`,
     getOpenCodeAuthHeaders: () => ({}),
-    getOpenCodePort: () => 0,
+    getOpenCodePort: () => openCodeFixture?.port ?? 0,
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -93,16 +118,50 @@ describe('skill-routes directory soft fallback', () => {
   let projectRoot = null;
   /** @type {{ close: () => Promise<void> } | null} */
   let appHandle = null;
+  /** @type {{ close: () => Promise<void> } | null} */
+  let openCodeFixture = null;
 
   afterEach(async () => {
     if (appHandle) {
       await appHandle.close();
       appHandle = null;
     }
+    if (openCodeFixture) {
+      await openCodeFixture.close();
+      openCodeFixture = null;
+    }
     if (projectRoot) {
       fs.rmSync(projectRoot, { recursive: true, force: true });
       projectRoot = null;
     }
+  });
+
+  it('includes plugin skills from OpenCode skill.list path field in GET /api/config/skills', async () => {
+    const pluginSkillPath = '/home/user/.config/opencode/node_modules/superpowers/skills/brainstorming/SKILL.md';
+    openCodeFixture = await startOpenCodeSkillFixture([
+      {
+        name: 'brainstorming',
+        path: pluginSkillPath,
+        description: 'Creative work skill',
+      },
+      {
+        name: 'legacy-location-only',
+        location: '/home/user/.config/opencode/skills/legacy-location-only/SKILL.md',
+        description: 'Must not appear without path',
+      },
+    ]);
+
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({ projectRoot, openCodeFixture });
+
+    const listResponse = await fetch(`${appHandle.baseUrl}/api/config/skills`);
+    expect(listResponse.status).toBe(200);
+    const payload = await listResponse.json();
+    const pluginSkill = payload.skills.find((entry) => entry.name === 'brainstorming');
+    expect(pluginSkill).toBeTruthy();
+    expect(pluginSkill.path).toBe(pluginSkillPath);
+    expect(pluginSkill.description).toBe('Creative work skill');
+    expect(payload.skills.some((entry) => entry.name === 'legacy-location-only')).toBe(false);
   });
 
   it('lists repository-local .agents skills after create even when list omits directory', async () => {
