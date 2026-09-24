@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { getEventListeners } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { SpaceError } from './errors.js';
 import { killLiveTrees, killProcessTree, liveTreeCount, runCommand } from './run-command.js';
 
 const node = process.execPath;
@@ -394,3 +396,110 @@ setTimeout(() => process.exit(0), 200);
   }, 20_000);
 });
 
+
+// The caller stops a running child from outside, as code out does when the quarantine passes its
+// size cap. The rejection is the caller's own reason, whatever the child's exit looked like.
+describe('runCommand with an abort signal', () => {
+  const leftovers = [];
+  afterEach(() => {
+    for (const pid of leftovers.splice(0)) {
+      if (isRealPid(pid) && isAlive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
+  const abortListeners = (signal) => getEventListeners(signal, 'abort').length;
+  const stopReason = () => new SpaceError('stopped_by_caller', 'the caller stopped it');
+
+  it('starts nothing when the signal is already aborted, and rejects with its reason', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-abort-before-'));
+    const marker = path.join(directory, 'started');
+    try {
+      const reason = stopReason();
+      const error = await runCommand(node, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`], { killTree: true, signal: AbortSignal.abort(reason) }).catch((caught) => caught);
+      expect(error).toBe(reason);
+      // The control: the same command without the signal does start and leave its marker.
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(liveTreeCount()).toBe(0);
+      await runCommand(node, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`]);
+      expect(fs.existsSync(marker)).toBe(true);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // On Windows this runs the real `taskkill /T`, whose child exits with code 1 and no signal.
+  it('kills the whole tree while it runs, rejects with the reason once the child is gone, and forgets the tree', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-abort-during-'));
+    const pidFile = path.join(directory, 'pids.json');
+    try {
+      const controller = new AbortController();
+      const reason = stopReason();
+      const started = Date.now();
+      const running = runCommand(node, ['-e', parentOfSleeper(pidFile)], { killTree: true, timeoutMs: 60_000, signal: controller.signal }).catch((caught) => caught);
+      expect(await waitFor(() => fs.existsSync(pidFile) && fs.statSync(pidFile).size > 0)).toBe(true);
+      const pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      leftovers.push(pids.grandchild, pids.child);
+      expect(isAlive(pids.child) && isAlive(pids.grandchild)).toBe(true);
+      expect(abortListeners(controller.signal)).toBe(1);
+      controller.abort(reason);
+      expect(await running).toBe(reason);
+      expect(isAlive(pids.child)).toBe(false);
+      expect(await waitFor(() => !isAlive(pids.grandchild))).toBe(true);
+      expect(Date.now() - started).toBeLessThan(30_000);
+      expect(liveTreeCount()).toBe(0);
+      expect(abortListeners(controller.signal)).toBe(0);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('kills the child alone without killTree, and rejects with the reason', async () => {
+    const controller = new AbortController();
+    const reason = stopReason();
+    const running = runCommand(node, ['-e', 'process.stdout.write("up"); setInterval(() => {}, 1000)'], { timeoutMs: 60_000, signal: controller.signal }).catch((caught) => caught);
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    controller.abort(reason);
+    expect(await running).toBe(reason);
+    expect(abortListeners(controller.signal)).toBe(0);
+  });
+
+  it('changes nothing about a run that already closed, and leaves no listener behind', async () => {
+    const controller = new AbortController();
+    expect(await runCommand(node, ['-e', 'process.stdout.write("ok")'], { killTree: true, signal: controller.signal })).toEqual({ code: 0, stdout: 'ok', stderr: '' });
+    expect(abortListeners(controller.signal)).toBe(0);
+    controller.abort(stopReason());
+    expect(liveTreeCount()).toBe(0);
+  });
+
+  // The timeout came first: its kill is the only one, and a late abort neither kills again nor
+  // replaces the error.
+  it('keeps the timeout as the error when the abort comes after it', async () => {
+    const controller = new AbortController();
+    const running = runCommand(node, ['-e', 'setInterval(() => {}, 1000)'], { killTree: true, timeoutMs: 500, signal: controller.signal }).catch((caught) => caught);
+    await new Promise((resolve) => { setTimeout(resolve, 700); });
+    expect(abortListeners(controller.signal)).toBe(0);
+    controller.abort(stopReason());
+    expect(await running).toMatchObject({ code: 'command_timeout' });
+    expect(liveTreeCount()).toBe(0);
+  });
+
+  // Whatever the caller aborts with, the rejection is a SpaceError: a string, null or nothing at all
+  // would otherwise reach a caller that catches SpaceErrors.
+  it.each([['a string', 'stopped'], ['null', null], ['nothing', undefined]])('rejects with a SpaceError when the reason is %s', async (_, reason) => {
+    const controller = new AbortController();
+    const running = runCommand(node, ['-e', 'setInterval(() => {}, 1000)'], { killTree: true, timeoutMs: 60_000, signal: controller.signal }).catch((caught) => caught);
+    await new Promise((resolve) => { setTimeout(resolve, 200); });
+    if (reason === undefined) controller.abort(); else controller.abort(reason);
+    const error = await running;
+    expect(error).toBeInstanceOf(SpaceError);
+    expect(error).toMatchObject({ code: 'command_aborted' });
+    expect(await runCommand(node, ['-e', ''], { signal: AbortSignal.abort(reason) }).catch((caught) => caught)).toMatchObject({ code: 'command_aborted' });
+  });
+
+  it('leaves no listener after a spawn failure', async () => {
+    const controller = new AbortController();
+    await expect(runCommand('/nonexistent/openchamber-no-such-binary', [], { killTree: true, signal: controller.signal })).rejects.toMatchObject({ code: 'command_spawn_failed' });
+    expect(abortListeners(controller.signal)).toBe(0);
+    expect(liveTreeCount()).toBe(0);
+  });
+});

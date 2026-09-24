@@ -70,6 +70,11 @@ const trackTree = (child) => {
   liveTrees.add(child);
 };
 
+/** What an abort rejects with: the caller's own SpaceError, or one of ours for any other reason. */
+const abortReason = (signal, file, args) => (signal.reason instanceof SpaceError
+  ? signal.reason
+  : new SpaceError('command_aborted', `${file} ${args[0] ?? ''} was stopped by its caller`));
+
 /**
  * Runs one executable with an argument array and resolves `{ code, stdout, stderr }`
  * for any exit code. The executable is spawned directly, never through a shell.
@@ -88,6 +93,12 @@ const trackTree = (child) => {
  * `options.killWaitMs` changes that bound, for the tests. While a `killTree` child runs, an exit of
  * this process kills its tree too, see `liveTrees`.
  *
+ * `options.signal` is an `AbortSignal` that lets the caller stop the child from outside: the child is
+ * killed as a timeout kills it, and the rejection is the signal's reason when that reason is a
+ * SpaceError, and `command_aborted` otherwise, so every rejection of this function is a SpaceError.
+ * The caller then knows that it stopped the child, which the exit code cannot tell: on Windows a tree
+ * ended by `taskkill` exits with code 1, not a signal. A signal that is already aborted starts nothing.
+ *
  * Rejects with a SpaceError when the process cannot start (`command_spawn_failed`),
  * runs past `timeoutMs` (`command_timeout`), prints more than `maxOutputBytes`
  * (`command_output_too_large`), or dies from a signal (`command_killed`). The child
@@ -99,8 +110,13 @@ export function runCommand(file, args, options = {}) {
   const stdin = options.stdin ?? '';
   const killTree = options.killTree === true;
   const killWaitMs = options.killWaitMs ?? KILL_WAIT_MS;
+  const abortSignal = options.signal;
 
   return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(abortReason(abortSignal, file, args));
+      return;
+    }
     let child;
     try {
       child = spawn(file, args, {
@@ -139,6 +155,7 @@ export function runCommand(file, args, options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      abortSignal?.removeEventListener('abort', stop);
       if (!killTree) {
         child.kill('SIGKILL');
         reject(error);
@@ -150,6 +167,8 @@ export function runCommand(file, args, options = {}) {
     const timer = setTimeout(() => {
       fail(new SpaceError('command_timeout', `${file} ${args[0] ?? ''} did not finish within ${timeoutMs} ms and was stopped`));
     }, timeoutMs);
+    const stop = () => fail(abortReason(abortSignal, file, args));
+    abortSignal?.addEventListener('abort', stop, { once: true });
 
     const capture = (chunks) => (chunk) => {
       capturedBytes += chunk.length;
@@ -178,6 +197,7 @@ export function runCommand(file, args, options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      abortSignal?.removeEventListener('abort', stop);
       if (code === null) {
         reject(new SpaceError('command_killed', `${file} ${args[0] ?? ''} was stopped by signal ${signal}`));
         return;

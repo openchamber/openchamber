@@ -101,18 +101,18 @@ const subcommandOf = (args) => {
  * `run(directory, args, options)` resolves `{ code, stdout, stderr }` for any exit code, and
  * `output(directory, args, options)` resolves stdout and rejects with `git_command_failed` for a
  * non-zero one. Both run `git -C <directory> ...` through `runCommand`, with an argv and no shell.
- * `options.env` adds variables for one call, such as `GIT_INDEX_FILE`. `options.killTree` goes to
- * `runCommand` unchanged.
+ * `options.env` adds variables for one call, such as `GIT_INDEX_FILE`. `options.killTree` and
+ * `options.signal` go to `runCommand` unchanged.
  *
  * `gitPath` is the git program, `environment` the environment to start from.
  */
 export function createHostGit({ runCommand, gitPath = 'git', environment = process.env }) {
   const baseEnvironment = hostGitEnvironment(environment);
 
-  const run = (directory, args, { env = {}, stdin, timeoutMs = QUERY_TIMEOUT_MS, maxOutputBytes = QUERY_MAX_OUTPUT_BYTES, killTree = false } = {}) => runCommand(
+  const run = (directory, args, { env = {}, stdin, timeoutMs = QUERY_TIMEOUT_MS, maxOutputBytes = QUERY_MAX_OUTPUT_BYTES, killTree = false, signal } = {}) => runCommand(
     gitPath,
     ['-C', directory, ...args],
-    { env: { ...baseEnvironment, ...env }, stdin, timeoutMs, maxOutputBytes, killTree },
+    { env: { ...baseEnvironment, ...env }, stdin, timeoutMs, maxOutputBytes, killTree, signal },
   );
 
   const output = async (directory, args, options) => {

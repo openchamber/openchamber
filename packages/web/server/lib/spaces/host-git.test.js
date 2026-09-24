@@ -86,7 +86,8 @@ describe('createHostGit', () => {
   it('runs git -C with an argv, the cleaned environment and the call options', async () => {
     const { calls, runCommand } = recordingRunner({ code: 0, stdout: 'out\n', stderr: '' });
     const git = createHostGit({ runCommand, gitPath: '/opt/git/bin/git', environment: { PATH: '/usr/bin', GIT_DIR: '/elsewhere' } });
-    expect(await git.output('/repo with space', ['write-tree'], { env: { GIT_INDEX_FILE: '/tmp/index' }, killTree: true })).toBe('out\n');
+    const { signal } = new AbortController();
+    expect(await git.output('/repo with space', ['write-tree'], { env: { GIT_INDEX_FILE: '/tmp/index' }, killTree: true, signal })).toBe('out\n');
     expect(calls).toEqual([{
       file: '/opt/git/bin/git',
       args: ['-C', '/repo with space', 'write-tree'],
@@ -96,6 +97,7 @@ describe('createHostGit', () => {
         timeoutMs: 120_000,
         maxOutputBytes: 4 * 1024 * 1024,
         killTree: true,
+        signal,
       },
     }]);
   });
