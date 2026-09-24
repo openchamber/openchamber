@@ -9,7 +9,8 @@
  * that needs to know where mentions are now scans with `scanMentions` and
  * decides what they are with `classifyMention`.
  *
- * A mention is `@` at a token boundary followed by non-whitespace. The visible
+ * A mention is `@` at a token boundary followed by a confirmed path or
+ * non-whitespace. Confirmed paths can contain spaces. The visible
  * span (`start`..`end`) covers the raw token including any punctuation that
  * merely brushes against it; `name` is that token cleaned of wrapping
  * punctuation, and is what gets matched against agents and file paths.
@@ -67,7 +68,7 @@ export function cleanMentionName(rawName: string): string {
  * Find every `@mention` in `text`. Tokens whose name cleans away to nothing
  * (a bare `@`, `@...`) are skipped — there is nothing to reference.
  */
-export function scanMentions(text: string): MentionToken[] {
+export function scanMentions(text: string, confirmedMentions?: ReadonlySet<string>): MentionToken[] {
     if (!text || !text.includes('@')) return [];
 
     const tokens: MentionToken[] = [];
@@ -77,6 +78,21 @@ export function scanMentions(text: string): MentionToken[] {
     while ((match = MENTION_SCAN.exec(text)) !== null) {
         const start = match.index;
         if (!isMentionBoundary(text, start)) continue;
+
+        let confirmedToken: MentionToken | undefined;
+        for (const path of confirmedMentions ?? []) {
+            if (!path || path.length <= (confirmedToken?.name.length ?? 0)) continue;
+            if (!text.startsWith(path, start + 1)) continue;
+            const end = start + 1 + path.length;
+            const suffix = /^\S*/.exec(text.slice(end))?.[0] ?? '';
+            if (suffix.replace(TRAILING_NOISE, '') !== '') continue;
+            confirmedToken = { start, end, raw: text.slice(start, end + suffix.length), name: path };
+        }
+        if (confirmedToken) {
+            tokens.push(confirmedToken);
+            MENTION_SCAN.lastIndex = start + confirmedToken.raw.length;
+            continue;
+        }
 
         const rawName = match[1] ?? '';
         const name = cleanMentionName(rawName);

@@ -35,6 +35,12 @@ describe('tokenizeComposer — reference constructs', () => {
         expect(styled('see @src/app.ts')).toEqual([['@src/app.ts', 'mentionFile']]);
     });
 
+    test('a selected path containing spaces is highlighted in full', () => {
+        const path = 'my docs/my document.md';
+        expect(styled(`see @${path}, please`, context({ confirmedMentions: new Set([path]) })))
+            .toEqual([[`@${path}`, 'mentionFile']]);
+    });
+
     test('an unknown bare mention is not tokenized', () => {
         expect(styled('hi @stranger')).toEqual([]);
     });

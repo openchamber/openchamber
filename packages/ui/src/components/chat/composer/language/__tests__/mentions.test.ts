@@ -11,6 +11,45 @@ import {
 const names = (text: string) => scanMentions(text).map((token) => token.name);
 const raws = (text: string) => scanMentions(text).map((token) => token.raw);
 
+describe('scanMentions with confirmed paths containing spaces', () => {
+    for (const path of [
+        'docs/my document.md',
+        'my docs/document.md',
+        'my docs/my document.md',
+        'my notes',
+        'docs/my @notes.md',
+        'docs/my document.pdf',
+    ]) {
+        test(`preserves the selected path ${path} and its offsets`, () => {
+            const text = `Read @${path}, then @src/app.ts`;
+            const tokens = scanMentions(text, new Set([path]));
+            expect(tokens.map((token) => token.name)).toEqual([path, 'src/app.ts']);
+            expect(text.slice(tokens[0].start, tokens[0].end)).toBe(`@${path}`);
+            expect(tokens[0].raw).toBe(`@${path},`);
+        });
+    }
+
+    test('uses the longest confirmed path at the same position', () => {
+        const paths = new Set(['docs/my', 'docs/my document.md']);
+        expect(scanMentions('@docs/my document.md please', paths).map((token) => token.name))
+            .toEqual(['docs/my document.md']);
+    });
+
+    test('does not match a confirmed path inside a word or a longer filename', () => {
+        const paths = new Set(['docs/my document.md']);
+        expect(scanMentions('email@docs/my document.md', paths)).toEqual([]);
+        expect(scanMentions('@docs/my document.md.bak', paths).map((token) => token.name))
+            .toEqual(['docs/my']);
+    });
+
+    test('keeps repeated mentions separate from surrounding prose', () => {
+        const path = 'docs/my document.md';
+        const text = `(@${path}) and @${path}\n@build review this`;
+        expect(scanMentions(text, new Set([path])).map((token) => token.name))
+            .toEqual([path, path, 'build']);
+    });
+});
+
 describe('scanMentions — boundaries', () => {
     test('a mention at the start of the text', () => {
         expect(names('@build do this')).toEqual(['build']);

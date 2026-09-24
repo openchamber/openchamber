@@ -864,7 +864,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const seenPaths = new Set<string>();
         const attachments: AttachedFile[] = [];
 
-        for (const token of scanMentions(rawText)) {
+        for (const token of scanMentions(rawText, confirmedMentionsRef.current)) {
             const mention = resolveInlineFileMention(token.name);
             if (!mention || seenPaths.has(mention.serverPath)) continue;
             seenPaths.add(mention.serverPath);
@@ -909,7 +909,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ): Promise<DocumentMentionPreparation> => {
         const prepared = new Map<string, AttachedFile[]>();
         for (const rawText of texts) {
-            for (const token of scanMentions(rawText)) {
+            for (const token of scanMentions(rawText, confirmedMentionsRef.current)) {
                 const mention = resolveInlineFileMention(token.name);
                 if (
                     !mention
