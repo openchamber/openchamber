@@ -32,6 +32,7 @@ import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import type { NotificationSoundEventSounds } from '@/lib/notificationSound';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -49,9 +50,11 @@ import {
   parseNonEmptyString,
   parseNonEmptyTrimmedString,
   parseNotificationTemplates,
+  parseNotificationSoundEventSounds,
   parseNullableFiniteNumber,
   parseNullableTrimmedPath,
   parseNullableTrimmedString,
+  parseNumberInRange,
   parseOneOf,
   parsePositiveInteger,
   parseProjects,
@@ -468,6 +471,15 @@ export const SETTINGS_REGISTRY = {
   notifyOnCompletion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnCompletion', (v) => useUIStore.getState().setNotifyOnCompletion(v)) }),
   notifyOnError: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnError', (v) => useUIStore.getState().setNotifyOnError(v)) }),
   notifyOnQuestion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnQuestion', (v) => useUIStore.getState().setNotifyOnQuestion(v)) }),
+  notifyOnPermission: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnPermission', (v) => useUIStore.getState().setNotifyOnPermission(v)) }),
+  notificationSoundEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notificationSoundEnabled', (v) => useUIStore.getState().setNotificationSoundEnabled(v)) }),
+  notificationSoundVolume: field({ scope: 'profile', parse: parseNumberInRange(0, 1), ui: uiStore('notificationSoundVolume', (v) => useUIStore.getState().setNotificationSoundVolume(v)) }),
+  notificationSoundEventSounds: field<NotificationSoundEventSounds>({
+    scope: 'profile',
+    parse: parseNotificationSoundEventSounds,
+    ui: uiStore('notificationSoundEventSounds', (v) => useUIStore.getState().setNotificationSoundEventSounds(v)),
+  }),
+  notificationSoundFocusOnly: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notificationSoundFocusOnly', (v) => useUIStore.getState().setNotificationSoundFocusOnly(v)) }),
   notificationTemplates: field<NotificationTemplates>({
     scope: 'profile',
     parse: parseNotificationTemplates,

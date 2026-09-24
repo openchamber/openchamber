@@ -506,6 +506,21 @@
     "notifyOnQuestion": {
       "scope": "profile"
     },
+    "notifyOnPermission": {
+      "scope": "profile"
+    },
+    "notificationSoundEnabled": {
+      "scope": "profile"
+    },
+    "notificationSoundVolume": {
+      "scope": "profile"
+    },
+    "notificationSoundEventSounds": {
+      "scope": "profile"
+    },
+    "notificationSoundFocusOnly": {
+      "scope": "profile"
+    },
     "notificationTemplates": {
       "scope": "profile"
     },
