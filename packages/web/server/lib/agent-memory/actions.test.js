@@ -80,6 +80,15 @@ describe('save', () => {
     }, DIRECTORY)).rejects.toThrow('type must be');
   });
 
+  test('an over-limit body is a clear 400, not a truncated save', async () => {
+    // The action layer maps validation errors to a 400 the agent can read;
+    // answering success for a body it never stored would be worse than failing.
+    await expect(actions.execute('memory.save', {
+      scope: 'global', title: 't', body: 'y'.repeat(4001),
+    }, DIRECTORY)).rejects.toThrow('body holds at most 4000 characters');
+    expect((await runtime.read({ scope: 'global' })).entries).toHaveLength(0);
+  });
+
   test('reports a correction as replaced so the agent does not claim a second memory', async () => {
     await actions.execute('memory.save', {
       scope: 'global',
