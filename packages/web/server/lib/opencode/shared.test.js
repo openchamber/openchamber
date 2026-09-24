@@ -5,7 +5,7 @@ import path from 'path';
 
 import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig } from './shared.js';
 import { updateAgent } from './agents.js';
-import { updateMcpConfig } from './mcp.js';
+import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
 
 const FIXTURE_DIR = path.join(os.tmpdir(), `openchamber-shared-test-${process.pid}`);
 
@@ -316,7 +316,7 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
     config.mcp.openproject.enabled = false;
     writeConfig(config, file);
 
-    const rewritten = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const rewritten = readConfigFile(file);
     expect(rewritten.plugin).toEqual(['opencode-see-image']);
     expect(rewritten.provider['ollama-cloud'].name).toBe('Ollama Cloud');
     expect(rewritten.mcp.openproject.enabled).toBe(false);
@@ -375,7 +375,7 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
       ]);
 
       updateMcpConfig('openproject', { disabled: true }, projectDir);
-      const rewritten = JSON.parse(fs.readFileSync(custom, 'utf8'));
+      const rewritten = readConfigFile(custom);
       expect(rewritten.plugin).toEqual(['opencode-see-image']);
       // The v1 `mcp.<name>` entry is rewritten in place into `mcp.servers`.
       expect(rewritten.mcp.openproject).toBeUndefined();
@@ -386,5 +386,200 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
       if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
       else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
     }
+  });
+});
+
+describe('writeConfig preserves JSONC comments (issue #3587)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const COMMENTED_CONFIG = [
+    '{',
+    '  // schema for editor hints',
+    '  "$schema": "https://opencode.ai/config.json",',
+    '  /* my servers */',
+    '  "mcp": {',
+    '    "servers": {',
+    '      "openproject": {',
+    '        "type": "remote",',
+    '        "url": "https://openproject.example.com/mcp",',
+    '        "disabled": true, // toggle per environment',
+    '      }',
+    '    }',
+    '  },',
+    '  "plugin": ["opencode-see-image"],',
+    '}',
+    '',
+  ].join('\n');
+
+  const withCustomConfig = (file, run) => {
+    const previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+    try {
+      process.env.OPENCODE_CONFIG = file;
+      return run();
+    } finally {
+      if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+    }
+  };
+
+  it('keeps every comment when a single MCP value changes', () => {
+    const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
+
+    withCustomConfig(file, () => updateMcpConfig('openproject', { disabled: false }));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// schema for editor hints');
+    expect(raw).toContain('/* my servers */');
+    expect(raw).toContain('// toggle per environment');
+    expect(readConfigFile(file)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      mcp: {
+        servers: {
+          openproject: {
+            type: 'remote',
+            url: 'https://openproject.example.com/mcp',
+            disabled: false,
+          },
+        },
+      },
+      plugin: ['opencode-see-image'],
+    });
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(COMMENTED_CONFIG);
+  });
+
+  it('keeps comments when adding a new MCP server', () => {
+    const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
+
+    withCustomConfig(file, () => createMcpConfig('linear', { type: 'remote', url: 'https://mcp.linear.app/sse' }));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// schema for editor hints');
+    expect(raw).toContain('/* my servers */');
+    expect(raw).toContain('// toggle per environment');
+    expect(readConfigFile(file).mcp.servers.linear).toEqual({
+      type: 'remote',
+      url: 'https://mcp.linear.app/sse',
+    });
+    expect(readConfigFile(file).mcp.servers.openproject.disabled).toBe(true);
+  });
+
+  it('keeps comments when deleting an MCP server and the emptied section', () => {
+    const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
+
+    withCustomConfig(file, () => deleteMcpConfig('openproject'));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// schema for editor hints');
+    expect(raw).toContain('/* my servers */');
+    const rewritten = readConfigFile(file);
+    expect(rewritten.mcp).toBeUndefined();
+    expect(rewritten.plugin).toEqual(['opencode-see-image']);
+  });
+
+  it('keeps comments when deleting the only property of a trailing-comma object', () => {
+    const file = writeFixture('trailing-comma.jsonc', [
+      '{',
+      '  // the only entry',
+      '  "mcp": {',
+      '    "servers": {',
+      '      "openproject": { "type": "remote", "url": "https://x", "disabled": true },',
+      '    },',
+      '  },',
+      '}',
+      '',
+    ].join('\n'));
+
+    withCustomConfig(file, () => deleteMcpConfig('openproject'));
+
+    expect(fs.readFileSync(file, 'utf8')).toContain('// the only entry');
+    expect(readConfigFile(file)).toEqual({});
+  });
+
+  it('keeps a standalone comment between a removed property and the next one', () => {
+    const file = writeFixture('gap-comment.jsonc', [
+      '{',
+      '  "a": 1,',
+      '  // about b',
+      '  "b": 2,',
+      '}',
+      '',
+    ].join('\n'));
+
+    const config = readConfigFile(file);
+    delete config.a;
+    writeConfig(config, file);
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// about b');
+    expect(readConfigFile(file)).toEqual({ b: 2 });
+  });
+
+  it('appends the config after comments of a comment-only file', () => {
+    const file = writeFixture('comments-only.jsonc', '// placeholder\n/* still empty */\n');
+
+    writeConfig({ $schema: 'https://opencode.ai/config.json' }, file);
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// placeholder');
+    expect(raw).toContain('/* still empty */');
+    expect(readConfigFile(file)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
+  it('writes a new file as plain JSON when it is missing or empty', () => {
+    const file = path.join(FIXTURE_DIR, 'fresh.jsonc');
+    writeConfig({ $schema: 'https://opencode.ai/config.json' }, file);
+    expect(fs.readFileSync(file, 'utf8')).toBe(
+      JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2),
+    );
+
+    const empty = writeFixture('empty.jsonc', '');
+    writeConfig({ $schema: 'https://opencode.ai/config.json' }, empty);
+    expect(fs.readFileSync(empty, 'utf8')).toBe(
+      JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2),
+    );
+  });
+
+  it('leaves the file byte-identical when nothing changed', () => {
+    const file = writeFixture('unchanged.jsonc', COMMENTED_CONFIG);
+
+    writeConfig(readConfigFile(file), file);
+
+    expect(fs.readFileSync(file, 'utf8')).toBe(COMMENTED_CONFIG);
+  });
+
+  it('preserves CRLF line endings and comments', () => {
+    const file = writeFixture('crlf.jsonc', [
+      '{',
+      '  // windows file',
+      '  "mcp": {',
+      '    "servers": {',
+      '      "openproject": { "type": "remote", "url": "https://x", "disabled": true }',
+      '    }',
+      '  },',
+      '}',
+      '',
+    ].join('\r\n'));
+
+    withCustomConfig(file, () => updateMcpConfig('openproject', { disabled: false }));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('\r\n');
+    expect(raw).toContain('// windows file');
+    expect(readConfigFile(file).mcp.servers.openproject.disabled).toBe(false);
+  });
+
+  it('falls back to a normalized rewrite when the edit cannot round-trip', () => {
+    const file = writeFixture('duplicate-keys.jsonc', '{\n  "a": 1,\n  "a": 2,\n}\n');
+
+    writeConfig({ a: 3 }, file);
+
+    expect(fs.readFileSync(file, 'utf8')).toBe(JSON.stringify({ a: 3 }, null, 2));
   });
 });
