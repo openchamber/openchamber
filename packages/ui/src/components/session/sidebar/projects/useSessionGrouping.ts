@@ -134,7 +134,7 @@ export const useSessionGrouping = (args: Args) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return true;
         const parentSession = sessionMap.get(parentID);
-        if (!parentSession) return true;
+        if (!parentSession) return false;
         return isArchivedSession(parentSession) !== isArchivedSession(session);
       });
 
@@ -146,7 +146,23 @@ export const useSessionGrouping = (args: Args) => {
         roots.push(buildProjectNode(session));
       };
       rootCandidates.forEach(addRoot);
-      sortedProjectSessions.forEach(addRoot);
+      const recoverable = new Map<string, boolean>();
+      sortedProjectSessions.filter((session) => {
+        if (claimedSessionIds.has(session.id)) return false;
+        const seen = new Set<string>();
+        let current: Session | undefined = session;
+        let result = true;
+        while (current?.parentID) {
+          const cached = recoverable.get(current.id);
+          if (cached !== undefined) { result = cached; break; }
+          if (seen.has(current.id)) break;
+          seen.add(current.id);
+          current = sessionMap.get(current.parentID);
+          if (!current) { result = false; break; }
+        }
+        for (const id of seen) recoverable.set(id, result);
+        return result;
+      }).forEach(addRoot);
 
       const groupedNodes = new Map<string, SessionNode[]>();
       const archivedKey = '__archived__';

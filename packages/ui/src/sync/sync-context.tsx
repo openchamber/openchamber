@@ -55,7 +55,7 @@ import {
 import { shouldConsumeBulkArchiveEcho } from "./bulk-archive-echo"
 import { applyForkedSession, noteForkedSessionPatched } from "./forked-session"
 import { useBtwStore } from "@/stores/useBtwStore"
-import { selectNewChildSessions } from "./child-session-discovery"
+import { childSessionsInDirectory, newlyDiscoveredChildParents, selectNewChildSessions } from "./child-session-discovery"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { messagesBefore } from "./message-ordering"
@@ -2639,6 +2639,7 @@ export function SyncProvider(props: {
     let stopped = false
     let running = false
 
+    const discoveredChildren = new Map<string, Map<string, Session>>()
     const discoverChildSessions = async (
       directory: string,
       store: StoreApi<DirectoryStore>,
@@ -2652,24 +2653,35 @@ export function SyncProvider(props: {
         // discovered; a single 200-record page silently truncated the list and
         // left subagent children beyond it undiscovered.
         const { active: allSessions } = splitGlobalSessionsByArchived(
-          await listGlobalSessionPages(listSessionPage, { directory, pageSize: 200 }),
+          (await Promise.all(parentSessionIds.map((parentID) =>
+            listGlobalSessionPages((options) => listSessionPage({ ...options, parentID }), { pageSize: 200 })
+          ))).flat(),
         )
+        if (stopped || getRuntimeKey() !== runtimeKey) return
         const state = store.getState()
         const globalEntities = useGlobalSessionsStore.getState().entityById
         const newChildSessions = selectNewChildSessions(
           allSessions,
-          new Set(state.session.map((s) => s.id)),
+          new Set<string>(),
           new Set(parentSessionIds),
           (sessionId) => Boolean(globalEntities.get(sessionId)?.time?.archived),
         )
         if (newChildSessions.length === 0) return
-        // Collect unique parent IDs for materialization
-        const parentIdsForMaterialization = new Set<string>()
+        const knownChildren = discoveredChildren.get(directory) ?? new Map<string, Session>()
+        const parentIdsForMaterialization = newlyDiscoveredChildParents(newChildSessions, knownChildren)
         for (const session of newChildSessions) {
-          if (session.parentID) parentIdsForMaterialization.add(session.parentID)
+          const known = globalEntities.get(session.id)
+          if (!known || known.parentID !== session.parentID || known.directory !== session.directory) {
+            useGlobalSessionsStore.getState().upsertSession(session)
+          }
+          knownChildren.set(session.id, session)
         }
-        store.setState((state: DirectoryStore) => {
-          const sessions = [...state.session, ...newChildSessions].sort((a, b) =>
+        discoveredChildren.set(directory, knownChildren)
+        // Collect unique parent IDs for materialization
+        const existingIds = new Set(state.session.map((session) => session.id))
+        const localChildren = childSessionsInDirectory(newChildSessions, directory).filter((session) => !existingIds.has(session.id))
+        if (localChildren.length > 0) store.setState((state: DirectoryStore) => {
+          const sessions = [...state.session, ...localChildren].sort((a, b) =>
             a.id < b.id ? -1 : a.id > b.id ? 1 : 0
           )
           return { session: sessions, limit: Math.max(sessions.length, 50) }
@@ -2761,7 +2773,7 @@ export function SyncProvider(props: {
       stopped = true
       clearInterval(interval)
     }
-  }, [childStores, props.sdk, triggerDirectoryResync])
+  }, [childStores, props.sdk, triggerDirectoryResync, runtimeKey])
 
   // Ensure current directory's child store exists
   useEffect(() => {

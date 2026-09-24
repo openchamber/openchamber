@@ -1,6 +1,8 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
-import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
+import { useAllSessionStatuses } from '@/sync/sync-context';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -9,7 +11,6 @@ import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './
 import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
-import type { State } from '@/sync/types';
 
 type Props = {
   sessionId: string | null;
@@ -27,7 +28,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
 
-  const liveSessions = useAllLiveSessions();
+  const liveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const statuses = useAllSessionStatuses();
   const children = React.useMemo(
     () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId) : []),
@@ -41,8 +42,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   // One subscription covers every child: per-session hooks would multiply
   // store subscriptions by the number of subagents.
-  const permissions = useDirectorySync(React.useCallback((state: State) => state.permission, []));
-  const forms = useDirectorySync(React.useCallback((state: State) => state.form, []));
+  const blockingRequests = useGlobalBlockingRequestsStore((state) => state.bySession);
 
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -62,12 +62,13 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // Same branch the transcript's Task tool takes: surfaces that cannot host an
   // embedded panel navigate to the child session instead of opening a tab.
   const openChildSession = React.useCallback((childId: string, label: string) => {
-    if (!directory) return;
-    if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
-      setCurrentSession(childId, directory);
+    const childDirectory = useSessionUIStore.getState().getDirectoryForSession(childId);
+    if (!childDirectory) return;
+    if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime() || childDirectory !== directory) {
+      setCurrentSession(childId, childDirectory);
       return;
     }
-    openContextPanelTab(directory, {
+    openContextPanelTab(childDirectory, {
       mode: 'chat',
       dedupeKey: `session:${childId}`,
       label,
@@ -91,8 +92,8 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     >
       <div className="max-h-56 overflow-y-auto">
         {children.map((child) => {
-          const blocked = (permissions[child.id]?.length ?? 0) > 0;
-          const asked = (forms[child.id]?.length ?? 0) > 0;
+          const blocked = (blockingRequests.get(child.id)?.permissions.length ?? 0) > 0;
+          const asked = (blockingRequests.get(child.id)?.forms.length ?? 0) > 0;
           const busy = statuses[child.id]?.type === 'busy';
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           const childCost = perChildCost.get(child.id) ?? 0;

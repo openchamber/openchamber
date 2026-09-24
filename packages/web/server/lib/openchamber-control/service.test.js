@@ -126,6 +126,14 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
+  it('passes the caller as parent for agent forks rather than the fork source', async () => {
+    const { service, sessionService } = createService();
+    sessionService.fork.mockResolvedValue({ sessionId: 'ses_child', directory: '/source' });
+    const result = await service.execute('session.fork', { sessionId: 'ses_source', directory: '/source', prompt: 'Continue' }, '/caller', { contextSessionId: 'ses_caller' });
+    expect(result.sessionId).toBe('ses_child');
+    expect(sessionService.fork).toHaveBeenCalledWith('ses_source', { directory: '/source', prompt: 'Continue' }, { parentID: 'ses_caller' });
+  });
+
   it.each([
     ['session.send', 'send'],
     ['session.fork', 'fork'],

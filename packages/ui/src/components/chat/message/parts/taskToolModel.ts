@@ -1,5 +1,6 @@
 import type { MessageRecord } from '@/lib/messageCompletion';
 import type { Part, Session, ToolInput } from '@/lib/opencode/model';
+import { z } from 'zod';
 
 import { isSubagentTool, normalizeToolName } from '@/lib/opencode/tools';
 
@@ -20,6 +21,32 @@ const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
     if (typeof value !== 'string') return undefined;
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const managedSessionResult = z.object({ ok: z.literal(true), data: z.object({ sessionId: z.string().min(1), directory: z.string().min(1) }) });
+
+export const readManagedSessionResult = (output: string | undefined) => {
+    if (!output) return undefined;
+    try {
+        const result = managedSessionResult.safeParse(JSON.parse(output));
+        return result.success ? result.data.data : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+const managedSpawnResult = managedSessionResult.extend({ action: z.enum(['session.create', 'session.fork']) });
+const managedSessionResults = z.union([managedSpawnResult, z.array(managedSpawnResult.optional().catch(undefined))]);
+
+export const readManagedSessionResults = (output: string | undefined) => {
+    if (!output) return [];
+    try {
+        const result = managedSessionResults.safeParse(JSON.parse(output));
+        if (!result.success) return [];
+        return (Array.isArray(result.data) ? result.data : [result.data]).flatMap((entry) => entry ? [entry.data] : []);
+    } catch {
+        return [];
+    }
 };
 
 /**
@@ -136,6 +163,12 @@ export const parseTaskMetadataBlock = (output: string | undefined): {
 
 export const readTaskSessionIdFromOutput = (output: string | undefined): string | undefined => {
     if (typeof output !== 'string' || output.trim().length === 0) return undefined;
+    try {
+        const result = z.object({ ok: z.literal(true), data: z.object({ sessionId: z.string().min(1) }) }).safeParse(JSON.parse(output));
+        if (result.success) return result.data.data.sessionId;
+    } catch {
+        // Native subagent output is text rather than the managed tool envelope.
+    }
     const parsedMetadata = parseTaskMetadataBlock(output);
     if (parsedMetadata.sessionId) return parsedMetadata.sessionId;
 

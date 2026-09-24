@@ -296,7 +296,7 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  const executeSessionAction = async (action, input, contextDirectory, signal) => {
+  const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     const sessionID = asNonEmptyString(input.sessionId);
@@ -326,13 +326,15 @@ export const createOpenChamberControlService = (dependencies) => {
     const startedAt = now();
     let result;
     if (action === 'session.create') {
-      result = await sessionService.create(payload);
+      const parentID = asNonEmptyString(contextSessionId);
+      result = parentID ? await sessionService.create(payload, { parentID }) : await sessionService.create(payload);
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
         result = await sessionService.send(sessionID, payload);
       } else {
-        result = await sessionService.fork(sessionID, payload);
+        const parentID = asNonEmptyString(contextSessionId);
+        result = parentID ? await sessionService.fork(sessionID, payload, { parentID }) : await sessionService.fork(sessionID, payload);
       }
     }
     if (input.wait !== true) {
@@ -582,7 +584,7 @@ export const createOpenChamberControlService = (dependencies) => {
         }
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
-        return executeSessionAction(action, input, contextDirectory, options.signal);
+        return executeSessionAction(action, input, contextDirectory, options.signal, options.contextSessionId);
       }
       if (action.startsWith('session.')) {
         const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);

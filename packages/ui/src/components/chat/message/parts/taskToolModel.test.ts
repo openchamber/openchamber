@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 
 import {
+    readManagedSessionResults,
     buildTaskSummaryEntriesFromSession,
     parseTaskMetadataBlock,
     prepareTaskToolOutput,
@@ -12,6 +13,20 @@ import {
 import { TOOL_OUTPUT_MAX_CHARS } from '../toolRenderers';
 
 describe('taskToolModel', () => {
+    test('reads multiple Code Mode spawn results but excludes ordinary session reads', () => {
+        expect(readManagedSessionResults(JSON.stringify([
+            { ok: false, action: 'session.create', error: { message: 'failed' } },
+            { ok: true, action: 'session.create', data: { sessionId: 'first', directory: '/first' } },
+            { ok: true, action: 'session.status', data: { sessionId: 'unrelated', directory: '/other' } },
+            null,
+            { ok: true, action: 'session.fork', data: { sessionId: 'second', directory: '/second' } },
+        ]))).toEqual([{ sessionId: 'first', directory: '/first' }, { sessionId: 'second', directory: '/second' }]);
+        expect(readManagedSessionResults(JSON.stringify({ ok: true, action: 'session.messages', data: { sessionId: 'first', directory: '/first' } }))).toEqual([]);
+    });
+    test('reads the child identity from a successful managed session result', () => {
+        expect(readTaskSessionIdFromOutput(JSON.stringify({ ok: true, data: { sessionId: 'ses_worker', directory: '/other' } }))).toBe('ses_worker');
+        expect(readTaskSessionIdFromOutput(JSON.stringify({ ok: false, error: { message: 'failed' } }))).toBeUndefined();
+    });
     test('reads the current OpenCode running-state identity contract', () => {
         expect(readTaskSessionIdFromRecord({ sessionId: 'child-live' })).toBe('child-live');
         expect(readTaskSessionIdFromRecord({})).toBe(undefined);

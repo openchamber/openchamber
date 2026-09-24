@@ -73,6 +73,12 @@ export const isShellTool = is(OPENCODE_TOOLS.shell)
  */
 export const isExecuteTool = is(OPENCODE_TOOLS.execute)
 export const isSubagentTool = is(OPENCODE_TOOLS.subagent)
+const sessionSpawnInput = z.object({ action: z.enum(["session.create", "session.fork"]) })
+
+export function isSessionSpawnTool(toolName: ToolName, input: ToolInput | undefined): boolean {
+  const name = normalizeToolName(toolName)
+  return (name === "openchamber" || name === "opencode") && sessionSpawnInput.safeParse(input).success
+}
 export const isQuestionTool = is(OPENCODE_TOOLS.question)
 export const isSkillTool = is(OPENCODE_TOOLS.skill)
 export const isReadTool = is(OPENCODE_TOOLS.read)

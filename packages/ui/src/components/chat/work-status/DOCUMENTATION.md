@@ -4,6 +4,10 @@ A card rendered to the right of the transcript inside `ChatContainer`. It
 reports the state of the current session, its branch, its quotas and its
 subagents.
 
+Subagent rows read pending permissions and questions from the cross-directory
+blocking-request index. The parent's directory store cannot establish whether
+a child in another directory is blocked.
+
 ## Structure
 
 Every readout is a **labelled row**: icon, name, trailing value. A number
@@ -100,8 +104,8 @@ which requests only providers enabled for this panel.
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestPrVisualSummaryForBranch` | **read-only**; follows the freshest remote-keyed entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `useSubagentCostRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
-| Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
+| Subagents | global active-session records by `parentID` + `useAllSessionStatuses`; per-row cost from `useSubagentCostRollup`'s `perChildCost` | Includes unopened child directories |
+| Subagent blockers | `useGlobalBlockingRequestsStore.bySession` | Cross-directory permissions and forms |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |

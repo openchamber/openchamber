@@ -26,6 +26,18 @@ other.
 
 ## Invariants
 
+- Agent `session.create` calls use the tool's `contextSessionId` as the child's
+  authoritative OpenCode `parentID`. CLI and UI creation remain root sessions.
+  The relationship is an internal service option, not a model-supplied input.
+  OpenCode 2.0.15's create route cannot set a parent, so the session service
+  imports an empty session through the official SDK. Import validates the parent
+  and publishes the normal creation event, including for children in another
+  directory. Existing child discovery, archive traversal and activity handling
+  therefore use the same parent relationship as native subagents.
+- Agent forks import settled source history into a new child of the calling
+  session. User forks retain the native fork operation. Archive traverses
+  authoritative child pages before writing, including descendants absent from
+  the UI cache and descendants below already archived sessions.
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
 - Wait never treats an initial idle response as completion after dispatch. It

@@ -1,4 +1,22 @@
 import type { Session } from "@/lib/opencode/model"
+import { normalizeProjectPath } from "@/lib/projectResolution"
+
+export const childSessionsInDirectory = (sessions: readonly Session[], directory: string): Session[] => {
+  const owner = normalizeProjectPath(directory)
+  return sessions.filter((session) => normalizeProjectPath(session.directory) === owner)
+}
+
+export const newlyDiscoveredChildParents = (
+  sessions: readonly Session[],
+  knownSessions: ReadonlyMap<string, Pick<Session, "parentID" | "directory">>,
+): Set<string> => {
+  const parents = new Set<string>()
+  for (const session of sessions) {
+    const known = knownSessions.get(session.id)
+    if (session.parentID && (known?.parentID !== session.parentID || known.directory !== session.directory)) parents.add(session.parentID)
+  }
+  return parents
+}
 
 /**
  * Pick the children a discovery listing adds to a directory store.

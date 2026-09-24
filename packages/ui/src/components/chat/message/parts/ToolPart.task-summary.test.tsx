@@ -170,6 +170,20 @@ test('subagent patch summaries show file names and update when the same call cha
   });
 });
 
+test('failed managed session operations keep their output available', async () => {
+  for (const action of ['session.create', 'session.fork']) {
+    const failed: ToolPartData = {
+      ...parent, tool: 'openchamber',
+      state: { status: 'error', input: { action }, error: 'Parent session unavailable', time: { start: 1, end: 2 } },
+    };
+    await withHarness(failed, async (_store, container) => {
+      const outputButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Output');
+      expect(outputButton).toBeDefined();
+      expect(container.textContent).not.toContain('No directory provided');
+    });
+  }
+});
+
 test('a running subagent without the progress join resolves its child session from the store', async () => {
   const running: ToolPartData = {
     ...parent,
