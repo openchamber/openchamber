@@ -25,7 +25,8 @@ import {
   requireSpaceId,
   spaceResourceName,
 } from '../labels.js';
-import { SPACE_USER, TOOLS_MOUNT_PATH } from '../layout.js';
+import { SPACE_CONNECT_COMMAND, SPACE_USER, TOOLS_MOUNT_PATH } from '../layout.js';
+import { openCommandStream as openCommandStreamProcess } from '../run-command.js';
 import { createSpaceServerChannel, createSpaceToken } from '../space-server.js';
 import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, createDockerEngine, entryLabels, entryName, isInterrupted, pause } from './docker-engine.js';
 import { createDockerTools } from './docker-tools.js';
@@ -57,7 +58,7 @@ function execRole(target) {
   throw new SpaceError('invalid_exec_target', `A command runs in the space or in its gatekeeper, not in '${target}'`);
 }
 
-export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, wait = pause, now = () => new Date() }) {
+export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, owner, toolsSource, wait = pause, now = () => new Date() }) {
   requireOwner(owner);
 
   const engine = createDockerEngine({ runCommand, dockerPath });
@@ -426,6 +427,17 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
   };
 
   /**
+   * A channel to the server inside the space: the bridge of `layout.js` over the argv of
+   * `execArgv`, so the same ownership and running checks come first, and the same process
+   * shape as a push carries the bytes. The space's network never sees it. The stream is a
+   * `CommandStream` of `run-command.js`, and the dispatcher's agent uses it as a socket.
+   */
+  const connect = async (spaceId) => {
+    const [file, ...args] = await execArgv(spaceId);
+    return openCommandStream(file, [...args, ...SPACE_CONNECT_COMMAND]);
+  };
+
+  /**
    * The space stops first and its gatekeeper after it, so a space is never running while its
    * way out is not under the host's control. A stop of the gatekeeper that fails leaves the
    * space stopped, which is the safe side of this order.
@@ -583,5 +595,5 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
     return starting.get(spaceId);
   };
 
-  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, stop, start, remove, verify };
+  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, connect, stop, start, remove, verify };
 }

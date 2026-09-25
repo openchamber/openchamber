@@ -5,6 +5,8 @@
 // one container would pass nothing here.
 
 import crypto from 'node:crypto';
+import http from 'node:http';
+import net from 'node:net';
 
 import { SpaceError } from '../errors.js';
 import { ROLE_GATEKEEPER, ROLE_SPACE, requireSpaceId } from '../labels.js';
@@ -57,6 +59,14 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
         // A container has a hostname of its own, as a real one does, so a caller can tell them apart.
         containers.set(`${spaceId}:${target}`, { hostname: crypto.randomBytes(6).toString('hex') });
       }
+      // The server inside, for `connect`: a loopback listener of this space's own that answers
+      // `/health` the way the real one does, with the space id so a caller can tell spaces apart.
+      const server = http.createServer((request, response) => {
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ status: 'ok', isOpenCodeReady: true, spaceId, path: request.url }));
+      });
+      await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+      containers.get(`${spaceId}:${ROLE_SPACE}`).server = server;
     },
     list: async () => Array.from(spaces.values(), (space) => ({ ...space })),
     exec: async (spaceId, argv, options = {}) => {
@@ -84,12 +94,25 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
       }
       return [process.execPath, '-e', CONTAINER_PROGRAM, hostname];
     },
+    // Added in stage 4a. A channel to the server inside, refused like `execArgv` when the space
+    // is stopped or gone: a plain socket to this space's own listener.
+    connect: async (spaceId) => {
+      const { server } = requireContainer(spaceId);
+      if (requireSpace(spaceId).state !== 'running') {
+        throw new SpaceError('space_not_running', `Space ${spaceId} is stopped`);
+      }
+      return net.connect({ host: '127.0.0.1', port: server.address().port });
+    },
     stop: async (spaceId) => { requireSpace(spaceId).state = 'exited'; },
     start: async (spaceId) => { requireSpace(spaceId).state = 'running'; },
     remove: async (spaceId) => {
       const removed = [];
       for (const target of TARGETS) {
-        if (containers.delete(`${requireSpaceId(spaceId)}:${target}`)) removed.push({ kind: 'container', name: `${spaceId}-${target}` });
+        const container = containers.get(`${requireSpaceId(spaceId)}:${target}`);
+        if (!container) continue;
+        container.server?.close();
+        containers.delete(`${spaceId}:${target}`);
+        removed.push({ kind: 'container', name: `${spaceId}-${target}` });
       }
       if (spaces.delete(spaceId)) removed.push({ kind: 'space', name: spaceId });
       return { removed, failed: [] };

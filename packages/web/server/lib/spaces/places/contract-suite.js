@@ -1,6 +1,8 @@
 // The contract every place must pass. Stage 8 to 10 places run this same suite.
 // `setup` resolves `{ place, dispose }`. `dispose` cleans up and may assert that nothing is left.
 
+import http from 'node:http';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSpaceId, hashProjectDirectory } from '../labels.js';
@@ -22,6 +24,17 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
     let dispose = async () => {};
 
     const listed = async () => (await place.list()).find((space) => space.id === spec.id);
+
+    /** One HTTP request over a channel that `connect` gave, as the dispatcher's agent makes it. */
+    const requestOver = (stream, path) => new Promise((resolve, reject) => {
+      const request = http.request({ path, headers: { host: '127.0.0.1' }, createConnection: () => stream }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      });
+      request.on('error', reject);
+      request.end();
+    });
 
     beforeAll(async () => {
       ({ place, dispose } = await setup());
@@ -111,9 +124,27 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
       expect(hostname.stdout).not.toBe((await place.exec(spec.id, ['cat', '/etc/hostname'], { target: 'gatekeeper' })).stdout);
     });
 
+    // Added in stage 4a. `connect` is the dispatcher's way to the server inside: a stream that
+    // carries HTTP to it and nothing else. It must reach the server of this space, and it
+    // must end cleanly when the caller lets go, so an agent can hold and reuse it.
+    it('connects to the server inside the space', async () => {
+      const stream = await place.connect(spec.id);
+      const answer = await requestOver(stream, '/health');
+      expect(answer.status).toBe(200);
+      expect(JSON.parse(answer.body)).toMatchObject({ isOpenCodeReady: true });
+      const closed = new Promise((resolve) => stream.once('close', resolve));
+      stream.destroy();
+      await closed;
+    });
+
     it('stops the space and lists it as exited', async () => {
       await place.stop(spec.id);
       expect(await listed()).toMatchObject({ state: 'exited' });
+    });
+
+    // Added in stage 4a, for the same reason as the argv: a stopped space has no server to reach.
+    it('connects to no stopped space', async () => {
+      await expect(place.connect(spec.id)).rejects.toMatchObject({ code: 'space_not_running' });
     });
 
     // Added in stage 3a. git starts the argv itself, and a stopped container answers it only with
@@ -147,6 +178,11 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
     // is gone gets none. A place that built it from the id alone would still hand one out here.
     it('hands out no argv for a space that is gone', async () => {
       await expect(place.execArgv(spec.id)).rejects.toThrow();
+    });
+
+    // Added in stage 4a, with the same reasoning as the argv.
+    it('connects to no space that is gone', async () => {
+      await expect(place.connect(spec.id)).rejects.toThrow();
     });
 
     it('treats removing a missing space as done', async () => {

@@ -112,6 +112,7 @@ import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
 import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
+import { createSpacesHost } from './lib/spaces/host.js';
 import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -387,6 +388,8 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
   normalizeDirectoryPath,
   getReadSettingsFromDiskMigrated: () => readSettingsFromDiskMigrated,
   sanitizeProjects,
+  // A space's directory never runs on the host, whatever route carries it.
+  refuseDirectory: (candidate) => spacesHost?.refuseDirectory(candidate) ?? null,
 });
 
 const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
@@ -630,6 +633,9 @@ let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
+// The isolated-spaces host: the place, the manager and the dispatcher. Null while the feature's
+// switch is off, and then nothing of the feature runs, see docs/isolated-spaces/DESIGN.md.
+let spacesHost = null;
 let activeTunnelController = null;
 let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
@@ -1686,6 +1692,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getDictationRuntime: () => dictationRuntime,
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
+  getSpacesHost: () => spacesHost,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1862,6 +1869,22 @@ async function main(options = {}) {
   // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
   const sayTTSCapability = detectSayTtsCapability(process);
 
+  // The isolated-spaces switch is read once, here. While it is off the feature has no place, no
+  // manager, no route and runs no `docker`; a change of the switch takes effect at the next start.
+  const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
+  if (startupSettings?.isolatedSpacesEnabled === true) {
+    try {
+      spacesHost = createSpacesHost({
+        dataDir: OPENCHAMBER_DATA_DIR,
+        dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
+      });
+    } catch (error) {
+      // The feature is absent then, and the rest of the server starts as with the switch off.
+      console.error(`[spaces] isolated spaces are unavailable this start: ${error?.code ?? ''} ${error?.message ?? error}`.trim());
+      spacesHost = null;
+    }
+  }
+
   const app = express();
   const serverStartedAt = new Date().toISOString();
   const packagedClientOrigins = new Set([
@@ -2029,8 +2052,11 @@ async function main(options = {}) {
     setAutoAcceptSession,
     agentToolRuntime,
     desktopUpdater,
+    skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+  // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
+  spacesHost?.registerRoutes(app);
   realtimeProxyRuntime = attachRealtimeProxy({
     app,
     server,

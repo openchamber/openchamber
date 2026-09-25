@@ -458,7 +458,7 @@ ConPTY or Console Window Host behavior.
   - `readCustomThemesFromDisk()`
 
 ## Public exports (project-directory-runtime.js)
-- `createProjectDirectoryRuntime(dependencies)`: creates runtime for request/project directory candidate normalization and validation.
+- `createProjectDirectoryRuntime(dependencies)`: creates runtime for request/project directory candidate normalization and validation. `dependencies.refuseDirectory(candidate)` answers the reason a resolved directory may not be used on this host, or null; `validateDirectoryPath` asks it before it looks at the disk, so a refused directory is never touched and never falls back to another one. The isolated-spaces host refuses `/spaces/...` through it while its switch is on.
 - Returned API:
   - `resolveDirectoryCandidate(value)`
   - `validateDirectoryPath(candidate)`
@@ -732,6 +732,7 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
   - conditional JSON body parser behavior for `/api/*` vs non-API requests
   - URL-encoded parser setup
   - request logging middleware
+  - `dependencies.skipBodyParsing(req)` names a request both parsers leave alone, so its body reaches its route untouched; the isolated-spaces dispatcher uses it for `/api/spaces/<id>/...`, which it streams into a space
 
 ## Public exports (cli-options.js)
 - `parseServeCliOptions(options)`: parses serve CLI flags and environment-derived defaults:

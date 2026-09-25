@@ -146,6 +146,29 @@ const SERVER_SCRIPT = [
 /** The command of a space container. A fixed script, nothing in it varies per space. */
 export const SPACE_SERVER_COMMAND = Object.freeze([IMAGE_SH, '-c', SERVER_SCRIPT]);
 
+// The bridge of `connect`: runs inside the space over `docker exec --interactive`, joins its stdin
+// and stdout to the loopback port of the server inside, and ends when either side ends. It
+// leaves only after its last write to stdout has gone out: an exit on the socket's close would
+// drop what is still buffered. The two standard streams are Node's own, which cope with a pipe
+// that is full; a plain file stream on the descriptor failed with a system error there,
+// measured on macOS with a four-megabyte answer. One line, as every fixed program that travels
+// as an argument. It uses `net`, which no proxy variable of the space touches, and reads nothing
+// from the space but its two arguments.
+export const CONNECT_BRIDGE_PROGRAM = [
+  'const net = require("node:net");',
+  'const [host, port] = process.argv.slice(1);',
+  'const socket = net.connect({ host, port: Number(port) });',
+  'const leave = (code) => process.stdout.write("", () => process.exit(code));',
+  'socket.on("error", (error) => { process.stderr.write(String(error.code || error.message)); leave(1); });',
+  'socket.on("connect", () => { process.stdin.pipe(socket); socket.pipe(process.stdout, { end: false }); });',
+  'socket.on("close", () => leave(0));',
+  'process.stdin.on("error", () => socket.destroy());',
+  'process.stdout.on("error", () => socket.destroy());',
+].join(' ');
+
+/** The command that `connect` runs inside a space: the bridge to the server inside, on the image's Node. */
+export const SPACE_CONNECT_COMMAND = Object.freeze([IMAGE_NODE, '-e', CONNECT_BRIDGE_PROGRAM, SPACE_SERVER_HOST, String(SPACE_SERVER_PORT)]);
+
 /**
  * The environment of a gatekeeper. It holds no secret and never will: grants arrive on the
  * stdin of an `exec` and live in the program's memory. HOME points into the tmpfs, because the

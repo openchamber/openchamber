@@ -129,6 +129,9 @@
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
+    "isolatedSpacesEnabled": {
+      "scope": "instance"
+    },
     "agentMemoryFeatureAvailable": {
       "scope": "instance",
       "computed": true

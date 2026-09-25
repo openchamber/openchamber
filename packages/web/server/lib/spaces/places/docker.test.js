@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { SpaceError } from '../errors.js';
 import { GATEKEEPER_PROGRAM } from '../gatekeeper-channel.js';
 import { buildSpaceLabels, buildToolsLabels, hashProjectDirectory } from '../labels.js';
-import { SPACE_ENVIRONMENT, SPACE_SERVER_COMMAND } from '../layout.js';
+import { SPACE_CONNECT_COMMAND, SPACE_ENVIRONMENT, SPACE_SERVER_COMMAND } from '../layout.js';
 import { createRegistryToolsSource, toolsContentKey } from '../tools.js';
 import { SPACE_BASE_IMAGE, createDockerPlace } from './docker.js';
 import { bridgeNetworkEntry, createFakeDocker, hardenedContainerEntry, internalNetworkEntry } from './fake-docker.js';
@@ -27,7 +27,7 @@ const NOW = new Date('2026-09-20T08:00:00.000Z');
 /** A place on a plain runner, for the tests that wrap or replace the fake. */
 const placeOn = (runCommand, options = {}) => createDockerPlace({ runCommand, dockerPath: 'docker', owner: OWNER, toolsSource: SOURCE, now: () => NOW, ...options });
 
-const makePlace = (fake, owner = OWNER, toolsSource = SOURCE) => placeOn(fake.runCommand, { dockerPath: '/usr/bin/docker', owner, toolsSource, wait: fake.wait, now: fake.now });
+const makePlace = (fake, owner = OWNER, toolsSource = SOURCE, options = {}) => placeOn(fake.runCommand, { dockerPath: '/usr/bin/docker', owner, toolsSource, wait: fake.wait, now: fake.now, ...options });
 
 const labelsFor = (role, { id = ID, owner = OWNER } = {}) => buildSpaceLabels({ ...SPEC, id, role, owner });
 
@@ -831,6 +831,37 @@ describe('docker place: exec, stop, start, verify', () => {
       ? { ...resource, name: `${CONTAINER}-old`, entry: { ...resource.entry, Name: `/${CONTAINER}-old` } }
       : resource));
     await expect(makePlace(createFakeDocker({ resources: aside })).execArgv(ID)).rejects.toMatchObject({ code: 'space_move_unfinished' });
+  });
+
+  // Added in stage 4a. `connect` runs the bridge of layout.js over the argv of `execArgv`, through
+  // the injected stream opener, so the same checks come first and no process starts in a unit test.
+  it('connects through the bridge inside the space container, over the exec argv, and changes nothing', async () => {
+    const fake = createFakeDocker({ resources: spaceResources() });
+    const opened = [];
+    const stream = { destroyed: false };
+    const place = makePlace(fake, OWNER, SOURCE, { openCommandStream: (file, args) => { opened.push([file, ...args]); return stream; } });
+
+    expect(await place.connect(ID)).toBe(stream);
+    expect(opened).toEqual([['/usr/bin/docker', 'exec', '--interactive', '--user', '1000:1000', CONTAINER, ...SPACE_CONNECT_COMMAND]]);
+    expect(SPACE_CONNECT_COMMAND.slice(0, 2)).toEqual(['/usr/local/bin/node', '-e']);
+    expect(SPACE_CONNECT_COMMAND.slice(-2)).toEqual(['127.0.0.1', '27600']);
+    expect(SPACE_CONNECT_COMMAND.join(' ')).not.toMatch(/\n/);
+    expect(changes(fake)).toEqual([]);
+  });
+
+  it('connects to no stopped space, no stranger\'s container, no space of another installation, none that is missing or mid-move', async () => {
+    const opened = [];
+    const connectWith = (fake) => makePlace(fake, OWNER, SOURCE, { openCommandStream: (...args) => { opened.push(args); return {}; } }).connect(ID);
+    await expect(connectWith(createFakeDocker({ resources: spaceResources({ running: false }) }))).rejects.toMatchObject({ code: 'space_not_running' });
+    const stranger = hardenedContainerEntry({ name: CONTAINER, labels: {}, network: NETWORK, volumes: [] });
+    await expect(connectWith(createFakeDocker({ resources: [{ kind: 'container', name: CONTAINER, entry: stranger }] }))).rejects.toMatchObject({ code: 'space_not_ours' });
+    await expect(connectWith(createFakeDocker({ resources: spaceResources({ owner: 'install-b' }) }))).rejects.toMatchObject({ code: 'space_not_ours' });
+    await expect(connectWith(createFakeDocker())).rejects.toMatchObject({ code: 'space_not_found' });
+    const aside = spaceResources({ running: false }).map((resource) => (resource.name === CONTAINER
+      ? { ...resource, name: `${CONTAINER}-old`, entry: { ...resource.entry, Name: `/${CONTAINER}-old` } }
+      : resource));
+    await expect(connectWith(createFakeDocker({ resources: aside }))).rejects.toMatchObject({ code: 'space_move_unfinished' });
+    expect(opened).toEqual([]);
   });
 
   it('stops the space, starts the same container again, and waits for its server', async () => {

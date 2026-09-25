@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Duplex } from 'node:stream';
 
 import { SpaceError } from './errors.js';
 
@@ -358,4 +359,156 @@ export async function killProcessTree(child, {
     killChildOnly();
   }
   return true;
+}
+
+// How much of a streamed command's stderr is kept for its error message.
+const STREAM_STDERR_BYTES = 4 * 1024;
+
+/**
+ * A command's stdin and stdout as one duplex stream that an `http.Agent` can use as a socket.
+ * Written for `docker exec --interactive` with the bridge inside a space, which joins the two
+ * pipes to the loopback port of the server there: the dispatcher's requests travel through
+ * this and never through a network of the space. Everything an `http` client calls on a
+ * `net.Socket` is here: `setNoDelay`, `setKeepAlive`, `setTimeout`, `ref` and `unref`, and
+ * `destroy`, which kills the command. Backpressure runs both ways through the pipes.
+ *
+ * The stream ends when the command's stdout ends. A command that exits with a code other than
+ * zero, or before it wrote anything, destroys the stream with `command_stream_failed` and the
+ * tail of its stderr, so a bridge that could not reach the server inside says so.
+ */
+class CommandStream extends Duplex {
+  #child;
+  #file;
+  #args;
+  #stderr = [];
+  #stderrBytes = 0;
+  #receivedBytes = 0;
+  #closed = false;
+  #timer = null;
+
+  constructor(child, file, args) {
+    super({ allowHalfOpen: false });
+    this.#child = child;
+    this.#file = file;
+    this.#args = args;
+    this.timeout = 0;
+    // A failure that arrives before a consumer listens must not end the process. Whoever holds
+    // the stream still gets the error; this listener only keeps it from being uncaught.
+    this.on('error', () => {});
+
+    child.stdout.on('data', (chunk) => {
+      this.#receivedBytes += chunk.length;
+      this.#touch();
+      if (!this.push(chunk)) child.stdout.pause();
+    });
+    // The readable side ends at the command's `close`, not at stdout's `end`, so that a command
+    // which failed can still end the stream with its reason rather than with a bare end.
+    child.stderr.on('data', (chunk) => {
+      if (this.#stderrBytes >= STREAM_STDERR_BYTES) return;
+      this.#stderr.push(chunk.subarray(0, STREAM_STDERR_BYTES - this.#stderrBytes));
+      this.#stderrBytes += chunk.length;
+    });
+    child.stdin.on('error', (error) => {
+      // After the command has ended, its input closing is not news.
+      if (!this.#closed) this.destroy(this.#failure(`its input closed: ${error.code ?? error.message}`));
+    });
+    child.on('error', (error) => {
+      this.#closed = true;
+      this.destroy(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null }));
+    });
+    child.on('close', (code, signal) => {
+      this.#closed = true;
+      if (this.destroyed) return;
+      // A clean end: the readable side ends, the writable side follows (`allowHalfOpen: false`),
+      // and nothing is destroyed here, so what is still buffered is read.
+      if (code === 0 && this.#receivedBytes > 0) {
+        this.push(null);
+        return;
+      }
+      const why = code === null ? `stopped by signal ${signal}` : `exited with code ${code}`;
+      this.destroy(this.#failure(`${why}${this.#stderrText() ? `: ${this.#stderrText()}` : ''}`));
+    });
+  }
+
+  #stderrText() {
+    return Buffer.concat(this.#stderr).toString('utf8').trim();
+  }
+
+  #failure(what) {
+    return new SpaceError('command_stream_failed', `${this.#file} ${this.#args[0] ?? ''} ${what}`);
+  }
+
+  #touch() {
+    if (this.timeout > 0) this.setTimeout(this.timeout);
+  }
+
+  _read() {
+    this.#child.stdout.resume();
+  }
+
+  _write(chunk, _encoding, callback) {
+    this.#touch();
+    if (this.#closed) {
+      callback(this.#failure('has ended'));
+      return;
+    }
+    this.#child.stdin.write(chunk, callback);
+  }
+
+  _final(callback) {
+    if (this.#closed) {
+      callback();
+      return;
+    }
+    this.#child.stdin.end(callback);
+  }
+
+  _destroy(error, callback) {
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#child.stdout.removeAllListeners('data');
+    try {
+      this.#child.kill('SIGKILL');
+    } catch {
+      // Already gone.
+    }
+    callback(error);
+  }
+
+  /** Emits `timeout` after `milliseconds` without a byte in either direction. Zero cancels it. */
+  setTimeout(milliseconds, callback) {
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.timeout = milliseconds;
+    if (callback) this.once('timeout', callback);
+    if (milliseconds > 0) {
+      this.#timer = setTimeout(() => { this.#timer = null; this.emit('timeout'); }, milliseconds);
+      this.#timer.unref?.();
+    }
+    return this;
+  }
+
+  setNoDelay() { return this; }
+
+  setKeepAlive() { return this; }
+
+  ref() { return this; }
+
+  unref() { return this; }
+}
+
+/**
+ * Starts one executable with an argument array and hands back its stdin and stdout as a
+ * `CommandStream`. The executable is spawned directly, never through a shell, hidden on
+ * Windows. It is the transport of the place contract's `connect`. A command that cannot be
+ * started throws `command_spawn_failed` at once.
+ */
+export function openCommandStream(file, args) {
+  let child;
+  try {
+    child = spawn(file, args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (error) {
+    throw new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null });
+  }
+  return new CommandStream(child, file, args);
 }
