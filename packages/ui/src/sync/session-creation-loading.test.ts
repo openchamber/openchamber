@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { createOpencodeClient, type Session } from "@opencode-ai/sdk/v2/client"
+import type { Session, UserMessage } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
+import type { MessagePage } from "@/lib/opencode/client"
+import type { SessionMessagePageSource } from "./session-message-loader"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { ChildStoreManager } from "./child-store"
 import { createSession, setActionRefs } from "./session-actions"
@@ -13,20 +15,21 @@ const originalSelection = useSessionUIStore.getState()
 let childStores: ChildStoreManager
 let loader: SessionMessageLoader
 let requests = 0
-const sdk = createOpencodeClient({
-  baseUrl: "http://session-creation.test",
-  fetch: async () => {
+// Any history read is a failure for these tests, so the page source counts
+// calls and rejects.
+const sdk: SessionMessagePageSource = {
+  getSessionMessages: async (): Promise<MessagePage> => {
     requests += 1
-    return Response.json({ message: "not found" }, { status: 404 })
+    throw new Error("history read should not happen")
   },
-})
+}
 const session: Session = {
   id: "session-created",
-  slug: "created",
   projectID: "project-created",
   directory: "C:/canonical/worktree",
   title: "New session",
-  version: "1",
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: 1 },
 }
 
@@ -34,7 +37,7 @@ beforeEach(() => {
   requests = 0
   childStores = new ChildStoreManager()
   loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: getRuntimeKey() })
-  setActionRefs(sdk, childStores, () => "/requested")
+  setActionRefs(childStores, () => "/requested")
   setImperativeSessionMessageLoader(loader)
 })
 
@@ -71,9 +74,7 @@ describe("confirmed session creation", () => {
       sessionID: session.id,
       role: "user",
       time: { created: 2 },
-      agent: "build",
-      model: { providerID: "test", modelID: "test" },
-    } satisfies import("@opencode-ai/sdk/v2/client").UserMessage
+    } satisfies UserMessage
     opencodeClient.createSession = async () => {
       store.setState({ session: [newerSession], message: { [session.id]: [record] } })
       return session

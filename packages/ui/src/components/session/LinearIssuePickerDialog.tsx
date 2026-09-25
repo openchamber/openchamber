@@ -432,7 +432,7 @@ export function LinearIssuePickerDialog({
                   setCreateInWorktree((value) => !value);
                 }}
                 aria-label={t('session.linearIssuePicker.actions.toggleWorktreeAria')}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {createInWorktree ? (
                   <Icon name="checkbox" className="h-4 w-4 text-primary" />

@@ -1585,6 +1585,9 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         if (!response.ok || !body?.ok) {
           spin?.error('Tunnel start failed');
+          if (body?.code === 'ui_password_required') {
+            throw new Error(body.error);
+          }
           const baseError = body?.error || `Tunnel start failed (${response.status})`;
           const isCloudflareTimeout = /context deadline exceeded|Client\.Timeout exceeded while awaiting headers|failed to request quick Tunnel/i.test(baseError);
           const userError = isCloudflareTimeout

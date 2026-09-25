@@ -1,6 +1,7 @@
 import React from 'react';
+import { useSessionTurnActive } from '@/sync/global-session-status';
 import { Menu as BaseMenu } from '@base-ui/react/menu';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 import {
   DropdownMenu,
@@ -8,8 +9,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import {
   findSwitcherItemAncestorIds,
@@ -230,15 +231,13 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
 
-  const sessionStatus = useGlobalSessionStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
 
   const isActive = currentSessionId === session.id;
   const sessionTitle = session.title?.trim() || t('sessions.sidebar.session.untitled');
   const isSubtask = Boolean((session as Session & { parentID?: string | null }).parentID);
   const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
-  const statusType = sessionStatus?.type ?? 'idle';
-  const isStreaming = statusType === 'busy' || statusType === 'retry';
+  const isStreaming = useSessionTurnActive(session.id);
   const showUnreadDot = !isStreaming && needsAttention && !isActive;
 
   const timestamp = session.time?.updated || session.time?.created || Date.now();
@@ -272,6 +271,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
       className={cn(
         'group relative flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
         'data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover',
+        isActive && 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection data-[highlighted]:bg-interactive-selection',
       )}
       style={{ paddingLeft: 8 + depth * 12 }}
     >
@@ -293,7 +293,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
               {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
             </span>
           ) : null}
-          <span className={cn('truncate typography-ui-label font-normal leading-tight', isActive ? 'text-primary' : 'text-foreground')}>
+          <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
             {sessionTitle}
           </span>
         </div>
@@ -332,19 +332,13 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
 
       {isStreaming || showUnreadDot ? (
         <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
-          {isStreaming ? (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-              aria-label={t('sessions.sidebar.session.status.active')}
-              title={t('sessions.sidebar.session.status.active')}
-            />
-          ) : (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-              aria-label={t('sessions.sidebar.session.status.unread')}
-              title={t('sessions.sidebar.session.status.unread')}
-            />
-          )}
+          <SessionActivityIndicator
+            state={isStreaming ? 'running' : 'unread'}
+            label={isStreaming
+              ? t('sessions.sidebar.session.status.active')
+              : t('sessions.sidebar.session.status.unread')}
+            runningDotClassName="animate-busy-pulse"
+          />
         </span>
       ) : null}
     </BaseMenu.Item>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { Session } from "@/lib/opencode/model"
 import { autoRespondsPermission, type PermissionAutoAcceptMap } from "./permissionAutoAccept"
 
 function makeSession(id: string, parentID?: string): Session {

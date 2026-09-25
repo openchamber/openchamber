@@ -1,4 +1,4 @@
-import type { Message } from "@opencode-ai/sdk/v2/client"
+import type { Message } from "@/lib/opencode/model"
 
 const getCreatedAt = (message: Message): number => {
   const value = (message as { time?: { created?: unknown } }).time?.created

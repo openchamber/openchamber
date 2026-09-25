@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 
 import { MessageFreshnessDetector } from './messageFreshness';
 
-import type { Message } from '@opencode-ai/sdk/v2';
+import type { Message } from '@/lib/opencode/model';
 
 const makeAssistantMessage = (id: string, created: number): Message =>
     ({

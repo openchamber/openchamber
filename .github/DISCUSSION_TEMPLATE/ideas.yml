@@ -1,0 +1,57 @@
+title: "[Idea] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Discussions are for people, and they happen before the code.** The point of this place is to work out *what* to build and *how it should behave* while that's still an open question. Once you've written the implementation, that question is closed: a post describing what you already built isn't a discussion, it's a report, and there's nothing left for anyone to decide.
+
+        So a generated summary of finished code posted here gets closed, and so does the PR behind it. Not because it's AI-written, we all use AI. Because it arrives after the only moment when talking would have changed anything, and it asks a maintainer to rubber-stamp a decision you made alone.
+
+        Write it while you're still annoyed and haven't built anything: what you were trying to do, what got in your way, what you'd want instead. One honest paragraph in your own words. That we can actually discuss.
+
+        Have an idea of how you'd implement it, or something already sketched out on a branch? Bring it, that's genuinely useful. Bring it as a question though: here's how I'd do it, does that shape work for you? A branch you're willing to change is a proposal. A PR with a finished report attached is not.
+
+        Then wait for the answer before you build. A pull request that carries a product decision, with no discussion behind it and no maintainer go-ahead, is not getting reviewed, whatever shape the code is in.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do, and what gets in the way?
+      description: The situation, not the solution. When does it happen, how often, what do you do about it today?
+      placeholder: |
+        I write prompts for a long-running agent session. Half the time I phrase something loosely, the agent goes the wrong way, and I lose a few minutes re-explaining. I've started writing prompts in a notes app first, which is silly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: want
+    attributes:
+      label: What would you like to happen instead?
+      description: The shape of what you want, not a design. It's fine to not know how it should look.
+      placeholder: |
+        Something in the composer that cleans up what I typed before it goes out, so I can see the better version and edit it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Anything that shows what you mean
+      description: A screenshot of where it hurts today, a rough mockup, a link to another tool doing it, a session where it went wrong. Optional, but it's usually the fastest way to be understood.
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Would you want to build it?
+      options:
+        - Just want it to exist
+        - I'd like to build it if we agree on the shape
+        - I already have a PR open for it
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Already opened a PR before reading this? Link it above and still describe the problem here in your own words, as a question rather than a summary. The PR shows what you built; this post is where we work out whether it's the right thing to build.

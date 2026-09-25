@@ -1,18 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  buildDeferredRestartResponse,
+  buildAppliedResponse,
   buildExternalManualRestartResponse,
 } from './config-mutation-response.js';
 
 describe('config mutation response helpers', () => {
-  test('buildDeferredRestartResponse marks restart as deferred', () => {
-    expect(buildDeferredRestartResponse('Saved. Restart OpenCode to apply.')).toEqual({
+  test('buildAppliedResponse reports plain success with no restart flags', () => {
+    expect(buildAppliedResponse('Agent saved.')).toEqual({
       success: true,
-      requiresReload: false,
-      requiresRestart: true,
-      restartDeferred: true,
-      message: 'Saved. Restart OpenCode to apply.',
+      message: 'Agent saved.',
     });
   });
 

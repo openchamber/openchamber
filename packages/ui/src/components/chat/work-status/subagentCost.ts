@@ -1,4 +1,4 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 // Spend is read against a budget, so it keeps its real precision instead of
 // collapsing to two decimals. Trailing zeros are dropped so exact values stay

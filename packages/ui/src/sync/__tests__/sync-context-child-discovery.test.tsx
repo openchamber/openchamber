@@ -2,9 +2,96 @@ import { describe, expect, test } from 'bun:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Window } from 'happy-dom'
-import { createOpencodeClient, type Session } from '@opencode-ai/sdk/v2'
-import { SyncProvider, setActiveSession } from '../sync-context'
-import { getSyncChildStores } from '../sync-refs'
+import { mock } from 'bun:test'
+import { OpenCode } from '@opencode/client'
+import type { Session } from '@/lib/opencode/model'
+import type { SessionListOptions, SessionPage } from '@/lib/opencode/client'
+
+const DIRECTORY = '/repo/discovery'
+const cursorsSeenOnDiscoveryCalls: Array<string | undefined> = []
+const parentMessageFetches: string[] = []
+
+const rootSession = (id: string, title: string, updated: number): Session => ({
+  id,
+  projectID: 'project',
+  directory: DIRECTORY,
+  title,
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated },
+})
+
+const childSession: Session = { ...rootSession('ses_child', 'subagent child', 10), parentID: 'ses_parent' }
+
+const hang = <T,>(): Promise<T> => new Promise<T>(() => undefined)
+
+// The provider reads every session list through the client wrapper, so the
+// pagination under test is driven here rather than through a fake transport.
+const listSessionsPage = async (options: SessionListOptions = {}): Promise<SessionPage> => {
+  if (options.limit === 200) {
+    cursorsSeenOnDiscoveryCalls.push(options.cursor)
+    if (options.cursor === undefined) {
+      // Page 1: a full page of root sessions, so the child on page 2 sits
+      // beyond the pre-fix one-shot cutoff.
+      return {
+        sessions: Array.from({ length: 200 }, (_, index) => rootSession(`ses_root_${index}`, `root ${index}`, 1000 - index)),
+        cursor: { next: 'cursor_page_2' },
+      }
+    }
+    return { sessions: [childSession], cursor: {} }
+  }
+  if (options.limit === 500) {
+    // Bootstrap's own list: hang. Resolving it would replace the store's
+    // sessions after discovery merged them; in production the two race and the
+    // next watchdog tick re-discovers merged children.
+    return hang()
+  }
+  return { sessions: [], cursor: {} }
+}
+
+let sequence = 0
+// Staleness checks compare client identity across awaits, so these must be
+// stable references rather than a fresh object per call.
+const sdkIdentity = {}
+
+mock.module('@/lib/opencode/client', () => ({
+  ascendingId: (prefix: string) => `${prefix}_${(sequence += 1).toString().padStart(6, '0')}`,
+  isOpencodeNotFound: () => false,
+  OpencodeApiError: Error,
+  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
+  OPENCODE_DIRECTORY_HEADER: 'x-opencode-directory',
+  opencodeClient: {
+    listSessionsPage,
+    getSdkClient: () => sdkIdentity,
+    getScopedSdkClient: () => sdkIdentity,
+    getDirectory: () => DIRECTORY,
+    setDirectory: () => undefined,
+    clearConfigCache: () => undefined,
+    listProjects: async () => [],
+    getFilesystemHome: async () => '/home',
+    getLocation: async () => ({
+      directory: DIRECTORY,
+      project: { id: 'project', directory: DIRECTORY, canonical: DIRECTORY },
+    }),
+    getConfig: async () => ({}),
+    getActiveSessionStatuses: async () => ({}),
+    listCommands: async () => [],
+    listAgents: async () => [],
+    listMcpServers: async () => [],
+    getVcs: async () => undefined,
+    listPendingForms: async () => [],
+    listPendingPermissions: async () => [],
+    getProvidersForConfig: async () => ({ providers: [], models: [] }),
+    getSession: async (id: string) => rootSession(id, id, 1),
+    getSessionMessages: async (id: string) => {
+      parentMessageFetches.push(id)
+      return { items: [], cursor: {} }
+    },
+  },
+}))
+
+const { SyncProvider, setActiveSession } = await import('../sync-context')
+const { getSyncChildStores } = await import('../sync-refs')
 
 /**
  * Regression guard for silent child-session truncation in the watchdog's
@@ -100,117 +187,14 @@ describe('SyncProvider child-session discovery pagination', () => {
   // interval's second tick (~5s after mount).
   test('discovers a child session on page 2 beyond the 200 cutoff and materializes its parent', async () => {
     const dom = installHookTestDomWithStorage()
-    const DIRECTORY = '/repo/discovery'
-    const cursorsSeenOnDiscoveryCalls: Array<number | undefined> = []
-    const parentMessageFetches: string[] = []
-    const childSession: Session = {
-      id: 'ses_child',
-      slug: 'ses_child',
-      projectID: 'project',
-      directory: DIRECTORY,
-      title: 'subagent child',
-      version: '1',
-      parentID: 'ses_parent',
-      time: { created: 1, updated: 10 },
-    }
-
-    const hang = () => new Promise<Response>(() => undefined)
-
-    const sdk = createOpencodeClient({
-      baseUrl: 'http://discovery.test',
-      fetch: async (request) => {
-        const url = new URL(request instanceof Request ? request.url : request.toString())
-        const path = url.pathname
-        if (path.endsWith('/global/event')) {
-          return hang()
-        }
-        if (path.endsWith('/experimental/session')) {
-          const roots = url.searchParams.get('roots') === 'true'
-          const limit = Number(url.searchParams.get('limit') ?? '0')
-          if (!roots && limit === 200) {
-            // Only the watchdog's child-discovery loop requests pageSize 200
-            // with roots unset (bootstrap uses 500 with roots true/false).
-            const cursorParam = url.searchParams.get('cursor')
-            const cursor = cursorParam === null ? undefined : Number(cursorParam)
-            cursorsSeenOnDiscoveryCalls.push(cursor)
-            if (cursor === undefined) {
-              // Page 1: a full page of 200 parent-less root sessions ending at
-              // time.updated 801, so the child (page 2) sits beyond the
-              // pre-fix one-shot cutoff. The next-cursor header matches the
-              // last record's time.updated; the helper reads it at
-              // result.response.headers with "updated strictly before"
-              // semantics. The child is created after bootstrap, which is
-              // exactly the gap the watchdog's discovery pull covers.
-              const page: Session[] = Array.from({ length: 200 }, (_, index) => ({
-                id: `ses_root_${index}`,
-                slug: `root_${index}`,
-                projectID: 'project',
-                directory: DIRECTORY,
-                title: `root ${index}`,
-                version: '1',
-                time: { created: 1, updated: 1000 - index },
-              }))
-              return new Response(JSON.stringify(page), {
-                status: 200,
-                headers: { 'content-type': 'application/json', 'x-next-cursor': '801' },
-              })
-            }
-            // Page 2: the subagent child of a known parent.
-            return new Response(JSON.stringify([childSession]), {
-              status: 200,
-              headers: { 'content-type': 'application/json' },
-            })
-          }
-          if (roots) {
-            // Bootstrap root list: the parent known to the directory.
-            return new Response(JSON.stringify([{
-              id: 'ses_parent',
-              slug: 'parent',
-              projectID: 'project',
-              directory: DIRECTORY,
-              title: 'parent',
-              version: '1',
-              time: { created: 1, updated: 1500 },
-            }]), { status: 200, headers: { 'content-type': 'application/json' } })
-          }
-          // Bootstrap's broader children list: hang. Resolving it as empty
-          // would replace the store's sessions after discovery merges them;
-          // in production this list races discovery anyway, and the watchdog
-          // tick re-discovers merged children.
-          return hang()
-        }
-        if (path.endsWith('/session/status')) {
-          return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
-        }
-        if (path.match(/\/session\/[^/]+\/message$/)) {
-          parentMessageFetches.push(path)
-          return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
-        }
-        if (path.endsWith('/path')) {
-          return new Response(JSON.stringify({ state: '', config: '', worktree: DIRECTORY, directory: DIRECTORY, home: '/home' }), { status: 200, headers: { 'content-type': 'application/json' } })
-        }
-        if (path.endsWith('/project/current')) {
-          return new Response(JSON.stringify({ id: 'project' }), { status: 200, headers: { 'content-type': 'application/json' } })
-        }
-        if (path.endsWith('/config')) {
-          return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } })
-        }
-        return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
-      },
-    })
+    cursorsSeenOnDiscoveryCalls.length = 0
+    parentMessageFetches.length = 0
+    const sdk = OpenCode.make({ baseUrl: 'http://discovery.test', fetch: () => hang<Response>() })
 
     try {
       // Seed the persisted cache so the watchdog's first pass (before any
       // bootstrap session commit) sees the parent as a candidate.
-      seedPersistedSessions(DIRECTORY, [{
-        id: 'ses_parent',
-        slug: 'parent',
-        projectID: 'project',
-        directory: DIRECTORY,
-        title: 'parent',
-        version: '1',
-        time: { created: 1, updated: 1500 },
-      }])
+      seedPersistedSessions(DIRECTORY, [rootSession('ses_parent', 'parent', 1500)])
 
       const root = createRoot(dom.container)
       await act(async () => root.render(
@@ -232,19 +216,16 @@ describe('SyncProvider child-session discovery pagination', () => {
         const state = store?.getState()
         if (!state) return false
         discovered = state.session.some((session) => session.id === 'ses_child')
-        materialized = parentMessageFetches.includes('/session/ses_parent/message')
+        materialized = parentMessageFetches.includes('ses_parent')
         return discovered && materialized
       }, 8000)
 
       // The child beyond the first page was discovered through pagination.
       expect(discovered).toBe(true)
       // The discovery loop fetched two pages: page 2 exists only because the
-      // helper paginates past the 200 cutoff. The second request carried the
-      // page-1 cursor boundary (801 = the x-next-cursor header, which equals
-      // the last record's time.updated in this fixture; server cursor
-      // semantics are "updated strictly before this timestamp"). The pre-fix
-      // one-shot fetch never issued this second request.
-      expect(cursorsSeenOnDiscoveryCalls).toEqual([undefined, 801])
+      // helper paginates past the first full page, carrying the cursor page 1
+      // returned. The pre-fix one-shot fetch never issued this second request.
+      expect(cursorsSeenOnDiscoveryCalls).toEqual([undefined, 'cursor_page_2'])
       // Parent materialization was enqueued so the Task tool part refreshes.
       expect(materialized).toBe(true)
 

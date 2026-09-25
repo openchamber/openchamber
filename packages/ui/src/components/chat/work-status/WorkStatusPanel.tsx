@@ -10,16 +10,20 @@ import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
 import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
 import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
-import { WorkStatusTasksSection } from './WorkStatusTasksSection';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
+import { WorkStatusExtensionSection } from './WorkStatusExtensionSection';
 import {
   areAllWorkStatusSectionsHidden,
   getWorkStatusPanelPresentation,
+  isExtensionSectionId,
   isWorkStatusSectionVisible,
+  resolveWorkStatusSectionOrder,
+  type WorkStatusSectionId,
 } from './sections';
+import { useWorkStatusExtensionSections } from './useWorkStatusExtensionSections';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -54,9 +58,7 @@ const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
  * Work-status panel: a card inside the chat column reporting the state of the
  * session, its branch and its subagents.
  *
- * Ordering is by durability, not by category. The first sections hold readouts
- * that stay true for the whole session, then the state of the work in flight,
- * then episodic material an agent may never produce. Each section renders
+ * Sections follow the user's saved order. Each section renders
  * nothing when it has nothing, so the panel collapses toward the top instead of
  * reserving empty space.
  *
@@ -71,6 +73,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
+  const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
+  const extensionSections = useWorkStatusExtensionSections();
+  const sectionOrder = React.useMemo(
+    () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids),
+    [extensionSections.ids, storedOrder],
+  );
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
   // Starts optimistic: sections report after their first commit, and rendering
   // nothing on the way in would make the card flash out and back on arrival.
@@ -96,7 +104,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // re-enable sections. The previous `renderedSections > 0` guard is preserved
   // for the transient "no data yet" state so the panel doesn't flash a bare
   // bordered card on first mount.
-  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections);
+  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections, extensionSections.ids);
   const { interactive, showEmptyState } = getWorkStatusPanelPresentation({
     visible,
     contentMounted,
@@ -146,9 +154,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   React.useEffect(() => {
     // Only while it is actually up: a hidden overlay listening for clicks would
     // swallow the very press that opens it.
-    if (!overlay || !visible) return undefined;
+    if (!overlay || !visible || sectionsDialogOpen) return undefined;
     const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target instanceof Element ? event.target : null;
       if (overlayRef.current?.contains(target)) return;
       // The header toggle closes it on its own; letting this fire too would
       // close and immediately reopen.
@@ -164,7 +172,18 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [overlay, setOverlayOpen, visible]);
+  }, [overlay, setOverlayOpen, visible, sectionsDialogOpen]);
+
+  // Keep these elements owned by the panel so primary readout updates do not
+  // rerender unrelated sections through the composition callback.
+  const secondarySections = {
+    usage: <WorkStatusUsageSection />,
+    telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,
+    subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
+    mcp: <WorkStatusMcpSection directory={directory} />,
+    pinned: <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />,
+    contextSources: <WorkStatusContextSection sessionId={sessionId} directory={directory} />,
+  } satisfies Record<Exclude<WorkStatusSectionId, 'session' | 'repository'>, React.ReactNode>;
 
   return (
     <aside
@@ -245,7 +264,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         ref={restore}
         onScroll={handleScroll}
         size={24}
-        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2"
+        // Sections returning null leave no DOM node, so this reserves room for
+        // settings in the first rendered heading, regardless of saved order.
+        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pr-7"
       >
         <WorkStatusPrimaryGroup
           sessionId={sessionId}
@@ -253,14 +274,16 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           showSession={sectionVisible('session')}
           showRepository={repositoryEnabled && sectionVisible('repository')}
           goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
-        />
-        {sectionVisible('usage') ? <WorkStatusUsageSection /> : null}
-        {sectionVisible('telemetry') ? <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('subagents') ? <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('tasks') ? <WorkStatusTasksSection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('mcp') ? <WorkStatusMcpSection directory={directory} /> : null}
-        {sectionVisible('pinned') ? <WorkStatusPinnedSection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
+        >
+          {(primary) => sectionOrder.map((id) => {
+            if (!sectionVisible(id)) return null;
+            if (isExtensionSectionId(id)) {
+              const guest = extensionSections.byId.get(id);
+              return guest ? <WorkStatusExtensionSection key={id} guest={guest} /> : null;
+            }
+            return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
+          })}
+        </WorkStatusPrimaryGroup>
       </ScrollShadow>
       </WorkStatusPresenceProvider>
       ) : null}

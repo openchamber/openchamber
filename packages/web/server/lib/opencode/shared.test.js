@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig } from './shared.js';
+import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig, walkSkillMdFiles } from './shared.js';
 import { updateAgent } from './agents.js';
 import { updateMcpConfig } from './mcp.js';
 
@@ -165,10 +165,12 @@ describe('updateAgent frontmatter preservation', () => {
     expect(content.match(/^---\r?\n/g)).toHaveLength(1);
 
     const parsed = parseMdFile(agentPath);
+    // `temperature` is a v1 field: reading accepts it, writing moves it under
+    // the v2 `request.body` overlay.
     expect(parsed.frontmatter).toEqual({
       description: 'Strategy agent',
       model: 'openai/gpt-5',
-      temperature: 0.7,
+      request: { body: { temperature: 0.7 } },
     });
     expect(parsed.body).toBe('');
   });
@@ -196,7 +198,7 @@ describe('updateAgent frontmatter preservation', () => {
     expect(parsed.frontmatter).toEqual({
       description: 'Updated strategy agent',
       mode: 'primary',
-      temperature: 0.7,
+      request: { body: { temperature: 0.7 } },
     });
     expect(parsed.body).toBe('Body of strateg.');
   });
@@ -372,10 +374,12 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
         }),
       ]);
 
-      updateMcpConfig('openproject', { enabled: false }, projectDir);
+      updateMcpConfig('openproject', { disabled: true }, projectDir);
       const rewritten = JSON.parse(fs.readFileSync(custom, 'utf8'));
       expect(rewritten.plugin).toEqual(['opencode-see-image']);
-      expect(rewritten.mcp.openproject.enabled).toBe(false);
+      // The v1 `mcp.<name>` entry is rewritten in place into `mcp.servers`.
+      expect(rewritten.mcp.openproject).toBeUndefined();
+      expect(rewritten.mcp.servers.openproject.disabled).toBe(true);
       expect(fs.readFileSync(projectFile, 'utf8')).toBe(PARTIAL_PARSE_CONFIG);
       expect(fs.existsSync(`${projectFile}.openchamber.backup`)).toBe(false);
     } finally {
@@ -384,3 +388,81 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
     }
   });
 });
+
+describe('walkSkillMdFiles', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const writeSkill = (relativeDir) => writeFixture(path.join(relativeDir, 'SKILL.md'), STANDARD_MD);
+  // A junction needs no elevation on Windows, which is what Skills Manager deploys;
+  // the type argument is ignored on POSIX.
+  const linkDirectory = (target, relativeLink) =>
+    fs.symlinkSync(target, path.join(FIXTURE_DIR, relativeLink), process.platform === 'win32' ? 'junction' : 'dir');
+  const foundRelative = () =>
+    walkSkillMdFiles(FIXTURE_DIR)
+      .map((found) => path.relative(FIXTURE_DIR, found).split(path.sep).join('/'))
+      .sort();
+
+  it('walks a skill deployed as a link inside the scanned root', () => {
+    writeSkill('real-skill');
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'collection'), { recursive: true });
+    writeSkill(path.join('collection', 'nested-skill'));
+    linkDirectory(path.join(FIXTURE_DIR, 'real-skill'), 'linked-skill');
+    linkDirectory(path.join(FIXTURE_DIR, 'collection'), 'collection-link');
+
+    expect(foundRelative()).toEqual([
+      'collection-link/nested-skill/SKILL.md',
+      'collection/nested-skill/SKILL.md',
+      'linked-skill/SKILL.md',
+      'real-skill/SKILL.md',
+    ]);
+  });
+
+  it('ends on a link that points back into the scanned tree', () => {
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'loopdir'), { recursive: true });
+    writeSkill('loopdir');
+    linkDirectory(FIXTURE_DIR, path.join('loopdir', 'back'));
+
+    expect(foundRelative()).toEqual(['loopdir/SKILL.md']);
+  });
+
+  it('skips a link whose target is gone and keeps the rest of the scan', () => {
+    writeSkill('real-skill');
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'gone-skill'), { recursive: true });
+    linkDirectory(path.join(FIXTURE_DIR, 'gone-skill'), 'dangling-link');
+    fs.rmSync(path.join(FIXTURE_DIR, 'gone-skill'), { recursive: true, force: true });
+
+    expect(foundRelative()).toEqual(['real-skill/SKILL.md']);
+  });
+
+  it('follows a link nested below the top level of the scanned root', () => {
+    const outside = `${FIXTURE_DIR}-outside`;
+    fs.rmSync(outside, { recursive: true, force: true });
+    fs.mkdirSync(path.join(outside, 'deep-skill'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'deep-skill', 'SKILL.md'), STANDARD_MD);
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'group'), { recursive: true });
+    try {
+      linkDirectory(path.join(outside, 'deep-skill'), path.join('group', 'linked'));
+      expect(foundRelative()).toEqual(['group/linked/SKILL.md']);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('ends on a nested link loop between two directories', () => {
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'a'), { recursive: true });
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'b'), { recursive: true });
+    writeSkill('a');
+    linkDirectory(path.join(FIXTURE_DIR, 'b'), path.join('a', 'to-b'));
+    linkDirectory(path.join(FIXTURE_DIR, 'a'), path.join('b', 'to-a'));
+
+    expect(foundRelative()).toEqual(['a/SKILL.md', 'b/to-a/SKILL.md']);
+  });
+});
+

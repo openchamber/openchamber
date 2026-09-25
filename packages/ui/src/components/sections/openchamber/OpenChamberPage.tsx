@@ -177,12 +177,12 @@ const VisualSectionContent: React.FC = () => {
         'spacing',
         'scrollbars',
         'inputBarOffset',
+        'animatedActivityIndicators',
     ]} />;
 };
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
 const ChatSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
     return (
         <OpenChamberVisualSettings
             visibleSettings={[
@@ -198,7 +198,7 @@ const ChatSectionContent: React.FC = () => {
                 'expandedTools',
                 'collapsibleUserMessages',
                 'stickyUserHeader',
-                ...(!isVSCode ? ['promptNavigatorEnabled' as const] : []),
+                'promptNavigatorEnabled',
                 'wideChatLayout',
                 'codeBlockLineWrap',
                 'splitAssistantMessageActions',

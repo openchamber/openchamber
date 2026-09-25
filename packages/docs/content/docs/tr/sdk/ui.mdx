@@ -1,0 +1,155 @@
+---
+title: UI kiti
+description: "@openchamber/sdk/ui içindeki düğmeler, alanlar, açılır listeler, sekmeler, listeler ve diğer yapı taşları; bir eklentiyi OpenChamber'ın geri kalanı gibi gösterir."
+---
+
+# UI kiti
+
+`@openchamber/sdk/ui`, uygulamanın renklerini, yazı tiplerini ve boşluklarını kullanan hazır kontroller kümesidir; böylece eklentiniz stilleri kopyalamadan OpenChamber'ın geri kalanı gibi görünür. Her kontrol bir fonksiyondur: ona size ait bir öğe ve ayarlarını verirsiniz, kendini oraya çizer ve `{ update, dispose }` döndürür. Kontrolleri bir ekrana siz yerleştirir, veriyi siz tutarsınız. Kit sağlayıcınızı ya da OpenChamber'ı asla çağırmaz; `host.request`, `host.attach` ve diğerlerini yine kendiniz çağırırsınız. Kitte olmayan her şey için kendi HTML ve CSS'inizi yazabilirsiniz, ama önce kite başvurun: kontrolleri kullanıcının temasını, boşluklarını ve klavye alışkanlıklarını kendiliğinden izler; böylece onlarla kurulan bir panel içine gömülü bir web sitesi gibi değil, OpenChamber'ın bir parçası gibi hissedilir.
+
+## Önce `applyHostReady` çağırın
+
+Kontroller renklerini `applyHostReady` fonksiyonunun sayfaya yazdığı CSS değişkenlerinden okur. Ayrıca uygulamanın yazı tipini ve metin rengini sayfa köküne uygular; böylece kendi eklediğiniz düz HTML de doğru görünür. Bunu `host.onReady` içinde, ilk bağlamadan önce çağırın; kullanıcı temayı değiştirdiğinde renkler uygulamanın temasını izler.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  // Mount controls and register listeners once here.
+});
+```
+
+Kit; hafif renkli düğmeler, rozetler, bildirim başlıkları, doğrulama mesajları ve bağlantılar için host'un hesapladığı metin renklerini kullanır. Kontrastı kendiniz hesaplamanız gerekmez.
+
+Kendi CSS'iniz için `applyHostReady`; `--primary-text`, `--success-text`, `--warning-text`, `--error-text` ve `--info-text` değişkenlerini ve bunlara karşılık gelen `--oc-*-text` takma adlarını sağlar. Bunları nötr veya hafif renkli arka planlardaki metinlerde kullanın. Dolgular için temel renkleri, düz `--oc-primary` dolgusu üzerindeki metin için `--oc-primary-fg` kullanın. Renkleri güncel tutmak için her `onReady` durumunu uygulayın.
+
+`onReady`, panel açıkken oturum bağlamı değişiklikleri dahil birçok kez çalışabilir. Temayı her çağrıda uygulayın, ancak kontrolleri ve dinleyicileri yalnızca bir kez oluşturun. Taslak değerlerini çizim fonksiyonlarının dışında tutun. Sekme değiştirirken mevcut panelleri gizleyin veya değerlerini durumdan geri yükleyin.
+
+## Seçimi ve giriş alanlarını eşitleyin
+
+`mountTabs`, `mountSelect`, `mountCheckbox` ve `mountSwitch`, değişiklikleri `onChange` ile bildirir; `activeId`, `value` veya `checked` değerlerini kendileri değiştirmez. Değeri kaydedip `update` ile geri verin. Metin ve arama alanları yazılanı hemen gösterir, ancak sonraki güncellemenin eski değeri geri getirmemesi için `update({ value })` da gerekir. Düğmenin `onClick` işleyicisi variant değerini değiştirmez. Mod seçimi için `mountTabs` kullanın.
+
+Bu kontrolleri panelin mevcut `root` öğesine bir kez bağlayın:
+
+```ts
+import { mountSelect, mountTabs } from "@openchamber/sdk/ui";
+
+let activeId = "convert";
+const tabs = mountTabs(root, {
+  items: [{ id: "convert", label: "Convert" }, { id: "format", label: "Format" }],
+  activeId,
+  onChange: (next) => {
+    activeId = next;
+    tabs.update({ activeId });
+    // Show the matching panel without discarding its draft values.
+  },
+});
+
+let format = "json";
+const select = mountSelect(root, {
+  options: [{ id: "json", label: "JSON" }, { id: "yaml", label: "YAML" }],
+  value: format,
+  onChange: (next) => {
+    format = next;
+    select.update({ value: format });
+  },
+});
+```
+
+Biçimleri takas etmek için durumdaki iki değeri değiştirin ve mevcut iki select üzerinde `update({ value })` çağırın. Değer değiştirmek için yeni kontroller oluşturmayın. Kontrolü kaldırırken `dispose()` çağırın.
+
+## Neleri bağlayabilirsiniz
+
+| Fonksiyon | Ne çizer |
+| --- | --- |
+| `mountButton` | Bir düğme. `variant` değeri `default`, `secondary`, `outline`, `ghost` veya `destructive`; `size` değeri `default`, `sm` veya `xs`. `loading` bir dönen simge gösterir ve tıklamaları engeller. |
+| `mountTextField` | Etiketli bir giriş alanı ya da `multiline` ile çok satırlı metin alanı. İsteğe bağlı `helper` veya `error` metni, `password` maskeleme ve token ile id'ler için `mono`. |
+| `mountSearchField` | Büyüteç ve temizleme düğmeli bir arama kutusu. Escape temizler. |
+| `mountSelect` | Bir açılır liste. `searchable` listenin üstüne bir filtre kutusu ekler. Ok tuşları gezer, Enter seçer, Escape kapatır. |
+| `mountCheckbox`, `mountSwitch` | Etiketli ve isteğe bağlı `description` içeren bir onay kutusu ya da anahtar. |
+| `mountTabs` | Her biri isteğe bağlı sayaç taşıyan hap biçimli sekmeler. Sol ve sağ oklar aralarında gezer. |
+| `mountBadge` | Küçük bir hap. `tone` değeri `neutral`, `primary`, `success`, `warning`, `error` veya `info`. |
+| `mountList` | Klavyeyle kullanımı kolay bir liste. Her satırda öncü bir anahtar, başlık, alt başlık, sağa hizalı meta metin ve bir rozet olabilir. |
+| `mountEmpty` | Ortalanmış boş durum; başlık, bir satır gövde ve isteğe bağlı düğme. |
+| `mountSpinner` | İsteğe bağlı etiketli bir yükleme halkası. |
+| `mountBanner` | Tonlu bir uyarı; başlık, gövde ve isteğe bağlı eylem. |
+| `mountSeparator` | İnce bir çizgi, isteğe bağlı olarak ortasında etiket. |
+| `mountProgress` | 0'dan 100'e ilerleme çubuğu. |
+| `mountMenu` | Eylem listesi açan bir düğme. Öğeler yıkıcı, devre dışı ya da ayırıcı olabilir. |
+| `mountText` | Sağlayıcınızdan gelen metin. Markdown tarzı görseller ve `http(s)` bağlantıları gerçek görsel ve bağlantıya dönüşür; geri kalan her şey düz metin kalır, bu yüzden güvenilmeyen içerik güvenle gösterilebilir. |
+
+Kontrollerin yanında üç düz yardımcı da gelir. `filterSelectOptions(options, query)`, `mountSelect` fonksiyonunun kullandığı eşleştirmedir. `splitTextMedia(text)`, `mountText` fonksiyonunun çizmeden önce yaptığı şeydir. `moveListSelection`, liste, açılır liste ve menünün paylaştığı klavye adımıdır; kendi listenizi kurarsanız işinize yarar.
+
+## Aramalı bir liste
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+  const emptyRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(emptyRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  const search = mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      search.update({ value: next });
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` yalnızca değişen ayarları alır. Vurgulu satır hâlâ oradaysa liste güncellemeler arasında onu korur.
+
+## Sağlayıcı metnindeki bağlantılar
+
+Sayfanız bir sandbox içinde çalışır ve kendi başına yeni sekme açamaz. `mountText` kullanırken `onOpenUrl` verin ve bağlantıyı OpenChamber'a bırakın:
+
+```ts
+import { mountText } from "@openchamber/sdk/ui";
+
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## İlgili sayfalar
+
+- [Eklenti oluşturma](/sdk/): klasör, manifest ve kurulum
+- [Host API](/sdk/host/): `connectHost`, attach ve hata kodları

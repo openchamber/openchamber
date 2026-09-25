@@ -27,7 +27,7 @@ import { isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOptio
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { normalizeMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isTerminalShell } from '@/lib/terminalShell';
-import { sanitizeWorkStatusHiddenSections } from '@/components/chat/work-status/sections';
+import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -246,6 +246,9 @@ export const SETTINGS_REGISTRY = {
   }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
+  // `builtin` or an installed extension id; the server falls back to `builtin` when that extension cannot serve.
+  browserProvider: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('browserProvider', (v) => useUIStore.getState().setBrowserProvider(v)) }),
+  agentNotifyToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentNotifyToolEnabled', (v) => useUIStore.getState().setAgentNotifyToolEnabled(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
   // Server-owned: it says whether this build has the feature at all.
   agentMemoryFeatureAvailable: field({
@@ -253,6 +256,12 @@ export const SETTINGS_REGISTRY = {
     computed: true,
     parse: parseBoolean,
     ui: uiStore('agentMemoryFeatureAvailable', (v) => useUIStore.getState().setAgentMemoryFeatureAvailable(v), { autoSave: false }),
+  }),
+  routingFeatureAvailable: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
   }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
@@ -287,11 +296,19 @@ export const SETTINGS_REGISTRY = {
 
   // ── Sidebar display (profile; useSessionDisplayStore) ──
   sidebarProjectDisplayMode: field({ scope: 'profile', parse: parseOneOf(['all', 'single']), ui: sessionDisplayField('projectDisplayMode') }),
-  sidebarSessionGroupingMode: field({ scope: 'profile', parse: parseOneOf(['by-worktree', 'flat']), ui: sessionDisplayField('sessionGroupingMode') }),
+  // Per surface: the phone defaults to the timeline and a choice made there
+  // must not flip the desktop sidebar (and vice versa).
+  sidebarViewMode: field({ scope: 'profile', perSurface: true, parse: parseOneOf(['projects', 'timeline']), ui: sessionDisplayField('sidebarViewMode') }),
   sidebarProjectSortOrder: field({ scope: 'profile', parse: parseOneOf(['manual', 'a-z', 'z-a', 'date-added', 'recent']), ui: sessionDisplayField('projectSortOrder') }),
+  sidebarWorktreeSortOrder: field({ scope: 'profile', parse: parseOneOf(['recent', 'manual', 'a-z']), ui: sessionDisplayField('worktreeSortOrder') }),
   sidebarShowRecentSection: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('showRecentSection') }),
 
   // ── Work status ──
+  workStatusSectionOrder: field({
+    scope: 'profile',
+    parse: mapParser(parseStringList, sanitizeWorkStatusSectionOrder),
+    ui: uiStore('workStatusSectionOrder', (value) => useUIStore.getState().setWorkStatusSectionOrder(value)),
+  }),
   workStatusPanelEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('workStatusPanelEnabled', (v) => useUIStore.getState().setWorkStatusPanelEnabled(v)) }),
   workStatusHiddenSections: field({
     scope: 'profile',
@@ -360,7 +377,6 @@ export const SETTINGS_REGISTRY = {
   autoSaveEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('autoSaveEnabled', (v) => useUIStore.getState().setAutoSaveEnabled(v)) }),
   autoCreateWorktree: field({ scope: 'profile', parse: parseBoolean }),
   sessionTabsEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'vscode'], parse: parseBoolean, ui: uiStore('sessionTabsEnabled', (v) => useUIStore.getState().setSessionTabsEnabled(v)) }),
-  showOpenCodeRestartConfirm: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showOpenCodeRestartConfirm', (v) => useUIStore.getState().setShowOpenCodeRestartConfirm(v)) }),
   allowPromptingSubagentSessions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('allowPromptingSubagentSessions', (v) => useUIStore.getState().setAllowPromptingSubagentSessions(v)) }),
 
   // ── Composer (profile) ──
@@ -475,7 +491,6 @@ export const SETTINGS_REGISTRY = {
   responseStyleEnabled: field({ scope: 'profile', parse: parseBoolean }),
   responseStylePreset: field({ scope: 'profile', parse: parseOneOf(RESPONSE_STYLE_PRESETS) }),
   responseStyleCustomInstructions: field({ scope: 'profile', parse: parseTextUpTo(50_000) }),
-  optimizeSystemPrompt: field({ scope: 'profile', parse: parseBoolean }),
 
   // The server serves the PWA manifest from these, so they are facts about
   // the instance even though only the installed web app shows them.
@@ -526,9 +541,11 @@ export const LOCAL_DEVICE_KEYS = [
   'contextRailOrder',
   'contextRailHiddenSurfaces',
   'contextEditorTreeVisible',
+  'contextEditorVisible',
   'contextEditorTreeWidth',
   'notesPanelHeight',
   'workStatusExpandedSections',
+  'messageQueueExpanded',
   'workStatusScrollTop',
   'isSessionSwitcherOpen',
   'sidebarSection',
@@ -540,6 +557,8 @@ export const LOCAL_DEVICE_KEYS = [
   'autoDeleteLastRunAt',
   'messageLimit',
   'walkthroughTocWidth',
+  'diffFileListMode',
+  'diffFileTreeWidth',
   'linearIssueListStatus',
   'linearIssueListAssignee',
   'linearIssueListTeamIdByRuntime',

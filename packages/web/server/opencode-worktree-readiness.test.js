@@ -36,11 +36,12 @@ async function createFixture({ timeoutMs = 1000 } = {}) {
     instance ??= bootstrap.phase === 'directory-created'
       ? { projectID: 'global', config: {} }
       : { projectID: 'project-3464', config: projectConfig };
-    if (req.path === '/config') return res.json(instance.config);
-    if (req.path === '/session' && req.method === 'POST') {
+    if (req.path === '/api/config') return res.json(instance.config);
+    if (req.path === '/api/session' && req.method === 'POST') {
       return res.json({ projectID: instance.projectID, directory: req.query.directory, title: req.body.title });
     }
-    res.json([]);
+    // v2 pages the session list as `{ data, cursor }`.
+    res.json({ data: [], cursor: {} });
   });
   const upstreamUrl = await listen(upstream);
   const app = express();
@@ -91,7 +92,7 @@ describe('issue #3464 worktree OpenCode initialization', () => {
     expect(fixture.forwarded).toEqual([]);
     fixture.setBootstrap({ status: 'ready', phase: 'setup-ready', error: null });
     expect((await response).status).toBe(200);
-    expect(fixture.forwarded).toEqual(['/session']);
+    expect(fixture.forwarded).toEqual(['/api/session']);
   });
 
   it('does not block unrelated directories while a worktree is pending', async () => {

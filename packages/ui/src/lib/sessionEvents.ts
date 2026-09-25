@@ -1,5 +1,6 @@
-import type { Session } from '@opencode-ai/sdk/v2';
-import type { Part } from '@opencode-ai/sdk/v2/client';
+import type { Session } from '@/lib/opencode/model';
+import { isFinalToolStatus, type Part } from '@/lib/opencode/model';
+import { isExecuteTool, isFileChangeTool, isShellTool } from '@/lib/opencode/tools';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -26,12 +27,10 @@ const deleteListeners = new Set<DeleteListener>();
 const createListeners = new Set<CreateListener>();
 const directoryListeners = new Set<DirectoryListener>();
 const gitRefreshListeners = new Set<GitRefreshListener>();
-const gitMutatingTools = new Set(['bash', 'edit', 'write', 'apply_patch', 'patch']);
-
-const normalizeToolName = (tool: string): string => {
-  const parts = tool.trim().toLowerCase().split('.').filter(Boolean);
-  return parts[parts.length - 1] ?? '';
-};
+// Shell and code-mode scripts can touch the worktree too, so they count
+// alongside the file tools.
+const isGitMutatingTool = (tool: string): boolean =>
+  isFileChangeTool(tool) || isShellTool(tool) || isExecuteTool(tool);
 
 export const sessionEvents = {
   onDeleteRequest(listener: DeleteListener) {
@@ -79,13 +78,14 @@ export const sessionEvents = {
     gitRefreshListeners.forEach((listener) => listener(hint));
   },
   requestGitRefreshForToolTransition(directory: string, previousPart: Part | undefined, nextPart: Part) {
-    if (nextPart.type !== 'tool' || nextPart.state.status !== 'completed') {
+    // A failed patch or shell command may still have written files.
+    if (nextPart.type !== 'tool' || !isFinalToolStatus(nextPart.state.status)) {
       return;
     }
-    if (previousPart?.type === 'tool' && previousPart.state.status === 'completed') {
+    if (previousPart?.type === 'tool' && isFinalToolStatus(previousPart.state.status)) {
       return;
     }
-    if (!gitMutatingTools.has(normalizeToolName(nextPart.tool))) {
+    if (!isGitMutatingTool(nextPart.tool)) {
       return;
     }
     sessionEvents.requestGitRefresh({ directory });

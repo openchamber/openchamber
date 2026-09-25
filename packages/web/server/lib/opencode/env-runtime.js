@@ -18,6 +18,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
     readSettingsFromDiskMigrated,
   } = deps;
   const runSpawnSync = typeof deps.spawnSync === 'function' ? deps.spawnSync : spawnSync;
+  const readProvidedLoginShellEnvSnapshot = typeof deps.providedLoginShellEnvSnapshot === 'function'
+    ? deps.providedLoginShellEnvSnapshot
+    : () => undefined;
   const resolveHomeDir = typeof deps.homedir === 'function' ? deps.homedir : () => os.homedir();
 
   const parseNullSeparatedEnvSnapshot = (raw) => {
@@ -193,6 +196,14 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const getLoginShellEnvSnapshot = () => {
     if (state.cachedLoginShellEnvSnapshot !== undefined) {
       return state.cachedLoginShellEnvSnapshot;
+    }
+
+    // An embedding host (Desktop) that already probed the login shell hands
+    // its snapshot over; see login-shell-env.js.
+    const provided = readProvidedLoginShellEnvSnapshot();
+    if (provided !== undefined) {
+      state.cachedLoginShellEnvSnapshot = provided;
+      return provided;
     }
 
     if (process.platform === 'win32') {
@@ -678,39 +689,50 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return isExecutable(trimmed) ? trimmed : null;
   };
 
+  // OpenCode 2.x platform packages first, then the 1.x names.
+  const WINDOWS_X64_NATIVE_PACKAGES = [
+    path.join('@opencode', 'cli-windows-x64-baseline'),
+    path.join('@opencode', 'cli-windows-x64'),
+    'opencode-windows-x64-baseline',
+    'opencode-windows-x64',
+  ];
+
   const getWindowsNativeOpencodePackageNames = () => {
-    // TEMPORARY WORKAROUND — Windows ARM64: native opencode.exe fails with a Bun
-    // FFI/TinyCC dlopen error (https://github.com/anomalyco/opencode/issues/19130).
-    // prepare-opencode-cli.mjs bundles x64-baseline instead; match that here so
-    // the runtime resolver looks for the same x64-baseline package. Restore the
-    // arm64 branch below when the upstream issue is resolved.
     if (process.arch === 'arm64') {
-      // --- ORIGINAL (restore when ARM64 is fixed) ---
-      // return ['opencode-windows-arm64'];
-      return ['opencode-windows-x64-baseline', 'opencode-windows-x64'];
+      return [path.join('@opencode', 'cli-windows-arm64'), 'opencode-windows-arm64'];
     }
     if (process.arch === 'x64') {
       // Prefer the baseline build when bypassing package-manager wrappers so the
       // direct binary still runs on hosts without AVX2 support.
-      return ['opencode-windows-x64-baseline', 'opencode-windows-x64'];
+      return WINDOWS_X64_NATIVE_PACKAGES;
     }
     return [];
   };
+
+  // An npm-installed OpenCode lives under one of these package directories:
+  // `@opencode/cli` (OpenCode 2.x) or `opencode-ai` (1.x). Both ship a
+  // `bin/opencode.exe` that postinstall replaces with the platform binary from
+  // the matching optional dependency (`@opencode/cli-windows-x64` or
+  // `opencode-windows-x64`).
+  const OPENCODE_NPM_PACKAGE_DIRS = [path.join('@opencode', 'cli'), 'opencode-ai'];
 
   const resolveNativeOpencodeBinaryFromNodeModules = (nodeModulesDir) => {
     if (typeof nodeModulesDir !== 'string' || nodeModulesDir.trim().length === 0) {
       return null;
     }
 
-    const packageShim = path.join(nodeModulesDir, 'opencode-ai', 'bin', 'opencode.exe');
-    if (isExecutable(packageShim)) {
-      return packageShim;
+    for (const packageDir of OPENCODE_NPM_PACKAGE_DIRS) {
+      const packageShim = path.join(nodeModulesDir, packageDir, 'bin', 'opencode.exe');
+      if (isExecutable(packageShim)) {
+        return packageShim;
+      }
     }
 
     for (const packageName of getWindowsNativeOpencodePackageNames()) {
       const candidates = [
         path.join(nodeModulesDir, packageName, 'bin', 'opencode.exe'),
-        path.join(nodeModulesDir, 'opencode-ai', 'node_modules', packageName, 'bin', 'opencode.exe'),
+        ...OPENCODE_NPM_PACKAGE_DIRS.map((packageDir) =>
+          path.join(nodeModulesDir, packageDir, 'node_modules', packageName, 'bin', 'opencode.exe')),
       ];
       for (const candidate of candidates) {
         if (isExecutable(candidate)) {
@@ -747,13 +769,18 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     try {
       const content = fs.readFileSync(wrapperPath, 'utf8');
-      const launcherMatch = content.match(/node_modules[\\/]+opencode-ai[\\/]+bin[\\/]+opencode/i);
+      const launcherMatch = content.match(/node_modules[\\/]+(?:@opencode[\\/]+cli|opencode-ai)[\\/]+bin[\\/]+opencode/i);
       if (!launcherMatch) {
         return null;
       }
 
       const launcherPath = path.resolve(path.dirname(wrapperPath), launcherMatch[0].replace(/[\\/]+/g, path.sep));
-      return path.dirname(path.dirname(path.dirname(launcherPath)));
+      // Walk back up to `node_modules`: past `bin`, the package directory and,
+      // for the scoped 2.x package, its scope.
+      const depth = /[\\/]@opencode[\\/]/i.test(launcherMatch[0]) ? 4 : 3;
+      let nodeModulesDir = launcherPath;
+      for (let index = 0; index < depth; index += 1) nodeModulesDir = path.dirname(nodeModulesDir);
+      return nodeModulesDir;
     } catch {
       return null;
     }
@@ -791,6 +818,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     if (lower.endsWith(`${path.sep}node_modules${path.sep}opencode-ai${path.sep}bin${path.sep}opencode`)) {
       pushCandidate(path.dirname(path.dirname(fileDir)));
+    }
+
+    if (lower.endsWith(`${path.sep}node_modules${path.sep}@opencode${path.sep}cli${path.sep}bin${path.sep}opencode`)
+      || lower.endsWith(`${path.sep}node_modules${path.sep}@opencode${path.sep}cli${path.sep}bin${path.sep}opencode.exe`)) {
+      pushCandidate(path.dirname(path.dirname(path.dirname(fileDir))));
     }
 
     if (path.basename(fileDir).toLowerCase() === 'npm') {

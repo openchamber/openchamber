@@ -1,10 +1,9 @@
 import React from 'react';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 import { useShallow } from 'zustand/react/shallow';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -14,7 +13,11 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 
-import MessageBody from './message/MessageBody';
+import MessageBody, { type MessageExtraAction } from './message/MessageBody';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { buildGuestMessageItem, guestMessageActionsFor } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
@@ -38,36 +41,13 @@ import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { focusChatInput } from './composer/editor/dom';
+import { isFileChangeTool, isShellTool } from '@/lib/opencode/tools';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
 const EXPANDED_TOOLS_CACHE_MAX = 4000;
 const expandedToolsStateCache = new Map<string, Set<string>>();
 const collapsedToolsStateCache = new Map<string, Set<string>>();
-
-const BASH_TOOL_NAMES = new Set(['bash', 'shell', 'cmd', 'terminal']);
-const EDIT_TOOL_NAMES = new Set([
-    'apply_patch',
-    'edit',
-    'write',
-    'multiedit',
-    'str_replace',
-    'str_replace_based_edit_tool',
-    'create',
-    'file_write',
-]);
-
-const normalizeToolName = (toolName: unknown): string => {
-    if (typeof toolName !== 'string') return '';
-    const trimmed = toolName.trim().toLowerCase();
-    if (!trimmed) return '';
-    const withoutIndex = trimmed.replace(/:\d+$/, '');
-    if (!withoutIndex.includes('.')) {
-        return withoutIndex;
-    }
-    const parts = withoutIndex.split('.').filter(Boolean);
-    return parts[parts.length - 1] ?? withoutIndex;
-};
 
 const readExpandedToolsCache = (messageId: string): Set<string> => {
     const cached = expandedToolsStateCache.get(messageId);
@@ -203,7 +183,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
     const sessionId = message.info.sessionID;
-    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
 
     // Keep non-active-turn rows detached from context-store churn.
     const { currentContextAgent, savedSessionAgentSelection } = useContextStore(
@@ -219,85 +198,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return safeParts;
         }
 
-        return normalizeUserDisplayParts(safeParts, { planModeEnabled });
-    }, [isUser, message.parts, planModeEnabled]);
-
-    const previousUserMetadata = React.useMemo(() => {
-        if (isUser || !previousMessage) {
-            return null;
-        }
-
-        const clientRole = getMessageInfoProp(previousMessage.info, 'clientRole');
-        const role = getMessageInfoProp(previousMessage.info, 'role');
-        const previousRole = typeof clientRole === 'string' ? clientRole : (typeof role === 'string' ? role : undefined);
-        if (previousRole !== 'user') {
-            return null;
-        }
-
-        const mode = getMessageInfoProp(previousMessage.info, 'mode');
-        const agent = getMessageInfoProp(previousMessage.info, 'agent');
-        const providerID = getMessageInfoProp(previousMessage.info, 'providerID');
-        const modelID = getMessageInfoProp(previousMessage.info, 'modelID');
-        const variant = getMessageInfoProp(previousMessage.info, 'variant');
-        const resolvedAgent =
-            typeof mode === 'string' && mode.trim().length > 0
-                ? mode
-                : (typeof agent === 'string' && agent.trim().length > 0 ? agent : undefined);
-        const resolvedProvider = typeof providerID === 'string' && providerID.trim().length > 0 ? providerID : undefined;
-        const resolvedModel = typeof modelID === 'string' && modelID.trim().length > 0 ? modelID : undefined;
-        const resolvedVariant = typeof variant === 'string' && variant.trim().length > 0 ? variant : undefined;
-
-        if (!resolvedAgent && !resolvedProvider && !resolvedModel && !resolvedVariant) {
-            return null;
-        }
-
-        return {
-            agentName: resolvedAgent,
-            providerId: resolvedProvider,
-            modelId: resolvedModel,
-            variant: resolvedVariant,
-        };
-    }, [isUser, previousMessage]);
-
-    const previousIsModeSwitchMessage = React.useMemo(() => {
-        if (!planModeEnabled) return false;
-        if (isUser || !previousMessage) return false;
-        const parts = Array.isArray(previousMessage.parts) ? previousMessage.parts : [];
-        for (let i = 0; i < parts.length; i++) {
-            const part = parts[i] as unknown as { type?: string; text?: string; synthetic?: boolean };
-            if (part?.type !== 'text') continue;
-            if (part?.synthetic !== true) continue;
-            const text = typeof part.text === 'string' ? part.text.trim() : '';
-            if (text.startsWith('User has requested to enter plan mode') || text.startsWith('The plan at ')) {
-                return true;
-            }
-        }
-        return false;
-    }, [isUser, planModeEnabled, previousMessage]);
+        return normalizeUserDisplayParts(safeParts);
+    }, [isUser, message.parts]);
 
     const agentName = React.useMemo(() => {
         if (isUser) return undefined;
 
-        // While the assistant message is streaming, if the immediately previous user message is a
-        // synthetic mode switch, trust that mode for the badge.
-        const timeInfo = message.info.time as { completed?: number } | undefined;
-        const isCompleted = typeof timeInfo?.completed === 'number' && timeInfo.completed > 0;
-        if (!isCompleted && previousIsModeSwitchMessage && previousUserMetadata?.agentName) {
-            return previousUserMetadata.agentName;
-        }
-
-        const messageMode = getMessageInfoProp(message.info, 'mode');
-        if (typeof messageMode === 'string' && messageMode.trim().length > 0) {
-            return messageMode;
-        }
-
-        const messageAgent = getMessageInfoProp(message.info, 'agent');
-        if (typeof messageAgent === 'string' && messageAgent.trim().length > 0) {
-            return messageAgent;
-        }
-
-        if (previousUserMetadata?.agentName) {
-            return previousUserMetadata.agentName;
+        // v2 records the agent on the assistant message itself; the session
+        // selection is only a fallback for a message that predates it.
+        if (message.info.role === 'assistant') {
+            const messageAgent = message.info.agent.trim();
+            if (messageAgent) return messageAgent;
         }
 
         if (!sessionId) {
@@ -309,20 +220,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }
 
         return savedSessionAgentSelection ?? undefined;
-    }, [isUser, message.info, previousIsModeSwitchMessage, previousUserMetadata, sessionId, currentContextAgent, savedSessionAgentSelection]);
+    }, [isUser, message.info, sessionId, currentContextAgent, savedSessionAgentSelection]);
 
-    const messageProviderID = !isUser ? getMessageInfoProp(message.info, 'providerID') : null;
-    const messageModelID = !isUser ? getMessageInfoProp(message.info, 'modelID') : null;
+    const messageProviderID = message.info.role === 'assistant' ? message.info.providerID : null;
+    const messageModelID = message.info.role === 'assistant' ? message.info.modelID : null;
 
     const contextModelSelection = React.useMemo(() => {
         if (isUser || !sessionId) return null;
-
-        if (previousUserMetadata?.providerId && previousUserMetadata?.modelId) {
-            return {
-                providerId: previousUserMetadata.providerId,
-                modelId: previousUserMetadata.modelId,
-            };
-        }
 
         if (agentName) {
             const agentSelection = getAgentModelForSession(sessionId, agentName);
@@ -337,22 +241,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }
 
         return null;
-    }, [isUser, sessionId, agentName, previousUserMetadata, getAgentModelForSession, getSessionModelSelection]);
+    }, [isUser, sessionId, agentName, getAgentModelForSession, getSessionModelSelection]);
 
     const providerID = React.useMemo(() => {
         if (isUser) return null;
-        if (typeof messageProviderID === 'string' && messageProviderID.trim().length > 0) {
-            return messageProviderID;
-        }
-        return contextModelSelection?.providerId ?? null;
+        return messageProviderID?.trim() || contextModelSelection?.providerId || null;
     }, [isUser, messageProviderID, contextModelSelection]);
 
     const modelID = React.useMemo(() => {
         if (isUser) return null;
-        if (typeof messageModelID === 'string' && messageModelID.trim().length > 0) {
-            return messageModelID;
-        }
-        return contextModelSelection?.modelId ?? null;
+        return messageModelID?.trim() || contextModelSelection?.modelId || null;
     }, [isUser, messageModelID, contextModelSelection]);
 
     const modelName = React.useMemo(() => {
@@ -368,17 +266,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (isUser) return false;
         if (!providerID || !modelID) return false;
 
-        const provider = providers.find((p) => p.id === providerID);
-        if (!provider?.models || !Array.isArray(provider.models)) {
-            return false;
-        }
-
-        const model = provider.models.find((m: Record<string, unknown>) => (m as Record<string, unknown>).id === modelID) as
-            | { variants?: Record<string, unknown> }
-            | undefined;
-
-        const variants = model?.variants;
-        return Boolean(variants && Object.keys(variants).length > 0);
+        // v2 keys catalog models by the bare `modelID` an assistant message
+        // reports and lists variants as records, not as a keyed map.
+        const model = providers
+            .find((provider) => provider.id === providerID)
+            ?.models.find((entry) => entry.modelID === modelID);
+        return (model?.variants.length ?? 0) > 0;
     }, [isUser, modelID, providerID, providers]);
 
     const displayAgentName = useStickyDisplayValue<string>(agentName);
@@ -484,14 +377,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         for (const part of [...toolParts, ...turnActivityToolParts]) {
             const toolId = typeof part?.id === 'string' ? part.id : '';
             if (!toolId) continue;
-            const toolName = normalizeToolName((part as { tool?: string }).tool);
-            if (!toolName) continue;
-
-            if (showExpandedBashTools && BASH_TOOL_NAMES.has(toolName)) {
+            const toolName = (part as { tool?: string }).tool;
+            if (showExpandedBashTools && isShellTool(toolName)) {
                 next.add(toolId);
                 continue;
             }
-            if (showExpandedEditTools && EDIT_TOOL_NAMES.has(toolName)) {
+            if (showExpandedEditTools && isFileChangeTool(toolName)) {
                 next.add(toolId);
             }
         }
@@ -565,13 +456,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
 
     const previousIsHiddenUserMessage = React.useMemo(
-        () => !isUser && isHiddenUserMessage(previousMessage, { planModeEnabled }),
-        [isUser, planModeEnabled, previousMessage]
+        () => !isUser && isHiddenUserMessage(previousMessage),
+        [isUser, previousMessage]
     );
 
     const nextIsHiddenUserMessage = React.useMemo(
-        () => !isUser && isHiddenUserMessage(nextMessage, { planModeEnabled }),
-        [isUser, planModeEnabled, nextMessage]
+        () => !isUser && isHiddenUserMessage(nextMessage),
+        [isUser, nextMessage]
     );
 
     const isFollowedByAssistant = React.useMemo(() => {
@@ -654,7 +545,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         });
     }, []);
 
-    const headerVariantRaw = !isUser ? (turnGroupingContext?.userMessageVariant ?? previousUserMetadata?.variant) : undefined;
+    // v2 keeps the variant on the assistant message that ran with it. Fall
+    // back to the turn's first assistant step so every row of a turn shows the
+    // same label, including one that arrived before the variant was recorded.
+    const headerVariantRaw = !isUser
+        ? ((message.info.role === 'assistant' ? message.info.variant?.trim() : undefined) || turnGroupingContext?.assistantVariant)
+        : undefined;
 
     const headerVariant = !isUser && modelHasVariants ? (headerVariantRaw ?? 'Default') : undefined;
 
@@ -735,6 +631,28 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (!sessionId || !message.info.id) return;
         useSessionUIStore.getState().revertToMessage(sessionId, message.info.id);
     }, [sessionId, message.info.id]);
+
+    // Extension actions for this role. The record is read at click time so a
+    // streaming message does not rebuild the list on every part update.
+    const guestActionEntries = useGuestActions();
+    const messageRecordRef = React.useRef(message);
+    messageRecordRef.current = message;
+    const guestMessageActions = React.useMemo<MessageExtraAction[] | undefined>(() => {
+        if (guestActionEntries.length === 0 || !sessionId) return undefined;
+        const entries = guestMessageActionsFor(guestActionEntries, isUser ? 'user' : 'assistant');
+        if (entries.length === 0) return undefined;
+        return entries.map((entry) => ({
+            id: `guest:${entry.guest.id}:${entry.action.id}`,
+            label: entry.action.label,
+            icon: <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-3.5" />,
+            onSelect: () => {
+                const sessionTitle = useGlobalSessionsStore.getState().entityById.get(sessionId)?.title ?? null;
+                const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+                const item = buildGuestMessageItem(entry.action.id, { sessionId, sessionTitle, directory }, messageRecordRef.current);
+                void runGuestAction(entry, item, t);
+            },
+        }));
+    }, [guestActionEntries, isUser, sessionId, t]);
 
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {
@@ -895,6 +813,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorMessage={assistantErrorText}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
+                                                extraActions={guestMessageActions}
                                             />
                                         </div>
                                         {useExternalUserActionsRow ? (
@@ -929,6 +848,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorMessage={assistantErrorText}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
+                                                extraActions={guestMessageActions}
                                             />
                                         ) : null}
                                     </div>
@@ -973,6 +893,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
                                 isDarkTheme={isDarkTheme}
+                                extraActions={guestMessageActions}
                             />
 
                         </div>

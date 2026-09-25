@@ -9,7 +9,7 @@ description: Use when creating or modifying OpenChamber Settings pages, dialogs,
 
 - Load `theme-system` for colors, buttons, icons, and visual states.
 - Load `locale-ui-patterns` for every visible string, tooltip, placeholder, and accessible label.
-- Load `ui-api-decoupling` when a setting reads/writes runtime data or adds a capability.
+- Load `ui-api-decoupling` when a setting reads/writes runtime data or adds a capability, and write the surface list from its *Name The Surfaces Before Editing* step before adding or moving a settings page: a page that exists on desktop and is unreachable on a phone is the common way this goes wrong.
 
 When examples conflict, shared component/theme and localization contracts win. Stop on unresolved material conflicts.
 
@@ -58,7 +58,7 @@ Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, 
 ## Description Policy (info hints)
 
 - Explanatory prose goes behind the info icon via the `info` prop by default.
-- When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Large-text paste modes and send shortcuts with expanded-composer exceptions need this explanation. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
+- When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Option lists whose labels already read as complete choices (large-text paste modes, send shortcut) keep the explanation behind `info` even when it carries an exception. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
 - Stays visible: security/data-loss warnings, destructive consequences, required syntax/placeholder lists the user reads while typing, dynamic status, empty states, validation errors, active-flow wizard instructions.
 - Mixed text: keep the warning sentence visible, move the explanation to `info`.
 

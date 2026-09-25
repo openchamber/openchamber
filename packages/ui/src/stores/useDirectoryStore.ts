@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
+import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -43,19 +44,7 @@ const invalidateFileSearchCache = (scope?: string | null) => {
   }
 };
 
-const normalizeDirectoryPath = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-  const normalized = trimmed
-    .replace(/\\/g, '/')
-    .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
-  if (normalized.length > 1) {
-    return normalized.replace(/\/+$/, '');
-  }
-  return normalized;
-};
+const normalizeDirectoryPath = (value: string): string => normalizePath(value) ?? '';
 
 const resolveTildePath = (path: string, homeDir?: string | null): string => {
   const trimmed = path.trim();
@@ -147,27 +136,8 @@ const getHomeDirectory = () => {
 
 
 const normalizeHomeCandidate = (value?: string | null) => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const normalized = trimmed.replace(/\\/g, '/');
-  if (normalized.length > 1) {
-    const withoutTrailingSlash = normalized.replace(/\/+$/, '');
-    if (withoutTrailingSlash && withoutTrailingSlash.length > 0) {
-      if (withoutTrailingSlash === '/') {
-        return null;
-      }
-      return withoutTrailingSlash;
-    }
-  }
-  if (normalized === '/' || normalized.length === 0) {
-    return null;
-  }
-  return normalized;
+  const normalized = normalizePath(value);
+  return normalized && normalized !== '/' ? normalized : null;
 };
 
 const persistResolvedHome = (resolved: string) => {
@@ -274,7 +244,8 @@ export const useDirectoryStore = create<DirectoryStore>()(
         invalidateFileSearchCache();
 
         set((state) => {
-          const newHistory = [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
+          const alreadyCurrent = state.directoryHistory[state.historyIndex] === resolvedPath;
+          const newHistory = alreadyCurrent ? state.directoryHistory : [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
 
           safeStorage.setItem('lastDirectory', resolvedPath);
           void updateDesktopSettings({ lastDirectory: resolvedPath });
@@ -282,7 +253,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           return {
             currentDirectory: resolvedPath,
             directoryHistory: newHistory,
-            historyIndex: newHistory.length - 1,
+            historyIndex: alreadyCurrent ? state.historyIndex : newHistory.length - 1,
             hasPersistedDirectory: true,
             isHomeReady: true,
             isSwitchingDirectory: false,
@@ -340,23 +311,11 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const { currentDirectory, setDirectory } = get();
         const homeDir = cachedHomeDirectory || get().homeDirectory || getHomeDirectory();
 
-        if (currentDirectory === homeDir || currentDirectory === '/') {
+        if (currentDirectory === homeDir) {
           return;
         }
-
-        const cleanPath = currentDirectory.endsWith('/')
-          ? currentDirectory.slice(0, -1)
-          : currentDirectory;
-
-        const lastSlash = cleanPath.lastIndexOf('/');
-        if (lastSlash === -1) {
-          const home = cachedHomeDirectory || getHomeDirectory();
-          setDirectory(home);
-        } else if (lastSlash === 0) {
-          setDirectory('/');
-        } else {
-          setDirectory(cleanPath.substring(0, lastSlash));
-        }
+        const parent = getNormalizedParentDirectory(currentDirectory);
+        if (parent) setDirectory(parent);
       },
 
       goHome: async () => {

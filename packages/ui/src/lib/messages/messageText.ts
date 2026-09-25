@@ -1,4 +1,4 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 
 type TextLikePart = Part & { text?: string; content?: string };
 type UserTextPart = Part & { text?: string; content?: string; shellAction?: { output?: unknown; command?: unknown } };

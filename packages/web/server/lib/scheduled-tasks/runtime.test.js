@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises';
@@ -12,6 +12,20 @@ import {
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 
 describe('scheduled-tasks runtime helpers', () => {
+  it.each([
+    ['*/15 * * * *', 'UTC', '2026-09-18T08:07:00Z', '2026-09-18T08:15:00Z'],
+    ['30 */5 * * * *', 'UTC', '2026-09-18T08:07:00Z', '2026-09-18T08:10:30Z'],
+    ['0 9 * * MON-FRI', 'Europe/Kyiv', '2026-09-18T07:00:00Z', '2026-09-21T06:00:00Z'],
+    ['0 9 * * *', 'Europe/Kyiv', '2026-03-28T08:00:00Z', '2026-03-29T06:00:00Z'],
+    ['0 9 * * *', 'Europe/Kyiv', '2026-10-24T08:00:00Z', '2026-10-25T07:00:00Z'],
+    ['0 0 L * *', 'UTC', '2026-02-01T00:00:00Z', '2026-02-28T00:00:00Z'],
+  ])('computes cron %s in %s from %s', (cron, timezone, now, expected) => {
+    expect(computeNextRunAt({
+      enabled: true,
+      schedule: { kind: 'cron', cron, timezone },
+    }, Date.parse(now))).toBe(Date.parse(expected));
+  });
+
   it('computes next daily run in timezone', () => {
     const nowUtc = Date.UTC(2025, 0, 1, 8, 0, 0);
     const next = computeNextRunAt({
@@ -257,5 +271,57 @@ Run daily.
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('scheduled-tasks runtime prompt dispatch', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('parks the briefing with resume: false so execution starts on the task prompt', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5', goalEnabled: true, goalTokenBudget: 50_000 },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      persistSessionGoal: async () => undefined,
+      sessionKnowledgeRuntime: {
+        resolvePendingForSession: async () => ({ text: 'Project background', signature: 'sig' }),
+        recordDelivered: async () => undefined,
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/'));
+    expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['synthetic', 'synthetic', 'prompt']);
+    expect(dispatch[0].body).toMatchObject({ text: 'Project background', resume: false });
+    expect(dispatch[1].body.resume).toBe(false);
+    expect(dispatch[2].body).toMatchObject({ text: 'Review open issues' });
+    expect(dispatch[2].body.resume).toBeUndefined();
   });
 });

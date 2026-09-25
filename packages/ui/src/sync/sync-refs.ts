@@ -5,7 +5,8 @@
  * session-actions) use them to read child-store domain data without hooks.
  */
 
-import type { Config, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { OpenCodeClient } from "@opencode/client"
+import type { Config } from "@/lib/opencode/model"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
@@ -20,7 +21,7 @@ let cachedSessionsById = new Map<string, State["session"][number]>()
 let cachedSessionDirectoryById = new Map<string, string>()
 
 export function setSyncRefs(
-  _sdk: OpencodeClient,
+  _sdk: OpenCodeClient,
   childStores: ChildStoreManager,
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,

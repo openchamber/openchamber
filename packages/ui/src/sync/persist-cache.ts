@@ -6,12 +6,13 @@
  * Message/part data is always loaded from the server.
  */
 
-import type { Session, VcsInfo } from "@opencode-ai/sdk/v2/client"
+import type { Session, Vcs } from "@/lib/opencode/model"
 import type { ProjectMeta } from "./types"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
 import { countSyncPersistenceSerialization, countSyncPersistenceStorageWrite } from "./performance-diagnostics"
 import { isChatDirectoryPath } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { z } from "zod"
 
 /** Cap persisted session lists so localStorage stays bounded per directory. */
 const PERSISTED_SESSION_LIMIT = 50
@@ -209,19 +210,44 @@ if (typeof window !== "undefined") {
 // ---------------------------------------------------------------------------
 
 export type PersistedDirCache = {
-  vcs: VcsInfo | undefined
+  vcs: Vcs | undefined
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
   sessions: Session[] | undefined
 }
 
 /** Read all cached metadata for a directory */
+/**
+ * The fields the stores dereference before bootstrap replaces a cached list.
+ * localStorage is shared by every OpenChamber build that ran on this origin,
+ * so a record written by another version is data, not a `Session`: a record
+ * missing any of these is dropped instead of crashing the first render.
+ */
+const cachedSessionSchema = z.looseObject({
+  id: z.string().min(1),
+  directory: z.string(),
+  projectID: z.string(),
+  title: z.string(),
+  time: z.looseObject({ created: z.number(), updated: z.number(), archived: z.number().optional() }),
+})
+
+function readCachedSessions(directory: string): Session[] | undefined {
+  const cached = readCache<unknown>(directory, "sessions")
+  if (!Array.isArray(cached)) return undefined
+  return cached.flatMap((record) => {
+    const parsed = cachedSessionSchema.safeParse(record)
+    // SAFETY: the parsed record carries every field read before bootstrap and
+    // keeps its remaining keys, which is all a stale-while-revalidate seed needs.
+    return parsed.success ? [parsed.data as Session] : []
+  })
+}
+
 export function readDirCache(directory: string): PersistedDirCache {
   return {
-    vcs: readCache<VcsInfo>(directory, "vcs"),
+    vcs: readCache<Vcs>(directory, "vcs"),
     projectMeta: readCache<ProjectMeta>(directory, "projectMeta"),
     icon: readCache<string>(directory, "icon"),
-    sessions: readCache<Session[]>(directory, "sessions"),
+    sessions: readCachedSessions(directory),
   }
 }
 
@@ -260,7 +286,7 @@ export function persistManagedChatSessions(sessions: Session[]): void {
 }
 
 /** Write vcs info to cache */
-export function persistVcs(directory: string, vcs: VcsInfo | undefined): void {
+export function persistVcs(directory: string, vcs: Vcs | undefined): void {
   writeCache(directory, "vcs", vcs)
 }
 

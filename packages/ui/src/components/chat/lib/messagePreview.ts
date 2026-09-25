@@ -1,4 +1,4 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { readContextPart, type ContextPartPayload } from '@/lib/messages/contextParts';
@@ -59,6 +59,9 @@ const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
             return `#${payload.number} ${payload.title}`;
         case 'linear-issue':
             return `${payload.identifier} ${payload.title}`;
+        case 'guest-issue':
+        case 'guest-pr':
+            return `${payload.id} ${payload.title}`;
     }
 };
 
@@ -81,6 +84,8 @@ const contextBody = (payload: ContextPartPayload): string => {
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             return '';
     }
 };

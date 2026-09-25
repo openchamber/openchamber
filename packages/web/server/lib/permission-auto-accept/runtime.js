@@ -25,6 +25,10 @@ export function createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  // The routing safety net: asked once per request before the automatic reply.
+  // `hold` leaves the request for the user; absent means every request is replied to.
+  evaluatePermission = null,
+  onPermissionReplied = null,
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
   requestTimeoutMs = REQUEST_TIMEOUT_MS,
@@ -86,10 +90,18 @@ export function createPermissionAutoAcceptRuntime({
 
   const rememberSession = (info, directoryHint) => {
     if (!info || typeof info.id !== 'string' || !info.id) return;
-    sessions.set(info.id, {
-      parentID: typeof info.parentID === 'string' && info.parentID ? info.parentID : null,
-      directory: typeof info.directory === 'string' && info.directory ? info.directory : directoryHint,
-    });
+    // v2 session updates are partial (a rename carries only the title), so a
+    // field the update does not name keeps what an earlier record said.
+    const previous = sessions.get(info.id);
+    const parentID = typeof info.parentID === 'string' && info.parentID ? info.parentID : previous?.parentID ?? null;
+    // v2 keeps the directory on `location`; translated events already flatten it.
+    const directory = typeof info.directory === 'string' && info.directory
+      ? info.directory
+      : (typeof info.location?.directory === 'string' && info.location.directory
+        ? info.location.directory
+        : previous?.directory ?? directoryHint);
+    if (previous) sessions.delete(info.id);
+    sessions.set(info.id, { parentID, directory });
     if (sessions.size > SESSION_CACHE_LIMIT) {
       sessions.delete(sessions.keys().next().value);
     }
@@ -97,12 +109,14 @@ export function createPermissionAutoAcceptRuntime({
 
   const request = async (path, { directory, method = 'GET', body } = {}) => {
     const url = new URL(buildOpenCodeUrl(path, ''));
-    if (directory) url.searchParams.set('directory', directory);
     const response = await fetchImpl(url, {
       method,
       headers: {
         Accept: 'application/json',
         ...(body ? { 'Content-Type': 'application/json' } : {}),
+        // OpenCode 2.x scopes a request to a directory through this header;
+        // the pending-permission list and services behind it are per location.
+        ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
         ...getOpenCodeAuthHeaders(),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -119,7 +133,7 @@ export function createPermissionAutoAcceptRuntime({
   const getSession = async (sessionId, directory) => {
     const cached = sessions.get(sessionId);
     if (cached) return cached;
-    const info = await request(`/session/${encodeURIComponent(sessionId)}`, { directory });
+    const info = await request(`/api/session/${encodeURIComponent(sessionId)}`, { directory });
     rememberSession(info?.data ?? info, directory);
     return sessions.get(sessionId) ?? null;
   };
@@ -148,10 +162,16 @@ export function createPermissionAutoAcceptRuntime({
     if (!permission?.id || !permission?.sessionID) return false;
     await load();
     if (!(await isSessionAutoAccepting(permission.sessionID, directory))) return false;
-    await request(`/permission/${encodeURIComponent(permission.id)}/reply`, {
+    if (evaluatePermission) {
+      const verdict = await evaluatePermission(permission, directory);
+      if (verdict?.action === 'hold') return true;
+    }
+    // v2 scopes a permission reply under its session.
+    await request(`/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`, {
       directory,
       method: 'POST',
-      body: { reply: 'once' },
+      // OpenCode 2.0.8 renamed the reply body field `reply` to `decision`.
+      body: { decision: 'once' },
     });
     return true;
   };
@@ -190,7 +210,7 @@ export function createPermissionAutoAcceptRuntime({
       for (const directory of scopes) {
         let payload;
         try {
-          payload = await request('/permission', { directory });
+          payload = await request('/api/permission/request', { directory });
         } catch {
           continue;
         }
@@ -209,15 +229,24 @@ export function createPermissionAutoAcceptRuntime({
   }
 
   const processEvent = (event) => {
-    const raw = event?.payload;
-    const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
     const directory = typeof event?.directory === 'string' && event.directory !== 'global' ? event.directory : undefined;
-    if (payload?.type === 'session.created' || payload?.type === 'session.updated') {
-      rememberSession(payload.properties?.info, directory);
-      return;
-    }
-    if (payload?.type === 'permission.asked') {
-      void processPermission(payload.properties, directory);
+    for (const payload of event?.translated?.() ?? []) {
+      if (payload.type === 'session.created' || payload.type === 'session.updated') {
+        rememberSession(payload.properties?.info, directory ?? payload.properties?.directory);
+        continue;
+      }
+      // A v2 permission request is `{ id, sessionID, action, resources, ... }`;
+      // only the id and session id are used to reply.
+      if (payload.type === 'permission.asked') {
+        void processPermission(payload.properties, directory ?? payload.properties?.directory);
+        continue;
+      }
+      // The routing safety net holds a request instead of replying; once the
+      // user answers it, stop tracking it.
+      if (payload.type === 'permission.replied') {
+        const permissionId = payload.properties?.requestID;
+        if (typeof permissionId === 'string' && permissionId) onPermissionReplied?.(permissionId);
+      }
     }
   };
 

@@ -3,7 +3,7 @@ import os from 'os';
 
 import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
 import { isExactSemver as defaultIsExactSemver, isPathSpec as defaultIsPathSpec, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
-import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { buildAppliedResponse } from './config-mutation-response.js';
 
 const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
 const FILE_EXISTS_CODES = new Set(['FILE_EXISTS', 'EEXIST']);
@@ -46,8 +46,8 @@ export const registerPluginRoutes = (app, dependencies) => {
     applyChange();
 
     const pastTense = operation.replace(/ion$/, 'ed').replace(/update$/, 'updated');
-    return res.json(buildDeferredRestartResponse(
-      `Plugin ${pastTense}. Restart OpenCode to apply.`,
+    return res.json(buildAppliedResponse(
+      `Plugin ${pastTense}.`,
     ));
   };
 

@@ -1,4 +1,5 @@
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 export const createOpenCodeWatcherRuntime = (deps) => {
   const {
@@ -16,6 +17,12 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   let reader = null;
   let unsubscribeEvent = null;
   let unsubscribeStatus = null;
+
+  // `onPayload` consumers speak the server's own event vocabulary, so the v2
+  // wire payload is translated here rather than in each consumer.
+  const emitTranslated = (payload) => {
+    for (const translated of translateWireEvent(payload)) onPayload(translated);
+  };
 
   const unwrapGlobalEventPayload = (eventData) => {
     if (!eventData || typeof eventData !== 'object') {
@@ -45,7 +52,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (!payload || typeof payload !== 'object') {
           return;
         }
-        onPayload(payload);
+        emitTranslated(payload);
       });
       unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
         if (signal.aborted) {
@@ -65,7 +72,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
 
     reader = createUpstreamSseReader({
       signal,
-      buildUrl: () => buildOpenCodeUrl('/global/event', ''),
+      buildUrl: () => buildOpenCodeUrl('/api/event', ''),
       getHeaders: getOpenCodeAuthHeaders,
       fetchImpl,
       stallTimeoutMs: upstreamStallTimeoutMs,
@@ -78,7 +85,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (!payload || typeof payload !== 'object') {
           return;
         }
-        onPayload(payload);
+        emitTranslated(payload);
       },
       onError(error) {
         if (signal.aborted) {

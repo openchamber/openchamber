@@ -11,8 +11,10 @@ export type MarkdownTokenRun = [length: number, color: string, fontStyle: number
 
 export type MarkdownWorkerRequest =
   | { type: 'init' }
-  // Highlight a whole block to ready-to-splice Shiki `<pre>` HTML.
-  | { type: 'highlight'; id: number; code: string; lang: string }
+  // Highlight a whole block to ready-to-splice Shiki `<pre>` HTML. A block that
+  // extends one highlighted before is tokenized from where that one ended;
+  // `fullPass` asks for a fresh pass over the whole block instead.
+  | { type: 'highlight'; id: number; code: string; lang: string; fullPass?: boolean }
   // Highlight a whole block but return per-line inner HTML (one entry per line),
   // so per-line layouts (diffs, gutters, virtualization) tokenize in ONE call
   // instead of one worker round-trip per line.

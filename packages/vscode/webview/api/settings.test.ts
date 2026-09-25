@@ -8,7 +8,18 @@ describe('VS Code webview settings API', () => {
     const originalWindow = globalThis.window;
     // SAFETY: acquireVsCodeApi is an optional webview global and is restored to this exact value below.
     const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
-    const messages: BridgeRequest[] = [];
+    const posted: Array<{ id?: string; type: string }> = [];
+    // The bridge posts `webview:ready` (no request id) before its first request;
+    // only id-carrying messages are requests waiting for a response.
+    const messages = {
+      shift: (): BridgeRequest | undefined => {
+        while (posted.length > 0) {
+          const message = posted.shift();
+          if (message && typeof message.id === 'string') return message as BridgeRequest;
+        }
+        return undefined;
+      },
+    };
     const testWindow = Object.assign(new EventTarget(), {
       __VSCODE_CONFIG__: { theme: 'light', workspaceFolder: '/workspace' },
     });
@@ -21,7 +32,7 @@ describe('VS Code webview settings API', () => {
       Object.defineProperty(globalThis, 'acquireVsCodeApi', {
         configurable: true,
         value: () => ({
-          postMessage: (message: BridgeRequest) => messages.push(message),
+          postMessage: (message: { id?: string; type: string }) => posted.push(message),
           getState: () => undefined,
           setState: () => undefined,
         }),

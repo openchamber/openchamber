@@ -63,12 +63,48 @@ export function cleanMentionName(rawName: string): string {
         .replace(TRAILING_NOISE, '');
 }
 
+/** Characters that may directly follow a confirmed path that contains spaces. */
+const CONFIRMED_END_BOUNDARY = /[\s)\]},.;:!?`"'>]/;
+
+/**
+ * The longest confirmed path containing whitespace that starts right after the
+ * `@` at `start` and ends at a boundary. Paths without whitespace are already
+ * captured whole by the plain scan, so only spaced paths need this lookup.
+ */
+function matchSpacedConfirmedPath(
+    text: string,
+    start: number,
+    spacedPaths: readonly string[],
+): string | null {
+    for (const path of spacedPaths) {
+        if (!text.startsWith(path, start + 1)) continue;
+        const after = start + 1 + path.length;
+        if (after >= text.length || CONFIRMED_END_BOUNDARY.test(text[after])) return path;
+    }
+    return null;
+}
+
 /**
  * Find every `@mention` in `text`. Tokens whose name cleans away to nothing
  * (a bare `@`, `@...`) are skipped — there is nothing to reference.
+ *
+ * `confirmedMentions` lets a path the picker inserted keep its spaces:
+ * `@docs/my document.md` is one mention when that path was confirmed, while an
+ * unconfirmed `@docs/my document.md` still stops at the first space.
  */
-export function scanMentions(text: string): MentionToken[] {
+export function scanMentions(
+    text: string,
+    confirmedMentions?: ReadonlySet<string>,
+): MentionToken[] {
     if (!text || !text.includes('@')) return [];
+
+    const spacedPaths: string[] = [];
+    if (confirmedMentions) {
+        for (const path of confirmedMentions) {
+            if (/\s/.test(path)) spacedPaths.push(path);
+        }
+        spacedPaths.sort((a, b) => b.length - a.length);
+    }
 
     const tokens: MentionToken[] = [];
     MENTION_SCAN.lastIndex = 0;
@@ -77,6 +113,14 @@ export function scanMentions(text: string): MentionToken[] {
     while ((match = MENTION_SCAN.exec(text)) !== null) {
         const start = match.index;
         if (!isMentionBoundary(text, start)) continue;
+
+        const spaced = spacedPaths.length > 0 ? matchSpacedConfirmedPath(text, start, spacedPaths) : null;
+        if (spaced) {
+            const end = start + 1 + spaced.length;
+            tokens.push({ start, end, raw: text.slice(start, end), name: spaced });
+            MENTION_SCAN.lastIndex = end;
+            continue;
+        }
 
         const rawName = match[1] ?? '';
         const name = cleanMentionName(rawName);

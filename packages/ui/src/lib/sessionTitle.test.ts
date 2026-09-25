@@ -1,43 +1,52 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Message, Part, Session, TextPart } from '@opencode-ai/sdk/v2';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import type { AssistantMessage, Message, Part, Session, SyntheticMessage, TextPart } from '@/lib/opencode/model';
 import { collectSessionTitleTurns, formatSessionTitleContext, generatedSessionTitleSchema, generateSessionTitle } from './sessionTitle';
 import { configureRuntimeUrlResolver } from './runtime-url';
 import { createContextPart, type ContextPartPayload } from './messages/contextParts';
 import { formatMessageText } from './messages/messageMarkdown';
 import { formatSessionAsMarkdown } from './exportSession';
 import { ChildStoreManager } from '@/sync/child-store';
-import { SessionMessageLoader } from '@/sync/session-message-loader';
+import { SessionMessageLoader, type SessionMessagePageSource } from '@/sync/session-message-loader';
 import { loadSessionTitleTurns } from '@/sync/session-title-context';
 import { cancelSessionTitleGeneration, generateAndSaveSessionTitle, runSessionTitleGeneration } from '@/sync/session-title-generation';
 import { getRuntimeKey } from './runtime-switch';
 
 type RecordEntry = { info: Message; parts: Part[] };
-const textPart = (text: string, synthetic = false): TextPart => ({
-  id: 'part', messageID: 'message', sessionID: 'session', type: 'text', text, synthetic,
+const textPart = (text: string): TextPart => ({
+  id: 'part', messageID: 'message', sessionID: 'session', type: 'text', text,
 });
 function user(id: string, parts: Part[] = [textPart(`Request ${id}`)]): RecordEntry {
   return {
-    info: { id, sessionID: 'session', role: 'user', time: { created: 1 }, agent: 'build', model: { providerID: 'provider', modelID: 'model' } },
+    info: { id, sessionID: 'session', role: 'user', time: { created: 1 } },
     parts,
   };
 }
-function assistant(parentID: string, options: Partial<AssistantMessage> = {}, parts: Part[] = [textPart(`Answer ${parentID}`)]): RecordEntry {
+function assistant(turnID: string, options: Partial<AssistantMessage> = {}, parts: Part[] = [textPart(`Answer ${turnID}`)]): RecordEntry {
   return {
     info: {
-      id: `answer-${parentID}`, parentID, sessionID: 'session', role: 'assistant',
-      time: { created: 2, completed: 3 }, finish: 'stop', providerID: 'provider', modelID: 'model', agent: 'build', mode: 'build',
-      path: { cwd: '/project', root: '/project' }, cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, ...options,
+      id: `answer-${turnID}`, sessionID: 'session', role: 'assistant',
+      time: { created: 2, completed: 3 }, finish: 'stop', providerID: 'provider', modelID: 'model', agent: 'build',
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, ...options,
     }, parts,
   };
 }
+/** Legacy inline context: a text part that carries context metadata. */
 const contextPart = (payload: ContextPartPayload): TextPart => ({
-  ...textPart(''), ...createContextPart(payload),
+  ...textPart(''),
+  ...createContextPart(payload),
+});
+/** Attached context is its own synthetic message, sent ahead of the prompt. */
+const contextMessage = (payload: ContextPartPayload): RecordEntry => ({
+  info: {
+    id: `context-${payload.kind}`, sessionID: 'session', role: 'synthetic', time: { created: 1 },
+    ...createContextPart(payload),
+  } satisfies SyntheticMessage,
+  parts: [],
 });
 const pair = (id: string) => [user(id), assistant(id)];
 const session: Session = {
-  id: 'session', title: 'Original', slug: 'original', projectID: 'project', directory: '/project', version: '1',
+  id: 'session', title: 'Original', projectID: 'project', directory: '/project',
+  cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: 2 },
 };
 
@@ -62,28 +71,42 @@ describe('session title context', () => {
     expect(collectSessionTitleTurns([...pair('one'), assistant('one', { id: 'later', finish: 'tool-calls' })])).toEqual([]);
   });
 
-  test('excludes summaries, failed turns, synthetic nudges and reverted history', () => {
+  test('excludes failed turns, empty prompts and reverted history', () => {
     const records = [
-      ...pair('real'), user('summary'), assistant('summary', { summary: true }),
-      user('error'), assistant('error', { error: { name: 'MessageAbortedError', data: { message: 'aborted' } } }),
-      user('nudge', [textPart('Agent completed', true)]), assistant('nudge'), ...pair('reverted'),
+      ...pair('real'),
+      user('error'), assistant('error', { error: { type: 'MessageAbortedError', message: 'aborted' } }),
+      user('empty', [textPart('   ')]), assistant('empty'), ...pair('reverted'),
     ];
     expect(collectSessionTitleTurns(records, 'reverted').map((turn) => turn.user.info.id)).toEqual(['real']);
     expect(collectSessionTitleTurns(records, 'not-loaded')).toEqual([]);
     expect(collectSessionTitleTurns([])).toEqual([]);
   });
 
-  test('retains annotation-only user messages and excludes unrelated injected instructions', () => {
-    const records = [user('quote', [contextPart({ kind: 'chat-quote', quote: 'Earlier answer', text: 'Fix this detail' }), textPart('Secret system instruction', true)]), assistant('quote')];
+  test('retains annotation-only user messages', () => {
+    const records = [
+      contextMessage({ kind: 'chat-quote', quote: 'Earlier answer', text: 'Fix this detail' }),
+      user('quote', []),
+      assistant('quote'),
+    ];
     const context = formatSessionTitleContext(collectSessionTitleTurns(records));
     expect(context).toContain('> Earlier answer');
     expect(context).toContain('**User comment:**\n\nFix this detail');
-    expect(context).not.toContain('Secret system instruction');
+  });
+
+  test('ignores server plugin prompts that carry no attached context', () => {
+    const plumbing: RecordEntry = {
+      info: { id: 'plumbing', sessionID: 'session', role: 'synthetic', time: { created: 1 }, text: 'The user is returning after a break.' },
+      parts: [],
+    };
+    expect(collectSessionTitleTurns([plumbing, user('quote', []), assistant('quote')])).toEqual([]);
+    const context = formatSessionTitleContext(collectSessionTitleTurns([plumbing, ...pair('one')]));
+    expect(context).not.toContain('returning after a break');
   });
 
   test('bounds oversized turns without losing replies after large quoted sources', () => {
     const turns = collectSessionTitleTurns(['one', 'two', 'three'].flatMap((id) => [
-      user(id, [contextPart({ kind: 'code-comment', source: 'file', fileLabel: 'big.ts', startLine: 1, endLine: 10000, language: 'ts', code: 'x'.repeat(100000), text: `Fix ${id}` })]),
+      contextMessage({ kind: 'code-comment', source: 'file', fileLabel: 'big.ts', startLine: 1, endLine: 10000, language: 'ts', code: 'x'.repeat(100000), text: `Fix ${id}` }),
+      user(id, []),
       assistant(id, {}, [textPart('y'.repeat(100000))]),
     ]));
     const context = formatSessionTitleContext(turns);
@@ -150,14 +173,30 @@ describe('bounded history loading', () => {
   test('uses the real shared loader and stops paging as soon as three pairs are available', async () => {
     let requests = 0;
     const childStores = new ChildStoreManager();
-    const sdk = createOpencodeClient({ baseUrl: 'http://session-title.test', fetch: async () => {
-      requests += 1;
-      return new Response(JSON.stringify(requests === 1 ? pair('three') : [...pair('one'), ...pair('two')]), {
-        headers: { 'Content-Type': 'application/json', 'x-next-cursor': requests === 1 ? 'older' : 'much-older' },
-      });
-    } });
+    // Records that go through a child store come back ordered by creation
+    // time, so this fixture stamps each pair with its own slot.
+    const orderedPair = (ordinal: number, id: string): RecordEntry[] => {
+      const created = ordinal * 10;
+      const prompt = user(id);
+      return [
+        { ...prompt, info: { id: `msg_${ordinal}_1`, sessionID: 'session', role: 'user', time: { created } } },
+        assistant(id, { id: `msg_${ordinal}_2`, time: { created: created + 1, completed: created + 2 } }),
+      ];
+    };
+    // v2 pages messages newest-first through the loader's page source rather
+    // than through an HTTP client, so the fake returns pages directly.
+    const sdk: SessionMessagePageSource = {
+      getSessionMessages: async () => {
+        requests += 1;
+        return {
+          items: requests === 1 ? orderedPair(3, 'three') : [...orderedPair(1, 'one'), ...orderedPair(2, 'two')],
+          cursor: { next: requests === 1 ? 'older' : 'much-older' },
+        };
+      },
+    };
     const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: 'test' });
     const target = { sessionID: 'session', directory: '/project' };
+    const release = loader.retainSessionHistory(target);
     try {
       const turns = await loadSessionTitleTurns({
         loader, target, signal: new AbortController().signal,
@@ -169,7 +208,7 @@ describe('bounded history loading', () => {
       expect(turns).toHaveLength(3);
       expect(requests).toBe(2);
       expect(loader.getSnapshot(target).complete).toBe(false);
-    } finally { loader.dispose(); childStores.disposeAll(); }
+    } finally { release(); loader.dispose(); childStores.disposeAll(); }
   });
 
   test('does not use cached partial turns when the authoritative loader failed', async () => {

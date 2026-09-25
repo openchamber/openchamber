@@ -44,6 +44,12 @@ other.
 - Send and fork dispatches without an explicit model/agent/variant reuse the
   target session's last user-message selection before falling back to the
   configured defaults; only session creation resolves defaults directly.
+- Default agents resolve from the owning project before global settings and
+  OpenCode defaults. Directory-based requests identify the project before
+  creating a worktree; existing linked worktrees resolve through Git's primary
+  worktree root. Send/fork fallback uses that same owner. Configured model IDs
+  and effort preferences survive missing catalog entries rather than silently
+  dispatching with a different model.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
@@ -53,6 +59,16 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- `file.open` shows a file in the user's viewer. `file-open.js` resolves a
+  relative path against the session directory (an explicit `directory` wins),
+  refuses a relative path with no directory at all, checks the target is an
+  existing file, then hands `{ path, directory, sessionId }` to the injected
+  `emit`, which `index.js` writes to every UI control stream as
+  `openchamber:file-open-request`. Nothing comes back: opening a tab does not
+  fail quietly on a client, so the count of clients reached is the signal, and
+  zero is a 503, never a claimed success. Paths outside the workspace are
+  allowed on purpose: screenshots and recordings often land in a temp
+  directory, and the viewer already reads such files.
 - `browser.capture` writes its image on the server, into
   `.openchamber/screenshots/` under the scoped project directory, and returns
   the project-relative path rather than the image bytes. The client that took

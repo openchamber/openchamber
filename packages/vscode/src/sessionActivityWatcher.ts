@@ -1,4 +1,4 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { OpenCode, type OpenCodeClient, type OpenCodeEvent } from '@opencode/client';
 import type { OpenCodeManager } from './opencode';
 
 // Session activity tracking (mirrors web server and desktop behavior)
@@ -26,46 +26,26 @@ const clearGlobalEventWatcherRetry = (): void => {
   globalEventWatcherRetryTimer = null;
 };
 
-const unwrapGlobalEventPayload = (eventData: unknown): Record<string, unknown> | null => {
-  if (!eventData || typeof eventData !== 'object') {
-    return null;
+const createActivityClient = (manager: OpenCodeManager, baseUrl: string): OpenCodeClient => OpenCode.make({
+  baseUrl: baseUrl.replace(/\/+$/, ''),
+  headers: manager.getOpenCodeAuthHeaders(),
+});
+
+/**
+ * `GET /api/session/active` is the authoritative set of sessions running an
+ * agent loop. Anything not in it is idle, including sessions this process
+ * believed were busy before the stream dropped.
+ */
+const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promise<void> => {
+  const active = await client.session.active({ signal: AbortSignal.timeout(8_000) });
+  const activeSessionIds = new Set(Object.keys(active || {}));
+
+  for (const sessionId of activeSessionIds) {
+    setSessionActivityPhase(sessionId, 'busy');
   }
 
-  const record = eventData as { payload?: unknown };
-  if (record.payload && typeof record.payload === 'object') {
-    return record.payload as Record<string, unknown>;
-  }
-
-  return eventData as Record<string, unknown>;
-};
-
-const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Promise<void> => {
-  const baseUrl = manager.getApiUrl();
-  if (!baseUrl) {
-    return;
-  }
-
-  const url = new URL('/session/status', baseUrl);
-  const response = await fetch(url.toString(), {
-    headers: manager.getOpenCodeAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`session status fetch failed (${response.status})`);
-  }
-
-  const statuses = await response.json() as Record<string, { type?: string }>;
-  const knownSessionIds = new Set(Object.keys(statuses || {}));
-
-  for (const [sessionId, data] of Object.entries(statuses || {})) {
-    const type = typeof data?.type === 'string' ? data.type : 'idle';
-    const phase: ActivityPhase = type === 'busy' || type === 'retry' ? 'busy' : 'idle';
-    setSessionActivityPhase(sessionId, phase);
-  }
-
-  // Drop stale in-memory activity entries not present in authoritative status.
   for (const sessionId of Array.from(sessionActivityPhases.keys())) {
-    if (!knownSessionIds.has(sessionId)) {
+    if (!activeSessionIds.has(sessionId)) {
       setSessionActivityPhase(sessionId, 'idle');
     }
   }
@@ -120,44 +100,39 @@ export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPha
   return snapshot;
 };
 
-const deriveSessionActivity = (payload: Record<string, unknown>): SessionActivity | null => {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-
-  const type = payload.type as string;
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-
-  if (type === 'session.status') {
-    const status = properties?.status as Record<string, unknown> | undefined;
-    const info = properties?.info as Record<string, unknown> | undefined;
-    const sessionId = (properties?.sessionID ?? properties?.sessionId) as string;
-    const statusType = (status?.type ?? info?.type) as string;
-
-    if (typeof sessionId === 'string' && sessionId.length > 0 && typeof statusType === 'string') {
-      const phase = statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle';
-      return { sessionId, phase };
+/**
+ * Live activity comes from the live channel only.
+ *
+ * `session.execution.*` is the signal that matters: a normal OpenCode 2.x turn
+ * emits started → succeeded and NO `session.status` or `session.idle` at all, so
+ * anything waiting on those would never see the session go busy. The two status
+ * events are still handled because they do arrive outside a normal turn (retry,
+ * explicit status pushes) and they are cheap to honour.
+ *
+ * A finished run passes through `cooldown` so the UI does not flip the indicator
+ * off the instant the last token lands.
+ */
+const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => {
+  switch (event.type) {
+    case 'session.status': {
+      const statusType = event.data.status.type;
+      return {
+        sessionId: event.data.sessionID,
+        phase: statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle',
+      };
     }
+    case 'session.execution.started':
+      return { sessionId: event.data.sessionID, phase: 'busy' };
+    case 'session.execution.succeeded':
+      return { sessionId: event.data.sessionID, phase: 'cooldown' };
+    case 'session.execution.failed':
+    case 'session.execution.interrupted':
+      return { sessionId: event.data.sessionID, phase: 'idle' };
+    case 'session.idle':
+      return { sessionId: event.data.sessionID, phase: 'idle' };
+    default:
+      return null;
   }
-
-  if (type === 'message.updated' || type === 'message.part.updated' || type === 'message.part.delta') {
-    const info = properties?.info as Record<string, unknown> | undefined;
-    const sessionId = (info?.sessionID ?? info?.sessionId ?? properties?.sessionID ?? properties?.sessionId) as string;
-    const role = info?.role as string;
-    const finish = info?.finish as string;
-    if (typeof sessionId === 'string' && sessionId.length > 0 && role === 'assistant' && finish === 'stop') {
-      return { sessionId, phase: 'cooldown' };
-    }
-  }
-
-  if (type === 'session.idle') {
-    const sessionId = (properties?.sessionID ?? properties?.sessionId) as string;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
-      return { sessionId, phase: 'idle' };
-    }
-  }
-
-  return null;
 };
 
 const waitForOpenCodePort = async (manager: OpenCodeManager, timeoutMs = 30000): Promise<number | null> => {
@@ -221,32 +196,31 @@ export const startGlobalEventWatcher = async (
           throw new Error('OpenCode API URL not available');
         }
 
-        const client = createOpencodeClient({
-          baseUrl,
-          headers: manager.getOpenCodeAuthHeaders(),
-        });
+        const client = createActivityClient(manager, baseUrl);
         try {
-          await reconcileSessionActivityFromStatus(manager);
+          await reconcileSessionActivityFromStatus(client);
         } catch (error) {
           console.warn(
-            '[VSCode:Activity] session status reconcile failed',
+            '[VSCode:Activity] active session reconcile failed',
             error instanceof Error ? error.message : error,
           );
         }
-        const result = await client.global.event({
-          signal,
-          sseMaxRetryAttempts: 0,
-        });
 
-        console.log('[VSCode:Activity] connected');
+        // The stream is lazy: it is only proven connected once a frame arrives.
+        let connected = false;
 
-        for await (const event of result.stream) {
-          const payload = unwrapGlobalEventPayload((event as { payload?: unknown }).payload ?? event);
-          if (payload) {
-            const activity = deriveSessionActivity(payload);
-            if (activity) {
-              setSessionActivityPhase(activity.sessionId, activity.phase);
-            }
+        for await (const event of client.event.subscribe({ signal })) {
+          if (!connected) {
+            connected = true;
+            // A healthy connection clears the backoff, so a long-lived watcher
+            // does not carry a 30s delay into its next reconnect.
+            attempt = 0;
+            console.log('[VSCode:Activity] connected');
+          }
+
+          const activity = deriveSessionActivity(event);
+          if (activity) {
+            setSessionActivityPhase(activity.sessionId, activity.phase);
           }
 
           if (signal.aborted) {

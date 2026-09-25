@@ -1,10 +1,10 @@
 import React from 'react';
-import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
-import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { Message, Part, Session } from '@/lib/opencode/model';
+import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 
 import { ChatInput } from './ChatInput';
 import { ChatColumnSessionContext, type ChatColumnSession } from './chatColumnSession';
+import { MobileCommentComposerContext, useMobileCommentComposerOwner } from './composer/comment/MobileCommentComposerContext';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -34,9 +34,9 @@ const FLOATING_COMPOSER_DEFAULT_HEIGHT = 128;
 // for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
-import { PermissionCard } from './PermissionCard';
-import { QuestionCard } from './QuestionCard';
-import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
+// Mirrors the oc-chat-hydration-reveal duration in index.css.
+const TIMELINE_REVEAL_FADE_MS = 100;
+import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
@@ -48,6 +48,8 @@ import { useChatTimelineScroll, type TimelineListHandle } from '@/hooks/useChatT
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
+import { ChatQuoteHighlightContext, useChatQuoteHighlightStore } from './hooks/chatQuoteHighlightStore';
+import { ChatQuoteHighlightLayer } from './message/ChatQuoteHighlightLayer';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
@@ -63,26 +65,23 @@ import {
     useSessionMessageCount,
     useSessionMessageRecords,
     useSessionMessageLoadState,
+    useSessionMessageLoader,
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
     useScopedBlockingPermissions,
-    useScopedBlockingQuestions,
+    useScopedBlockingForms,
     useParentSession,
     useSession,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
-import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
-import { hasContextParts } from '@/lib/messages/contextParts';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
-import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shellBridge';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
@@ -203,8 +202,6 @@ type ChatViewportProps = {
     /** The user waited for this session (held or fetched); reveal it with a fade. */
     revealWaited: boolean;
     revealGate: TimelineRevealGate;
-    sessionQuestions: QuestionRequest[];
-    sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
@@ -240,8 +237,6 @@ const ChatViewport = React.memo(({
     endPinningReleased,
     revealWaited,
     revealGate,
-    sessionQuestions,
-    sessionPermissions,
     isProgrammaticFollowActive,
     showLoadOlderButton,
     onLoadOlder,
@@ -258,14 +253,6 @@ const ChatViewport = React.memo(({
     // Cache normalized parts per source array so unchanged messages keep the
     // same reference and the memo below can bail out to the previous map.
     const normalizedPromptPartsCache = React.useRef(new WeakMap<Part[], Part[]>());
-    // Shell-mode prompts show their extracted command; cache by message id so
-    // the parts array reference is stable while the command is unchanged.
-    const shellPreviewCache = React.useRef(new Map<string, { command: string; parts: Part[] }>());
-    const shellPreviewSessionRef = React.useRef(currentSessionId);
-    if (shellPreviewSessionRef.current !== currentSessionId) {
-        shellPreviewSessionRef.current = currentSessionId;
-        shellPreviewCache.current.clear();
-    }
     const promptPreviewsByTurnId = React.useMemo(() => {
         const next = new Map<string, Part[]>();
         for (let index = 0; index < renderedMessages.length; index += 1) {
@@ -273,27 +260,10 @@ const ChatViewport = React.memo(({
             if (message.info.role !== 'user') {
                 continue;
             }
-            if (isUserShellMarkerMessage(message)) {
-                const command = findShellCommandForMessage(renderedMessages, index) ?? '';
-                const cached = shellPreviewCache.current.get(message.info.id);
-                if (cached && cached.command === command) {
-                    next.set(message.info.id, cached.parts);
-                } else {
-                    const parts = [{ type: 'text', text: command ? `$ ${command}` : '/shell' } as Part];
-                    shellPreviewCache.current.set(message.info.id, { command, parts });
-                    next.set(message.info.id, parts);
-                }
-                continue;
-            }
-            // Other fully synthetic user messages (loop continuations,
-            // plan-mode injections) are not prompts the user typed — keep
-            // them out of the navigator entirely.
-            // Attached context (a quoted message, a terminal selection) is
-            // synthetic transport-wise but is a turn the user sent, so a
-            // context-only message stays navigable.
-            if (isFullySyntheticMessage(message.parts) && !hasContextParts(message.parts)) {
-                continue;
-            }
+            // v2 keeps injected context out of the user message: loop
+            // continuations and plan-mode injections arrive as their own
+            // `synthetic`-role messages, so every remaining user message is a
+            // turn the user actually sent and stays navigable.
             let displayParts = normalizedPromptPartsCache.current.get(message.parts);
             if (!displayParts) {
                 displayParts = normalizeUserDisplayParts(message.parts);
@@ -376,37 +346,28 @@ const ChatViewport = React.memo(({
 
     const listFooter = React.useMemo(() => (
         <>
-            {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
-                <div>
-                    {sessionQuestions.map((question) => (
-                        <QuestionCard key={question.id} question={question} />
-                    ))}
-                    {sessionPermissions.map((permission) => (
-                        <PermissionCard key={permission.id} permission={permission} />
-                    ))}
-                </div>
-            )}
-
+            {/* Permissions and forms dock above the composer (`PermissionDock`, `FormDock`). */}
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
-                composer covers, so the end of the transcript stays readable
-                above it; the extra gap is the breathing room between the last
-                row and the composer's top edge. The height comes from a CSS
-                variable the composer slot's observer writes directly, so a
-                growing composer resizes the footer without a list re-render;
-                the list's own footer observer then extends the content. */}
+                composer covers, plus any panel docked above it (queue, BTW),
+                so the end of the transcript stays readable above them; the
+                extra gap is the breathing room between the last row and the
+                top edge of whatever floats. Both heights come from CSS
+                variables written straight by observers, so a growing composer
+                or panel resizes the footer without a list re-render; the
+                list's own footer observer then extends the content. */}
             <div
                 className="flex-shrink-0"
                 style={{
                     height: floatingComposer
-                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + ${FLOATING_COMPOSER_GAP_PX}px)`
+                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + var(--chat-floating-panel-clearance, 0px) + ${FLOATING_COMPOSER_GAP_PX}px)`
                         : (isMobile ? '40px' : '10vh'),
                 }}
                 aria-hidden="true"
             />
         </>
-    ), [currentSessionId, directory, floatingComposer, isMobile, sessionPermissions, sessionQuestions]);
+    ), [currentSessionId, directory, floatingComposer, isMobile]);
 
     // Opening a session paints the timeline as one finished picture: the root
     // stays invisible while any renderer holds a provisional first paint, then
@@ -430,6 +391,7 @@ const ChatViewport = React.memo(({
         let finished = false;
         let timer: number | null = null;
         let frame: number | null = null;
+        let fadeTimer: number | null = null;
         // Revealed once the geometry has settled: after the last hold the
         // list still lays rows out from its own measurements over a few
         // frames, so the timeline stays hidden — pinned to the end on every
@@ -460,8 +422,28 @@ const ChatViewport = React.memo(({
                     frame = window.requestAnimationFrame(settle);
                     return;
                 }
-                if (fade) root.setAttribute('data-timeline-reveal', 'fading');
-                else root.removeAttribute('data-timeline-reveal');
+                if (!fade) {
+                    root.removeAttribute('data-timeline-reveal');
+                    return;
+                }
+                root.setAttribute('data-timeline-reveal', 'fading');
+                // The fade is a filled opacity animation, and a filled
+                // animation keeps the root a stacking context for as long
+                // as the attribute stays. That would trap the overlay
+                // scrollbar (z-30) under the composer slot (z-10): the thumb
+                // paints over the composer band but cannot be grabbed there.
+                // Drop the attribute once the fade has run (or immediately
+                // under reduced motion, where the animation never fires).
+                const clearFade = (event?: AnimationEvent) => {
+                    // Child entrance animations bubble here too.
+                    if (event && event.target !== root) return;
+                    if (fadeTimer !== null) window.clearTimeout(fadeTimer);
+                    fadeTimer = null;
+                    root.removeEventListener('animationend', clearFade);
+                    root.removeAttribute('data-timeline-reveal');
+                };
+                root.addEventListener('animationend', clearFade);
+                fadeTimer = window.setTimeout(clearFade, TIMELINE_REVEAL_FADE_MS * 2);
             };
             frame = window.requestAnimationFrame(settle);
         };
@@ -482,6 +464,7 @@ const ChatViewport = React.memo(({
             finished = true;
             if (timer !== null) window.clearTimeout(timer);
             if (frame !== null) window.cancelAnimationFrame(frame);
+            if (fadeTimer !== null) window.clearTimeout(fadeTimer);
             revealGate.onEmpty = null;
         };
     }, [revealGate, scrollRef]);
@@ -570,8 +553,6 @@ const ChatViewport = React.memo(({
         && prev.endPinningReleased === next.endPinningReleased
         && prev.revealWaited === next.revealWaited
         && prev.revealGate === next.revealGate
-        && prev.sessionQuestions === next.sessionQuestions
-        && prev.sessionPermissions === next.sessionPermissions
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.showLoadOlderButton === next.showLoadOlderButton
         && prev.onLoadOlder === next.onLoadOlder
@@ -766,9 +747,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
+    const messageLoader = useSessionMessageLoader();
     const currentSessionKey = currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
         : null;
+    // A deferred switch can keep the previous transcript on screen after the
+    // selected session changes. Protect what is actually rendered until commit.
+    React.useLayoutEffect(() => {
+        if (!currentSessionKey || !currentSessionId || !effectiveSessionDirectory) return;
+        return messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'rendered');
+    }, [currentSessionKey, currentSessionId, effectiveSessionDirectory, messageLoader]);
     // One gate per opened session; the scroll hook holds it until the
     // viewport is pinned to the end so the first visible frame is already
     // at the bottom.
@@ -781,6 +769,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         () => ({ sessionId: currentSessionId ?? null, directory: currentSessionId ? effectiveSessionDirectory ?? null : null }),
         [currentSessionId, effectiveSessionDirectory],
     );
+    const mobileCommentComposer = useMobileCommentComposerOwner();
     const ensureSessionRenderable = React.useCallback(
         (sessionId: string) => sync.ensureSessionRenderable(sessionId, false, effectiveSessionDirectory),
         [effectiveSessionDirectory, sync],
@@ -846,23 +835,23 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory) ?? IDLE_SESSION_STATUS;
 
-    // Scoped blocking requests — only subscribe to permissions/questions for
+    // Scoped blocking requests — only subscribe to permissions/forms for
     // the current session + descendant subagent sessions, not all sessions in
     // the directory.
     const sessionPermissions = useScopedBlockingPermissions(currentSessionId, effectiveSessionDirectory);
-    const sessionQuestions = useScopedBlockingQuestions(currentSessionId, effectiveSessionDirectory);
+    const sessionForms = useScopedBlockingForms(currentSessionId, effectiveSessionDirectory);
 
-    const hasUnreconciledQuestionTool = React.useMemo(
-        () => !sessionQuestions.some((question) => question.sessionID === currentSessionId)
-            && hasActiveQuestionToolInCurrentTurn(sessionMessages),
-        [currentSessionId, sessionMessages, sessionQuestions],
+    const hasUnreconciledFormTool = React.useMemo(
+        () => !sessionForms.some((form) => form.sessionID === currentSessionId)
+            && hasActiveFormToolInCurrentTurn(sessionMessages),
+        [currentSessionId, sessionMessages, sessionForms],
     );
 
     React.useEffect(() => {
-        if (!active || !currentSessionId || !effectiveSessionDirectory || !hasUnreconciledQuestionTool) return;
+        if (!active || !currentSessionId || !effectiveSessionDirectory || !hasUnreconciledFormTool) return;
         let cancelled = false;
 
-        void recoverPendingQuestionWithRetry(
+        void recoverPendingFormWithRetry(
             () => sync.recoverPendingQuestions(currentSessionId, effectiveSessionDirectory),
             { isCancelled: () => cancelled },
         );
@@ -870,10 +859,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [active, currentSessionId, effectiveSessionDirectory, hasUnreconciledQuestionTool, sync]);
+    }, [active, currentSessionId, effectiveSessionDirectory, hasUnreconciledFormTool, sync]);
 
     const sessionIsWorking = React.useMemo(() => {
-        if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
+        if (!currentSessionId || sessionPermissions.length > 0 || sessionForms.length > 0) {
             return false;
         }
 
@@ -882,13 +871,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             return true;
         }
 
-        const lastMessage = sessionMessages[sessionMessages.length - 1]?.info as Message | undefined;
-        return Boolean(
-            lastMessage
-            && lastMessage.role === 'assistant'
-            && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
-        );
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type]);
+        // The last record can be a synthetic/skill/shell/switch message; the
+        // turn is still running only per the last conversation message.
+        return isIncompleteAssistantTurn(getLastConversationRecord(sessionMessages)?.info);
+    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent.type]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;
@@ -1185,10 +1171,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         goToBottom('instant');
     }, [goToBottom]);
 
-    // Mobile loads older history via an explicit top button instead of a
-    // scroll-position trigger (see handleHistoryScroll in the controller).
-    const showLoadOlderButton = isMobileSurfaceRuntime()
-        && timelineController.historySignals.canLoadEarlier;
+    // A window too short to scroll must stay manually pageable on every runtime.
+    const showLoadOlderButton = timelineController.historySignals.canLoadEarlier;
     const timelineLoadEarlier = timelineController.loadEarlier;
     const handleLoadOlderClick = React.useCallback(() => {
         // Loading older history is an explicit move INTO the past: release
@@ -1201,6 +1185,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
     }, [timelineController.handleActiveTurnChange]);
+    const chatQuoteHighlights = useChatQuoteHighlightStore();
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -1218,7 +1203,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, [navigation]);
     const canLoadEarlierPrompts = timelineController.historySignals.canLoadEarlier;
     const showPromptNavigator = !isMobile
-        && !isVSCode
         && !isDesktopExpandedInput
         && promptNavigatorEnabled
         && timelineController.turnIds.length >= 2;
@@ -1607,8 +1591,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 endPinningReleased={userOwnsScroll}
                 revealWaited={revealWaited}
                 revealGate={revealGate}
-                sessionQuestions={sessionQuestions}
-                sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}
                 onLoadOlder={handleLoadOlderClick}
@@ -1626,12 +1608,23 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 	return (
 		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
+		{/* One mobile comment controller per column: selections in this column
+		    comment into this column's composer, never a sibling's. */}
+		<MobileCommentComposerContext.Provider value={mobileCommentComposer}>
+		<ChatQuoteHighlightContext.Provider value={chatQuoteHighlights}>
+		<ChatQuoteHighlightLayer
+			store={chatQuoteHighlights}
+			scrollNode={scrollNode}
+			scrollToMessage={timelineController.scrollToMessage}
+		/>
 		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			{sessionSurface}
 
             <div
                 ref={attachComposerSlot}
+                // The mobile pill morph pins a floating slot for its tween.
+                data-composer-slot={floatingComposer ? 'floating' : 'flow'}
                 className={cn(
                     'z-10 flex min-h-0',
                     floatingComposer
@@ -1645,7 +1638,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 )}
             >
                 {!draftLayoutVisible && !isDesktopExpandedInput && sessionMessages.length > 0 && (
-                    <>
+                    /* One zero-height anchor on the slot's top edge for
+                       everything that floats above the composer, so the
+                       mobile keyboard slide and the pill morph move them as
+                       one rider with the box instead of leaving them to jump
+                       when the slot resizes (see mobileComposerMorph). */
+                    <div className="oc-composer-riders absolute bottom-full inset-x-0" data-composer-riders="true">
                         <ScrollToBottomButton
                             visible={timelineController.showScrollToBottom}
                             working={sessionIsWorking}
@@ -1701,7 +1699,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 </div>
                             </div>
                         ) : null}
-                    </>
+                    </div>
                 )}
                 {promptReadOnly ? (
                     <ReadOnlyPromptBanner />
@@ -1739,6 +1737,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 onLoadEarlier={handleLoadOlderClick}
             />
         </div>
+        </ChatQuoteHighlightContext.Provider>
+        </MobileCommentComposerContext.Provider>
         </ChatColumnSessionContext.Provider>
         {/* Kept mounted while it could ever show, so it can animate its own
             collapse; `visible` drives that. Unmounting on the spot is what made

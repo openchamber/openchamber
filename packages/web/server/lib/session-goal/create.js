@@ -56,6 +56,7 @@ export const createSessionGoal = async ({
   providerID,
   modelID,
   onWarning,
+  persistSessionGoal,
 }) => {
   const warn = (message, error) => {
     if (typeof onWarning === 'function') {
@@ -98,17 +99,13 @@ export const createSessionGoal = async ({
     createdAt: now,
     updatedAt: now,
   };
-  const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-  url.searchParams.set('directory', directory);
-  const response = await fetch(url.toString(), {
-    method: 'PATCH',
-    headers: {
-      ...authHeaders,
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({ metadata: { openchamber: { goal } } }),
-  });
-  if (!response.ok) throw new Error(`goal metadata patch failed (${response.status})`);
+  // OpenCode 2.x accepts session metadata only at create time, so the goal
+  // record lives in OpenChamber's own store next to the objective text.
+  void baseUrl;
+  void authHeaders;
+  if (typeof persistSessionGoal !== 'function') {
+    throw new Error('goal mode needs a session metadata store to save the goal in');
+  }
+  await persistSessionGoal(sessionID, directory, goal);
   return goal;
 };

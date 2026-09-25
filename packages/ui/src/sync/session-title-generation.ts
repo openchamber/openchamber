@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from "@/lib/opencode/model"
 import type { collectSessionTitleTurns } from '@/lib/sessionTitle';
 
 type TitleTarget = { runtimeKey: string; directory: string; sessionID: string };

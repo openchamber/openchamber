@@ -21,6 +21,7 @@ import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 type FileInfo = ProjectFileSearchHit;
 type AgentInfo = {
   name: string;
+  displayName: string;
   description?: string;
   mode?: string | null;
 };
@@ -259,11 +260,12 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       .filter((agent) => agent.mode && agent.mode !== 'primary')
       .map((agent) => ({
         name: agent.name,
+        displayName: agent.displayName,
         description: agent.description,
         mode: agent.mode,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    setAgents(rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.description]));
+    setAgents(rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.displayName, agent.description]));
   }, [getVisibleAgents, searchQuery]);
 
   React.useEffect(() => {

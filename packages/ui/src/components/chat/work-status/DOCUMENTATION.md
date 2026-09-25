@@ -104,7 +104,7 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
-| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle |
+| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
 | Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
@@ -112,7 +112,7 @@ which requests only providers enabled for this panel.
 
 ### Turn stats
 
-The section follows Usage and reuses the panel's existing rows. Only its header
+The section follows Usage by default and reuses the panel's existing rows. Only its header
 has an icon; metric rows use labels and values without leading icons. It
 reads already-loaded records without fetching history. The newest turn needs a
 preceding user message and completed assistant steps. A truncated or unfinished
@@ -132,6 +132,11 @@ Waiting for each model response remains included. Invalid or missing inputs
 omit the dependent metric rather than becoming zero; reported zeros remain
 valid. TTFT averages the earliest text/reasoning start delay from every step,
 only when all steps have a valid sample.
+
+Either rate above 5,000 tok/s is reported as unknown. No provider streams that
+fast, so such a value means the measured window is broken: a tool that runs
+for nearly the whole step leaves a residual of a millisecond, and a text
+interval can be equally short. The row is omitted rather than shown wrong.
 
 Metric labels stay short. Every row is a single hover and keyboard-focus target
 for a shared tooltip, with a 750ms hover delay and a portal outside the panel's
@@ -165,6 +170,16 @@ has already subscribed to for a known session and directory, and the panel
 subscribes to `currentProviderId` / `currentModelId` for the limits.
 `contextUsage.test.ts` pins the arithmetic — notably that the *latest*
 reporting assistant turn is the answer, not a sum across turns.
+
+Which message is "latest" is decided by `findLatestContextFill` in
+`stores/utils/tokenUtils.ts`, shared with the header, VS Code header, mini chat,
+mobile metadata and context sidebar. A finished compaction's own record (a
+`compaction` message with `status: 'completed'`) is not a reading: its tokens
+describe the summarizing request,
+whose input is the pre-compaction history. Until a later response reports
+tokens, the fill is `compacted` and every surface shows a dash, never the older
+pre-compaction number. A compaction still running, or one that failed, has not
+changed the window, so the previous reading stays.
 
 Two further rules on this readout:
 
@@ -227,15 +242,73 @@ the row reflects the reset tree rather than a mid-creation snapshot.
 
 ## Section order
 
-Ordering is by durability, not category:
+The default order is by durability:
 
 1. **Session** (goal, context, cost), **Project** (attention, branch,
    changes, PR, checks), **Usage**, and **Turn stats** (session telemetry:
    throughput, duration, TTFT, cache hit rate) — true for as long as the session
    is open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
-2. **Subagents**, **Tasks** — what is happening right now;
+2. **Subagents** — what is happening right now;
 3. **MCP**, **Pinned messages**, **Context sources** — supporting material.
+
+The sections dialog has drag handles for changing this order, including hidden
+sections. A drop updates the panel immediately. `workStatusSectionOrder` is a
+profile preference persisted through the settings registry and the local UI
+store. Missing or empty order uses the default; duplicate and obsolete ids are
+discarded, and newly introduced sections append in default order. Visibility
+changes never alter positions.
+
+`WorkStatusPrimaryGroup` supplies Session and Project through a composition
+callback so the panel can place them independently while retaining one set of
+data subscriptions. Keyed fragments preserve mounted sections and DOM order;
+sections that render nothing leave no spacing wrappers. Secondary elements are
+created by the panel, so primary readout updates do not rerender them.
+
+The overlay's outside-click and Escape dismissal pauses while this dialog is
+open, since the dialog is portalled outside the panel.
+
+The first rendered section heading reserves space on its right for the panel's
+settings button. The scroller selects the first actual section DOM node, so
+hidden and empty sections do not claim that space. Both heading variants expose
+`data-work-status-heading`; only the heading is inset, leaving body rows at full
+width. Heading summaries truncate within a bounded share of the available width
+so project names and usage summaries cannot push actions under settings.
+
+## Extension sections
+
+An installed extension can add its own section (`contributes.statusSection`,
+see `packages/sdk/DOCUMENTATION.md`). `WorkStatusExtensionSection` draws the
+header from the extension's `statusTitle` (else its name) and panel icon, and
+its body is a `PluginPane` with `surface="status"`: the same sandboxed iframe,
+guest-scoped token, context, grants and pause gates as a rail panel.
+
+Cost is bounded by mounting. The frame exists only while the panel's content is
+mounted, the section is visible, and the section is expanded; the collapsible
+drops its children when folded. `PluginPane` itself is lazy-loaded, so a panel
+without extension sections never loads it. The frame's height starts at the
+manifest `height` (default 120px) and follows the guest's `setHeight`, clamped
+to 24..320px; taller content scrolls inside the frame, never the host. The last
+requested height is remembered per extension id and version for the app
+session (a module-level map, one number per installed extension), so folding
+and reopening a section does not jump back to the manifest default.
+
+`useWorkStatusExtensionSections` lists active guests with a `statusEntry` from
+the catalog store (`useGuestStatusSections`). It is empty on VS Code and
+mobile, which load no guests; the panel is hidden there anyway, but the empty
+list is explicit rather than an accident of visibility. The rail owns loading
+the catalog.
+
+Section ids are `ext:<extension id>` and share the persisted order and hidden
+lists with built-in ids. Sanitizing keeps well-formed `ext:` ids even when that
+extension is not installed, because settings load before the catalog and a
+paused or reinstalled extension should come back where the user put it.
+`resolveWorkStatusSectionOrder` drops unavailable extension ids from what the
+panel and the dialog show and appends available ones the saved order does not
+know. A drag in the dialog writes the shown order followed by the saved ids it
+did not show. "All hidden" and "Show all" count only sections that can
+actually be shown. Extension rows carry an "Extension" label and no settings
+search anchor (they are dynamic entities).
 
 ## Switching it off
 
@@ -281,19 +354,6 @@ just collapsed it.
 Its expanded list is capped at eight rows and scrolls independently, so a
 session with many subagents does not crowd every section below it out of the
 panel.
-
-## Tasks
-
-Icons and strike-through match the composer's todo dropdown, so one list does
-not read as two. Two deliberate differences:
-
-- **Completed items stay.** The dropdown is a queue to work through; this is a
-  record of the session.
-- **Sorted by status** — in progress, then pending, then completed — and stable
-  within each rank, since the agent's own ordering carries meaning.
-
-Rows truncate at this width, so each carries a delayed tooltip with the full
-task text.
 
 ## Collapsed Usage headline
 
@@ -408,6 +468,12 @@ once-per-instance bookkeeping, so every caller can ask on each connection
 change.
 
 ### These readouts belong to the connected instance
+
+Same-origin web pages and Electron's Vite proxy initialize a runtime identity
+even when the API base is empty. Requests stay relative to the page origin.
+Electron dev uses `local`; hosted pages use their HTTP origin. Without this,
+the quota loader treats a working proxy as a transient disconnected runtime
+and skips the initial load.
 
 Quotas, MCP status, skills, agent memory and the Linear/GitHub logins are all
 served by whichever OpenChamber instance is connected, and each was cached

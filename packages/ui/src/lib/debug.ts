@@ -6,7 +6,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { copyTextToClipboard as copyPlainTextToClipboard } from '@/lib/clipboard';
-import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory } from '@/sync/sync-refs';
+import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory, getDirectoryState } from '@/sync/sync-refs';
 import {
   describeSessionDirectorySources,
   resolveSessionDirectoryFromSources,
@@ -170,6 +170,12 @@ export const debugUtils = {
     }));
   },
 
+  /** Cached message count per session in the current directory store; -1 when not cached. */
+  getCachedMessageCount(sessionId: string, directory?: string) {
+    const state = getDirectoryState(directory);
+    return state?.message[sessionId]?.length ?? -1;
+  },
+
   getAllMessages(truncate: boolean = false) {
     const state = useSessionUIStore.getState();
     const currentSessionId = state.currentSessionId;
@@ -263,19 +269,13 @@ export const debugUtils = {
     let opencodeHealth: unknown = null;
 
     try {
-      const pathResult = await opencodeClient.getSdkClient().path.get(
-        currentDirectory ? { directory: currentDirectory } : undefined
-      );
-      pathInfo = pathResult.error ? { error: pathResult.error } : pathResult.data;
+      pathInfo = await opencodeClient.getLocation(currentDirectory);
     } catch (error) {
       pathInfo = { error: error instanceof Error ? error.message : String(error) };
     }
 
     try {
-      const projectResult = await opencodeClient.getSdkClient().project.current(
-        currentDirectory ? { directory: currentDirectory } : undefined
-      );
-      projectInfo = projectResult.error ? { error: projectResult.error } : projectResult.data;
+      projectInfo = await opencodeClient.getCurrentProject(currentDirectory);
     } catch (error) {
       projectInfo = { error: error instanceof Error ? error.message : String(error) };
     }
@@ -283,7 +283,10 @@ export const debugUtils = {
     settingsInfo = await safeFetchJson('/api/config/settings');
 
     try {
-      const resp = await runtimeFetch('/api/health');
+      // OpenChamber's own health route. Every field read below
+      // (`openCodePort`, `openCodeRunning`, `isOpenCodeReady`, ...) is
+      // OpenChamber's; OpenCode 2.0.8 removed `/api/health` entirely.
+      const resp = await runtimeFetch('/health');
       const contentType = resp.headers.get('content-type') || '';
       const body = await safeText(resp);
       const isJson = contentType.toLowerCase().includes('application/json');
@@ -401,7 +404,7 @@ export const debugUtils = {
   },
 
   /**
-   * The same text the status report dialog (Ctrl/Cmd+Shift+L) shows, for a
+   * The same text the status report dialog ("Show OpenCode status") shows, for a
    * console or remote session that cannot press the shortcut.
    */
   async statusReport() {

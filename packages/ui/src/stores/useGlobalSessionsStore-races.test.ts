@@ -1,6 +1,7 @@
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2"
+import type { Session } from "@/lib/opencode/model"
+import type { SessionPage } from "@/lib/opencode/client"
 
 import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "./useGlobalSessionsStore"
@@ -23,37 +24,35 @@ const deferred = <T>(): Deferred<T> => {
 
 let listRequest: Deferred<Session[]>
 
-// The store issues one inclusive (`archived: true`) paginated request per
-// load/refresh scope and splits active/archived client-side, so restored
-// sessions (`time.archived` falsy-but-present) stay visible in the active
-// list. The mock serves that single request.
-const sdk = {
-  experimental: {
-    session: {
-      list: async () => ({
-        data: await listRequest.promise,
-        response: { headers: new Headers() },
-      }),
-    },
-  },
-} as unknown as OpencodeClient
-const originalGetSdkClient = opencodeClient.getSdkClient
+// The store issues one paginated request per load/refresh scope and splits
+// active/archived client-side, so restored sessions (`time.archived`
+// falsy-but-present) stay visible in the active list. The mock serves that
+// single request.
+const listSessionsPage = async (): Promise<SessionPage> => ({
+  sessions: await listRequest.promise,
+  cursor: {},
+})
+const originalListSessionsPage = opencodeClient.listSessionsPage
 
 const session = (id: string, title = id, archived?: number): Session => ({
   id,
+  projectID: 'project',
+  directory: '',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   title,
   time: { created: 1, updated: 1, ...(archived !== undefined ? { archived } : {}) },
-} as Session)
+})
 
 describe("global session mutation reconciliation", () => {
   beforeEach(() => {
     listRequest = deferred<Session[]>()
-    opencodeClient.getSdkClient = () => sdk
+    opencodeClient.listSessionsPage = listSessionsPage
     useGlobalSessionsStore.getState().resetForRuntimeSwitch()
   })
 
   afterEach(() => {
-    opencodeClient.getSdkClient = originalGetSdkClient
+    opencodeClient.listSessionsPage = originalListSessionsPage
   })
 
   test("keeps a session created after a full load starts", async () => {
@@ -153,6 +152,119 @@ describe("global session mutation reconciliation", () => {
 
     expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["restored"])
     expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([])
+  })
+})
+
+describe("paginated global session load", () => {
+  const PAGE_SIZE = 500
+  let secondPage: Deferred<Session[]>
+  let listCalls: number
+
+  const firstPage = Array.from({ length: PAGE_SIZE }, (_, index) => ({
+    ...session(`page1-${index}`),
+    time: { created: 1, updated: 1000 - index },
+  }) as Session)
+
+  // Two pages: a full first page that names a cursor, then a short last page.
+  const pagedListSessionsPage = async (options?: { cursor?: string }): Promise<SessionPage> => {
+    listCalls += 1
+    if (options?.cursor === undefined) return { sessions: firstPage, cursor: { next: "page-2" } }
+    return { sessions: await secondPage.promise, cursor: {} }
+  }
+
+  const until = async (predicate: () => boolean): Promise<void> => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (predicate()) return
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw new Error("condition never became true")
+  }
+
+  beforeEach(() => {
+    secondPage = deferred<Session[]>()
+    listCalls = 0
+    opencodeClient.listSessionsPage = pagedListSessionsPage
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch()
+  })
+
+  afterEach(() => {
+    opencodeClient.listSessionsPage = originalListSessionsPage
+  })
+
+  test("shows the first page before pagination finishes", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    const partial = useGlobalSessionsStore.getState()
+    expect(partial.activeSessions).toHaveLength(PAGE_SIZE)
+    expect(partial.status).toBe("loading")
+    expect(partial.hasLoaded).toBe(false)
+    expect(listCalls).toBe(2)
+
+    secondPage.resolve([{ ...session("page2-0"), time: { created: 1, updated: 400 } } as Session])
+    await loading
+
+    const complete = useGlobalSessionsStore.getState()
+    expect(complete.activeSessions).toHaveLength(PAGE_SIZE + 1)
+    expect(complete.activeSessions.some((item) => item.id === "page2-0")).toBe(true)
+    expect(complete.status).toBe("ready")
+    expect(complete.hasLoaded).toBe(true)
+  })
+
+  test("keeps the persisted seed visible while pagination continues", async () => {
+    const seeded = session("seeded")
+    useGlobalSessionsStore.getState().upsertSession(seeded)
+
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 1)
+
+    expect(useGlobalSessionsStore.getState().activeSessions.some((item) => item.id === "seeded")).toBe(true)
+
+    secondPage.resolve([])
+    await loading
+  })
+
+  test("keeps an archive made between the first page and completion", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    useGlobalSessionsStore.getState().archiveSessions(["page1-0"], 42)
+
+    secondPage.resolve([])
+    await loading
+
+    const state = useGlobalSessionsStore.getState()
+    expect(state.activeSessions.some((item) => item.id === "page1-0")).toBe(false)
+    expect(state.archivedSessions.map((item) => item.id)).toEqual(["page1-0"])
+    expect(state.status).toBe("ready")
+  })
+
+  test("keeps the first page when a later page fails", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    secondPage.reject(new Error("unavailable"))
+    await loading
+
+    const state = useGlobalSessionsStore.getState()
+    expect(state.activeSessions).toHaveLength(PAGE_SIZE)
+    expect(state.status).toBe("error")
+    expect(state.hasLoaded).toBe(false)
+  })
+
+  test("drops the pages when the runtime switches mid-load", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    await until(() => useGlobalSessionsStore.getState().activeSessions.length > 0)
+
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch()
+    secondPage.resolve([{ ...session("page2-0"), time: { created: 1, updated: 400 } } as Session])
+    await loading
+
+    const state = useGlobalSessionsStore.getState()
+    expect(state.activeSessions).toEqual([])
+    expect(state.archivedSessions).toEqual([])
+    expect(state.hasLoaded).toBe(false)
+    expect(state.status).toBe("idle")
   })
 })
 

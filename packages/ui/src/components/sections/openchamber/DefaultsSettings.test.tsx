@@ -21,6 +21,9 @@ type ConfigState = {
   setSettingsDefaultVariant: () => void;
   setSettingsDefaultAgent: () => void;
   selectionSource: 'auto';
+  agentSelectionSource: 'auto';
+  agents: Array<{ name: string; model?: { providerID: string; id: string } }>;
+  currentAgentName: string | undefined;
 };
 
 const configState: ConfigState = {
@@ -35,6 +38,9 @@ const configState: ConfigState = {
   setSettingsDefaultVariant: () => undefined,
   setSettingsDefaultAgent: () => undefined,
   selectionSource: 'auto',
+  agentSelectionSource: 'auto',
+  agents: [],
+  currentAgentName: undefined,
 };
 
 const settingsState = {
@@ -69,6 +75,7 @@ mock.module('@/lib/persistence', () => ({
     updateCalls.push(changes);
     return { ok: true };
   },
+  reportSettingsSaveState: () => {},
 }));
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: async () => new Response(JSON.stringify({ authenticatedProviders: [] }), {

@@ -1,7 +1,27 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
-import { createSessionOwnershipIndex } from './sessionOwnership';
+import {
+  createSessionOwnershipIndex,
+  type SessionOwnershipRecord,
+} from './sessionOwnership';
+
+const ownershipSession = (
+  id: string,
+  options: {
+    directory?: string;
+    projectID?: string;
+    project?: { id?: string; worktree?: string };
+  } = {},
+): SessionOwnershipRecord => ({
+  id,
+  projectID: options.projectID ?? options.project?.id ?? 'project',
+  directory: options.directory ?? '/workspace',
+  title: id,
+  cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated: 1 },
+  project: options.project,
+});
 
 describe('createSessionOwnershipIndex', () => {
   test('assigns sessions to the deepest project and registered worktree', () => {
@@ -93,6 +113,106 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.bySessionId.has('nested')).toBe(false);
   });
 
+  test('resolves a deleted directory through canonical OpenCode project metadata', () => {
+    const ownership = createSessionOwnershipIndex(
+      [
+        ownershipSession('restored', { projectID: 'opencode-app', directory: '/deleted/worktrees/feature' }),
+        ownershipSession('canonical', { projectID: 'opencode-app', project: { id: 'opencode-app', worktree: '/projects/app' } }),
+      ],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map([['/projects/app', [{ path: '/worktrees/feature' }]]]),
+      false,
+    );
+
+    expect(ownership.bySessionId.get('restored')).toEqual({
+      projectId: 'configured-app',
+      projectRoot: '/projects/app',
+      scopeDirectory: '/projects/app',
+      kind: 'project',
+    });
+  });
+
+  test('resolves a bare session projectID from authoritative global project metadata', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('restored', { projectID: 'opencode-app', directory: '/deleted/worktrees/feature' })],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+      [],
+      [{ id: 'opencode-app', worktree: '/projects/app' }],
+    );
+
+    expect(ownership.bySessionId.get('restored')?.projectId).toBe('configured-app');
+  });
+
+  test('prefers authoritative project metadata over conflicting embedded metadata', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('restored', {
+        projectID: 'opencode-app',
+        directory: '/deleted/worktrees/feature',
+        project: { id: 'opencode-app', worktree: '/projects/embedded' },
+      })],
+      [
+        { id: 'configured-authoritative', normalizedPath: '/projects/authoritative' },
+        { id: 'configured-embedded', normalizedPath: '/projects/embedded' },
+      ],
+      new Map(),
+      false,
+      [],
+      [{ id: 'opencode-app', worktree: '/projects/authoritative' }],
+    );
+
+    expect(ownership.bySessionId.get('restored')?.projectId).toBe('configured-authoritative');
+  });
+
+  test('leaves conflicting embedded canonical roots unassigned', () => {
+    const ownership = createSessionOwnershipIndex(
+      [
+        ownershipSession('restored', { projectID: 'opencode-app', directory: '/deleted/worktree' }),
+        ownershipSession('metadata-one', { project: { id: 'opencode-app', worktree: '/projects/one' } }),
+        ownershipSession('metadata-two', { project: { id: 'opencode-app', worktree: '/projects/two' } }),
+      ],
+      [
+        { id: 'configured-one', normalizedPath: '/projects/one' },
+        { id: 'configured-two', normalizedPath: '/projects/two' },
+      ],
+      new Map(),
+      false,
+    );
+
+    expect(ownership.bySessionId.has('restored')).toBe(false);
+  });
+
+  test('keeps deleted-directory sessions unassigned without a canonical configured root', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('restored', {
+        projectID: 'opencode-app',
+        directory: '/deleted/worktrees/feature',
+        project: { id: 'opencode-app', worktree: '/deleted/worktrees/feature' },
+      })],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+    );
+
+    expect(ownership.bySessionId.has('restored')).toBe(false);
+  });
+
+  test('prefers exact topology over OpenCode project metadata fallback', () => {
+    const ownership = createSessionOwnershipIndex(
+      [
+        ownershipSession('worktree', { projectID: 'opencode-app', directory: '/worktrees/app-feature' }),
+        ownershipSession('canonical', { project: { id: 'opencode-app', worktree: '/projects/app' } }),
+      ],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map([['/projects/app', [{ path: '/worktrees/app-feature' }]]]),
+      false,
+    );
+
+    expect(ownership.bySessionId.get('worktree')?.scopeDirectory).toBe('/worktrees/app-feature');
+    expect(ownership.bySessionId.get('worktree')?.kind).toBe('worktree');
+  });
+
   test('supports a Windows drive root project', () => {
     const ownership = createSessionOwnershipIndex(
       [{ id: 'windows-root', directory: 'c:\\Users\\name\\project' } as Session],
@@ -102,6 +222,7 @@ describe('createSessionOwnershipIndex', () => {
     );
 
     expect(ownership.bySessionId.get('windows-root')?.projectId).toBe('drive');
+    expect(ownership.bySessionId.get('windows-root')?.scopeDirectory).toBe('C:/');
   });
 
   test('resolves report-sized data once instead of once per project consumer', () => {

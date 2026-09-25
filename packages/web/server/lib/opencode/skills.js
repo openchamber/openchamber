@@ -28,10 +28,6 @@ function ensureProjectSkillDir(workingDirectory) {
   if (!fs.existsSync(projectSkillDir)) {
     fs.mkdirSync(projectSkillDir, { recursive: true });
   }
-  const legacyProjectSkillDir = path.join(workingDirectory, '.opencode', 'skill');
-  if (!fs.existsSync(legacyProjectSkillDir)) {
-    fs.mkdirSync(legacyProjectSkillDir, { recursive: true });
-  }
   return projectSkillDir;
 }
 
@@ -199,12 +195,18 @@ function discoverSkills(workingDirectory) {
   let configuredPaths = [];
   try {
     const config = readConfig(workingDirectory);
-    configuredPaths = Array.isArray(config?.skills?.paths) ? config.skills.paths : [];
+    // OpenCode 2 stores extra skill sources as one ordered `skills` array; v1
+    // split them into `skills.paths` and `skills.urls`. URLs are not scanned
+    // from disk either way.
+    configuredPaths = Array.isArray(config?.skills)
+      ? config.skills
+      : (Array.isArray(config?.skills?.paths) ? config.skills.paths : []);
   } catch {
     configuredPaths = [];
   }
   for (const skillPath of configuredPaths) {
     if (typeof skillPath !== 'string' || !skillPath.trim()) continue;
+    if (/^https?:\/\//i.test(skillPath.trim())) continue;
     const expanded = skillPath.startsWith('~/')
       ? path.join(os.homedir(), skillPath.slice(2))
       : skillPath;

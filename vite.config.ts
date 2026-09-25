@@ -13,7 +13,6 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
-      { find: '@opencode-ai/sdk/v2', replacement: path.resolve(__dirname, './node_modules/@opencode-ai/sdk/dist/v2/client.js') },
       { find: '@', replacement: path.resolve(__dirname, './src') },
     ],
   },
@@ -23,9 +22,6 @@ export default defineConfig({
   define: {
     'process.env': {},
     global: 'globalThis',
-  },
-  optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2'],
   },
   build: {
     chunkSizeWarningLimit: 1200,
@@ -79,7 +75,6 @@ export default defineConfig({
 
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react'
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand'
-          if (packageName === '@opencode-ai/sdk') return 'vendor-opencode-sdk'
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown'
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui'
 

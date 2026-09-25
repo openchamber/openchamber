@@ -42,7 +42,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // One subscription covers every child: per-session hooks would multiply
   // store subscriptions by the number of subagents.
   const permissions = useDirectorySync(React.useCallback((state: State) => state.permission, []));
-  const questions = useDirectorySync(React.useCallback((state: State) => state.question, []));
+  const forms = useDirectorySync(React.useCallback((state: State) => state.form, []));
 
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -92,7 +92,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       <div className="max-h-56 overflow-y-auto">
         {children.map((child) => {
           const blocked = (permissions[child.id]?.length ?? 0) > 0;
-          const asked = (questions[child.id]?.length ?? 0) > 0;
+          const asked = (forms[child.id]?.length ?? 0) > 0;
           const busy = statuses[child.id]?.type === 'busy';
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           const childCost = perChildCost.get(child.id) ?? 0;

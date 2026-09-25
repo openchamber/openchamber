@@ -64,6 +64,15 @@ describe('findMagicPromptCommand', () => {
 });
 
 describe('planLocalSlashCommand', () => {
+    test('/fork is a session action that keeps its text as the argument', () => {
+        expect(planLocalSlashCommand('/fork try the other approach', 'normal', true, true)).toEqual({
+            command: { name: 'fork', argument: 'try the other approach' },
+            kind: 'action',
+            attachedContext: 'retain',
+        });
+        expect(planLocalSlashCommand('/fork', 'normal', false, false)).toBeNull();
+    });
+
     test('an action command retains an attached inline comment', () => {
         expect(planLocalSlashCommand('/compact', 'normal', true, true)).toEqual({
             command: { name: 'compact', argument: '' },

@@ -115,6 +115,7 @@ const createRuntime = (settings, options = {}) => {
     readSettingsFromDiskMigrated: async () => settings,
     spawnSync: options.spawnSync,
     homedir: options.homedir,
+    providedLoginShellEnvSnapshot: options.providedLoginShellEnvSnapshot,
   });
 
   return { runtime, state };
@@ -223,6 +224,33 @@ describe('OpenCode env runtime', () => {
       if (previousArgv0 === undefined) delete process.env.ARGV0;
       else process.env.ARGV0 = previousArgv0;
     }
+  });
+
+  it('uses a login-shell snapshot provided by the host instead of probing the shell', () => {
+    let probes = 0;
+    const spawnSyncSpy = () => { probes += 1; return { status: 0, stdout: 'PATH=/from/probe\0' }; };
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: spawnSyncSpy,
+      providedLoginShellEnvSnapshot: () => ({ PATH: '/from/host' }),
+    });
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toEqual({ PATH: '/from/host' });
+    expect(state.cachedLoginShellEnvSnapshot).toEqual({ PATH: '/from/host' });
+    expect(probes).toBe(0);
+  });
+
+  it('does not probe the shell when the host provided an empty snapshot', () => {
+    let probes = 0;
+    const spawnSyncSpy = () => { probes += 1; return { status: 0, stdout: 'PATH=/from/probe\0' }; };
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: spawnSyncSpy,
+      providedLoginShellEnvSnapshot: () => null,
+    });
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(probes).toBe(0);
   });
 
   it('clears AppImage ARGV0 even when no login-shell snapshot is available', () => {
@@ -525,6 +553,23 @@ describe('OpenCode env runtime', () => {
       binary: 'C:\\Windows\\System32\\cmd.exe',
       args: ['/d', '/s', '/c', 'call', shim],
       wrapperType: 'cmd-wrapper',
+    });
+  });
+
+  it('resolves an npm-installed OpenCode 2.x cmd shim to its packaged Windows executable', () => {
+    setPlatform('win32');
+    const npmDir = createTempDir('openchamber-opencode-npm-v2-');
+    const shim = path.join(npmDir, 'opencode.cmd');
+    const nativeBinary = path.join(npmDir, 'node_modules', '@opencode', 'cli', 'bin', 'opencode.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe" %*\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
     });
   });
 

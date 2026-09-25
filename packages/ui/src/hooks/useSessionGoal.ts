@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSession } from '@/sync/sync-context';
 import { getSessionGoal, type SessionGoalPayload } from '@/lib/sessionGoalMetadata';
-import { fetchGoalObjectiveContent } from '@/lib/sessionGoalActions';
+import { fetchGoalObjectiveContent } from '@/lib/goalObjectiveFiles';
 import { useUIStore } from '@/stores/useUIStore';
 
 export interface SessionGoalState {

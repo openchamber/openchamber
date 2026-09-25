@@ -1,61 +1,36 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useUIStore } from '@/stores/useUIStore';
-import type { NotificationPayload } from '@/lib/api/types';
-
-const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';
 
 const isFocused = () => {
-  if (typeof document === 'undefined') return true;
+  if (!globalThis.document) return true;
   return document.visibilityState === 'visible' && document.hasFocus();
-};
-
-const toNotificationPayload = (value: unknown): NotificationPayload | null => {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const properties = record.properties && typeof record.properties === 'object'
-    ? record.properties as Record<string, unknown>
-    : null;
-  if (record.type !== 'openchamber:notification' || !properties) return null;
-  return {
-    title: typeof properties.title === 'string' ? properties.title : undefined,
-    body: typeof properties.body === 'string' ? properties.body : undefined,
-    tag: typeof properties.tag === 'string' ? properties.tag : undefined,
-  };
 };
 
 export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
   const enabled = options?.enabled ?? true;
 
   React.useEffect(() => {
-    if (!enabled || isDesktopShell() || !isWebRuntime() || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    if (!enabled || isDesktopShell() || !isWebRuntime() || !globalThis.window) {
       return;
     }
 
-    const source = new EventSource(getRuntimeUrlResolver().sse(NOTIFICATION_STREAM_PATH));
-    source.onmessage = (event) => {
-      let data: unknown;
-      try {
-        data = JSON.parse(event.data) as unknown;
-      } catch {
-        return;
-      }
-
+    // The control stream already belongs to this runtime and reconnects with it.
+    // A second EventSource consumed another HTTP/1.1 slot in every browser tab.
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'notification') return;
       const settings = useUIStore.getState();
       if (!settings.nativeNotificationsEnabled) return;
-      if (settings.notificationMode !== 'always' && isFocused()) return;
+      // `requireHidden: false` is the server's explicit opt-out (the always
+      // mode, or a plugin notice sent with showWhenFocused).
+      if (settings.notificationMode !== 'always' && event.payload.requireHidden !== false && isFocused()) return;
 
-      const payload = toNotificationPayload(data);
-      if (!payload) return;
-
+      // Keep the identity fields so the runtime API deduplicates this delivery
+      // against the same notification arriving through the main event WebSocket.
       const apis = getRegisteredRuntimeAPIs();
-      void apis?.notifications?.notifyAgentCompletion(payload);
-    };
-
-    return () => {
-      source.close();
-    };
+      void apis?.notifications?.notifyAgentCompletion(event.payload);
+    });
   }, [enabled]);
 };

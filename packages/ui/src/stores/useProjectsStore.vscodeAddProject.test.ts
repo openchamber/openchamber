@@ -71,11 +71,14 @@ const opencodeClientStub = new Proxy(
   },
 );
 mock.module('@/lib/opencode/client', () => ({
+  OpencodeApiError: Error,
+  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
   opencodeClient: opencodeClientStub,
 }));
 mock.module('@/lib/persistence', () => ({
   updateDesktopSettings: async () => ({ ok: true }),
   loadDesktopSettings: async () => null,
+  reportSettingsSaveState: () => undefined,
 }));
 
 const addWorkspaceFolderCalls: string[] = [];

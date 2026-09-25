@@ -1,4 +1,6 @@
 import React from 'react';
+import { useSessionTurnActive } from '@/sync/global-session-status';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import {
   DndContext,
   MouseSensor,
@@ -16,7 +18,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { ContextMenu } from '@base-ui/react/context-menu';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 import {
   DropdownMenu,
@@ -33,7 +35,6 @@ import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
 import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 
@@ -107,9 +108,8 @@ const SessionTabItem: React.FC<{
   const overlayVisible = !suppressControls && (menuOpen || menuVisible);
 
   // Session state for the dot and the hover tooltip.
-  const sessionStatus = useGlobalSessionStatus(tab.id);
   const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
-  const isStreaming = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
+  const isStreaming = useSessionTurnActive(tab.id);
   const unseenCount = useSessionUnseenCount(tab.id);
   const showUnread = unseenCount > 0 && !isActive && !isStreaming;
   const showDot = isStreaming || showUnread;
@@ -169,7 +169,7 @@ const SessionTabItem: React.FC<{
                     // after the click.
                     'session-tab group/session-tab relative flex h-7 w-full min-w-0 select-none items-center rounded-md px-2',
                     isActive
-                      ? 'bg-interactive-selection'
+                      ? 'bg-interactive-selection text-interactive-selection-foreground'
                       : cn(
                         'cursor-pointer text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                         overlayVisible && 'bg-interactive-hover text-foreground',
@@ -201,14 +201,10 @@ const SessionTabItem: React.FC<{
                     {isAiRenaming ? (
                       <Icon name="loader-4" className="ml-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
                     ) : showDot ? (
-                      <span
-                        className={cn(
-                          'ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-                          isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                          !suppressControls && 'group-hover/session-tab:opacity-0',
-                          overlayVisible && 'opacity-0',
-                        )}
-                        aria-label={dotLabel}
+                      <SessionActivityIndicator
+                        state={isStreaming ? 'running' : 'unread'}
+                        label={dotLabel}
+                        className={cn('ml-1.5 shrink-0', !suppressControls && 'group-hover/session-tab:opacity-0', overlayVisible && 'opacity-0')}
                       />
                     ) : null}
                   </div>

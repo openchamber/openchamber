@@ -44,6 +44,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     writeSseEvent,
     getSessionActivitySnapshot,
     getSessionStateSnapshot,
+    getPendingBlockingRequestsSnapshot,
     getSessionAttentionSnapshot,
     getSessionState,
     getSessionAttentionState,
@@ -295,11 +296,15 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
+  // Cross-project seed for clients that do not initialize every directory:
+  // live status per session plus the permission requests and forms still
+  // waiting for an answer. Both come from the server's single upstream stream.
   app.get('/api/sessions/status', async (_req, res) => {
     await ensureSessionWatcher();
     const snapshot = getSessionStateSnapshot();
     res.json({
       sessions: snapshot,
+      pending: typeof getPendingBlockingRequestsSnapshot === 'function' ? getPendingBlockingRequestsSnapshot() : {},
       serverTime: Date.now(),
     });
   });

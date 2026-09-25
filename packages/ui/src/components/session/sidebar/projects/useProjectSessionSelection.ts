@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
 import { useUIStore } from '@/stores/useUIStore';

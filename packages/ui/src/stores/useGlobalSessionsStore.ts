@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived } from '@/stores/globalSessions';
+import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -42,6 +42,7 @@ type GlobalSessionsState = {
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
   mutationRevision: number;
   mutationRevisionBySessionId: Map<string, number>;
+  /** A complete global snapshot has arrived for this runtime. */
   hasLoaded: boolean;
   managedChatsHydrated: boolean;
   status: GlobalSessionsStatus;
@@ -82,6 +83,9 @@ const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promi
 };
 
 let inflightLoad: Promise<LoadResult> | null = null;
+// True while a page of an unfinished load is being merged. The managed-chats
+// snapshot is written from complete loads only, never from a partial list.
+let mergingSessionPage = false;
 // Bumped on runtime switch: an in-flight load from the previous instance must
 // not apply its (stale) snapshot after the reset.
 let loadGeneration = 0;
@@ -89,13 +93,7 @@ let loadGeneration = 0;
 export const mergeLiveSessionWithGlobalSession = (
   liveSession: Session,
   globalSession: Session,
-): Session => {
-  const merged = mergeSessionDirectoryMetadata(liveSession, globalSession);
-  if (merged.share !== globalSession.share) {
-    return { ...merged, share: globalSession.share };
-  }
-  return merged;
-};
+): Session => mergeSessionDirectoryMetadata(liveSession, globalSession);
 
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
   const next = new Map<string, Session[]>();
@@ -115,32 +113,26 @@ const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> =
 };
 
 const getSessionSignature = (session: Session): string => {
-  const record = session as Session & { parentID?: string | null; slug?: string | null };
   return [
     session.id,
     session.title ?? '',
-    record.parentID ?? '',
-    record.slug ?? '',
+    session.parentID ?? '',
     session.time?.created ?? 0,
     session.time?.updated ?? 0,
     session.time?.archived ?? 0,
-    session.share?.url ?? '',
-    JSON.stringify((session as Session & { metadata?: unknown }).metadata ?? null),
+    JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
 };
 
 const getSessionStructuralSignature = (session: Session): string => {
-  const record = session as Session & { parentID?: string | null; slug?: string | null };
   return [
     session.id,
     session.title ?? '',
-    record.parentID ?? '',
-    record.slug ?? '',
+    session.parentID ?? '',
     session.time?.created ?? 0,
     session.time?.archived ?? 0,
-    session.share?.url ?? '',
-    JSON.stringify((session as Session & { metadata?: unknown }).metadata ?? null),
+    JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
 };
@@ -224,8 +216,10 @@ type DirectoryPageResult = {
   errors: unknown[];
 };
 
+/** The session-list transport, bound once so paging code stays testable. */
+const listSessionPage: SessionPageLister = (options) => opencodeClient.listSessionsPage(options);
+
 const fetchDirectoryPages = async (
-  sdk: OpencodeClient,
   directories: Set<string>,
 ): Promise<DirectoryPageResult> => {
   const currentDirectory = normalizePath(opencodeClient.getDirectory());
@@ -240,11 +234,10 @@ const fetchDirectoryPages = async (
         status: 'fulfilled' as const,
         value: {
           directory,
-          // One inclusive request per directory: the server has no filter that
-          // returns only active sessions including restored (`time.archived`
-          // falsy-but-present) rows, so fetch everything and split client-side.
+          // One request per directory, split client-side: archive state is
+          // OpenChamber's own and the session list has no archived filter.
           sessions: await withDirectorySessionRefreshSlot(() => (
-            listGlobalSessionPages(sdk, { directory, archived: true, narrowToArchived: false, pageSize: PAGE_SIZE })
+            listGlobalSessionPages(listSessionPage, { directory, pageSize: PAGE_SIZE })
           )),
         },
       };
@@ -328,6 +321,9 @@ const applySnapshot = (
   activeSessions: Session[],
   archivedSessions: Session[],
   status: GlobalSessionsStatus,
+  /** False for a partial page merged mid-load: the lists are incomplete, so
+      they must not claim the authority `hasLoaded` grants. */
+  markLoaded = status === 'ready',
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
   if (isVSCodeRuntime()) {
     activeSessions = filterManagedChatsForRuntime(activeSessions, true);
@@ -359,7 +355,7 @@ const applySnapshot = (
     && nextArchivedSessions === state.archivedSessions
     && nextSessionsByDirectory === state.sessionsByDirectory
     && nextReviewTransferMap === state.reviewTransferBySessionId
-    && state.hasLoaded
+    && (state.hasLoaded || !markLoaded)
     && state.status === status
   ) {
     return state;
@@ -372,9 +368,33 @@ const applySnapshot = (
     structure: nextStructure,
     sessionsByDirectory: nextSessionsByDirectory,
     reviewTransferBySessionId: nextReviewTransferMap,
-    hasLoaded: true,
+    hasLoaded: markLoaded ? true : state.hasLoaded,
     status,
   };
+};
+
+/**
+ * Merge one page of an in-flight global load into the visible lists. Never a
+ * replacement: the store may already hold the persisted managed-chats seed and
+ * earlier pages, and those must stay visible while pagination continues.
+ * Sessions the page reclassifies move buckets; mutations newer than the load's
+ * baseline win, so an archive or delete made while the page was in flight is
+ * not undone.
+ */
+const mergeSessionPage = (
+  state: GlobalSessionsState,
+  active: Session[],
+  archived: Session[],
+  baselineRevision: number,
+): Partial<GlobalSessionsState> | GlobalSessionsState => {
+  const incomingActiveIds = new Set(active.map((session) => session.id));
+  const incomingArchivedIds = new Set(archived.map((session) => session.id));
+  const mergedActive = mergeSessionLists(state.activeSessions, active)
+    .filter((session) => !incomingArchivedIds.has(session.id));
+  const mergedArchived = mergeSessionLists(state.archivedSessions, archived)
+    .filter((session) => !incomingActiveIds.has(session.id));
+  const reconciled = overlayMutationsSince(state, mergedActive, mergedArchived, baselineRevision);
+  return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, state.status, false);
 };
 
 const overlayMutationsSince = (
@@ -665,16 +685,25 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
         rootsReady = true;
         get().rehydrateManagedChatSessions();
-        set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
-        const sdk = opencodeClient.getSdkClient();
-        // One inclusive fetch, split client-side. The server's
-        // `time_archived IS NULL` active filter would exclude restored
-        // sessions (`time.archived` falsy-but-present), so an
-        // `archived: false` request cannot produce a truthful active list.
-        const allSessions = await listGlobalSessionPages(sdk, {
-          archived: true,
-          narrowToArchived: false,
+        // One fetch of every session, split client-side: archive state is
+        // OpenChamber's own, so the server list cannot filter on it.
+        // Thousands of sessions paginate for seconds. Show the newest page as
+        // soon as it lands and keep loading the rest silently; the complete
+        // snapshot below is still the only authoritative result.
+        let firstPageMerged = false;
+        const allSessions = await listGlobalSessionPages(listSessionPage, {
           pageSize: PAGE_SIZE,
+          onPage: (page) => {
+            if (firstPageMerged || generation !== loadGeneration) return;
+            firstPageMerged = true;
+            const firstPage = splitGlobalSessionsByArchived(page);
+            mergingSessionPage = true;
+            try {
+              set((state) => mergeSessionPage(state, firstPage.active, firstPage.archived, baselineRevision));
+            } finally {
+              mergingSessionPage = false;
+            }
+          },
         });
 
         if (generation !== loadGeneration) {
@@ -717,6 +746,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     })();
 
     inflightLoad = loadPromise;
+    set({ status: 'loading' });
     const clearInflightLoad = () => {
       if (inflightLoad === loadPromise) {
         inflightLoad = null;
@@ -746,8 +776,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
     get().rehydrateManagedChatSessions();
-    const sdk = opencodeClient.getSdkClient();
-    const fetched = await fetchDirectoryPages(sdk, directorySet);
+    const fetched = await fetchDirectoryPages(directorySet);
 
     if (generation !== loadGeneration) {
       const state = get();
@@ -873,7 +902,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 useGlobalSessionsStore.subscribe((state, previous) => {
   countSyncPerformance('globalSessionPublications');
   if (
-    getChatsRootForHome(null) !== null
+    !mergingSessionPage
+    && getChatsRootForHome(null) !== null
     && (state.activeSessions !== previous.activeSessions
       || (!state.managedChatsHydrated && state.mutationRevision !== previous.mutationRevision)
       || (state.hasLoaded && !previous.hasLoaded))

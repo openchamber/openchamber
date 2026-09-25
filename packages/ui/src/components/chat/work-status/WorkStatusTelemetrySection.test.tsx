@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { createOpencodeClient, type AssistantMessage, type Session, type UserMessage } from '@opencode-ai/sdk/v2';
+import { OpenCode } from '@opencode/client';
+import type { AssistantMessage, Session, UserMessage } from '@/lib/opencode/model';
 import { useUIStore } from '@/stores/useUIStore';
 import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
@@ -12,12 +13,16 @@ let WorkStatusTelemetrySection: typeof import('./WorkStatusTelemetrySection').Wo
 
 const directory = '/repo';
 const sessionId = 'session-1';
-const user: UserMessage = { id: 'user-1', sessionID: sessionId, role: 'user', time: { created: 1000 }, agent: 'build', model: { providerID: 'test', modelID: 'test' } };
-const session: Session = { id: sessionId, slug: 'test', projectID: 'project', directory, title: 'test', version: '1', time: { created: 0, updated: 1 } };
+const user: UserMessage = { id: 'user-1', sessionID: sessionId, role: 'user', time: { created: 1000 } };
+const session: Session = {
+  id: sessionId, projectID: 'project', directory, title: 'test', cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 0, updated: 1 },
+};
 let tokenReads = 0;
 const assistant: AssistantMessage = {
-  id: 'assistant-final', sessionID: sessionId, role: 'assistant', parentID: user.id,
-  agent: 'build', mode: 'build', providerID: 'test', modelID: 'test', path: { cwd: directory, root: directory },
+  id: 'assistant-final', sessionID: sessionId, role: 'assistant',
+  agent: 'build', providerID: 'test', modelID: 'test',
   time: { created: 2000, completed: 7000 }, cost: 0.01,
   get tokens() { tokenReads += 1; return { input: 100, output: 20, reasoning: 10, cache: { read: 40, write: 0 } }; },
 };
@@ -48,7 +53,7 @@ describe('mounted turn telemetry with live sync stores', () => {
   let messageRequests = 0;
   // Keep bootstrap pending so each test controls real store publications. No
   // hook/module replacements: subscription and materialization paths are real.
-  const sdk = createOpencodeClient({ baseUrl: 'http://telemetry.test', fetch: (request) => {
+  const sdk = OpenCode.make({ baseUrl: 'http://telemetry.test', fetch: (request) => {
     const url = new URL(request instanceof Request ? request.url : request.toString());
     if (/\/session\/[^/]+\/message$/.test(url.pathname)) messageRequests += 1;
     return new Promise<Response>(() => undefined);
@@ -161,7 +166,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.textContent).not.toContain('Whole turn');
     await act(async () => store().setState({ message: { [sessionId]: [user, assistant] } }));
     expect(dom.container.textContent).toContain('~6 tok/s');
-    const corrected = { ...assistant, tokens: { ...assistant.tokens, output: 90 } };
+    const corrected: AssistantMessage = { ...assistant, tokens: { input: 100, output: 90, reasoning: 10, cache: { read: 40, write: 0 } } };
     await act(async () => store().setState({ message: { [sessionId]: [user, corrected] } }));
     expect(dom.container.textContent).toContain('~20 tok/s');
     await act(async () => store().setState({ session: [{ ...session, revert: { messageID: user.id } }] }));

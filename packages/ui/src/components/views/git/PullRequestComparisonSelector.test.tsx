@@ -146,6 +146,12 @@ const checkPullRequestSelection = async (mobile: boolean, tablet = false) => {
   }
 };
 
-test('desktop PR selection shares handoffs, pages, searches, retries, and isolates directories', () => checkPullRequestSelection(false));
-test('phone PR selection uses a sheet with shared selection and keyboard navigation', () => checkPullRequestSelection(true));
-test('tablet PR selection stays in an anchored picker', () => checkPullRequestSelection(true, true));
+// Each check renders the whole picker, and the first one also loads the web
+// runtime and UI modules cold. That alone is about 3 s on Windows, so Bun's 5 s
+// default fails it under a parallel run, and the unfinished check then runs
+// into the next one through the shared globals.
+const SELECTION_TIMEOUT_MS = 30_000;
+
+test('desktop PR selection shares handoffs, pages, searches, retries, and isolates directories', () => checkPullRequestSelection(false), SELECTION_TIMEOUT_MS);
+test('phone PR selection uses a sheet with shared selection and keyboard navigation', () => checkPullRequestSelection(true), SELECTION_TIMEOUT_MS);
+test('tablet PR selection stays in an anchored picker', () => checkPullRequestSelection(true, true), SELECTION_TIMEOUT_MS);

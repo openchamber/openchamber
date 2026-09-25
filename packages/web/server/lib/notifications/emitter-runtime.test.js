@@ -45,3 +45,35 @@ describe('notification emitter runtime', () => {
     });
   });
 });
+
+
+describe('shared control notification delivery', () => {
+  it('writes once to control SSE and once to the legacy/global broadcaster', () => {
+    const control = { write: vi.fn() };
+    const failed = { write: () => { throw new Error('closed'); } };
+    const broadcastGlobalUiEvent = vi.fn();
+    const runtime = createRuntime({
+      getOpenChamberEventClients: () => new Set([failed, control]),
+      getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
+    });
+    runtime.broadcastUiNotification({ title: 'Done', sessionId: 's1', kind: 'complete' });
+    expect(control.write).toHaveBeenCalledTimes(1);
+    expect(broadcastGlobalUiEvent).toHaveBeenCalledTimes(1);
+    const envelope = broadcastGlobalUiEvent.mock.calls[0][0];
+    expect(control.write).toHaveBeenCalledWith(`data: ${JSON.stringify(envelope)}\n\n`);
+    expect(envelope.properties.sessionId).toBe('s1');
+  });
+
+  it('preserves legacy notification SSE without a global broadcaster', () => {
+    const control = { write: vi.fn() };
+    const legacy = { write: vi.fn() };
+    const runtime = createRuntime({
+      getOpenChamberEventClients: () => new Set([control]),
+      getUiNotificationClients: () => new Set([legacy]),
+    });
+    runtime.broadcastUiNotification({ title: 'Done' });
+    expect(control.write).toHaveBeenCalledTimes(1);
+    expect(legacy.write).toHaveBeenCalledTimes(1);
+    expect(control.write.mock.calls).toEqual(legacy.write.mock.calls);
+  });
+});

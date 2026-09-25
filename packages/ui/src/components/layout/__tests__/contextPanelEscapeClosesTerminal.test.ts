@@ -49,10 +49,12 @@ describe('issue #2644: Escape in terminal must not close the context panel', () 
   });
 
   test('mobile drawer keeps its terminal Escape exception', () => {
-    const handlerStart = mobileWorkspaceDrawerSource.indexOf("if (event.key === 'Escape'");
+    const handlerStart = mobileWorkspaceDrawerSource.indexOf("if (event.key !== 'Escape'");
     expect(handlerStart).toBeGreaterThan(-1);
-    const handler = mobileWorkspaceDrawerSource.slice(handlerStart, handlerStart + 200);
-    expect(handler).toContain("tabRef.current !== 'terminal'");
+    const handler = mobileWorkspaceDrawerSource.slice(handlerStart, handlerStart + 300);
+    // The terminal tab returns before the drawer closes on Escape.
+    expect(handler).toContain("tabRef.current === 'terminal') return");
+    expect(handler).toContain('onCloseRef.current()');
   });
 });
 

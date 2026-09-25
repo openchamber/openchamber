@@ -1,0 +1,264 @@
+name: pr-intake
+
+# Puts a size label on every pull request and parks large PRs that have no
+# Ideas discussion linked, unless the author has write access to the repo.
+# Nothing here closes a PR; the stale workflow does that on its own schedule
+# if the author never comes back.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited]
+  issue_comment:
+    types: [created]
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/pr-intake.yml
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    name: Collect pull requests
+    if: ${{ github.repository == 'openchamber/openchamber' }}
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.collect.outputs.targets }}
+    steps:
+      - id: collect
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            if (context.eventName === "pull_request_target") {
+              const pr = context.payload.pull_request;
+              core.setOutput("targets", JSON.stringify([{ number: pr.number, user: pr.user.login }]));
+              return;
+            }
+
+            if (context.eventName === "issue_comment") {
+              const issue = context.payload.issue;
+              const body = context.payload.comment?.body ?? "";
+              if (!issue?.pull_request || !body.startsWith("/recheck-intake")) {
+                core.setOutput("targets", "[]");
+                return;
+              }
+              core.setOutput("targets", JSON.stringify([{ number: issue.number, user: issue.user.login }]));
+              return;
+            }
+
+            // Push to main touching this workflow: relabel every open PR.
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100,
+            });
+            core.setOutput(
+              "targets",
+              JSON.stringify(pulls.map((pull) => ({ number: pull.number, user: pull.user.login }))),
+            );
+
+  intake:
+    name: Label PR ${{ matrix.target.number }}
+    needs: collect
+    if: ${{ needs.collect.outputs.targets != '[]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: pr-intake-${{ matrix.target.number }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.collect.outputs.targets) }}
+    steps:
+      - name: Generate bot app token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+
+      # pull_request_target runs with base-repo secrets. The PR head is fetched
+      # as passive git data only: no install, no build, no test, no cache.
+      - name: Checkout base repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Sync labels and parking comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          PR_NUMBER: ${{ matrix.target.number }}
+          # A push to main touching this workflow relabels every open PR.
+          # Those runs only set labels: PRs opened before the rule existed get
+          # no parking comment.
+          POST_COMMENTS: ${{ github.event_name != 'push' }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { execFileSync } = require("node:child_process");
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const number = Number(process.env.PR_NUMBER);
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+
+            const sizeLabels = [
+              { name: "size:XS", color: "0e8a16", description: "Under 10 changed lines (tests, lockfiles, translations and evidence images excluded)." },
+              { name: "size:S", color: "5ebd3e", description: "10-29 changed lines (tests, lockfiles, translations and evidence images excluded)." },
+              { name: "size:M", color: "fbca04", description: "30-99 changed lines (tests, lockfiles, translations and evidence images excluded)." },
+              { name: "size:L", color: "fe7d37", description: "100-499 changed lines (tests, lockfiles, translations and evidence images excluded)." },
+              { name: "size:XL", color: "d93f0b", description: "500-999 changed lines (tests, lockfiles, translations and evidence images excluded)." },
+              { name: "size:XXL", color: "b60205", description: "1,000+ changed lines (tests, lockfiles, translations and evidence images excluded)." },
+            ];
+            const discussionLabel = {
+              name: "needs-discussion",
+              color: "c5def5",
+              description: "Large PR with no Ideas discussion linked. Parked until one exists.",
+            };
+
+            const ensureLabel = async (label) => {
+              try {
+                const { data: existing } = await github.rest.issues.getLabel({ owner, repo, name: label.name });
+                if (existing.color !== label.color || (existing.description ?? "") !== label.description) {
+                  await github.rest.issues.updateLabel({ owner, repo, name: label.name, color: label.color, description: label.description });
+                }
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                try {
+                  await github.rest.issues.createLabel({ owner, repo, name: label.name, color: label.color, description: label.description });
+                } catch (createError) {
+                  if (createError.status !== 422) throw createError;
+                }
+              }
+            };
+            for (const label of [...sizeLabels, discussionLabel]) {
+              await ensureLabel(label);
+            }
+
+            // Size label. Lines that don't cost review time are excluded.
+            const excludePathspecs = [
+              ":(glob,exclude)**/__tests__/**",
+              ":(glob,exclude)**/test/**",
+              ":(glob,exclude)**/tests/**",
+              ":(glob,exclude)**/*.test.*",
+              ":(glob,exclude)**/*.spec.*",
+              ":(glob,exclude)**/*.snap",
+              ":(glob,exclude)**/bun.lock",
+              ":(glob,exclude)**/package-lock.json",
+              ":(glob,exclude)**/pnpm-lock.yaml",
+              ":(glob,exclude)packages/ui/src/lib/i18n/messages/**",
+              ":(glob,exclude).github/pr-evidence/**",
+            ];
+            const sumNumstat = (text) =>
+              text
+                .split("\n")
+                .filter(Boolean)
+                .reduce((total, line) => {
+                  const [added = "0", deleted = "0"] = line.split("\t");
+                  const a = added === "-" ? 0 : Number.parseInt(added, 10) || 0;
+                  const d = deleted === "-" ? 0 : Number.parseInt(deleted, 10) || 0;
+                  return total + a + d;
+                }, 0);
+
+            const headRef = `refs/remotes/pr-intake/${number}`;
+            execFileSync("git", ["fetch", "--no-tags", "origin", pr.base.sha], { stdio: "inherit" });
+            execFileSync("git", ["fetch", "--no-tags", "origin", `+refs/pull/${number}/head:${headRef}`], { stdio: "inherit" });
+            const headSha = execFileSync("git", ["rev-parse", headRef], { encoding: "utf8" }).trim();
+
+            const diffArgs = ["diff", "--numstat", "--ignore-all-space", "--ignore-blank-lines", `${pr.base.sha}...${headSha}`];
+            const totalLines = sumNumstat(execFileSync("git", diffArgs, { encoding: "utf8" }));
+            const countedLines = sumNumstat(execFileSync("git", [...diffArgs, "--", ".", ...excludePathspecs], { encoding: "utf8" }));
+            // A PR that only touches excluded paths is still sized, by what it touches.
+            const effectiveLines = countedLines === 0 ? totalLines : countedLines;
+            const sizeLabel =
+              effectiveLines < 10 ? "size:XS"
+              : effectiveLines < 30 ? "size:S"
+              : effectiveLines < 100 ? "size:M"
+              : effectiveLines < 500 ? "size:L"
+              : effectiveLines < 1000 ? "size:XL"
+              : "size:XXL";
+
+            // Parking rule: XL or bigger, no Ideas discussion linked, author without
+            // write access. The team agrees on product decisions off GitHub.
+            const discussionLink = /github\.com\/openchamber\/openchamber\/discussions\/\d+/i;
+            const isLarge = sizeLabel === "size:XL" || sizeLabel === "size:XXL";
+            const hasDiscussion = discussionLink.test(pr.body ?? "");
+            const parkingExempt = ["pinned", "help wanted", "security"];
+            const currentLabelNames = pr.labels.map((label) => label.name);
+            // `author_association` reports MEMBER only when the caller can see the
+            // author's org membership, and this token cannot see private members,
+            // so a maintainer with hidden membership reads as CONTRIBUTOR here.
+            // Repository permission is the fact that matters and does not depend
+            // on the viewer.
+            const hasRepoAccess = async (login) => {
+              if (["OWNER", "MEMBER", "COLLABORATOR"].includes(pr.author_association)) return true;
+              try {
+                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: login });
+                return ["admin", "write", "maintain"].includes(data.permission) ||
+                  ["admin", "write", "maintain"].includes(data.role_name ?? "");
+              } catch (error) {
+                if (error.status === 403 || error.status === 404) return false;
+                throw error;
+              }
+            };
+            const isTeam = await hasRepoAccess(pr.user.login);
+            const parkingRuleApplies =
+              !isTeam &&
+              isLarge &&
+              !hasDiscussion &&
+              !pr.draft &&
+              !currentLabelNames.some((name) => parkingExempt.includes(name));
+
+            // The parking comment is posted once per PR. If it exists and the label is
+            // gone, a maintainer took the label off by hand; don't put it back.
+            const marker = "<!-- pr-intake:needs-discussion -->";
+            const comments = parkingRuleApplies
+              ? await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 })
+              : [];
+            const alreadyPosted = comments.some((comment) => (comment.body ?? "").includes(marker));
+            const currentlyParked = currentLabelNames.includes(discussionLabel.name);
+            const needsDiscussion = parkingRuleApplies && (currentlyParked || !alreadyPosted);
+
+            const managed = new Set([...sizeLabels, discussionLabel].map((label) => label.name));
+            const wanted = new Set([sizeLabel, ...(needsDiscussion ? [discussionLabel.name] : [])]);
+
+            for (const name of currentLabelNames) {
+              if (!managed.has(name) || wanted.has(name)) continue;
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+            const toAdd = [...wanted].filter((name) => !currentLabelNames.includes(name));
+            if (toAdd.length > 0) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: toAdd });
+            }
+
+            if (needsDiscussion && !currentlyParked && !alreadyPosted && process.env.POST_COMMENTS === "true") {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: number,
+                body: [
+                  marker,
+                  `Thanks for the PR. This one is large (${sizeLabel.replace("size:", "")}, about ${effectiveLines} changed lines after excluding tests, lockfiles, translation catalogs and evidence images), so I'm parking it with \`needs-discussion\` rather than reviewing it as-is.`,
+                  "",
+                  "A change this size almost always carries a product decision, and that's easier to settle in words than inside a diff. Even when it doesn't change where the product is going, this many touched files changes how it behaves in places nobody asked about, so the question is still whether we want this change at all, and in this shape. Please open an [Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas) describing what changes for the user and why, then add the link to this PR's description. The label comes off on the next push or edit.",
+                  "",
+                  "If the diff is mostly mechanical (generated files, a rename that touched everything), say so here and the maintainer will take a look anyway. Splitting off the bug fixes into their own PRs also works: those get reviewed straight away.",
+                  "",
+                  "Nothing closes automatically because of this label. The usual stale rule still applies: 28 days without activity marks the PR stale, 7 more days closes it.",
+                ].join("\n"),
+              });
+            }
+
+            core.info(`PR #${number}: team=${isTeam}; ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; needs-discussion=${needsDiscussion}`);

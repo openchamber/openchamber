@@ -34,7 +34,8 @@ async function summarizeForSpeech(
                 ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
                 ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
             }),
-        });
+        // No small model is not an error here: the original reply is spoken.
+        }, { silentStatuses: [404] });
         if (!response.ok) return null;
         const payload = await response.json().catch(() => null) as { text?: unknown } | null;
         return typeof payload?.text === 'string' && payload.text.trim() ? payload.text.trim() : null;

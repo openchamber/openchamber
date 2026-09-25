@@ -1,4 +1,4 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 
 import { getNormalizedMessageForDisplay } from '../messageDisplayNormalization';
 import { projectTurnRecords } from './projectTurnRecords';
@@ -24,7 +24,7 @@ type BuildLiveStreamingEntryOptions = {
     livePartsByMessageId: Readonly<Record<string, Part[]>>;
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
-    mergeHiddenUserTurns?: { planModeEnabled: boolean };
+    mergeHiddenUserTurns?: boolean;
 };
 
 const withLiveParts = (

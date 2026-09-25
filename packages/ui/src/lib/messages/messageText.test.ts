@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 import { flattenAssistantTextParts, flattenUserTextParts } from './messageText';
 
 // Regression tests for https://github.com/openchamber/openchamber/issues/2867

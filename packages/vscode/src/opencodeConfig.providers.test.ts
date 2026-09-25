@@ -83,7 +83,7 @@ describe('custom provider config persistence (VS Code parity)', () => {
         models: { m: { name: 'M' } },
       });
       assert.equal(result.ok, true);
-      if (result.ok) assert.equal(result.value.config.npm, npm);
+      if (result.ok) assert.equal(result.value.config.package, `aisdk:${npm}`);
     }
 
     const unsupported = validateCustomProviderConfig('ok', {
@@ -119,16 +119,15 @@ describe('custom provider config persistence (VS Code parity)', () => {
     assert.equal(result.path.startsWith(projectDir), true);
 
     const written = readJson(result.path);
-    assert.deepEqual(written.provider['campus-llm'], {
-      npm: '@ai-sdk/openai-compatible',
+    assert.equal(written.provider, undefined);
+    assert.deepEqual(written.providers['campus-llm'], {
       name: 'Campus LLM',
+      package: 'aisdk:@ai-sdk/openai-compatible',
       env: ['CAMPUS_KEY'],
-      options: {
-        baseURL: 'https://llm.example.edu/v1',
-        headers: { 'X-Campus': '1' },
-      },
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      headers: { 'X-Campus': '1' },
       models: {
-        'fast-model': { name: 'Fast' },
+        'fast-model': { modelID: 'fast-model', name: 'Fast' },
       },
     });
 
@@ -149,8 +148,8 @@ describe('custom provider config persistence (VS Code parity)', () => {
         options: { baseURL: 'https://api.example.com/v1' },
         models: { model: { name: 'Model' } },
       }, projectDir, 'project');
-      assert.equal(result.config.npm, npm);
-      assert.equal(readJson(result.path).provider[providerId].npm, npm);
+      assert.equal(result.config.package, `aisdk:${npm}`);
+      assert.equal(readJson(result.path).providers[providerId].package, `aisdk:${npm}`);
     }
   });
 
@@ -176,8 +175,9 @@ describe('custom provider config persistence (VS Code parity)', () => {
     }, projectDir, 'project');
 
     const written = readJson(configPath);
-    assert.equal(written.provider['campus-llm'].name, 'Campus LLM');
-    assert.deepEqual(written.provider['campus-llm'].models, { b: { name: 'B' } });
+    assert.equal(written.provider, undefined);
+    assert.equal(written.providers['campus-llm'].name, 'Campus LLM');
+    assert.deepEqual(written.providers['campus-llm'].models, { b: { modelID: 'b', name: 'B' } });
     assert.deepEqual(written.disabled_providers, ['other']);
   });
 
@@ -228,32 +228,66 @@ describe('custom provider config persistence (VS Code parity)', () => {
       },
     }, projectDir, 'project', { hasStoredAuth: true });
 
-    const written = readJson(configPath).provider['campus-llm'];
-    assert.deepEqual(written, {
-      npm: '@ai-sdk/openai-compatible',
+    // A legacy `provider` entry is rewritten in place into `providers` in v2
+    // shape: `npm` -> `package`, `options` -> `settings`, `tool_call`/
+    // `modalities` -> `capabilities`, variants map -> variants array. Fields v2
+    // accepts but ignores (`reasoning`, `attachment`) are dropped.
+    const config = readJson(configPath);
+    assert.equal(config.provider, undefined);
+    assert.deepEqual(config.providers['campus-llm'], {
       name: 'Campus LLM',
-      customProviderField: { owner: 'user' },
-      options: {
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      settings: {
         baseURL: 'https://new.example.edu/v1',
         timeout: 45_000,
       },
       models: {
         retained: {
+          modelID: 'retained',
           name: 'Retained model',
-          reasoning: true,
-          attachment: true,
-          tool_call: true,
-          modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+          settings: { instructions: 'Keep this instruction' },
+          capabilities: { tools: true, input: ['text', 'image', 'pdf'], output: ['text'] },
+          variants: [
+            { id: 'low', settings: { reasoningEffort: 'low' } },
+            { id: 'high', settings: { reasoningEffort: 'high' } },
+          ],
           limit: { context: 1_050_000, input: 922_000, output: 128_000 },
-          options: { instructions: 'Keep this instruction' },
-          variants: {
-            low: { reasoningEffort: 'low' },
-            high: { reasoningEffort: 'high' },
-          },
-          customModelField: { source: 'manual' },
         },
-        added: { name: 'Added model' },
+        added: { modelID: 'added', name: 'Added model' },
       },
+    });
+  });
+
+  test('renaming a provider keeps canonical and model compatibility', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const compatibility = { reasoningField: 'reasoning_content', requireReasoning: true, maxTokensField: 'max_tokens' };
+    writeJson(configPath, {
+      providers: {
+        'openai-proxy': {
+          canonical: 'openai',
+          name: 'Old name',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['PROXY_KEY'],
+          settings: { baseURL: 'https://proxy.example.com/v1' },
+          models: { 'gpt-5': { modelID: 'gpt-5', name: 'GPT-5', compatibility } },
+        },
+      },
+    });
+
+    upsertProviderConfig('openai-proxy', {
+      name: 'New name',
+      env: ['PROXY_KEY'],
+      settings: { baseURL: 'https://proxy.example.com/v1' },
+      models: { 'gpt-5': { name: 'GPT-5' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers['openai-proxy'], {
+      canonical: 'openai',
+      name: 'New name',
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      env: ['PROXY_KEY'],
+      settings: { baseURL: 'https://proxy.example.com/v1' },
+      models: { 'gpt-5': { modelID: 'gpt-5', name: 'GPT-5', compatibility } },
     });
   });
 
@@ -276,21 +310,21 @@ describe('custom provider config persistence (VS Code parity)', () => {
     }, projectDir, 'project', { hasStoredAuth: true });
 
     const written = readJson(configPath);
-    assert.equal(written.providers, undefined);
-    assert.deepEqual(written.provider.legacy, {
-      npm: '@ai-sdk/openai-compatible',
+    assert.equal(written.provider, undefined);
+    assert.deepEqual(written.providers.legacy, {
       name: 'Updated provider',
-      options: { baseURL: 'https://new.example.com/v1', timeout: 30_000 },
-      models: { model: { name: 'Updated model', reasoning: true } },
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      settings: { baseURL: 'https://new.example.com/v1', timeout: 30_000 },
+      models: { model: { modelID: 'model', name: 'Updated model' } },
     });
   });
 
   test('migrating one legacy providers entry keeps the other legacy entries', () => {
     const configPath = path.join(projectDir, 'opencode.json');
     writeJson(configPath, {
-      providers: {
-        legacy: { name: 'Legacy provider', options: { baseURL: 'https://old.example.com/v1' }, models: { model: { name: 'Old model' } } },
-        untouched: { name: 'Untouched', options: { baseURL: 'https://other.example.com/v1' }, models: { model: { name: 'Other model' } } },
+      provider: {
+        legacy: { npm: '@ai-sdk/openai-compatible', name: 'Legacy provider', options: { baseURL: 'https://old.example.com/v1' }, models: { model: { name: 'Old model' } } },
+        untouched: { npm: '@ai-sdk/openai-compatible', name: 'Untouched', options: { baseURL: 'https://other.example.com/v1' }, models: { model: { name: 'Other model' } } },
       },
     });
 
@@ -301,10 +335,10 @@ describe('custom provider config persistence (VS Code parity)', () => {
     }, projectDir, 'project', { hasStoredAuth: true });
 
     const written = readJson(configPath);
-    assert.deepEqual(written.providers, {
-      untouched: { name: 'Untouched', options: { baseURL: 'https://other.example.com/v1' }, models: { model: { name: 'Other model' } } },
+    assert.deepEqual(written.provider, {
+      untouched: { npm: '@ai-sdk/openai-compatible', name: 'Untouched', options: { baseURL: 'https://other.example.com/v1' }, models: { model: { name: 'Other model' } } },
     });
-    assert.equal(written.provider.legacy.name, 'Updated provider');
+    assert.equal(written.providers.legacy.name, 'Updated provider');
   });
 
   test('upsert then remove restores absence', () => {
@@ -347,7 +381,7 @@ describe('custom provider config persistence (VS Code parity)', () => {
 
   test('project-scope edit updates project layer without creating a user entry', () => {
     const providerId = `proj-scope-${Date.now()}`;
-    const configPath = path.join(projectDir, 'opencode.json');
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
 
     upsertProviderConfig(providerId, {
       name: 'Project Scoped',
@@ -362,14 +396,12 @@ describe('custom provider config persistence (VS Code parity)', () => {
     }, projectDir, 'project', { hasStoredAuth: true });
 
     const written = readJson(configPath);
-    assert.deepEqual(written.provider[providerId], {
-      npm: '@ai-sdk/openai-compatible',
+    assert.deepEqual(written.providers[providerId], {
       name: 'Project Scoped Updated',
-      options: {
-        baseURL: 'https://project.example.com/v2',
-        headers: { 'X-Project': '1' },
-      },
-      models: { m: { name: 'M2' } },
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      settings: { baseURL: 'https://project.example.com/v2' },
+      headers: { 'X-Project': '1' },
+      models: { m: { modelID: 'm', name: 'M2' } },
     });
 
     const sources = getProviderSources(providerId, projectDir);
@@ -408,8 +440,8 @@ describe('custom provider config persistence (VS Code parity)', () => {
       }, projectDir, 'custom', { hasStoredAuth: true });
 
       const written = readJson(customPath);
-      assert.equal(written.provider[providerId].name, 'Custom Scoped Updated');
-      assert.equal(written.provider[providerId].options.baseURL, 'https://custom.example.com/v2');
+      assert.equal(written.providers[providerId].name, 'Custom Scoped Updated');
+      assert.equal(written.providers[providerId].settings.baseURL, 'https://custom.example.com/v2');
 
       const sources = getProviderSources(providerId, projectDir);
       assert.equal(sources.custom.exists, true);

@@ -1,0 +1,33 @@
+{
+  "name": "@openchamber/example-git-graph-status",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "git-graph-status",
+        "name": "Git Graph",
+        "icon": "git-commit"
+      },
+      "statusSection": {
+        "entry": "status/index.html",
+        "title": "Recent commits",
+        "height": 160
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {
+          "exec": [
+            "git"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

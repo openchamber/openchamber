@@ -46,6 +46,7 @@ export function createGlobalMessageStreamWsBridge({
       return;
     }
 
+    globalHub.flushPending();
     const replay = globalHub.replayAfter(requestedLastEventId);
     const ready = { type: 'ready', scope: 'global' };
     if (replay === null) ready.replayReset = true;

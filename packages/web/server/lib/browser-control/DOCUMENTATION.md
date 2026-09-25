@@ -16,11 +16,50 @@ itself; it can only ask and wait.
   validates the envelope and hands the outcome to the broker.
 - `../../index.js` supplies `emitRequest`, which writes the request to the
   OpenChamber SSE clients and returns how many were reached.
+- `provider.js` sits between the control service and the broker. It reads
+  the `browserProvider` setting on every action: `builtin` goes to the broker;
+  an extension id goes to that extension's service (`contributes.service.provides`
+  includes `browser`) as `POST /browser-control` on its loopback through
+  `../guests/service.js`, with the open/action timeouts, the response cap, and
+  the idle stop from `@openchamber/sdk`. The body also carries `context`
+  (`directory`, `sessionId`, each `null` when unknown): the project and chat the
+  tool call came from, threaded from the plugin (`contextDirectory`,
+  `contextSessionId`) through the control service; the model never types it.
+  The answer is parsed with
+  `browserProviderResultSchema`; `ok: false` becomes the agent's error, any
+  other status or shape is reported as unknown page state. A selected extension
+  that cannot serve (`isBrowserProviderGuest`: enabled, fully approved, has the
+  role) resets the setting to `builtin`, emits
+  `openchamber:browser-provider-reset`, and runs the action in-app. A settings
+  or catalog read that fails is not that: the action fails with 503, nothing
+  runs anywhere, and the choice stays, because a read error says nothing
+  about the extension and an action must never land in a browser the user
+  did not pick. `REQUEST_FAILED` (sent, no answer) is reported to the agent
+  as "may or may not have run, read the page first", never as unchanged.
+  `handleGuestDeactivated` does the same reset when the guest routes pause,
+  remove, or withdraw approval from the selected extension.
+  When the extension also shows a shared surface (`../guests/surface.js`),
+  an action is refused with 409 while the user holds the surface, and every
+  action that runs is reported as agent activity so the panel says "Agent is
+  working".
 - `../openchamber-control/service.js` is the only caller. It maps the
-  `browser.*` actions of the `openchamber_web` tool onto `broker.request()` and
-  owns their parameter validation.
-- The client half is `packages/ui/src/lib/browser/controlClient.ts`, which
-  registers the mounted browser pane as the one responder.
+  `browser.*` actions of the `openchamber_web` tool onto the router's
+  `request()` (same signature as the broker) and owns their parameter
+  validation.
+- The client half is `packages/ui/src/lib/browser/controlClient.ts`. Every
+  mounted browser tab registers its pane under its context-panel tab id. An
+  action with `tabId` runs in that tab; without one it runs in the browser tab
+  the user last had in front of them (`setShownBrowserTab`, set by
+  `ContextPanel`), never in whichever pane registered last, and never switches
+  the user to the tab it acts in. `browser.open` without `tabId` never
+  navigates an existing tab: the registered opener (`ContextPanel`,
+  `useUIStore.openAgentBrowserTab`) makes a new background tab and the answer
+  carries its `tabId`. `browser.snapshot` answers carry `tabs`
+  (`id`, `title`, `url`, `active`). A client without the named tab waits
+  briefly, so the client that has it claims first, then claims and answers
+  "no such tab". `tabId` is validated and passed through by
+  `../openchamber-control/service.js` for every action, so an extension
+  provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
 
 ## Invariants
 
@@ -48,3 +87,11 @@ itself; it can only ask and wait.
   and a missing one silently turns every answer into an agent-visible timeout.
 - Request payload limits are sized for a page snapshot (visible text plus every
   interactive element), not for a control message.
+- The provider path never trusts the setting alone: the extension is
+  re-checked against the catalog on every action, and the grant list handed to
+  the service proxy is the catalog's effective list, so a version that widened
+  its permissions is refused until re-approved.
+- The provider's answer shapes are the desktop panel's own
+  (`packages/sdk/src/service-providers.ts`); `browser.capture` still returns
+  `base64`/`mime` and the control service writes the file, so the agent sees
+  the same result whoever took the picture.

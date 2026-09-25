@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 /** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
@@ -102,7 +103,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
-  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
   const { favoriteModelsList, recentModelsList } = useModelLists();
@@ -263,7 +263,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 providerOrder={providerOrder}
                 favoriteModels={favoriteModelsList}
                 recentModels={recentModelsList}
-                modelsMetadata={modelsMetadata}
                 hiddenModels={hiddenModels}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
@@ -296,9 +295,9 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
               const provider = providers.find((p) => p.id === model.providerID);
               const providerModel = provider?.models?.find((m: Record<string, unknown>) => (m as { id?: string }).id === model.modelID) as
-                | { variants?: Record<string, unknown> }
+                | { variants?: ModelVariantSource }
                 | undefined;
-              const variantKeys = providerModel?.variants ? Object.keys(providerModel.variants) : [];
+              const variantKeys = listModelVariantIds(providerModel?.variants);
               const hasVariants = variantKeys.length > 0;
 
               const DEFAULT_VARIANT_VALUE = '__default__';

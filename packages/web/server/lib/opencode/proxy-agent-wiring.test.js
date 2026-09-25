@@ -79,12 +79,14 @@ describe('OpenCode API proxy agent wiring', () => {
     }
   });
 
-  it('shares one agent instance across the API and OAuth proxies', () => {
+  it('resolves an agent for the API proxy', () => {
+    // v1 also built a long-deadline proxy for the interactive provider/MCP
+    // OAuth callbacks; v2 has neither route, so there is one proxy left.
     registerOpenCodeProxy(createStubApp(), createStubDeps(managedState()));
 
     const agents = agentsFromCalls();
 
-    expect(agents.length).toBeGreaterThan(1);
+    expect(agents.length).toBeGreaterThan(0);
     expect(agents.every(Boolean)).toBe(true);
     expect(new Set(agents).size).toBe(1);
   });

@@ -37,6 +37,17 @@ type TestWindow = {
 let createdWindow = false;
 let createdLocalStorage = false;
 let isolatedRuntimeCounter = 0;
+const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+
+// A failed runtime settings API tries HTTP next. Keep that fallback offline in
+// this suite instead of waiting for real DNS/network requests to *.example.
+beforeEach(() => {
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: async () => new Response(null, { status: 503 }),
+  });
+});
 
 // Each test gets its own runtime identity so an in-flight load or save left
 // behind by the previous test is rejected as stale instead of leaking its
@@ -139,6 +150,8 @@ const resetModelPrefsState = (): void => {
 };
 
 afterAll(() => {
+  if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+  else Reflect.deleteProperty(globalThis, 'fetch');
   registerRuntimeAPIs(null);
   if (createdWindow) {
     delete (globalThis as { window?: unknown }).window;
@@ -512,16 +525,15 @@ describe('updateDesktopSettings', () => {
     getWindow();
     useSessionDisplayStore.setState({
       projectDisplayMode: 'all',
-      sessionGroupingMode: 'by-worktree',
+      sidebarViewMode: 'projects',
       projectSortOrder: 'manual',
       showRecentSection: true,
       singleProjectId: 'local-project',
-      stickyZoneHeaders: false,
     });
     registerSettingsApi(async () => ({}), async () => ({
       settings: {
         sidebarProjectDisplayMode: 'single',
-        sidebarSessionGroupingMode: 'flat',
+        sidebarViewMode: 'timeline',
         sidebarProjectSortOrder: 'recent',
         sidebarShowRecentSection: false,
         autoSaveEnabled: true,
@@ -536,18 +548,16 @@ describe('updateDesktopSettings', () => {
     const state = useSessionDisplayStore.getState();
     expect({
       projectDisplayMode: state.projectDisplayMode,
-      sessionGroupingMode: state.sessionGroupingMode,
+      sidebarViewMode: state.sidebarViewMode,
       projectSortOrder: state.projectSortOrder,
       showRecentSection: state.showRecentSection,
       singleProjectId: state.singleProjectId,
-      stickyZoneHeaders: state.stickyZoneHeaders,
     }).toEqual({
       projectDisplayMode: 'single',
-      sessionGroupingMode: 'flat',
+      sidebarViewMode: 'timeline',
       projectSortOrder: 'recent',
       showRecentSection: false,
       singleProjectId: 'local-project',
-      stickyZoneHeaders: false,
     });
   });
 
@@ -556,7 +566,7 @@ describe('updateDesktopSettings', () => {
     const saves: Array<Partial<SettingsPayload>> = [];
     useSessionDisplayStore.setState({
       projectDisplayMode: 'single',
-      sessionGroupingMode: 'flat',
+      sidebarViewMode: 'timeline',
       projectSortOrder: 'a-z',
       showRecentSection: false,
     });
@@ -579,12 +589,12 @@ describe('updateDesktopSettings', () => {
     const state = useSessionDisplayStore.getState();
     expect({
       projectDisplayMode: state.projectDisplayMode,
-      sessionGroupingMode: state.sessionGroupingMode,
+      sidebarViewMode: state.sidebarViewMode,
       projectSortOrder: state.projectSortOrder,
       showRecentSection: state.showRecentSection,
     }).toEqual({
       projectDisplayMode: 'single',
-      sessionGroupingMode: 'flat',
+      sidebarViewMode: 'timeline',
       projectSortOrder: 'a-z',
       showRecentSection: false,
     });
@@ -594,7 +604,7 @@ describe('updateDesktopSettings', () => {
     getWindow();
     useSessionDisplayStore.setState({
       projectDisplayMode: 'single',
-      sessionGroupingMode: 'flat',
+      sidebarViewMode: 'timeline',
       projectSortOrder: 'z-a',
       showRecentSection: false,
     });
@@ -607,12 +617,12 @@ describe('updateDesktopSettings', () => {
     const state = useSessionDisplayStore.getState();
     expect({
       projectDisplayMode: state.projectDisplayMode,
-      sessionGroupingMode: state.sessionGroupingMode,
+      sidebarViewMode: state.sidebarViewMode,
       projectSortOrder: state.projectSortOrder,
       showRecentSection: state.showRecentSection,
     }).toEqual({
       projectDisplayMode: 'single',
-      sessionGroupingMode: 'flat',
+      sidebarViewMode: 'timeline',
       projectSortOrder: 'z-a',
       showRecentSection: false,
     });

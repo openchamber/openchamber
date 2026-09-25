@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.3.14 AS base
+FROM oven/bun:1.4.2 AS base
 WORKDIR /app
 
 FROM base AS deps
@@ -11,18 +11,19 @@ COPY packages/web/package.json ./packages/web/
 COPY packages/electron/package.json ./packages/electron/
 COPY packages/vscode/package.json ./packages/vscode/
 COPY packages/mobile/package.json ./packages/mobile/
+COPY packages/sdk/package.json ./packages/sdk/
 RUN bun install --frozen-lockfile --ignore-scripts
 
 FROM deps AS builder
 WORKDIR /app
 COPY . .
-# `deps` installs with --ignore-scripts, so the root postinstall never runs there
-# and the patches/ directory is not present yet. Apply patch-package here, after
-# the full source copy, so the web bundle ships the patched ghostty-web.
-RUN bunx patch-package
+# The server imports @openchamber/sdk at runtime, and deps installed with
+# --ignore-scripts, so the root postinstall never built it. Build it here
+# so the runtime stage can copy the output.
+RUN bun run --cwd packages/sdk build
 RUN bun run build:web
 
-FROM oven/bun:1.3.14 AS runtime
+FROM oven/bun:1.4.2 AS runtime
 WORKDIR /home/openchamber
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,7 +52,7 @@ ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
 
 RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global && \
   mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh && \
-  npm install -g opencode-ai
+  npm install -g @opencode/cli@2.0.16
 
 # cloudflared 2026.3.0 - update digest explicitly when upgrading
 COPY --from=cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283 /usr/local/bin/cloudflared /usr/local/bin/cloudflared
@@ -63,12 +64,12 @@ ENV LANG=C.UTF-8
 
 COPY scripts/docker-entrypoint.sh /home/openchamber/openchamber-entrypoint.sh
 
-# From builder, not deps: builder is where patch-package ran, so a patched
-# server-side dependency reaches the image instead of only the bundled dist.
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/web/node_modules ./packages/web/node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/packages/web/package.json ./packages/web/package.json
+COPY --from=builder /app/packages/sdk/package.json ./packages/sdk/package.json
+COPY --from=builder /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=builder /app/packages/web/bin ./packages/web/bin
 COPY --from=builder /app/packages/web/server ./packages/web/server
 COPY --from=builder /app/packages/web/dist ./packages/web/dist

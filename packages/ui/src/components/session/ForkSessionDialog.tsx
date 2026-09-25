@@ -20,6 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ForkSessionExecution = {
   providerID: string;
@@ -130,8 +131,8 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === providerID);
-    const model = provider?.models?.find((item) => item.id === modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
+    const model = provider?.models?.find((item) => item.id === modelID) as { variants?: ModelVariantSource } | undefined;
+    return listModelVariantIds(model?.variants);
   }, [providers, providerID, modelID]);
 
   const hasVariantOptions = variantOptions.length > 0;

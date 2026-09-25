@@ -1,3 +1,5 @@
+import { useGuestsStore } from '@/lib/guests/store';
+import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
@@ -17,6 +19,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -24,9 +27,13 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import { useAgentGroupsStore } from '@/stores/useAgentGroupsStore';
+import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
 import { syncDesktopSettings } from '@/lib/persistence';
+import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
 // to the new transport WITHOUT tearing down connection/session state or remounting
@@ -65,7 +72,12 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+  useAgentGroupsStore.getState().resetForRuntimeSwitch();
+  useMultiRunStore.getState().resetForRuntimeSwitch();
+  useSessionMultiSelectStore.getState().disable();
+  useCommandsStore.getState().resetForRuntimeSwitch();
   replaceGlobalSessionStatusById(new Map());
+  resetGlobalBlockingRequests();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
@@ -77,6 +89,12 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
   useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  // Guest rail icons are instance-owned. Keep the previous catalog and the
+  // new instance mints icon URLs that 404: an invisible, still-clickable slot.
+  useGuestsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  // Guest OAuth status is answered by the instance too; a stale "connected"
+  // would otherwise be pushed to a guest frame on the new instance.
+  useGuestOauthStore.getState().resetForRuntimeSwitch();
   // Linear and GitHub are authenticated on the instance, not in the browser.
   // Left in place, the previous instance's login stayed visible and usable —
   // its rail tab, its issue pickers, its work-status rows — against a runtime
@@ -94,6 +112,8 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // filters the new instance's issue list down to nothing.
   useUIStore.getState().applyLinearIssueListFiltersForRuntime();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
+  useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
+  useUIStore.getState().setOpenGuestPage(null);
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };

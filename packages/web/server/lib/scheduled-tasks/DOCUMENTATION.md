@@ -188,3 +188,7 @@ project write lock on every `syncProject` when the project path is known:
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`
+
+The shared `/api/openchamber/events` stream also carries web notifications.
+Its connection ownership and browser capability flag stay unchanged. Delivery
+and duplicate handling are documented in `../notifications/DOCUMENTATION.md`.

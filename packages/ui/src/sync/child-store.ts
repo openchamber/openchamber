@@ -18,7 +18,7 @@ export type DirectoryStore = State & {
 type BlockingRequestSubscriber = () => void
 type BlockingRequestSubscribers = WeakMap<StoreApi<DirectoryStore>, Map<string, Set<BlockingRequestSubscriber>>>
 const permissionSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
-const questionSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
+const formSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
 
 type SessionMessageChange = {
   messagesChanged: boolean
@@ -80,21 +80,21 @@ export function subscribeDirectoryPermission(
   return subscribeBlockingRequest(permissionSubscribersByStore, store, sessionID, listener)
 }
 
-export function subscribeDirectoryQuestion(
+export function subscribeDirectoryForm(
   store: StoreApi<DirectoryStore>,
   sessionID: string,
   listener: BlockingRequestSubscriber,
 ): () => void {
-  return subscribeBlockingRequest(questionSubscribersByStore, store, sessionID, listener)
+  return subscribeBlockingRequest(formSubscribersByStore, store, sessionID, listener)
 }
 
-export function subscribeDirectoryQuestions(
+export function subscribeDirectoryForms(
   store: StoreApi<DirectoryStore>,
   sessionIDs: readonly string[],
   listener: BlockingRequestSubscriber,
 ): () => void {
   const unsubscribers = [...new Set(sessionIDs.filter(Boolean))].map((sessionID) => (
-    subscribeBlockingRequest(questionSubscribersByStore, store, sessionID, listener)
+    subscribeBlockingRequest(formSubscribersByStore, store, sessionID, listener)
   ))
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe()
@@ -127,7 +127,7 @@ function subscribeBlockingRequest(
 
 const notifyChangedBlockingRequests = <T,>(
   subscribersByStore: BlockingRequestSubscribers,
-  counter: "permissionChangeCallbacks" | "questionChangeCallbacks",
+  counter: "permissionChangeCallbacks" | "formChangeCallbacks",
   store: StoreApi<DirectoryStore>,
   current: Record<string, T>,
   previous: Record<string, T>,
@@ -207,6 +207,7 @@ export type DirectoryBootstrapReason =
   | "project-expanded"
   | "worktree-expanded"
   | "server-connected"
+  | "location-shutdown"
   | "action-demand"
 
 export type DirectoryBootstrapDemand = {
@@ -222,7 +223,12 @@ export type DirectoryBootstrapFailureReason = "os-permission" | "generic"
 export type DirectoryBootstrapContext = DirectoryBootstrapDemand & {
   generation: number
   isCurrent: () => boolean
+  trackInitialization: (initialization: Promise<void>) => void
 }
+
+type DirectoryInitialization =
+  | { state: "running" | "complete"; token: symbol }
+  | { state: "failed"; token: symbol; reason: DirectoryBootstrapFailureReason }
 
 const BOOTSTRAP_PRIORITY: Record<DirectoryBootstrapPriority, number> = {
   selected: 0,
@@ -278,7 +284,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     if (state.icon !== prev.icon) persistIcon(directory, state.icon)
     if (state.session !== prev.session) persistSessions(directory, state.session)
     notifyChangedBlockingRequests(permissionSubscribersByStore, "permissionChangeCallbacks", store, state.permission, prev.permission)
-    notifyChangedBlockingRequests(questionSubscribersByStore, "questionChangeCallbacks", store, state.question, prev.question)
+    notifyChangedBlockingRequests(formSubscribersByStore, "formChangeCallbacks", store, state.form, prev.form)
     notifyChangedSessionMessages(store, state, prev)
   })
 
@@ -299,11 +305,13 @@ export class ChildStoreManager {
   private readonly runningBootstraps = new Map<string, RunningBootstrap>()
   private readonly bootstrapStates = new Map<string, DirectoryBootstrapState>()
   private readonly bootstrapFailures = new Map<string, DirectoryBootstrapFailureReason>()
+  private readonly initializations = new Map<string, DirectoryInitialization>()
 
   private onBootstrap?: (context: DirectoryBootstrapContext) => Promise<void> | void
   private onDispose?: (directory: string) => void
   private isBooting?: (directory: string) => boolean
   private isLoadingSessions?: (directory: string) => boolean
+  private isCurrentScope?: () => boolean
   private bootstrapConcurrency = 2
   private bootstrapGeneration = 0
   private bootstrapSequence = 0
@@ -327,6 +335,7 @@ export class ChildStoreManager {
     onDispose?: (directory: string) => void
     isBooting?: (directory: string) => boolean
     isLoadingSessions?: (directory: string) => boolean
+    isCurrentScope?: () => boolean
     bootstrapConcurrency?: number
   }): () => void {
     const generation = ++this.bootstrapGeneration
@@ -335,7 +344,18 @@ export class ChildStoreManager {
     this.onDispose = callbacks.onDispose
     this.isBooting = callbacks.isBooting
     this.isLoadingSessions = callbacks.isLoadingSessions
+    this.isCurrentScope = callbacks.isCurrentScope
     this.bootstrapConcurrency = Math.max(1, Math.floor(callbacks.bootstrapConcurrency ?? 2))
+    // A list may have finished before reconfiguration invalidated its still-
+    // running initialization. It no longer owns a scheduler slot to requeue it.
+    const interrupted = [...this.initializations].filter(([, initialization]) => initialization.state === "running")
+    for (const [directory] of interrupted) this.initializations.delete(directory)
+    for (const [directory] of interrupted) {
+      this.requestBootstrap({
+        ...(this.aggregateBootstrapDemand(directory) ?? { directory, priority: "background", reason: "action-demand" }),
+        force: true,
+      })
+    }
     this.pumpBootstrapQueue()
 
     return () => {
@@ -345,6 +365,7 @@ export class ChildStoreManager {
       this.onDispose = undefined
       this.isBooting = undefined
       this.isLoadingSessions = undefined
+      this.isCurrentScope = undefined
     }
   }
 
@@ -489,6 +510,17 @@ export class ChildStoreManager {
     return normalizedDirectory ? this.bootstrapFailures.get(normalizedDirectory) : undefined
   }
 
+  getInitializationState(directory: string): DirectoryInitialization["state"] | undefined {
+    const normalizedDirectory = normalizePath(directory)
+    return normalizedDirectory ? this.initializations.get(normalizedDirectory)?.state : undefined
+  }
+
+  getInitializationFailure(directory: string): DirectoryBootstrapFailureReason | undefined {
+    const normalizedDirectory = normalizePath(directory)
+    const initialization = normalizedDirectory ? this.initializations.get(normalizedDirectory) : undefined
+    return initialization?.state === "failed" ? initialization.reason : undefined
+  }
+
   subscribeBootstrap(listener: () => void): () => void {
     this.bootstrapSubscribers.add(listener)
     return () => this.bootstrapSubscribers.delete(listener)
@@ -502,6 +534,11 @@ export class ChildStoreManager {
       if (!result || BOOTSTRAP_PRIORITY[demand.priority] < BOOTSTRAP_PRIORITY[result.priority]) result = demand
     }
     return result
+  }
+
+  private hasForegroundBootstrapDemand(directory: string): boolean {
+    const demand = this.aggregateBootstrapDemand(directory)
+    return Boolean(demand && demand.priority !== "background")
   }
 
   private reconcileBootstrapQueue(): void {
@@ -577,7 +614,7 @@ export class ChildStoreManager {
   }
 
   private pumpBootstrapQueue(): void {
-    if (!this.onBootstrap || this.disposed) return
+    if (!this.onBootstrap || this.disposed || this.isCurrentScope?.() === false) return
     while (this.runningBootstraps.size < this.bootstrapConcurrency) {
       const next = this.nextBootstrap()
       if (!next) return
@@ -598,27 +635,28 @@ export class ChildStoreManager {
         queuedMs: Math.max(0, Date.now() - next.enqueuedAt),
       })
 
-      // Store liveness, not run-token ownership. The pump deletes the run
-      // token in `.finally()` as soon as onBootstrap settles, while
-      // bootstrapDirectory schedules deferred recovery pulls (permission.list
-      // and friends) from a `setTimeout(0)` that always runs after that
-      // cleanup — gating those on the token made them dead code. A per-
-      // directory run sequence keeps the context current across settle (so
-      // deferred pulls commit) while invalidating it as soon as a newer run
-      // starts, so a late deferred response cannot overwrite a newer run's
-      // state. Mirrors the isCurrent contract in session-message-loader.
+      // Initialization outlives the list scheduler's slot. Keep commit authority
+      // tied to this store and run sequence, not the slot's transient token.
+      // A newer bootstrap or runtime generation invalidates both phases.
       const runSequence = ++this.bootstrapRunSequence
       this.directoryBootstrapRuns.set(next.directory, runSequence)
       const store = this.children.get(next.directory)
+      const isCurrentScope = this.isCurrentScope
       const isCurrent = () => (
         !this.disposed
+        && isCurrentScope?.() !== false
         && this.bootstrapGeneration === running.generation
         && this.directoryBootstrapRuns.get(next.directory) === runSequence
         && this.children.get(next.directory) === store
       )
       let bootstrapPromise: Promise<void>
       try {
-        bootstrapPromise = Promise.resolve(this.onBootstrap({ ...next, generation: running.generation, isCurrent }))
+        bootstrapPromise = Promise.resolve(this.onBootstrap({
+          ...next,
+          generation: running.generation,
+          isCurrent,
+          trackInitialization: (initialization) => this.trackInitialization(next, initialization, isCurrent),
+        }))
       } catch (error) {
         bootstrapPromise = Promise.reject(error)
       }
@@ -645,7 +683,7 @@ export class ChildStoreManager {
           }
         })
         .finally(() => {
-          const executionBecameStale = this.bootstrapGeneration !== running.generation || this.disposed
+          const executionBecameStale = this.bootstrapGeneration !== running.generation || this.disposed || isCurrentScope?.() === false
           if (this.runningBootstraps.get(next.directory)?.token === token) {
             this.runningBootstraps.delete(next.directory)
           }
@@ -666,12 +704,39 @@ export class ChildStoreManager {
     }
   }
 
+  private trackInitialization(
+    demand: DirectoryBootstrapDemand,
+    initialization: Promise<void>,
+    isCurrent: () => boolean,
+  ): void {
+    const token = Symbol()
+    const { directory } = demand
+    const canCommit = () => isCurrent() && this.initializations.get(directory)?.token === token
+    const finish = startSessionLoadPerformanceEvent({ operation: "bootstrap.environment", caller: demand.reason })
+    this.initializations.set(directory, { state: "running", token })
+    this.notifyBootstrapSubscribers()
+    void initialization.then(() => {
+      if (!canCommit()) return finish("stale")
+      this.initializations.set(directory, { state: "complete", token })
+      finish("complete")
+      this.notifyBootstrapSubscribers()
+    }, (error) => {
+      if (!canCommit()) return finish("stale")
+      this.initializations.set(directory, {
+        state: "failed", token,
+        reason: isFilesystemError(error) && error.reason === "os-permission" ? "os-permission" : "generic",
+      })
+      finish("error")
+      this.notifyBootstrapSubscribers()
+    })
+  }
+
   disposeDirectory(directory: string): boolean {
     if (
       !canDisposeDirectory({
         directory,
         hasStore: this.children.has(directory),
-        pinned: this.pinned(directory),
+        pinned: this.pinned(directory) || this.hasForegroundBootstrapDemand(directory),
         booting: this.bootstrapStates.get(directory) === "queued"
           || this.bootstrapStates.get(directory) === "running"
           || (this.isBooting?.(directory) ?? false),
@@ -688,6 +753,7 @@ export class ChildStoreManager {
     this.bootstrapStates.delete(directory)
     this.bootstrapFailures.delete(directory)
     this.directoryBootstrapRuns.delete(directory)
+    this.initializations.delete(directory)
     for (const demands of this.bootstrapDemandsByOwner.values()) demands.delete(directory)
     this.children.delete(directory)
     this.notifyRegistrySubscribers()
@@ -703,10 +769,13 @@ export class ChildStoreManager {
   runEviction(skip?: string) {
     const stores = [...this.children.keys()]
     if (stores.length === 0) return
+    const protectedDirectories = new Set(stores.filter((directory) => (
+      this.pinned(directory) || this.hasForegroundBootstrapDemand(directory)
+    )))
     const list = pickDirectoriesToEvict({
       stores,
       state: this.lifecycle,
-      pins: new Set(stores.filter((d) => this.pinned(d))),
+      pins: protectedDirectories,
       max: MAX_DIR_STORES,
       ttl: DIR_IDLE_TTL_MS,
       graceMs: EVICTION_GRACE_MS,
@@ -750,6 +819,8 @@ export class ChildStoreManager {
     this.runningBootstraps.clear()
     this.bootstrapStates.clear()
     this.bootstrapFailures.clear()
+    this.initializations.clear()
+    this.directoryBootstrapRuns.clear()
     this.bootstrapDemandsByOwner.clear()
     this.manualBootstrapDemands.clear()
     this.notifyBootstrapSubscribers()

@@ -1,9 +1,16 @@
 import crypto from 'crypto';
-import { SignJWT, jwtVerify } from 'jose';
+
+// jose is loaded on the first session check, not with the server.
+let josePending;
+const loadJose = () => {
+  josePending ??= import('jose');
+  return josePending;
+};
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
+import { sessionCookieNameForRequest } from './session-cookie.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -266,7 +273,34 @@ const getUrlAuthTokenFromRequest = (req) => {
       token = undefined;
     }
   }
-  return typeof token === 'string' && token.trim() ? token.trim() : null;
+  if (typeof token === 'string' && token.trim()) return token.trim();
+  return getServedPageSubresourceToken(req);
+};
+
+/**
+ * An HTML file shown through `/api/fs/serve/` loads its own images, styles
+ * and scripts with plain relative URLs, which carry no token: only the page's
+ * URL has one. The browser sends that page URL as the Referer of every
+ * same-origin subresource request, so the page's token is taken from there,
+ * and only when both the page and the subresource live under `/api/fs/serve/`.
+ * Nothing else about the token changes: it is still checked for validity,
+ * expiry and scope like a query token.
+ */
+const SERVED_PAGE_PREFIX = '/api/fs/serve/';
+
+const getServedPageSubresourceToken = (req) => {
+  if (!getRequestPathname(req).startsWith(SERVED_PAGE_PREFIX)) return null;
+  const referer = req?.headers?.referer;
+  const value = Array.isArray(referer) ? referer[0] : referer;
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const url = new URL(value);
+    if (!url.pathname.startsWith(SERVED_PAGE_PREFIX)) return null;
+    const token = url.searchParams.get('oc_url_token');
+    return token && token.trim() ? token.trim() : null;
+  } catch {
+    return null;
+  }
 };
 
 const getRequestPathname = (req) => {
@@ -291,6 +325,25 @@ const isWebSocketUpgrade = (req) => {
   return String(upgradeValue || '').toLowerCase() === 'websocket';
 };
 
+const GUEST_URL_AUTH_SCOPE = /^guest:([a-z][a-z0-9-]*)$/;
+
+/**
+ * A URL token scope narrows where the token is accepted. `guest:<id>` is
+ * minted for a guest iframe and only opens that guest's own package files:
+ * the iframe URL is readable by the guest's script, so the token must be
+ * worthless anywhere else.
+ * @returns {{ kind: 'guest', id: string } | null | undefined} `undefined` when the value is not a scope
+ */
+const parseUrlAuthScope = (value) => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string') return undefined;
+  const match = raw.trim().match(GUEST_URL_AUTH_SCOPE);
+  return match ? { kind: 'guest', id: match[1] } : undefined;
+};
+
+const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guests/${guestId}/`);
+
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
@@ -301,7 +354,9 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/fs/serve'
     || pathname.startsWith('/api/fs/serve/')
     || pathname.startsWith('/api/preview/proxy/')
-    || /^\/api\/projects\/[^/]+\/icon$/.test(pathname);
+    || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
+    || pathname === '/api/guests'
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\//.test(pathname);
 };
 
 const isUrlAuthWebSocketPath = (pathname) => {
@@ -311,12 +366,16 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname === '/api/dev-tunnel'
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/.test(pathname)
     || pathname.startsWith('/api/preview/proxy/');
 };
 
-const canUseUrlAuthTokenForRequest = (req) => {
+const canUseUrlAuthTokenForRequest = (req, scope = null) => {
   const method = typeof req?.method === 'string' ? req.method.toUpperCase() : 'GET';
   const pathname = getRequestPathname(req);
+  if (scope?.kind === 'guest') {
+    return !isWebSocketUpgrade(req) && method === 'GET' && isGuestScopedPath(pathname, scope.id);
+  }
   if (isWebSocketUpgrade(req)) {
     return isUrlAuthWebSocketPath(pathname);
   }
@@ -425,16 +484,15 @@ export const createUiAuth = ({
     }
   };
 
-  const issueUrlAuthTokenForSession = (sessionToken) => {
+  const issueUrlAuthTokenForSession = (sessionToken, scope = null) => {
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
-    urlAuthTokens.set(token, { sessionToken, expiresAt });
+    urlAuthTokens.set(token, { sessionToken, expiresAt, scope });
     return { token, expiresAt };
   };
 
   const authenticateUrlAuthToken = (req) => {
-    if (!canUseUrlAuthTokenForRequest(req)) return null;
     const token = getUrlAuthTokenFromRequest(req);
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
     const entry = urlAuthTokens.get(token);
@@ -442,8 +500,12 @@ export const createUiAuth = ({
       urlAuthTokens.delete(token);
       return null;
     }
+    if (!canUseUrlAuthTokenForRequest(req, entry.scope)) return null;
     return { ok: true, sessionToken: entry.sessionToken || 'url:authenticated' };
   };
+
+  /** Scope requested on `POST /auth/url-token`: `?scope=guest:<id>` or `{ scope }` in the body. */
+  const readRequestedUrlAuthScope = (req) => parseUrlAuthScope(req?.body?.scope ?? req?.query?.scope);
 
   const authenticateClientRequest = async (req, { allowUrlToken = true } = {}) => {
     if (allowUrlToken) {
@@ -489,7 +551,7 @@ export const createUiAuth = ({
       const secure = isSecureRequest(req);
       const maxAgeSeconds = Math.floor(ttlMs / 1000);
       const header = buildCookie({
-        name: cookieName,
+        name: sessionCookieNameForRequest(req, cookieName),
         value: encodeURIComponent(token),
         maxAge: maxAgeSeconds,
         secure,
@@ -499,8 +561,9 @@ export const createUiAuth = ({
 
     const ensureSessionToken = async (req, res) => {
       const cookies = parseCookies(req.headers.cookie);
-      if (cookies[cookieName]) {
-        return cookies[cookieName];
+      const name = sessionCookieNameForRequest(req, cookieName);
+      if (cookies[name]) {
+        return cookies[name];
       }
       const token = crypto.randomBytes(32).toString('base64url');
       setSessionCookie(req, res, token, sessionTtlMs);
@@ -533,8 +596,9 @@ export const createUiAuth = ({
 
     const resolveAuthContext = async (req, res, { allowClientAuth = true, allowUrlToken = true } = {}) => {
       const cookies = parseCookies(req.headers.cookie);
-      if (cookies[cookieName]) {
-        return { type: 'session', token: cookies[cookieName] };
+      const name = sessionCookieNameForRequest(req, cookieName);
+      if (cookies[name]) {
+        return { type: 'session', token: cookies[name] };
       }
       if (allowClientAuth) {
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
@@ -566,17 +630,21 @@ export const createUiAuth = ({
         res.status(400).json({ error: 'UI password not configured' });
       },
       handleUrlAuthToken: async (req, res) => {
+        const scope = readRequestedUrlAuthScope(req);
+        if (scope === undefined) {
+          return res.status(400).json({ error: 'Unknown URL token scope' });
+        }
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
         if (clientAuth) {
           res.setHeader('Cache-Control', 'no-store');
-          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth)));
+          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth), scope));
         }
         if (requireClientAuth) {
           return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
         }
         const sessionToken = await ensureSessionToken(req, res);
         res.setHeader('Cache-Control', 'no-store');
-        return res.json(issueUrlAuthTokenForSession(sessionToken));
+        return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
       },
       handlePasskeyStatus: (_req, res) => {
         res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null });
@@ -641,8 +709,9 @@ export const createUiAuth = ({
 
   const getTokenFromRequest = (req) => {
     const cookies = parseCookies(req.headers.cookie);
-    if (cookies[cookieName]) {
-      return cookies[cookieName];
+    const name = sessionCookieNameForRequest(req, cookieName);
+    if (cookies[name]) {
+      return cookies[name];
     }
     return null;
   };
@@ -651,7 +720,7 @@ export const createUiAuth = ({
     const secure = isSecureRequest(req);
     const maxAgeSeconds = Math.floor(ttlMs / 1000);
     const header = buildCookie({
-      name: cookieName,
+      name: sessionCookieNameForRequest(req, cookieName),
       value: encodeURIComponent(token),
       maxAge: maxAgeSeconds,
       secure,
@@ -662,7 +731,7 @@ export const createUiAuth = ({
   const clearSessionCookie = (req, res) => {
     const secure = isSecureRequest(req);
     const header = buildCookie({
-      name: cookieName,
+      name: sessionCookieNameForRequest(req, cookieName),
       value: '',
       maxAge: 0,
       secure,
@@ -691,6 +760,7 @@ export const createUiAuth = ({
       return false;
     }
     try {
+      const { jwtVerify } = await loadJose();
       await jwtVerify(token, jwtSecret);
       return true;
     } catch {
@@ -700,6 +770,7 @@ export const createUiAuth = ({
 
   const issueSession = async (req, res, { trustDevice = false } = {}) => {
     const ttlMs = resolveSessionTtlMs(trustDevice);
+    const { SignJWT } = await loadJose();
     const token = await new SignJWT({ type: 'ui-session' })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
@@ -799,13 +870,17 @@ export const createUiAuth = ({
   };
 
   const handleUrlAuthToken = async (req, res) => {
+    const scope = readRequestedUrlAuthScope(req);
+    if (scope === undefined) {
+      return res.status(400).json({ error: 'Unknown URL token scope' });
+    }
     const sessionToken = await resolveAuthenticatedSessionToken(req, { allowUrlToken: false });
     if (!sessionToken) {
       clearSessionCookie(req, res);
       return respondUnauthorized(req, res);
     }
     res.setHeader('Cache-Control', 'no-store');
-    return res.json(issueUrlAuthTokenForSession(sessionToken));
+    return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
   };
 
   const handleSessionCreate = async (req, res) => {

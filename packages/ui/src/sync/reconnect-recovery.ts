@@ -1,5 +1,5 @@
-import type { SessionStatus, Message, Part } from "@opencode-ai/sdk/v2/client"
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import { getLastConversationMessage, isIncompleteAssistantTurn } from "@/lib/opencode/model"
 import { getSessionMaterializationStatus } from "./materialization"
 
 type ReconnectMaterializationState = {
@@ -25,9 +25,7 @@ type BootstrapSessionRevisionOptions = {
   deletedRevision?: Record<string, number>
 }
 
-const getParentId = (session: Session): string | null | undefined => (
-  (session as Session & { parentID?: string | null }).parentID
-)
+const getParentId = (session: Session): string | undefined => session.parentID
 
 const includeAncestorSessions = (
   parentIds: string[],
@@ -106,27 +104,19 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
   }
 
   for (const [sessionId, messages] of Object.entries(state.message ?? {})) {
-    const lastMessage = messages[messages.length - 1]
-    if (
-      lastMessage
-      && lastMessage.role === "assistant"
-      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
-    ) {
+    // Plumbing roles (synthetic, skill, shell, switches) can trail a still
+    // streaming assistant message, so recovery looks at the last
+    // conversation message rather than the last record.
+    const lastMessage = getLastConversationMessage(messages)
+    if (isIncompleteAssistantTurn(lastMessage)) {
       ids.add(sessionId)
     } else if (!getSessionMaterializationStatus({ message: state.message ?? {}, part: state.part ?? {} }, sessionId).renderable) {
       ids.add(sessionId)
+    } else if (lastMessage && state.part?.[lastMessage.id]?.some((part) => (
+      part.type === "tool" && (part.state?.status === "pending" || part.state?.status === "running")
+    ))) {
+      ids.add(sessionId)
     }
-  }
-
-  const parentIds = new Set<string>()
-  for (const session of state.session) {
-    const parentId = getParentId(session)
-    if (parentId) {
-      parentIds.add(parentId)
-    }
-  }
-  for (const pid of parentIds) {
-    ids.add(pid)
   }
 
   const viewedSession = options?.viewedSession
@@ -138,6 +128,19 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
 
     if (sessionExists) {
       ids.add(sessionId)
+    }
+  }
+
+  // Parentage in cached history is not live work. Recover ancestors only when
+  // their child is active, viewed, or has an unresolved materialized snapshot.
+  if (ids.size > 0) {
+    const sessionsById = new Map(state.session.map((session) => [session.id, session]))
+    const pending = [...ids]
+    for (const sessionId of pending) {
+      const parentId = sessionsById.get(sessionId)?.parentID
+      if (!parentId || ids.has(parentId)) continue
+      ids.add(parentId)
+      pending.push(parentId)
     }
   }
 

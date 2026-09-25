@@ -8,6 +8,7 @@ import {
 } from './highlightResultCache';
 import type { MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 import { HIGHLIGHT_REQUEST_TIMEOUT_MS } from './markdown-worker-timeout';
+import { streamTuning } from '../lib/streamTuningFlags';
 
 // Main-thread client for the markdown Shiki Web Worker. Moves syntax tokenization
 // off the UI thread: a closed code block is shipped to the worker, which returns
@@ -260,7 +261,8 @@ export const highlightCodeInWorker = async (code: string, lang: string): Promise
   if (cached?.type === 'failed') return null;
 
   const result = await coalesce(key, async () => {
-    const outcome = await request((id) => ({ type: 'highlight', id, code, lang }));
+    const fullPass = !streamTuning.incrementalHighlight();
+    const outcome = await request((id) => ({ type: 'highlight', id, code, lang, fullPass }));
     if (outcome.status === 'timeout') return memoizeFailure(key);
     if (outcome.status !== 'ok' || outcome.response.type !== 'highlight') return null;
     const entry: CachedHighlight = { type: 'highlight', html: outcome.response.html };

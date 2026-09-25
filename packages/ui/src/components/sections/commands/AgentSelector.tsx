@@ -1,5 +1,6 @@
 import React from 'react';
-import type { Agent } from '@opencode-ai/sdk/v2';
+import type { Agent } from '@/lib/opencode/model';
+import { agentLabel } from '@/lib/agentLabel';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -7,7 +8,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAgentsStore, filterVisibleAgents } from '@/stores/useAgentsStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectConfigAgentsForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,7 @@ interface AgentSelectorProps {
     className?: string;
     filter?: (agent: Agent) => boolean;
     dropdownPortalToBody?: boolean;
+    directory?: string;
 }
 
 export const AgentSelector: React.FC<AgentSelectorProps> = ({
@@ -31,17 +33,21 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     className,
     filter,
     dropdownPortalToBody = false,
+    directory,
 }) => {
     const { t } = useI18n();
-    const { isReady, isUnavailable } = useOpenCodeReadiness('agents');
-    const configAgents = useConfigStore((state) => state.agents);
+    const { isReady, isUnavailable } = useOpenCodeReadiness('agents', directory);
+    const configAgents = useConfigStore((state) => selectConfigAgentsForDirectory(state, directory));
     const agentsStoreAgents = useAgentsStore((state) => state.agents);
     const loadAgentsStore = useAgentsStore((state) => state.loadAgents);
     const loadConfigAgents = useConfigStore((state) => state.loadAgents);
     const rawAgents = React.useMemo(() => {
+        if (directory !== undefined) return configAgents;
         if (Array.isArray(configAgents) && configAgents.length > 0) return configAgents;
         return Array.isArray(agentsStoreAgents) ? agentsStoreAgents : [];
-    }, [configAgents, agentsStoreAgents]);
+    }, [configAgents, agentsStoreAgents, directory]);
+    const selectedAgent = rawAgents.find((agent) => agent.name === agentName);
+    const selectedAgentLabel = selectedAgent ? agentLabel(selectedAgent) : agentName;
     const agents = React.useMemo(() => {
         const visible = filterVisibleAgents(rawAgents);
         return filter ? visible.filter(filter) : visible;
@@ -53,10 +59,14 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     const [isMobilePanelOpen, setIsMobilePanelOpen] = React.useState(false);
 
     React.useEffect(() => {
+        if (directory !== undefined) {
+            void loadConfigAgents({ directory });
+            return;
+        }
         if (rawAgents.length > 0) return;
         void loadConfigAgents();
         void loadAgentsStore();
-    }, [rawAgents.length, loadConfigAgents, loadAgentsStore]);
+    }, [directory, rawAgents.length, loadConfigAgents, loadAgentsStore]);
 
     const closeMobilePanel = () => setIsMobilePanelOpen(false);
 
@@ -77,8 +87,8 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     <button
                         type="button"
                         className={cn(
-                            'flex w-full items-center justify-between rounded-lg border border-border/40 bg-background/95 px-2 py-1.5 text-left',
-                            !agentName ? 'bg-primary/10 text-primary' : 'text-foreground'
+                            'flex w-full items-center justify-between rounded-lg border border-border/40 px-2 py-1.5 text-left',
+                            !agentName ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-foreground hover:bg-interactive-hover'
                         )}
                         onClick={() => {
                             handleAgentChange('');
@@ -88,7 +98,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                         <span className={cn('typography-meta', !agentName ? 'font-medium' : 'text-muted-foreground')}>
                             {t('settings.commands.agentSelector.notSelected')}
                         </span>
-                        {!agentName && <div className="h-2 w-2 rounded-full bg-primary" />}
+                        {!agentName && <div className="h-2 w-2 rounded-full bg-current" />}
                     </button>
                     {agents.map((agent) => {
                         const isSelected = agent.name === agentName;
@@ -98,8 +108,8 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                 key={agent.name}
                                 type="button"
                                 className={cn(
-                                    'flex w-full items-center justify-between rounded-lg border border-border/40 bg-background/95 px-2 py-1.5 text-left',
-                                    isSelected ? 'bg-primary/10 text-primary' : 'text-foreground'
+                                    'flex w-full items-center justify-between rounded-lg border border-border/40 px-2 py-1.5 text-left',
+                                    isSelected ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-foreground hover:bg-interactive-hover'
                                 )}
                                 onClick={() => {
                                     handleAgentChange(agent.name);
@@ -107,7 +117,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                 }}
                             >
                                 <div className="flex flex-col">
-                                    <span className="typography-meta font-medium">{agent.name}</span>
+                                    <span className="typography-meta font-medium">{agentLabel(agent)}</span>
                                     {agent.description && (
                                         <span className="typography-micro text-muted-foreground">
                                             {agent.description}
@@ -115,7 +125,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                     )}
                                 </div>
                                 {isSelected && (
-                                    <div className="h-2 w-2 rounded-full bg-primary" />
+                                    <div className="h-2 w-2 rounded-full bg-current" />
                                 )}
                             </button>
                         );
@@ -148,7 +158,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             <>
                                 <Icon name="robot-2" className="h-3.5 w-3.5 text-muted-foreground" />
                                 <span className="typography-meta font-medium text-foreground">
-                                    {agentName || t('settings.commands.agentSelector.selectAgentPlaceholder')}
+                                    {selectedAgentLabel || t('settings.commands.agentSelector.selectAgentPlaceholder')}
                                 </span>
                             </>
                         )}
@@ -194,7 +204,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                 className="typography-meta"
                                 onSelect={() => handleAgentChange(agent.name)}
                             >
-                                <span className="font-medium">{agent.name}</span>
+                                <span className="font-medium">{agentLabel(agent)}</span>
                             </DropdownMenuItem>
                         ))}
                     </DropdownMenuContent>

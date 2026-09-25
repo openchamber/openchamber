@@ -20,7 +20,6 @@ const createRuntime = async (overrides = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-agent-tool-'));
   temporaryDirectories.push(dataDir);
   const executeAction = vi.fn(async () => ({ projects: [] }));
-  const env = {};
   const runtime = createAgentToolRuntime({
     crypto,
     fsPromises: fs,
@@ -28,10 +27,32 @@ const createRuntime = async (overrides = {}) => {
     dataDir,
     getActivePort: () => 3901,
     executeAction,
-    env,
     ...overrides,
   });
-  return { runtime, dataDir, executeAction, env };
+  return { runtime, dataDir, executeAction };
+};
+
+const pluginDirectoryFor = (dataDir) => path.join(dataDir, 'agent-tool', 'openchamber-agent-tool');
+
+/** What a managed OpenCode child start does: write the plugin, mint a token. */
+const prepareManagedEnv = async (runtime, options) => {
+  const pluginDirectory = await runtime.materializePlugin(options);
+  return { pluginDirectory, ...runtime.createChildEnv() };
+};
+
+/** Loads the generated plugin and returns the tools it registers, by name. */
+const loadTools = async (dataDir, tag) => {
+  const entrypoint = path.join(pluginDirectoryFor(dataDir), 'index.js');
+  const pluginModule = await import(`${pathToFileURL(entrypoint).href}?${tag}=${Date.now()}`);
+  const registered = {};
+  await pluginModule.default.setup({
+    tool: {
+      transform: (edit) => {
+        edit({ add: (tool) => { registered[tool.name] = tool; } });
+      },
+    },
+  });
+  return registered;
 };
 
 describe('agent tool action allowlist', () => {
@@ -53,6 +74,7 @@ describe('agent tool action allowlist', () => {
     'schedule.run',
     'schedule.delete',
     'schedule.toggle',
+    'file.open',
   ])('delegates %s to the shared control service', async (action) => {
     const { runtime, executeAction } = await createRuntime();
     const input = { action, projectId: 'project-1' };
@@ -75,21 +97,16 @@ describe('agent tool action allowlist', () => {
 });
 
 describe('managed agent tool runtime', () => {
-  it('materializes the plugin and preserves configured plugin entries', async () => {
-    const { runtime, dataDir, env } = await createRuntime();
-    env.OPENCODE_CONFIG_CONTENT = '{ // existing\n "plugin": ["file:///existing.js", ["example-plugin", {"flag": true}]], "model": "test/model" }';
+  it('materializes the plugin and mints a per-child callback token', async () => {
+    const { runtime, dataDir } = await createRuntime();
 
-    const preparedEnv = await runtime.prepareManagedOpenCodeEnv();
-    const config = JSON.parse(preparedEnv.OPENCODE_CONFIG_CONTENT);
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const source = await fs.readFile(pluginPath, 'utf8');
+    const preparedEnv = await prepareManagedEnv(runtime);
+    const source = await fs.readFile(path.join(pluginDirectoryFor(dataDir), 'index.js'), 'utf8');
+    const manifest = JSON.parse(await fs.readFile(path.join(pluginDirectoryFor(dataDir), 'package.json'), 'utf8'));
 
-    expect(config.model).toBe('test/model');
-    expect(config.plugin).toEqual([
-      'file:///existing.js',
-      ['example-plugin', { flag: true }],
-      expect.stringContaining('/agent-tool/openchamber-plugin.js'),
-    ]);
+    // The managed config layer names this directory; the runtime only writes it.
+    expect(preparedEnv.pluginDirectory).toBe(pluginDirectoryFor(dataDir));
+    expect(manifest.exports).toEqual({ '.': './index.js' });
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_URL).toBe('http://127.0.0.1:3901/api/openchamber/agent-tool');
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(source).toContain('openchamber: {');
@@ -97,48 +114,61 @@ describe('managed agent tool runtime', () => {
       expect(source).toContain(JSON.stringify({ const: action, description }));
     }
     expect(source).not.toContain('"schedule.status"');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?schema=${Date.now()}`);
-    const hooks = await pluginModule.OpenChamberPlugin();
-    expect(hooks.tool.openchamber.description).toContain('Session dispatches return immediately by default');
-    expect(hooks.tool.openchamber.description).toContain('Set wait only when the user asks or the next step requires the completed result');
-    expect(hooks.tool.openchamber.args.action.oneOf).toContainEqual({
+    const tool = await loadTools(dataDir, 'schema');
+    expect(tool.openchamber.description).toContain('Session dispatches return immediately by default');
+    expect(tool.openchamber.description).toContain('Set wait only when the user asks or the next step requires the completed result');
+    expect(tool.openchamber.input.properties.action.oneOf).toContainEqual({
       const: 'session.messages',
       description: 'Read text-only messages and current sessionStatus for sessionId; directory and limit 10 are defaults',
     });
-    expect(hooks.tool.openchamber.args.parameters.properties.wait.description).toBe(
+    expect(tool.openchamber.input.properties.parameters.properties.wait.description).toBe(
       'Wait for current session activity to become idle. Omit by default; use only when the user asks or the next step requires the completed result',
     );
-    expect(hooks.tool.openchamber.args.parameters.properties.sessionId).toEqual({ type: 'string' });
+    expect(tool.openchamber.input.properties.parameters.properties.sessionId).toEqual({ type: 'string' });
     expect(source).not.toContain('title: "OpenChamber"');
-    expect(source).not.toContain('@opencode-ai/plugin');
+    // Nothing resolves from the generated directory, so the file must not import.
+    expect(source).not.toMatch(/\bimport\b/);
     expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
   });
 
   it('emits both tools, each carrying only its own actions and inputs', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await runtime.prepareManagedOpenCodeEnv();
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?both=${Date.now()}`);
-    const { tool } = await pluginModule.OpenChamberPlugin();
+    await prepareManagedEnv(runtime);
+    const tool = await loadTools(dataDir, 'both');
 
-    const controlActions = tool.openchamber.args.action.enum;
-    const webActions = tool.openchamber_web.args.action.enum;
+    const controlActions = tool.openchamber.input.properties.action.oneOf.map((entry) => entry.const);
+    const webActions = tool.openchamber_web.input.properties.action.oneOf.map((entry) => entry.const);
     expect(webActions).toContain('browser.open');
     expect(controlActions).not.toContain('browser.open');
     expect(webActions).not.toContain('session.create');
 
     // Turning one tool off has to remove its inputs too, not just its actions.
-    expect(Object.keys(tool.openchamber_web.args.parameters.properties)).toContain('url');
-    expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('url');
-    expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('sessionId');
+    expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('url');
+    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('url');
+    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toContain('sessionId');
+    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toContain('path');
+    expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).not.toContain('path');
+  });
+
+  it('keeps the action schema to one validator keyword', async () => {
+    // A node carrying both `enum` and `oneOf` is valid JSON Schema, but some
+    // OpenAI-compatible gateways reject it and answer with an empty completion
+    // instead of an error. `oneOf` is the keyword that stayed. Its branches
+    // carry the per-action descriptions the model reads.
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime);
+    const tool = await loadTools(dataDir, 'validator');
+
+    for (const entry of Object.values(tool)) {
+      expect(entry.input.properties.action.oneOf).toBeInstanceOf(Array);
+      expect(entry.input.properties.action).not.toHaveProperty('enum');
+    }
   });
 
   it('accepts inputs passed beside the action, not only inside parameters', async () => {
     const { runtime, dataDir } = await createRuntime();
-    const prepared = await runtime.prepareManagedOpenCodeEnv();
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?flat=${Date.now()}`);
-    const { tool } = await pluginModule.OpenChamberPlugin();
+    const prepared = await prepareManagedEnv(runtime);
+    const tool = await loadTools(dataDir, 'flat');
 
     const sent = [];
     const originalFetch = globalThis.fetch;
@@ -150,7 +180,7 @@ describe('managed agent tool runtime', () => {
       sent.push(JSON.parse(init.body));
       return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'browser.open', data: {} }));
     };
-    const context = { directory: '/work/project', abort: new AbortController().signal, metadata: () => {} };
+    const context = { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', progress: async () => {} };
 
     try {
       // The shape a model actually produced: url and viewport next to action.
@@ -177,58 +207,68 @@ describe('managed agent tool runtime', () => {
     expect(sent[0].input).toEqual({ action: 'browser.open', url: 'https://example.test', viewport: 'mobile' });
     expect(sent[1].input.url).toBe('https://example.test/nested');
     expect(sent[2].input).toEqual({ action: 'session.messages', sessionId: 'ses_1', limit: 3 });
+    // v2 tools get no directory; the session id is what OpenChamber resolves from.
+    expect(sent[2].sessionID).toBe('ses_1');
+    expect(sent[2].contextDirectory).toBeUndefined();
   });
 
   it('omits a tool the user turned off', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: true, includeMemory: false });
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?web=${Date.now()}`);
-    const { tool } = await pluginModule.OpenChamberPlugin();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: true, includeMemory: false });
+    const tool = await loadTools(dataDir, 'web');
 
     expect(Object.keys(tool)).toEqual(['openchamber_web']);
   });
 
   it('exposes memory as its own tool carrying only its own inputs', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await runtime.prepareManagedOpenCodeEnv({ includeControl: true, includeWeb: false, includeMemory: true });
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?memory=${Date.now()}`);
-    const { tool } = await pluginModule.OpenChamberPlugin();
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: true });
+    const tool = await loadTools(dataDir, 'memory');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_memory']);
-    expect(Object.keys(tool.openchamber_memory.args.parameters.properties).sort())
+    expect(Object.keys(tool.openchamber_memory.input.properties.parameters.properties).sort())
       .toEqual(['body', 'memoryId', 'scope', 'title', 'type']);
     // Memory inputs must not leak into the control tool's schema, which the
     // model pays for on every unrelated call.
-    expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('memoryId');
+    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('memoryId');
   });
 
   it('omits memory entirely when the user turns it off', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await runtime.prepareManagedOpenCodeEnv({ includeControl: true, includeWeb: false, includeMemory: false });
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?nomemory=${Date.now()}`);
-    const { tool } = await pluginModule.OpenChamberPlugin();
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false });
+    const tool = await loadTools(dataDir, 'nomemory');
 
     expect(Object.keys(tool)).toEqual(['openchamber']);
   });
 
   it('injects the plugin when memory is the only tool left on', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: false, includeMemory: true });
-    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?onlymemory=${Date.now()}`);
-    const { tool } = await pluginModule.OpenChamberPlugin();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: true });
+    const tool = await loadTools(dataDir, 'onlymemory');
 
     expect(Object.keys(tool)).toEqual(['openchamber_memory']);
+  });
+
+  it('exposes notify as its own tool only when switched on', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeNotify: true });
+    const tool = await loadTools(dataDir, 'notify');
+
+    expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_notify']);
+    expect(Object.keys(tool.openchamber_notify.input.properties.parameters.properties).sort())
+      .toEqual(['body', 'showWhenFocused', 'title']);
+    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('showWhenFocused');
+
+    const { runtime: plain, dataDir: plainDir } = await createRuntime();
+    await prepareManagedEnv(plain, { includeControl: true, includeWeb: false, includeMemory: false });
+    expect(Object.keys(await loadTools(plainDir, 'nonotify'))).toEqual(['openchamber']);
   });
 
   it('refuses to inject a plugin with no tools in it', async () => {
     const { runtime } = await createRuntime();
     let failed = false;
     try {
-      await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: false, includeMemory: false });
+      await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false });
     } catch {
       failed = true;
     }
@@ -244,6 +284,7 @@ describe('managed agent tool runtime', () => {
     const result = await runtime.execute({
       input: { action: 'read', title: 'Uses bun' },
       contextDirectory: '/work/project',
+      contextSessionId: 'ses_1',
       tool: 'openchamber_memory',
     });
 
@@ -253,7 +294,7 @@ describe('managed agent tool runtime', () => {
       'memory.read',
       { action: 'memory.read', title: 'Uses bun' },
       '/work/project',
-      {},
+      { contextSessionId: 'ses_1' },
     );
   });
 
@@ -300,6 +341,35 @@ describe('managed agent tool runtime', () => {
     expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, '/work/project', {});
   });
 
+  it('resolves the directory from the session id the plugin sends', async () => {
+    const executeAction = vi.fn(async () => ({}));
+    const resolveSessionDirectory = vi.fn(async () => '/work/other-worktree');
+    const { runtime } = await createRuntime({ executeAction, resolveSessionDirectory });
+
+    await runtime.execute({ input: { action: 'session.messages', sessionId: 'ses_1' }, sessionID: 'ses_1' });
+
+    expect(resolveSessionDirectory).toHaveBeenCalledWith('ses_1');
+    // The calling session also scopes the action (browser pages are per session).
+    expect(executeAction).toHaveBeenCalledWith(
+      'session.messages',
+      { action: 'session.messages', sessionId: 'ses_1' },
+      '/work/other-worktree',
+      { contextSessionId: 'ses_1' },
+    );
+  });
+
+  it('runs without a directory when the session cannot be resolved', async () => {
+    const executeAction = vi.fn(async () => ({}));
+    const { runtime } = await createRuntime({
+      executeAction,
+      resolveSessionDirectory: vi.fn(async () => { throw new Error('unavailable'); }),
+    });
+
+    await runtime.execute({ input: { action: 'projects.list' }, sessionID: 'ses_1' });
+
+    expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { contextSessionId: 'ses_1' });
+  });
+
   it('keeps service failures as structured tool results', async () => {
     const error = Object.assign(new Error('Task not found'), { statusCode: 404 });
     const { runtime } = await createRuntime({ executeAction: vi.fn(async () => { throw error; }) });
@@ -335,9 +405,45 @@ describe('managed agent tool runtime', () => {
     expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { signal: controller.signal });
   });
 
+  it('aborts the actions a session still has running when its turn is cancelled', async () => {
+    // Safety net beside the plugin's forwarded abort signal: the server also
+    // ends the action itself when the event stream reports the cancel.
+    const executeAction = vi.fn(async (_action, _input, _directory, options) => {
+      await new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('OpenChamber action was cancelled'), { statusCode: 499 })), { once: true });
+      });
+    });
+    const { runtime } = await createRuntime({ executeAction });
+    const env = await prepareManagedEnv(runtime);
+    const app = express();
+    runtime.registerRoutes(app, express);
+
+    // supertest only sends when awaited; `.then` starts both requests now.
+    const pending = request(app)
+      .post('/api/openchamber/agent-tool')
+      .set('authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`)
+      .send({ input: { action: 'projects.list' }, sessionID: 'ses_cancel' })
+      .then((response) => response);
+    const other = request(app)
+      .post('/api/openchamber/agent-tool')
+      .set('authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`)
+      .send({ input: { action: 'projects.list' }, sessionID: 'ses_other' })
+      .then((response) => response);
+    // Let both requests reach the service before cancelling one session.
+    await vi.waitFor(() => expect(executeAction).toHaveBeenCalledTimes(2));
+
+    expect(runtime.abortSession('ses_cancel')).toBe(1);
+    const response = await pending;
+    expect(response.body).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ message: 'OpenChamber action was cancelled' }) }));
+
+    // The other session's action is untouched until it is told otherwise.
+    expect(runtime.abortSession('ses_other')).toBe(1);
+    await other;
+  });
+
   it('requires the per-child token on the loopback route', async () => {
     const { runtime } = await createRuntime();
-    const env = await runtime.prepareManagedOpenCodeEnv();
+    const env = await prepareManagedEnv(runtime);
     const app = express();
     runtime.registerRoutes(app, express);
 
@@ -354,6 +460,73 @@ describe('managed agent tool runtime', () => {
     expect(response.body).toEqual(expect.objectContaining({ ok: true, action: 'projects.list' }));
   });
 
+  it.each([
+    ['0.0.0.0', 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    ['::', 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    [null, 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    ['127.0.0.1', 'http://127.0.0.1:3901/api/openchamber/agent-tool'],
+    ['100.100.0.3', 'http://100.100.0.3:3901/api/openchamber/agent-tool'],
+    ['fd7a:115c::3', 'http://[fd7a:115c::3]:3901/api/openchamber/agent-tool'],
+  ])('points the callback at where a listener bound to %s answers', async (boundAddress, expectedUrl) => {
+    const { runtime } = await createRuntime({ getActiveHost: () => boundAddress });
+    const env = await prepareManagedEnv(runtime);
+    expect(env.OPENCHAMBER_AGENT_TOOL_URL).toBe(expectedUrl);
+  });
+
+  it.each([
+    ['100.100.0.3', '100.100.0.3', 200],
+    ['100.100.0.3', '::ffff:100.100.0.3', 200],
+    ['100.100.0.3', '100.100.0.7', 401],
+    ['fd7a:115c::3', 'fd7a:115c::3', 200],
+    ['fd7a:115c::3', 'fd7a:115c::7', 401],
+    ['0.0.0.0', '192.168.1.20', 401],
+    ['0.0.0.0', '0.0.0.0', 401],
+    [null, '192.168.1.20', 401],
+  ])('bound to %s, answers a token-bearing caller from %s with %i', async (boundAddress, remoteAddress, status) => {
+    const { runtime } = await createRuntime({ getActiveHost: () => boundAddress });
+    const env = await prepareManagedEnv(runtime);
+    const app = express();
+    app.use((req, _res, next) => {
+      Object.defineProperty(req.socket, 'remoteAddress', { value: remoteAddress, configurable: true });
+      next();
+    });
+    runtime.registerRoutes(app, express);
+
+    await request(app)
+      .post('/api/openchamber/agent-tool')
+      .set('authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`)
+      .send({ input: { action: 'projects.list' } })
+      .expect(status);
+  });
+
+  it.each([
+    ['http://100.100.0.3:3901/api/openchamber/agent-tool', 'localhost,127.0.0.1', 'localhost,127.0.0.1,100.100.0.3'],
+    ['http://[fd7a:115c::3]:3901/api/openchamber/agent-tool', undefined, 'fd7a:115c::3'],
+    ['http://100.100.0.3:3901/api/openchamber/agent-tool', '100.100.0.3', '100.100.0.3'],
+    ['not a url', 'localhost', 'localhost'],
+  ])('keeps the callback %s away from an environment proxy', async (callbackUrl, existing, expected) => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime);
+    const keys = ['OPENCHAMBER_AGENT_TOOL_URL', 'NO_PROXY', 'no_proxy'];
+    const previous = keys.map((key) => process.env[key]);
+    try {
+      process.env.OPENCHAMBER_AGENT_TOOL_URL = callbackUrl;
+      for (const key of ['NO_PROXY', 'no_proxy']) {
+        if (existing === undefined) delete process.env[key];
+        else process.env[key] = existing;
+      }
+      await loadTools(dataDir, 'proxy');
+
+      expect(process.env.NO_PROXY).toBe(expected);
+      expect(process.env.no_proxy).toBe(expected);
+    } finally {
+      keys.forEach((key, index) => {
+        if (previous[index] === undefined) delete process.env[key];
+        else process.env[key] = previous[index];
+      });
+    }
+  });
+
   it('executes through the materialized plugin and authenticated callback', async () => {
     let activePort = null;
     const { runtime, dataDir } = await createRuntime({ getActivePort: () => activePort });
@@ -367,32 +540,28 @@ describe('managed agent tool runtime', () => {
     const previousUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
     const previousToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
     try {
-      const env = await runtime.prepareManagedOpenCodeEnv();
+      const env = await prepareManagedEnv(runtime);
       process.env.OPENCHAMBER_AGENT_TOOL_URL = env.OPENCHAMBER_AGENT_TOOL_URL;
       process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = env.OPENCHAMBER_AGENT_TOOL_TOKEN;
-      const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
-      const pluginModule = await import(`${pathToFileURL(pluginPath).href}?test=${Date.now()}`);
-      const hooks = await pluginModule.OpenChamberPlugin();
-      const metadata = vi.fn();
+      const tool = await loadTools(dataDir, 'callback');
+      const progress = vi.fn(async () => {});
 
-      const result = await hooks.tool.openchamber.execute(
+      const result = await tool.openchamber.execute(
         { action: 'projects.list', parameters: {} },
-        { directory: '/work/project', abort: new AbortController().signal, metadata },
+        { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', progress },
       );
 
-      expect(JSON.parse(result.output)).toEqual({
+      // No output schema is declared, so the envelope has to travel as content.
+      expect(result.output).toBeUndefined();
+      expect(JSON.parse(result.content)).toEqual({
         schemaVersion: 1,
         ok: true,
         action: 'projects.list',
         data: { projects: [] },
       });
-      expect(result.title).toBe('List configured projects');
       expect(result.metadata.openchamber.description).toBe('List configured projects');
-      expect(metadata).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'List configured projects',
-        metadata: expect.objectContaining({
-          openchamber: expect.objectContaining({ description: 'List configured projects' }),
-        }),
+      expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+        openchamber: expect.objectContaining({ description: 'List configured projects' }),
       }));
     } finally {
       if (previousUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;

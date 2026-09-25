@@ -14,7 +14,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { DirectoryExplorerDialog } from './DirectoryExplorerDialog';
 import { cn, formatPathForDisplay } from '@/lib/utils';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
@@ -638,7 +638,7 @@ export const SessionDialogs: React.FC = () => {
                     'flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors',
                     removeRemoteOptionDisabled
                         ? 'cursor-not-allowed opacity-60'
-                        : 'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                        : 'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                 )}
             >
                 {deleteDialogShouldRemoveRemote ? (
@@ -667,7 +667,7 @@ export const SessionDialogs: React.FC = () => {
                 'flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors',
                 deleteLocalOptionDisabled
                     ? 'cursor-not-allowed opacity-60'
-                    : 'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                    : 'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
             )}
         >
             {deleteDialogShouldDeleteLocalBranch ? (
@@ -701,7 +701,7 @@ export const SessionDialogs: React.FC = () => {
             <button
                 type="button"
                 onClick={() => setShowDeletionDialog(!showDeletionDialog)}
-                className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 aria-pressed={!showDeletionDialog}
             >
                 {!showDeletionDialog ? <Icon name="checkbox" className="size-4 text-primary" /> : <Icon name="checkbox-blank" className="size-4" />}

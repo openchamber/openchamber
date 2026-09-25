@@ -30,9 +30,8 @@ const PillWorkingStatus: React.FC = () => {
         : status.charAt(0).toUpperCase() + status.slice(1);
 
     return (
-        <span className="min-w-0 truncate pr-3 text-sm text-muted-foreground">
+        <span className="-ml-px min-w-0 truncate pr-3 text-sm text-muted-foreground">
             {label}
-            <span className="animate-pulse"> …</span>
         </span>
     );
 };

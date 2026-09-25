@@ -1,11 +1,11 @@
 import React from 'react';
 import { useChatColumnSession } from '@/components/chat/chatColumnSession';
-import type { Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
+import type { Message, ModelRef, Part, ReasoningPart, TextPart, ToolPart } from '@/lib/opencode/model';
+import { executeToolCalls, isExecuteTool } from '@/lib/opencode/tools';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessages, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
-import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import { useDirectorySync, useSession, useSessionMessages, useSessionPermissions, useSessionForms, useSessionStatus } from '@/sync/sync-context';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
 type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
@@ -77,28 +77,26 @@ const DEFAULT_WORKING: WorkingSummary = {
 
 const EMPTY_PARTS: Part[] = [];
 const STATUS_SIGNATURE_SEPARATOR = '\u0000';
-const EDITING_TOOLS = new Set(['edit', 'write', 'multiedit', 'apply_patch']);
-const TOOL_STATUS_PHRASES: Record<string, string> = {
+const EDITING_TOOLS = new Set(['edit', 'write', 'patch']);
+// v2 tool names. `shell` replaced `bash`, `subagent` replaced `task`, and
+// `todowrite`/`todoread`/`list`/`lsp` are gone.
+const TOOL_STATUS_PHRASES = new Map(Object.entries({
     read: 'reading file',
     write: 'writing file',
     edit: 'editing file',
-    multiedit: 'editing files',
-    apply_patch: 'applying patch',
-    bash: 'running command',
+    patch: 'applying patch',
+    'file-diff': 'reading changes',
+    shell: 'running command',
+    execute: 'running a script',
     grep: 'searching content',
     glob: 'finding files',
-    list: 'listing directory',
-    task: 'delegating task',
+    subagent: 'delegating task',
     webfetch: 'fetching URL',
     websearch: 'searching web',
     codesearch: 'web code search',
-    todowrite: 'updating todos',
-    todoread: 'reading todos',
     skill: 'learning skill',
     question: 'asking question',
-    plan_enter: 'switching to planning',
-    plan_exit: 'switching to building',
-};
+}));
 const WORKING_PHRASES = [
     'working',
     'processing',
@@ -124,7 +122,22 @@ type ParsedStatusResult = {
 };
 
 const getToolStatusPhrase = (toolName: string): string => {
-    return TOOL_STATUS_PHRASES[toolName] ?? `using ${toolName}`;
+    return TOOL_STATUS_PHRASES.get(toolName) ?? `using ${toolName}`;
+};
+
+/**
+ * A running `execute` (Code Mode) script names the tool it is calling as soon
+ * as its metadata lists one, so the pill tracks the script's real work instead
+ * of sitting on a generic phrase for its whole run.
+ */
+const getRunningToolPhrase = (part: ToolPart, toolName: string): string => {
+    if (!isExecuteTool(toolName)) {
+        return getToolStatusPhrase(toolName);
+    }
+    const state = part.state;
+    const calls = executeToolCalls(state && 'metadata' in state ? state.metadata : undefined);
+    const last = calls[calls.length - 1];
+    return last ? `calling ${last.tool}` : getToolStatusPhrase(toolName);
 };
 
 const hashString = (value: string): number => {
@@ -142,56 +155,56 @@ const getStableWorkingPhrase = (key: string): string => {
 const createParsedStatus = (parts: Part[], genericKey: string): ParsedStatusResult => {
     let activePartType: ParsedStatusResult['activePartType'] = undefined;
     let activeToolName: string | undefined = undefined;
+    let activeToolPhrase: string | undefined = undefined;
 
-    if (!isFullySyntheticMessage(parts)) {
-        for (let index = parts.length - 1; index >= 0; index -= 1) {
-            const part = parts[index];
-            if (!part) continue;
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+        const part = parts[index];
+        if (!part) continue;
 
-            switch (part.type) {
-                case 'reasoning': {
-                    const time = part.time ?? getPartTimeInfo(part);
-                    const stillRunning = !time || typeof time.end === 'undefined';
-                    if (stillRunning && !activePartType) {
-                        activePartType = 'reasoning';
-                    }
-                    break;
+        switch (part.type) {
+            case 'reasoning': {
+                const time = part.time ?? getPartTimeInfo(part);
+                const stillRunning = !time || typeof time.end === 'undefined';
+                if (stillRunning && !activePartType) {
+                    activePartType = 'reasoning';
                 }
-                case 'tool': {
-                    const toolStatus = part.state?.status;
-                    if ((toolStatus === 'running' || toolStatus === 'pending') && !activePartType) {
-                        const toolName = getToolDisplayName(part);
-                        if (EDITING_TOOLS.has(toolName)) {
-                            activePartType = 'editing';
-                            activeToolName = toolName;
-                        } else {
-                            activePartType = 'tool';
-                            activeToolName = toolName;
-                        }
-                    }
-                    break;
-                }
-                case 'text': {
-                    const rawContent = getLegacyTextContent(part) ?? '';
-                    if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
-                        const time = getPartTimeInfo(part);
-                        const streamingPart = !time || typeof time.end === 'undefined';
-                        if (streamingPart && !activePartType) {
-                            activePartType = 'text';
-                        }
-                    }
-                    break;
-                }
-                default:
-                    break;
+                break;
             }
+            case 'tool': {
+                const toolStatus = part.state?.status;
+                if ((toolStatus === 'running' || toolStatus === 'pending') && !activePartType) {
+                    const toolName = getToolDisplayName(part);
+                    if (EDITING_TOOLS.has(toolName)) {
+                        activePartType = 'editing';
+                        activeToolName = toolName;
+                    } else {
+                        activePartType = 'tool';
+                        activeToolName = toolName;
+                        activeToolPhrase = getRunningToolPhrase(part, toolName);
+                    }
+                }
+                break;
+            }
+            case 'text': {
+                const rawContent = getLegacyTextContent(part) ?? '';
+                if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
+                    const time = getPartTimeInfo(part);
+                    const streamingPart = !time || typeof time.end === 'undefined';
+                    if (streamingPart && !activePartType) {
+                        activePartType = 'text';
+                    }
+                }
+                break;
+            }
+            default:
+                break;
         }
     }
 
     const isGenericStatus = activePartType === undefined;
     const statusText = (() => {
         if (activePartType === 'editing') return activeToolName === 'multiedit' ? getToolStatusPhrase(activeToolName) : 'editing file';
-        if (activePartType === 'tool' && activeToolName) return getToolStatusPhrase(activeToolName);
+        if (activePartType === 'tool' && activeToolName) return activeToolPhrase ?? getToolStatusPhrase(activeToolName);
         if (activePartType === 'reasoning') return 'thinking';
         if (activePartType === 'text') return 'composing';
         return getStableWorkingPhrase(genericKey);
@@ -258,47 +271,50 @@ const getToolDisplayName = (part: ToolPart): string => {
     return typeof candidate.name === 'string' ? candidate.name : 'tool';
 };
 
-export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantContext => {
-    let assistantId: string | null = null;
-    let parentId: string | null = null;
+/** True when a user prompt follows `index`, i.e. a turn is queued or starting. */
+const hasNewerPrompt = (messages: Message[], index: number): boolean => {
+    for (let cursor = messages.length - 1; cursor > index; cursor -= 1) {
+        if (messages[cursor]?.role === 'user') return true;
+    }
+    return false;
+};
 
+/**
+ * `sessionModel` is the session record's own model: in OpenCode v2 a send
+ * switches the session before the prompt goes out, so it names what the next
+ * turn runs on before any assistant record exists.
+ */
+export const getActiveAssistantContext = (messages: Message[], sessionModel?: ModelRef | null): ActiveAssistantContext => {
+    const sessionProviderId = sessionModel?.providerID.trim() ?? '';
+    const sessionModelId = sessionModel?.id.trim() ?? '';
+    const nextTurnModel = sessionProviderId && sessionModelId ? { providerId: sessionProviderId, modelId: sessionModelId } : null;
+    // OpenCode v2 records the provider and model on the assistant message
+    // itself, so the active model no longer has to be looked up on the user
+    // message that triggered the turn (which no longer links back to it).
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
         if (message?.role !== 'assistant') continue;
 
-        const candidate = message as Message & { parentID?: unknown };
-        assistantId = message.id;
-        parentId = typeof candidate.parentID === 'string' && candidate.parentID.trim().length > 0
-            ? candidate.parentID
-            : null;
-        break;
-    }
+        // A prompt newer than this answer starts a turn this answer's model
+        // says nothing about: a v2 user message carries no model, and the
+        // composer may have switched models since. The session record already
+        // holds the switched model (the send switches before it prompts), so it
+        // is the one shown; without it nothing is shown rather than the previous
+        // turn's. A turn still running keeps its model: the newer prompt is only
+        // queued behind it.
+        if (message.time.completed !== undefined && hasNewerPrompt(messages, index)) {
+            return { assistantId: message.id, model: nextTurnModel };
+        }
 
-    if (!assistantId || !parentId) {
-        return { assistantId, model: null };
-    }
-
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (message?.role !== 'user' || message.id !== parentId) continue;
-
-        const candidate = message as Message & {
-            model?: { providerID?: unknown; modelID?: unknown };
-        };
-        const providerId = typeof candidate.model?.providerID === 'string'
-            ? candidate.model.providerID.trim()
-            : '';
-        const modelId = typeof candidate.model?.modelID === 'string'
-            ? candidate.model.modelID.trim()
-            : '';
-
+        const providerId = message.providerID.trim();
+        const modelId = message.modelID.trim();
         return {
-            assistantId,
+            assistantId: message.id,
             model: providerId && modelId ? { providerId, modelId } : null,
         };
     }
 
-    return { assistantId, model: null };
+    return { assistantId: null, model: null };
 };
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
@@ -316,9 +332,10 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         currentSessionDirectory ?? undefined,
     );
 
+    const sessionModel = useSession(currentSessionId ?? undefined, currentSessionDirectory ?? undefined)?.model ?? null;
     const activeAssistant = React.useMemo(
-        () => getActiveAssistantContext(rawSessionMessages),
-        [rawSessionMessages],
+        () => getActiveAssistantContext(rawSessionMessages, sessionModel),
+        [rawSessionMessages, sessionModel],
     );
     const lastAssistantId = activeAssistant.assistantId;
 
@@ -332,7 +349,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
-    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const sessionFormRequests = useSessionForms(currentSessionId ?? '', currentSessionDirectory ?? undefined);
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -434,13 +451,13 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const hasPendingPermission = sessionPermissionRequests.length > 0;
-        const hasPendingQuestion = sessionQuestionRequests.length > 0;
+        const hasPendingForm = sessionFormRequests.length > 0;
 
-        if (!hasPendingPermission && !hasPendingQuestion) {
+        if (!hasPendingPermission && !hasPendingForm) {
             return baseWorking;
         }
 
-        if (hasPendingQuestion) {
+        if (hasPendingForm) {
             return {
                 ...baseWorking,
                 statusText: null,
@@ -461,7 +478,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             canAbort: false,
             retryInfo: null,
         };
-    }, [baseWorking, sessionPermissionRequests, sessionQuestionRequests]);
+    }, [baseWorking, sessionPermissionRequests, sessionFormRequests]);
 
     return {
         activeModel: activeAssistant.model,

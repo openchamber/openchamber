@@ -13,7 +13,9 @@
  *
  * See `scripts/oc-dev.config.example.json` for the shape. The config can set
  * local device/app preferences such as `ios.deviceName`, `ios.useXcodeBeta`,
- * and `ios.xcodeAppName`, and can define `remoteDeployments`. Remote deploy
+ * `ios.xcodeAppName`, and `electron.opencodeConfigDir` (prefilled when the
+ * Electron start asks for a separate OpenCode config directory), and can
+ * define `remoteDeployments`. Remote deploy
  * menu entries are shown only when configured. Maintainer-only actions such as
  * release creation are hidden unless `features.releaseTools` is true.
  *
@@ -28,6 +30,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cancel, intro, isCancel, log, outro, select, text } from '@clack/prompts';
 import { RELEASE_PACKAGE_FILES } from './bump-version.mjs';
+import { pointSdkAtArchive } from './lib/sdk-override.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,6 +74,9 @@ Options:
   --adb-address <host:port>        Wireless ADB address for android-connect
   --vsix-cleanup <delete|keep>
   --version <semver>
+  --opencode-config-dir <path>     OpenCode config directory for the started Electron app
+                                   (OPENCODE_CONFIG_DIR); lets a v2 checkout run beside a v1
+                                   install without sharing opencode.json
   -h, --help
 
 Mobile tasks:
@@ -126,6 +132,9 @@ function parseArgs(argv) {
       case '--version':
         options.version = readValue();
         break;
+      case '--opencode-config-dir':
+        options.opencodeConfigDir = readValue();
+        break;
       default:
         if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
         if (options.action) throw new Error(`Unexpected argument: ${arg}`);
@@ -167,6 +176,13 @@ function run(command, args, options = {}) {
   return result.stdout?.trim() || '';
 }
 
+// VS Code's `code` is a .cmd shim on Windows, and Node spawns those only
+// through a shell, which then needs each argument quoted.
+function runCode(args, options = {}) {
+  if (process.platform !== 'win32') return run('code', args, options);
+  return run('code', args.map((arg) => `"${arg}"`), { ...options, shell: true, label: options.label || ['code', ...args].join(' ') });
+}
+
 function step(label, fn) {
   log.step(label);
   const result = fn();
@@ -182,7 +198,7 @@ const RELEASE_CHANGELOG_FILES = ['changelog', 'packages/vscode/CHANGELOG.md', ..
 function printReleaseNextSteps(version) {
   log.success(`Release v${version} prepared locally`);
   log.info('Next steps (only the release files are staged, unrelated changes stay out):');
-  console.log(`  git add ${[...RELEASE_PACKAGE_FILES, ...RELEASE_CHANGELOG_FILES].join(' ')}`);
+  console.log(`  git add ${[...RELEASE_PACKAGE_FILES, 'bun.lock', ...RELEASE_CHANGELOG_FILES].join(' ')}`);
   console.log(`  git commit -m "release v${version}"`);
   console.log(`  git tag v${version}`);
   console.log(`  git push origin main v${version}`);
@@ -291,9 +307,13 @@ function installedWebCli(directory) {
   return existsSync(cliPath) ? cliPath : '';
 }
 
-function installedGlobalWebCli() {
+function globalBunDir() {
   const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
-  return installedWebCli(path.join(bunInstall, 'install', 'global'));
+  return path.join(bunInstall, 'install', 'global');
+}
+
+function installedGlobalWebCli() {
+  return installedWebCli(globalBunDir());
 }
 
 function stopInstalledInstance(directory, port) {
@@ -315,12 +335,32 @@ function startInstalledInstance(directory, port) {
   });
 }
 
-function packageWeb() {
-  step('Building web bundle', () => run('bun', ['run', '--cwd', 'packages/web', 'build']));
-  const packOutput = step('Creating web package archive', () => run('npm', ['pack', '--pack-destination', repoRoot], { cwd: path.join(repoRoot, 'packages/web'), capture: true }));
+function packWorkspace(label, workspaceDir) {
+  // bun rewrites the workspace link to @openchamber/sdk; npm pack would ship `workspace:*`.
+  const packOutput = step(label, () => run('bun', ['pm', 'pack', '--destination', repoRoot], { cwd: path.join(repoRoot, workspaceDir), capture: true }));
+  // bun prints the archive as an absolute path (npm printed a bare file name).
   const packageName = packOutput.split('\n').find((line) => line.trim().endsWith('.tgz'))?.trim();
-  if (!packageName) throw new Error('Archive creation failed: npm pack did not print a .tgz file.');
-  return path.join(repoRoot, packageName);
+  if (!packageName) throw new Error(`Archive creation failed: bun pm pack did not print a .tgz file for ${workspaceDir}.`);
+  return path.isAbsolute(packageName) ? packageName : path.join(repoRoot, packageName);
+}
+
+/**
+ * The web package depends on @openchamber/sdk at the app's version. Until that
+ * version is on npm (it ships with the release), an install has to take the
+ * SDK from a tarball built here, so both archives travel together and the
+ * target's package.json gets an override pointing at the SDK tarball.
+ */
+function packageWeb() {
+  step('Building SDK', () => run('bun', ['run', '--cwd', 'packages/sdk', 'build']));
+  const sdkFile = packWorkspace('Creating SDK package archive', 'packages/sdk');
+  step('Building web bundle', () => run('bun', ['run', '--cwd', 'packages/web', 'build']));
+  const webFile = packWorkspace('Creating web package archive', 'packages/web');
+  return { webFile, sdkFile };
+}
+
+/** Node one-liner that points the SDK dependency at a tarball; runs over ssh. */
+function sdkOverrideScript(sdkPath) {
+  return `node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.overrides={...(p.overrides||{}),'@openchamber/sdk':'file:${sdkPath}'};fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n')"`;
 }
 
 async function selectRemoteDeployment(config, options) {
@@ -360,7 +400,7 @@ async function deployWeb(options, config) {
     throw new Error('Invalid deployment mode. Use global or testing. Use remote-deploy-web for configured remote deployments.');
   }
 
-  const packageFile = packageWeb();
+  const { webFile: packageFile, sdkFile } = packageWeb();
 
   if (deploymentMode === 'testing') {
     const testingDir = path.join(os.homedir(), TESTING_DIR);
@@ -368,18 +408,32 @@ async function deployWeb(options, config) {
     step('Preparing testing install directory', () => {
       resetDirectory(testingDir);
       run('bun', ['init', '-y'], { cwd: testingDir });
+      pointSdkAtArchive(testingDir, sdkFile);
     });
     step('Installing testing package', () => run('bun', ['add', packageFile], { cwd: testingDir }));
     step(`Starting testing instance on ${TESTING_PORT}`, () => startInstalledInstance(testingDir, TESTING_PORT));
     return;
   }
 
-  step(`Stopping global instance on ${GLOBAL_PORT}`, () => run('openchamber', ['stop', '--port', GLOBAL_PORT], { allowFail: true, label: `stop global instance on ${GLOBAL_PORT}` }));
+  // The installed CLI, not `openchamber` from PATH: bun's global bin is often missing from PATH (Windows
+  // by default), and a stop that silently misses leaves the old server holding the port.
+  step(`Stopping global instance on ${GLOBAL_PORT}`, () => stopInstalledInstance(globalBunDir(), GLOBAL_PORT));
   step('Removing old global package', () => {
     run('bun', ['remove', '-g', '@openchamber/web'], { allowFail: true, label: 'remove @openchamber/web' });
     run('bun', ['remove', '-g', 'openchamber'], { allowFail: true, label: 'remove openchamber' });
   });
-  step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
+  step('Installing package globally', () => {
+    // Only for this install: `openchamber update` later runs `bun add -g` on the
+    // same manifest and must resolve the published SDK, not this checkout's tarball.
+    // That update re-resolves the lockfile but keeps the SDK this deploy put on disk
+    // while the version number matches; `bun remove -g @openchamber/web` first clears it.
+    const restoreManifest = pointSdkAtArchive(globalBunDir(), sdkFile);
+    try {
+      run('bun', ['add', '-g', packageFile]);
+    } finally {
+      restoreManifest();
+    }
+  });
   step(`Starting global instance on ${GLOBAL_PORT}`, () => {
     const cliPath = installedGlobalWebCli();
     if (!cliPath) throw new Error('Global OpenChamber CLI was not installed by bun add -g');
@@ -389,7 +443,8 @@ async function deployWeb(options, config) {
 
 async function deployRemoteWeb(options, config) {
   const remote = await selectRemoteDeployment(config, options);
-  const packageFile = packageWeb();
+  const { webFile: packageFile, sdkFile } = packageWeb();
+  const sdkBase = path.basename(sdkFile);
   const host = remote.host;
   const dir = remote.dir;
   const port = String(remote.port);
@@ -404,9 +459,10 @@ async function deployRemoteWeb(options, config) {
   step('Copying package to remote', () => {
     run('ssh', [host, `mkdir -p ~/${dir}/releases && rm -f ~/${dir}/releases/*.tgz`]);
     run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
+    run('scp', ['-q', sdkFile, `${host}:~/${dir}/releases/${sdkBase}`]);
   });
   step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
-  step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi`]));
+  step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi; ${sdkOverrideScript(`./releases/${sdkBase}`)}`]));
   step('Installing remote package', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun add ./releases/${packageBase}; else npm install ./releases/${packageBase}; fi`]));
   step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
   log.success(`Remote deployment ready: ${host}:${port}`);
@@ -539,9 +595,51 @@ async function mobileTools(options, config) {
   }
 }
 
-function startElectronApp() {
+/**
+ * Environment for a started dev app. `OPENCODE_CONFIG_DIR` reaches the
+ * OpenChamber server and the managed OpenCode it spawns, so one machine can
+ * run a v2 checkout and a v1 install side by side: they share the sessions
+ * database (separate tables) but not the config file, which v1 rejects once
+ * v2 has written to it.
+ */
+function devAppEnv(opencodeConfigDir) {
+  if (!opencodeConfigDir) return {};
+  const configDir = path.resolve(opencodeConfigDir.replace(/^~(?=$|\/)/, os.homedir()));
+  if (!existsSync(configDir)) throw new Error(`OpenCode config directory not found: ${configDir}`);
+  log.info(`Using OpenCode config directory ${configDir}`);
+  return { OPENCODE_CONFIG_DIR: configDir };
+}
+
+/**
+ * The flag wins; otherwise an interactive run asks, with the last directory
+ * from `oc-dev.json` (`electron.opencodeConfigDir`) prefilled; a non-TTY run
+ * keeps OpenCode's default directory instead of hanging on a prompt.
+ */
+async function chooseOpencodeConfigDir(options, config) {
+  if (options.opencodeConfigDir) return options.opencodeConfigDir;
+  if (!isTty) return '';
+  const remembered = config.electron?.opencodeConfigDir || '';
+  const mode = await chooseValue('', [
+    { value: 'default', label: 'Default (~/.config/opencode)' },
+    { value: 'separate', label: 'Separate directory', hint: 'run this checkout beside a v1 install' },
+  ], 'OpenCode config for the Electron app');
+  if (mode === 'default') return '';
+  const value = await text({
+    message: 'OpenCode config directory',
+    initialValue: remembered || path.join(os.homedir(), '.config', 'opencode-v2'),
+    validate: (input) => (input.trim() ? undefined : 'Enter a directory path'),
+  });
+  if (isCancel(value)) {
+    cancel('Operation cancelled.');
+    process.exit(130);
+  }
+  return value.trim();
+}
+
+async function startElectronApp(options, config) {
+  const env = devAppEnv(await chooseOpencodeConfigDir(options, config));
   prepareOpenCodeCli();
-  run('bun', ['run', 'electron:dev']);
+  run('bun', ['run', 'electron:dev'], { env });
 }
 
 function prepareOpenCodeCli() {
@@ -561,7 +659,7 @@ function startVsCodeExtension() {
   const vscodeDir = path.join(repoRoot, 'packages/vscode');
   removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix');
   step('Building VS Code extension', () => run('bun', ['run', 'vscode:build']));
-  run('code', ['--extensionDevelopmentPath', vscodeDir]);
+  runCode(['--extensionDevelopmentPath', vscodeDir]);
 }
 
 async function installVsCodeExtensionLocal(options) {
@@ -578,10 +676,13 @@ async function installVsCodeExtensionLocal(options) {
   const vscodeDir = path.join(repoRoot, 'packages/vscode');
   step('Building VS Code extension', () => run('bun', ['run', '--cwd', 'packages/vscode', 'build']));
   step('Removing found VSIX package(s) before install flow', () => removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix'));
-  step('Packaging VSIX', () => run('bunx', ['vsce', 'package', '--no-dependencies'], { cwd: vscodeDir }));
+  step('Packaging VSIX', () => run('bun', ['x', 'vsce', 'package', '--no-dependencies'], { cwd: vscodeDir }));
   step('Installing VSIX locally', () => {
-    run('code', ['--uninstall-extension', 'fedaykindev.openchamber'], { label: 'uninstall old extension', allowFail: true });
-    run('code --install-extension packages/vscode/openchamber-*.vsix', [], { shell: true, label: 'install VSIX' });
+    runCode(['--uninstall-extension', 'fedaykindev.openchamber'], { label: 'uninstall old extension', allowFail: true });
+    // Found here rather than by a shell glob, which cmd.exe does not expand.
+    const vsix = readdirSync(vscodeDir).find((name) => name.startsWith('openchamber-') && name.endsWith('.vsix'));
+    if (!vsix) throw new Error('vsce package did not produce an openchamber-*.vsix');
+    runCode(['--install-extension', path.join(vscodeDir, vsix)], { label: 'install VSIX' });
   });
   if (cleanup === 'delete') {
     step('Removing local VSIX package(s) after install', () => removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix'));
@@ -663,7 +764,7 @@ async function main() {
       await mobileTools(options, config);
       break;
     case 'start-electron-app':
-      startElectronApp();
+      await startElectronApp(options, config);
       break;
     case 'prepare-opencode-cli':
       prepareOpenCodeCli();

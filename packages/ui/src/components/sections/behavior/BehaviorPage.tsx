@@ -1,11 +1,8 @@
 import React from 'react';
 import { z } from 'zod';
-import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import {
   Select,
   SelectContent,
@@ -19,10 +16,15 @@ import {
   RESPONSE_STYLE_PRESETS,
   type ResponseStylePreset,
 } from '@/lib/responseStyle';
-import type { DesktopSettings } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import {
+  useAutosave,
+  AUTOSAVE_SAVED,
+  AUTOSAVE_UNCHANGED,
+  autosaveFailed,
+  type AutosaveResult,
+} from '@/components/sections/shared/SettingsAutosave';
 import {
   SettingsSection,
   SettingsCheckboxRow,
@@ -30,6 +32,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
+import { resolveBehaviorPrompt, type BehaviorPromptSource } from './behaviorPrompt';
 
 const agentsMdResponseSchema = z.object({
   content: z.string(),
@@ -50,7 +53,6 @@ type ResponseStyleValue = ResponseStylePreset | 'custom';
 
 type BehaviorSettingsState = {
   prompt: string;
-  optimizeSystemPrompt: boolean;
   responseStyleEnabled: boolean;
   responseStylePreset: ResponseStyleValue;
   responseStyleCustomInstructions: string;
@@ -58,7 +60,6 @@ type BehaviorSettingsState = {
 
 const DEFAULT_BEHAVIOR_SETTINGS: BehaviorSettingsState = {
   prompt: '',
-  optimizeSystemPrompt: false,
   responseStyleEnabled: false,
   responseStylePreset: 'concise',
   responseStyleCustomInstructions: '',
@@ -83,32 +84,17 @@ const RESPONSE_STYLE_OPTION_LABEL_KEYS: Record<ResponseStylePreset, I18nKey> = {
   warmPeer: 'settings.behavior.page.responseStyle.option.warmPeer',
 };
 
-const saveBehaviorSetting = async (settings: Partial<DesktopSettings>, fallbackError: string) => {
-  const result = await updateDesktopSettings(settings);
-  if (!result.ok) {
-    throw new Error(fallbackError);
-  }
-};
-
 export const BehaviorPage: React.FC = () => {
   const { t } = useI18n();
-  const isVSCode = useIsVSCodeRuntime();
   const [prompt, setPrompt] = React.useState('');
   const [agentsMdPath, setAgentsMdPath] = React.useState('AGENTS.md');
-  const [optimizeSystemPrompt, setOptimizeSystemPrompt] = React.useState(false);
   const [responseStyleEnabled, setResponseStyleEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleEnabled);
   const [responseStylePreset, setResponseStylePreset] = React.useState<ResponseStyleValue>(DEFAULT_BEHAVIOR_SETTINGS.responseStylePreset);
   const [responseStyleCustomInstructions, setResponseStyleCustomInstructions] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleCustomInstructions);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [isApplyingPromptOptimization, setIsApplyingPromptOptimization] = React.useState(false);
-  const [initialPrompt, setInitialPrompt] = React.useState('');
-  const [initialOptimizeSystemPrompt, setInitialOptimizeSystemPrompt] = React.useState(false);
-  const lastSavedResponseStyleRef = React.useRef<{
-    enabled: boolean;
-    preset: ResponseStyleValue;
-    custom: string;
-  } | null>(null);
+  // What is currently on disk. Every field is compared against this, so a save
+  // writes only what actually changed and a refreshed value is never clobbered.
+  const savedRef = React.useRef<BehaviorSettingsState | null>(null);
 
   React.useEffect(() => {
     const abort = new AbortController();
@@ -125,40 +111,42 @@ export const BehaviorPage: React.FC = () => {
         ]);
 
         let nextSettings: BehaviorSettingsState = DEFAULT_BEHAVIOR_SETTINGS;
+        let settingsGlobalBehaviorPrompt: string | undefined;
         if (data) {
           nextSettings = {
             ...nextSettings,
-            optimizeSystemPrompt: data.optimizeSystemPrompt === true,
             responseStyleEnabled: data.responseStyleEnabled === true,
             responseStylePreset: sanitizeResponseStylePreset(data.responseStylePreset),
             responseStyleCustomInstructions: data.responseStyleCustomInstructions ?? '',
           };
           if (data.globalBehaviorPrompt !== undefined) {
-            nextSettings = { ...nextSettings, prompt: data.globalBehaviorPrompt };
+            settingsGlobalBehaviorPrompt = data.globalBehaviorPrompt;
           }
         }
 
+        // AGENTS.md is the source of truth OpenCode reads at runtime, so an
+        // existing file is authoritative even when it is empty. The persisted
+        // copy (globalBehaviorPrompt) is only a fallback for a missing file or
+        // a failed read.
+        let promptSource: BehaviorPromptSource = { kind: 'missing' };
         if (agentsMdRes.ok) {
           const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
           if (abort.signal.aborted) return;
           setAgentsMdPath(agentsData.path ?? 'AGENTS.md');
-          if (!nextSettings.prompt.trim()) {
-            nextSettings = { ...nextSettings, prompt: agentsData.content };
+          if (agentsData.exists) {
+            promptSource = { kind: 'file', content: agentsData.content };
           }
         }
+        nextSettings = {
+          ...nextSettings,
+          prompt: resolveBehaviorPrompt(promptSource, settingsGlobalBehaviorPrompt),
+        };
 
         setPrompt(nextSettings.prompt);
-        setOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);
-        setInitialOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);
         setResponseStyleEnabled(nextSettings.responseStyleEnabled);
         setResponseStylePreset(nextSettings.responseStylePreset);
         setResponseStyleCustomInstructions(nextSettings.responseStyleCustomInstructions);
-        setInitialPrompt(nextSettings.prompt);
-        lastSavedResponseStyleRef.current = {
-          enabled: nextSettings.responseStyleEnabled,
-          preset: nextSettings.responseStylePreset,
-          custom: nextSettings.responseStyleCustomInstructions,
-        };
+        savedRef.current = nextSettings;
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
           console.warn('Failed to load behavior settings:', error);
@@ -172,140 +160,74 @@ export const BehaviorPage: React.FC = () => {
     return () => abort.abort();
   }, []);
 
-  React.useEffect(() => {
-    if (isLoading) return;
-    const last = lastSavedResponseStyleRef.current;
-    if (
-      last &&
-      last.enabled === responseStyleEnabled &&
-      last.preset === responseStylePreset &&
-      last.custom === responseStyleCustomInstructions
-    ) {
-      return;
-    }
+  const save = React.useCallback(async (): Promise<AutosaveResult> => {
+    const saved = savedRef.current;
+    if (!saved || isLoading) return AUTOSAVE_UNCHANGED;
 
-    const next = {
-      enabled: responseStyleEnabled,
-      preset: responseStylePreset,
-      custom: responseStyleCustomInstructions,
-    };
+    const promptChanged = prompt !== saved.prompt;
+    const settingsChanged =
+      responseStyleEnabled !== saved.responseStyleEnabled ||
+      responseStylePreset !== saved.responseStylePreset ||
+      responseStyleCustomInstructions !== saved.responseStyleCustomInstructions;
 
-    const timer = setTimeout(async () => {
-      try {
-        await saveBehaviorSetting({
-          responseStyleEnabled: next.enabled,
-          responseStylePreset: next.preset,
-          responseStyleCustomInstructions: next.custom,
-        }, t('settings.behavior.page.toast.saveFailed'));
-        lastSavedResponseStyleRef.current = next;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
-        toast.error(message);
-      }
-    }, 400);
+    if (!promptChanged && !settingsChanged) return AUTOSAVE_UNCHANGED;
 
-    return () => clearTimeout(timer);
-  }, [responseStyleEnabled, responseStylePreset, responseStyleCustomInstructions, isLoading, t]);
-
-  const responseStylePreview = getResponseStylePreview(responseStylePreset, responseStyleCustomInstructions);
-  const isPromptDirty = prompt !== initialPrompt;
-  const isPromptOptimizationDirty = optimizeSystemPrompt !== initialOptimizeSystemPrompt;
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const content = normalizeAgentsMdContent(prompt);
+    // The prompt lives in AGENTS.md; the rest lives in OpenChamber settings.
+    const content = promptChanged ? normalizeAgentsMdContent(prompt) : saved.prompt;
+    if (promptChanged) {
       const response = await runtimeFetch('/api/behavior/agents-md', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ content }),
       });
-
       if (!response.ok) {
-        throw new Error(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
+        return autosaveFailed(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
-
-      const payload = await response.json().catch(() => null);
-      const deferred = noteDeferredRestartFromPayload(payload, 'behavior', { id: 'agents-md' });
-
-      await saveBehaviorSetting({
-        globalBehaviorPrompt: content,
-      }, t('settings.behavior.page.toast.saveFailed'));
-
-      setPrompt(content);
-      setInitialPrompt(content);
-      toast.success(
-        deferred
-          ? t('settings.view.pendingRestart.saved')
-          : t('settings.behavior.page.toast.saved'),
-      );
-    } catch (error) {
-      console.error('Failed to save behavior:', error);
-      const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
-      toast.error(message);
-    } finally {
-      setIsSaving(false);
+      // Normalize only the submitted draft. A newer edit must survive this
+      // response so the autosave follow-up can still write it.
+      setPrompt((current) => current === prompt ? content : current);
     }
-  };
 
-  const handleSavePromptOptimization = async () => {
-    setIsApplyingPromptOptimization(true);
-    try {
-      await saveBehaviorSetting(
-        { optimizeSystemPrompt },
-        t('settings.behavior.page.toast.saveFailed'),
-      );
-      setInitialOptimizeSystemPrompt(optimizeSystemPrompt);
-      recordDeferredOpenCodeRestart('behavior', { id: 'optimize-system-prompt' });
-      toast.success(t('settings.view.pendingRestart.saved'));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
-      toast.error(message);
-    } finally {
-      setIsApplyingPromptOptimization(false);
+    const result = await updateDesktopSettings({
+      ...(promptChanged ? { globalBehaviorPrompt: content } : {}),
+      responseStyleEnabled,
+      responseStylePreset,
+      responseStyleCustomInstructions,
+    });
+    if (!result.ok) {
+      return autosaveFailed(t('settings.behavior.page.toast.saveFailed'));
     }
-  };
+
+    savedRef.current = {
+      prompt: content,
+      responseStyleEnabled,
+      responseStylePreset,
+      responseStyleCustomInstructions,
+    };
+    return AUTOSAVE_SAVED;
+  }, [
+    isLoading,
+    prompt,
+    responseStyleCustomInstructions,
+    responseStyleEnabled,
+    responseStylePreset,
+    t,
+  ]);
+
+  const autosave = useAutosave(save);
+  const { requestSave } = autosave;
+
+  const responseStylePreview = getResponseStylePreview(responseStylePreset, responseStyleCustomInstructions);
 
   return (
     <SettingsPageLayout
       title={t('settings.behavior.page.title')}
       description={t('settings.page.behavior.description')}
-      showSaveStatus
+      onBlurCapture={autosave.onBlurCapture}
     >
-      {!isVSCode && (
-        <SettingsSection
-          title={t('settings.behavior.page.section.systemPromptOptimization')}
-          divider={false}
-          settingsItem="behavior.system-prompt-optimization"
-          contentClassName="space-y-3"
-        >
-          <SettingsCheckboxRow
-            checked={optimizeSystemPrompt}
-            onChange={setOptimizeSystemPrompt}
-            disabled={isLoading || isApplyingPromptOptimization}
-            label={t('settings.behavior.page.systemPromptOptimization.enable')}
-            ariaLabel={t('settings.behavior.page.systemPromptOptimization.enableAria')}
-            info={t('settings.behavior.page.systemPromptOptimization.info')}
-          />
-          <Button
-            type="button"
-            size="xs"
-            onClick={() => void handleSavePromptOptimization()}
-            disabled={isLoading || isApplyingPromptOptimization || !isPromptOptimizationDirty}
-            className="!font-normal"
-          >
-            {isApplyingPromptOptimization
-              ? t('settings.common.actions.saving')
-              : t('settings.common.actions.saveChanges')}
-          </Button>
-        </SettingsSection>
-      )}
-
       <SettingsSection
         title={t('settings.behavior.page.section.systemPrompt')}
+        divider={false}
         info={(
           <div className="space-y-1">
             <p className="font-medium text-foreground">
@@ -328,14 +250,6 @@ export const BehaviorPage: React.FC = () => {
           outerClassName="min-h-[160px] max-h-[70vh]"
           className="w-full font-mono typography-meta bg-transparent"
         />
-        <Button
-          onClick={handleSave}
-          disabled={isSaving || !isPromptDirty || isLoading}
-          size="xs"
-          className="!font-normal"
-        >
-          {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
-        </Button>
       </SettingsSection>
 
       <SettingsSection
@@ -346,7 +260,10 @@ export const BehaviorPage: React.FC = () => {
       >
         <SettingsCheckboxRow
           checked={responseStyleEnabled}
-          onChange={setResponseStyleEnabled}
+          onChange={(next) => {
+            setResponseStyleEnabled(next);
+            requestSave();
+          }}
           disabled={isLoading}
           label={t('settings.behavior.page.responseStyle.enable')}
           ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
@@ -358,7 +275,10 @@ export const BehaviorPage: React.FC = () => {
         >
           <Select<ResponseStyleValue>
             value={responseStylePreset}
-            onValueChange={(value) => setResponseStylePreset(value)}
+            onValueChange={(value) => {
+              setResponseStylePreset(value);
+              requestSave();
+            }}
             disabled={isLoading || !responseStyleEnabled}
           >
             <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>

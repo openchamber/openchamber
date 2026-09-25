@@ -1,6 +1,8 @@
 import { EventEmitter } from 'events';
+import { Readable, Writable } from 'node:stream';
 import path from 'path';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -571,8 +573,7 @@ describe('fs read', () => {
     expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
   });
 
-  it('rejects outside workspace reads without a grant', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('reads outside workspace files without a grant', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
       readFile: vi.fn(async () => 'secret'),
@@ -581,10 +582,9 @@ describe('fs read', () => {
 
     const res = await callRead(handler, { path: '/etc/passwd', allowOutsideWorkspace: 'true' });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: 'Outside workspace file access requires a grant' });
-    expect(fsPromises.readFile).not.toHaveBeenCalled();
-    warn.mockRestore();
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('secret');
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/etc/passwd', 'utf8');
   });
 
   it('allows outside workspace reads with an exact-path grant', async () => {
@@ -610,7 +610,7 @@ describe('fs read', () => {
     expect(res.body).toBe('secret');
   });
 
-  it('rejects outside workspace grants for a different canonical path', async () => {
+  it('ignores legacy grants when reading another outside file', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
@@ -629,33 +629,56 @@ describe('fs read', () => {
       outsideFileGrant: grant.outsideFileGrant,
     });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: 'Outside workspace file grant does not match requested path' });
-    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('secret');
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/b.txt', 'utf8');
   });
 
-  it('sets no-referrer on raw responses served through outside file grants', async () => {
+  it('reads outside raw files without a grant and sets no-referrer', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
       readFile: vi.fn(async () => Buffer.from('secret')),
     };
-    const grant = await mintOutsideFileGrant('/outside/image.png', {
-      scopes: ['raw'],
-      fsPromises,
-      path: path.posix,
-      crypto: { randomUUID: () => 'grant-raw' },
-    });
     const handler = registerRaw(fsPromises);
 
     const res = await callRaw(handler, {
       path: '/outside/image.png',
       allowOutsideWorkspace: 'true',
-      outsideFileGrant: grant.outsideFileGrant,
     });
 
     expect(res.statusCode).toBe(200);
     expect(res.getHeader('referrer-policy')).toBe('no-referrer');
+  });
+
+  it('stats outside files without a grant', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      path: path.posix,
+      os: { homedir: () => '/home/user' },
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat: async () => ({ isFile: () => true, size: 100, mtimeMs: 123 }),
+      },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const res = await callRead(getRoute('GET', '/api/fs/stat'), { path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ path: '/tmp/plan.txt', isFile: true, size: 100, mtimeMs: 123 });
+  });
+
+  it.each([
+    ['ENOENT', 404, { error: 'File not found' }],
+    ['EACCES', 403, { error: 'Access to file denied', reason: 'os-permission' }],
+  ])('reports %s for outside files instead of requiring a grant', async (code, status, body) => {
+    const handler = registerRead({
+      realpath: async () => { throw Object.assign(new Error(code), { code }); },
+    });
+    const res = await callRead(handler, { path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' });
+    expect(res.statusCode).toBe(status);
+    expect(res.body).toEqual(body);
   });
 
   it('rejects outside workspace mkdir without a trusted directory grant', async () => {
@@ -1008,6 +1031,88 @@ describe('fs exec git-read cache', () => {
     await callExec(handler, { commands: [command], cwd: '/repo/worktree-499' }); // cached  -> no spawn
 
     expect(calls.length).toBe(afterFill + 2);
+  });
+});
+
+describe('fs raw byte ranges', () => {
+  const createStreamingResponse = () => {
+    const chunks = [];
+    const headers = new Map();
+    let statusCode = 200;
+    const res = new Writable({
+      write(chunk, _encoding, callback) {
+        chunks.push(Buffer.from(chunk));
+        callback();
+      },
+    });
+    Object.assign(res, {
+      status(code) { statusCode = code; return res; },
+      json(payload) { chunks.push(Buffer.from(JSON.stringify(payload))); return res; },
+      type() { return res; },
+      send(payload) { chunks.push(Buffer.from(payload)); return res; },
+      setHeader(name, value) { headers.set(name.toLowerCase(), value); return res; },
+      getHeader(name) { return headers.get(name.toLowerCase()); },
+    });
+    return {
+      res,
+      finished: new Promise((resolve) => res.on('finish', resolve)),
+      get statusCode() { return statusCode; },
+      get body() { return Buffer.concat(chunks).toString('utf8'); },
+    };
+  };
+
+  const registerRawWithFile = (bytes) => {
+    const open = vi.fn(async () => ({
+      createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
+    }));
+    const readFile = vi.fn(async () => bytes);
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: bytes.length }),
+      open,
+      readFile,
+    });
+    return { handler, open, readFile };
+  };
+
+  it('answers a bytes span with 206, the span headers, and only those bytes', async () => {
+    const { handler, open, readFile } = registerRawWithFile(Buffer.from('0123456789'));
+    const response = createStreamingResponse();
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: { range: 'bytes=3-' } }, response.res);
+    await response.finished;
+
+    expect(response.statusCode).toBe(206);
+    expect(response.getHeader?.('content-range') ?? response.res.getHeader('content-range')).toBe('bytes 3-9/10');
+    expect(response.res.getHeader('content-length')).toBe('7');
+    expect(response.res.getHeader('accept-ranges')).toBe('bytes');
+    expect(response.body).toBe('3456789');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('serves the whole file, advertising ranges, when no span is asked for', async () => {
+    const { handler, open } = registerRawWithFile(Buffer.from('0123456789'));
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.getHeader('accept-ranges')).toBe('bytes');
+    expect(res.body.toString('utf8')).toBe('0123456789');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('rejects a span past the end with 416 and the file size', async () => {
+    const { handler, open } = registerRawWithFile(Buffer.from('0123456789'));
+    const res = createMockResponse();
+    res.end = vi.fn(() => res);
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: { range: 'bytes=10-' } }, res);
+
+    expect(res.statusCode).toBe(416);
+    expect(res.getHeader('content-range')).toBe('bytes */10');
+    expect(res.end).toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
@@ -1445,6 +1550,7 @@ describe('fs stat directory error handling', () => {
     try {
       await mkdir(path.join(directory, 'fs'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
+      await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
       await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
@@ -1586,6 +1692,40 @@ describe('fs managed chats root', () => {
     expect(res.body.chatsRoot).toBe('/srv/openchamber-chats');
   });
 
+  it('fails home lookup on permission errors and retries the next request', async () => {
+    const failure = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    let inaccessible = true;
+    const { home } = registerWithChatsRoot({ fsPromises: {
+      realpath: async directory => { if (inaccessible) throw failure; return directory; },
+    } });
+    const failed = createMockResponse();
+    await home(undefined, failed);
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).toEqual({ error: 'permission denied' });
+    inaccessible = false;
+    const recovered = createMockResponse();
+    await home(undefined, recovered);
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.body.chatsRoot).toBe('/home/user/.config/openchamber/chats');
+  });
+
+  it('keeps an accessible relocated root available when legacy alias lookup fails', async () => {
+    const { home } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/chat-alias',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/chat-alias') return '/storage/chats';
+          throw Object.assign(new Error('legacy root is inaccessible'), { code: 'EACCES' });
+        },
+      },
+    });
+    const response = createMockResponse();
+    await home(undefined, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.canonicalChatsRoot).toBe('/storage/chats');
+    expect(response.body.canonicalLegacyChatsRoot).toBeUndefined();
+  });
+
   it('allows mkdir inside the relocated chats root outside the active workspace', async () => {
     const mkdirCalls = [];
     const { mkdir } = registerWithChatsRoot({
@@ -1605,6 +1745,22 @@ describe('fs managed chats root', () => {
     expect(mkdirCalls).toEqual(['/srv/openchamber-chats/2026-08-25/session-a']);
   });
 
+  it('accepts a canonical relocated root even when the config root cannot be resolved', async () => {
+    const { mkdir } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/chat-alias',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/chat-alias') return '/storage/chats';
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        },
+      },
+    });
+    const response = createMockResponse();
+    await mkdir({ body: { path: '/storage/chats/day/session-a' } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.path).toBe('/storage/chats/day/session-a');
+  });
+
   it('still rejects mkdir outside the workspace and all managed roots', async () => {
     const { mkdir } = registerWithChatsRoot({ managedChatsRoot: '/srv/openchamber-chats' });
 
@@ -1613,5 +1769,70 @@ describe('fs managed chats root', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+  });
+});
+
+describe('canonical managed roots with real filesystem aliases', () => {
+  const setup = async (context, { relocated = false, caseAlias = false } = {}) => {
+    const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-canonical-chats-'));
+    context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+    const home = path.join(root, 'Home');
+    await nativeFs.mkdir(home);
+    const reportedHome = path.join(root, caseAlias ? 'home' : 'home-alias');
+    if (!caseAlias) await nativeFs.symlink(home, reportedHome, 'junction');
+    const config = path.join(reportedHome, '.config/openchamber');
+    const rawChats = relocated ? path.join(reportedHome, 'scratch/chats') : path.join(config, 'chats');
+    const canonicalHome = await nativeFs.realpath(home);
+    if (caseAlias && await nativeFs.realpath(reportedHome).catch(() => null) !== canonicalHome) {
+      context.skip('This volume distinguishes Home from home');
+    }
+    const canonicalChats = path.join(canonicalHome, relocated ? 'scratch/chats' : '.config/openchamber/chats');
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => reportedHome }, path, fsPromises: nativeFs,
+      normalizeDirectoryPath: value => value,
+      resolveProjectDirectory: async () => ({ directory: path.join(root, 'unrelated-project') }),
+      openchamberUserConfigRoot: config, managedChatsRoot: rawChats,
+    });
+    return { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome };
+  };
+
+  for (const relocated of [false, true]) {
+    it(`returns canonical paths before the ${relocated ? 'relocated' : 'default'} root exists and permits its lifecycle`, async context => {
+      const { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome } = await setup(context, { relocated });
+      const home = createMockResponse();
+      await getRoute('GET', '/api/fs/home')({}, home);
+      expect(home.body).toEqual({
+        home: reportedHome, chatsRoot: rawChats,
+        canonicalChatsRoot: canonicalChats,
+        canonicalLegacyChatsRoot: path.join(canonicalHome, '.config/openchamber/chats'),
+      });
+      await expect(nativeFs.stat(canonicalChats)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const directory = path.join(home.body.canonicalChatsRoot, 'day/session-a');
+      const created = createMockResponse();
+      await getRoute('POST', '/api/fs/mkdir')({ body: { path: directory } }, created);
+      expect(created.statusCode).toBe(200);
+      expect(await nativeFs.realpath(directory)).toBe(directory);
+      const deleted = createMockResponse();
+      await getRoute('POST', '/api/fs/delete')({ body: { path: directory } }, deleted);
+      expect(deleted.statusCode).toBe(200);
+      await expect(nativeFs.stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const legacy = createMockResponse();
+      await getRoute('POST', '/api/fs/mkdir')({ body: { path: path.join(rawChats, 'legacy-session') } }, legacy);
+      expect(legacy.statusCode).toBe(200);
+      expect((await nativeFs.stat(path.join(canonicalChats, 'legacy-session'))).isDirectory()).toBe(true);
+    });
+  }
+
+  it('reports on-disk home casing on a case-insensitive macOS volume', { skip: process.platform !== 'darwin' }, async context => {
+    const { getRoute, canonicalChats, rawChats, reportedHome } = await setup(context, { caseAlias: true });
+    const response = createMockResponse();
+    await getRoute('GET', '/api/fs/home')({}, response);
+    expect(response.body).toEqual({
+      home: reportedHome, chatsRoot: rawChats,
+      canonicalChatsRoot: canonicalChats, canonicalLegacyChatsRoot: canonicalChats,
+    });
   });
 });

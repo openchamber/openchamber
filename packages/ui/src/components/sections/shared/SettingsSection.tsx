@@ -14,9 +14,14 @@ import { SettingsInfoHint } from './SettingsInfoHint';
  * and the value clips at 150–200% interface font size. `ch` is measured
  * against the trigger's own `typography-ui-label` font, so the cap grows with
  * the setting. Below `@xl` the field row stacks and the control is plain
- * `w-full`, so this cap only binds on wide panes.
+ * `w-full`, so on narrow panes the cap is the only thing keeping the
+ * trigger from spanning the pane.
+ *
+ * The cap is deliberately tight: every settings picker shares it so a column
+ * of dropdowns reads as one width, and long values truncate inside instead
+ * of stretching the trigger across the pane.
  */
-const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[22ch] max-w-[40ch]';
+const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[16ch] max-w-[28ch]';
 
 /** Settings select trigger: full column width in stacked cells; capped in field rows via parent. */
 export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
@@ -499,10 +504,7 @@ export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
       />
       <div className="flex min-w-0 flex-col">
         <span
-          className={cn(
-            'typography-settings-field-label font-normal',
-            selected ? 'text-foreground' : 'text-foreground/50',
-          )}
+          className="typography-settings-field-label font-normal text-foreground"
         >
           {label}
         </span>

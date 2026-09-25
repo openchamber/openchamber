@@ -5,6 +5,7 @@ import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from '@code
 import { classHighlighter, tags as t } from '@lezer/highlight';
 
 import type { Theme } from '@/types/theme';
+import { resolveSyntaxTokens } from '../theme/syntax';
 
 export function createFlexokiCodeMirrorTheme(
   theme: Theme,
@@ -17,13 +18,14 @@ export function createFlexokiCodeMirrorTheme(
 
   const monoFont = theme.config?.fonts?.mono || 'monospace';
   const highlights = theme.colors.syntax.highlights || {};
-  const tokens = theme.colors.syntax.tokens || {};
+  const tokens = resolveSyntaxTokens(theme.colors.syntax);
 
   const contentFontSize = options?.fontSize ? `${options.fontSize}px` : 'var(--text-code)';
+  const backgroundColor = theme.colors.syntax.base.background;
 
   const ui = EditorView.theme({
     '&': {
-      backgroundColor: 'var(--background)',
+      backgroundColor,
       color: theme.colors.syntax.base.foreground,
       fontSize: contentFontSize,
       lineHeight: '1.5',
@@ -31,7 +33,7 @@ export function createFlexokiCodeMirrorTheme(
     },
     '.cm-scroller': {
       fontFamily: monoFont,
-      backgroundColor: 'var(--background)',
+      backgroundColor,
     },
 
     /* StreamLanguage/legacy-modes tokens (class-based) */
@@ -102,23 +104,23 @@ export function createFlexokiCodeMirrorTheme(
       backgroundColor: theme.colors.interactive.selection,
     },
     '.cm-gutters': {
-      backgroundColor: 'var(--background)',
+      backgroundColor,
       color: highlights.lineNumber || theme.colors.syntax.base.comment,
       borderRight: `1px solid ${theme.colors.interactive.border}`,
       position: 'sticky',
       paddingRight: '8px',
       left: 0,
       zIndex: 2,
-      boxShadow: `0 0 0 var(--background)`,
+      boxShadow: `0 0 0 ${backgroundColor}`,
     },
     '.cm-gutter': {
-      backgroundColor: 'var(--background)',
+      backgroundColor,
     },
     '.cm-gutterElement': {
-      backgroundColor: 'var(--background)',
+      backgroundColor,
     },
     '.cm-lineNumbers': {
-      backgroundColor: 'var(--background)',
+      backgroundColor,
     },
     '.cm-lineNumbers .cm-gutterElement': {
       paddingLeft: '8px',
@@ -129,12 +131,12 @@ export function createFlexokiCodeMirrorTheme(
       color: highlights.lineNumberActive || theme.colors.syntax.base.foreground,
     },
     '.cm-activeLine': {
-      backgroundColor: theme.colors.surface.overlay,
+      backgroundColor: `color-mix(in srgb, ${theme.colors.syntax.base.foreground} 5%, transparent)`,
     },
     /* ── Floating search: panels container ── */
     '.cm-panels': {
       backgroundColor: 'transparent',
-      color: theme.colors.surface.foreground,
+      color: theme.colors.surface.elevatedForeground,
       position: 'absolute' as const,
       top: '0',
       right: '0',
@@ -186,7 +188,7 @@ export function createFlexokiCodeMirrorTheme(
       alignItems: 'center',
       gap: '0',
       width: '100%',
-      color: theme.colors.surface.foreground,
+      color: theme.colors.surface.elevatedForeground,
       fontFamily: 'inherit',
       fontSize: '13px',
       lineHeight: '1',
@@ -209,8 +211,8 @@ export function createFlexokiCodeMirrorTheme(
       padding: '0 8px',
       borderRadius: '6px !important',
       border: `1px solid ${theme.colors.interactive.border}`,
-      backgroundColor: theme.colors.surface.background,
-      color: theme.colors.surface.foreground,
+      backgroundColor: theme.colors.surface.elevated,
+      color: theme.colors.surface.elevatedForeground,
       fontFamily: 'inherit',
       fontSize: '12px',
       lineHeight: '1',
@@ -222,7 +224,7 @@ export function createFlexokiCodeMirrorTheme(
       opacity: 1,
     },
     '.cm-search .cm-textfield:focus': {
-      borderColor: theme.colors.primary.base,
+      borderColor: theme.colors.interactive.borderFocus,
     },
 
     /* Find input: row 1, max-width matches replace input for alignment */
@@ -300,10 +302,10 @@ export function createFlexokiCodeMirrorTheme(
       pointerEvents: 'none' as const,
     },
     '.cm-search label:hover::after': {
-      color: theme.colors.surface.foreground,
+      color: theme.colors.surface.elevatedForeground,
     },
     '.cm-search label:has(input[type="checkbox"]:checked)::after': {
-      color: theme.colors.surface.foreground,
+      color: theme.colors.surface.elevatedForeground,
     },
 
     /* Case sensitive: "Aa" */
@@ -386,7 +388,7 @@ export function createFlexokiCodeMirrorTheme(
       backgroundColor: theme.colors.interactive.hover,
     },
     '.cm-search .cm-button:hover::after': {
-      color: theme.colors.surface.foreground,
+      color: theme.colors.surface.elevatedForeground,
     },
     '.cm-search .cm-button:active': {
       backgroundColor: theme.colors.interactive.active,
@@ -456,7 +458,7 @@ export function createFlexokiCodeMirrorTheme(
     },
     '.cm-panel.cm-search button[name="close"]:hover': {
       backgroundColor: theme.colors.interactive.hover,
-      color: theme.colors.surface.foreground,
+      color: theme.colors.surface.elevatedForeground,
     },
 
     /* ──────────────────────────────────────────────────
@@ -489,8 +491,9 @@ export function createFlexokiCodeMirrorTheme(
       marginTop: '2px',
     },
     '.cm-searchMatch': {
-      backgroundColor: theme.colors.status.infoBackground,
-      boxShadow: `inset 0 0 0 1px ${theme.colors.status.infoBorder}`,
+      backgroundColor: theme.colors.interactive.selection,
+      color: theme.colors.interactive.selectionForeground,
+      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,
       borderRadius: '2px',
     },
     '.cm-searchMatch.cm-searchMatch-selected': {

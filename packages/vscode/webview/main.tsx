@@ -1,7 +1,7 @@
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
 import { resolveCommentTarget } from './inlineCommentTarget';
-import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -17,8 +17,10 @@ import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
-import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
+import type { AssistantMessage, Part } from '@openchamber/ui/lib/opencode/model';
+import { syncEventSessionID, type SyncEvent } from '@openchamber/ui/lib/opencode/events';
 import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
+import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -334,6 +336,16 @@ const unsupportedWebRouteResponse = (feature: string): Response => {
   return jsonResponse({ error: `${feature} is not supported in VS Code` }, 501);
 };
 
+/** Answers a local API route from a bridge call; validation failures come back as 400, the rest as 500. */
+const bridgeJsonRoute = async (bridgeType: string, payload: unknown): Promise<Response> => {
+  try {
+    return jsonResponse(await sendBridgeMessage(bridgeType, payload), 200);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Request failed';
+    return jsonResponse({ error: message }, /must be|is required|session id/.test(message) ? 400 : 500);
+  }
+};
+
 const pluginConfigErrorStatus = (message: string): number => {
   const lower = message.toLowerCase();
   if (lower.includes('already exists')) return 409;
@@ -359,8 +371,31 @@ const buildProxiedResponse = (
   return new Response(body, { status: proxied.status, headers: proxied.headers });
 };
 
-const isSseApiPath = (pathname: string) => pathname === '/api/event' || pathname === '/api/global/event';
-const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/message$/.test(pathname);
+/**
+ * Split `/api/config/<entity>/<name>[/<resource>]` into the entity name and the
+ * optional sub-resource (`config`, `permissions`). An entity name never
+ * contains a slash once decoded, so the last segment is the resource when it is
+ * one of the known ones.
+ */
+const CONFIG_ENTITY_RESOURCES = new Set(['config', 'permissions']);
+
+interface ConfigEntityPath {
+  name: string;
+  resource?: string;
+}
+
+const splitConfigEntityPath = (pathname: string, prefix: string): ConfigEntityPath => {
+  const segments = pathname.slice(prefix.length).split('/').filter(Boolean);
+  const last = segments[segments.length - 1];
+  if (segments.length > 1 && last && CONFIG_ENTITY_RESOURCES.has(last)) {
+    return { name: decodeURIComponent(segments.slice(0, -1).join('/')), resource: last };
+  }
+  return { name: decodeURIComponent(segments.join('/')) };
+};
+
+// OpenCode 2.x: one event stream, and a prompt goes to /api/session/:id/prompt.
+const isSseApiPath = (pathname: string) => pathname === '/api/event';
+const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/prompt$/.test(pathname);
 const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
 const isLocalRuntimePath = (pathname: string) => isApiPath(pathname) || pathname === '/auth/session';
 
@@ -382,16 +417,30 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Preview proxy');
   }
 
+  if (normalizedPathname === '/api/config/themes' || normalizedPathname.startsWith('/api/config/themes/')) {
+    return unsupportedWebRouteResponse('Theme import and management');
+  }
+
   if (normalizedPathname.startsWith('/api/openchamber/tunnel/')) {
     return unsupportedWebRouteResponse('Remote tunnel settings');
   }
 
-  // Archiving a batch of sessions server-side needs an OpenChamber server
-  // process; the extension host has none. Answering explicitly keeps the
-  // shared UI on its per-session archive path instead of leaving the request
-  // to the generic proxy.
-  if (normalizedPathname === '/api/openchamber/sessions/archive') {
-    return unsupportedWebRouteResponse('Server-side session archiving');
+  // OpenChamber-owned session state (archive flags, metadata). OpenCode 2.x
+  // has no route for either, so the extension host keeps the same files the
+  // OpenChamber server does and folds them onto session reads.
+  if (normalizedPathname === '/api/openchamber/sessions/archive' && method === 'POST') {
+    return bridgeJsonRoute('api:sessions/archive', await extractJsonBody(input, init, method));
+  }
+  if (normalizedPathname === '/api/openchamber/sessions/unarchive' && method === 'POST') {
+    return bridgeJsonRoute('api:sessions/unarchive', await extractJsonBody(input, init, method));
+  }
+  const sessionMetadataMatch = normalizedPathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata$/);
+  if (sessionMetadataMatch && (method === 'GET' || method === 'POST')) {
+    const sessionId = decodeURIComponent(sessionMetadataMatch[1]);
+    if (method === 'GET') return bridgeJsonRoute('api:sessions/metadata:get', { sessionId });
+    const body = await extractJsonBody(input, init, method);
+    const patch = body && typeof body === 'object' && !Array.isArray(body) ? (body as { patch?: unknown }).patch : undefined;
+    return bridgeJsonRoute('api:sessions/metadata:set', { sessionId, patch });
   }
 
   if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
@@ -494,10 +543,25 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (normalizedPathname === '/api/sessions/status' && method === 'GET') {
+    // Parity with the web server's cross-project status map, served from the
+    // extension host's activity watcher. Its phases collapse busy and retry
+    // into `busy` and it settles sessions itself through `cooldown`, so every
+    // busy entry is current as of now.
+    type ActivitySnapshot = Record<string, { type: 'idle' | 'busy' | 'cooldown' }>;
+    const activity = await sendBridgeMessage<ActivitySnapshot>('api:session-activity:get')
+      .catch((): ActivitySnapshot => ({}));
+    const now = Date.now();
+    const sessions: Record<string, { status: 'busy'; lastUpdateAt: number }> = {};
+    for (const [sessionId, entry] of Object.entries(activity || {})) {
+      if (entry?.type === 'busy') sessions[sessionId] = { status: 'busy', lastUpdateAt: now };
+    }
+    // The extension host keeps no pending-request map; directory stores and
+    // its own auto-accept path cover requests in VS Code.
     return new Response(
       JSON.stringify({
-        sessions: {},
-        serverTime: Date.now(),
+        sessions,
+        pending: {},
+        serverTime: now,
       }),
       {
         status: 200,
@@ -585,8 +649,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
-  // Health endpoints: reflect actual connection status
-  if (pathname === '/health' || pathname === '/api/health') {
+  // OpenChamber's own health route reflects the extension's connection status.
+  // OpenCode 2.x has no health route of its own; its `/api/info` is forwarded
+  // to it like every other `/api/*` call.
+  if (pathname === '/health') {
     const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
     const isReady = connectionStatus === 'connected';
     const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
@@ -657,13 +723,14 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (pathname.startsWith('/api/config/agents/')) {
-    const encodedName = pathname.slice('/api/config/agents/'.length);
-    const name = decodeURIComponent(encodedName);
+    // The web routes hang `/config` and `/permissions` off the agent name; the
+    // bridge takes the sub-resource as its own field, so split it back out.
+    const { name, resource } = splitConfigEntityPath(pathname, '/api/config/agents/');
     const verb = method;
     const body = await extractJsonBody(input, init, method);
     const directory = getRequestDirectoryHint(url, input, init);
     try {
-      const data = await sendBridgeMessage('api:config/agents', { method: verb, name, body, directory });
+      const data = await sendBridgeMessage('api:config/agents', { method: verb, name, resource, body, directory });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -672,13 +739,34 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (pathname.startsWith('/api/config/commands/')) {
-    const encodedName = pathname.slice('/api/config/commands/'.length);
-    const name = decodeURIComponent(encodedName);
+    const { name, resource } = splitConfigEntityPath(pathname, '/api/config/commands/');
     const verb = method;
     const body = await extractJsonBody(input, init, method);
     const directory = getRequestDirectoryHint(url, input, init);
     try {
-      const data = await sendBridgeMessage('api:config/commands', { method: verb, name, body, directory });
+      const data = await sendBridgeMessage('api:config/commands', { method: verb, name, resource, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/websearch' && method === 'GET') {
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/websearch', { method: 'GET', directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/websearch' && method === 'PUT') {
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:config/websearch', body);
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1029,6 +1117,14 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
+  if (pathname === '/api/opencode/compatibility' && method === 'GET') {
+    return jsonResponse(await sendBridgeMessage('api:opencode/compatibility'));
+  }
+
+  if (pathname === '/api/opencode/install-v2' && method === 'POST') {
+    return jsonResponse(await sendBridgeMessageWithOptions('api:opencode/install-v2', undefined, { timeoutMs: 0 }));
+  }
+
   if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {
     const data = await sendBridgeMessage('api:opencode/upgrade-status');
     return jsonResponse(data);
@@ -1036,7 +1132,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 
   if (pathname === '/api/opencode/upgrade' && method === 'POST') {
     const body = await extractJsonBody(input, init, method);
-    const result = await sendBridgeMessage<{ status: number; body: unknown }>('api:opencode/upgrade', body);
+    const result = await sendBridgeMessageWithOptions<{ status: number; body: unknown }>('api:opencode/upgrade', body, { timeoutMs: 0 });
     return jsonResponse(result.body, result.status);
   }
 
@@ -1125,21 +1221,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Handle provider auth deletion: DELETE /api/provider/:providerId/auth
-  const providerAuthMatch = pathname.match(/^\/api\/provider\/([^/]+)\/auth$/);
-  if (providerAuthMatch && method === 'DELETE') {
-    const providerId = decodeURIComponent(providerAuthMatch[1]);
-    const scope = url.searchParams.get('scope') || 'auth';
-    const queryDirectory = url.searchParams.get('directory') || undefined;
-    try {
-      const data = await sendBridgeMessage('api:provider/auth:delete', { providerId, scope, directory: queryDirectory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
   // Handle provider source lookup: GET /api/provider/:providerId/source
   const providerSourceMatch = pathname.match(/^\/api\/provider\/([^/]+)\/source$/);
   if (providerSourceMatch && method === 'GET') {
@@ -1214,7 +1295,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       return originalFetch(input as RequestInfo, init);
     }
 
-    const suffixPath = `${targetUrl.pathname.replace(/^\/api/, '')}${targetUrl.search}`;
+    // OpenCode 2.x serves everything under /api itself, so the extension host
+    // forwards the request path unchanged instead of stripping the prefix.
+    const upstreamPath = `${targetUrl.pathname}${targetUrl.search}`;
 
     const headersFromRequest = input instanceof Request ? headersToRecord(input.headers) : {};
     const headersFromInit = headersToRecord(init?.headers);
@@ -1285,7 +1368,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
       let start;
       try {
-        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: suffixPath, headers, streamId }));
+        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: upstreamPath, headers, streamId }));
       } catch (error) {
         await stream.cancel();
         throw error;
@@ -1301,7 +1384,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     if (method === 'POST' && isSessionMessageApiPath(targetUrl.pathname)) {
       const bodyText = await extractBodyText(input, init, method);
       const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
-      const proxied = await proxySessionMessageRequest({ path: suffixPath, headers, bodyText, signal });
+      const proxied = await proxySessionMessageRequest({ path: upstreamPath, headers, bodyText, signal });
       const response = buildProxiedResponse(proxied);
       maybeHideLoadingOverlay();
       return response;
@@ -1309,7 +1392,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
     const bodyBase64 = await extractBodyBase64(input, init, method);
     const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
-    const proxied = await proxyApiRequest({ method, path: suffixPath, headers, bodyBase64, signal });
+    const proxied = await proxyApiRequest({ method, path: upstreamPath, headers, bodyBase64, signal });
     const response = buildProxiedResponse(proxied);
     maybeHideLoadingOverlay();
     return response;
@@ -1740,10 +1823,12 @@ onCommand('showNotification', (payload) => {
   showOpenChamberNotification(payload as { title?: unknown; body?: unknown; sessionId?: unknown; requireHidden?: unknown } | undefined);
 });
 
-onCommand('windowFocusChanged', (payload) => {
-  if (typeof payload === 'object' && payload && typeof (payload as { focused?: unknown }).focused === 'boolean') {
-    window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = (payload as { focused: boolean }).focused;
-  }
+onCommand('viewerStateChanged', (payload) => {
+  const parsed = hostViewerStateSchema.safeParse(payload);
+  if (!parsed.success) return;
+  window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = parsed.data.windowFocused;
+  // The webview document's own focus is not whether the user sees the chat.
+  reportHostViewerState(parsed.data);
 });
 
 const readyNotificationCooldowns = new Map<string, number>();
@@ -1751,8 +1836,6 @@ const errorNotificationCooldowns = new Map<string, number>();
 const READY_NOTIFICATION_COOLDOWN_MS = 5000;
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 let notificationSettingsSyncPromise: Promise<void> | null = null;
-
-const getPayloadString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 const normalizeNotificationPlainText = (text: string): string => text
   .replace(/```[\s\S]*?```/g, ' ')
@@ -1813,62 +1896,25 @@ const formatNotificationLabel = (raw: string, fallback: string): string => {
   return raw.split(/[-_\s]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 };
 
-const extractNotificationTextFromParts = (parts: unknown): string => {
-  if (!Array.isArray(parts)) return '';
+const extractNotificationTextFromParts = (parts: readonly Part[] | undefined): string => {
+  if (!parts) return '';
   return parts
-    .map((part) => {
-      if (!part || typeof part !== 'object') return '';
-      const entry = part as { type?: unknown; text?: unknown; content?: unknown };
-      if (entry.type === 'text') {
-        return typeof entry.text === 'string' ? entry.text : typeof entry.content === 'string' ? entry.content : '';
-      }
-      return '';
-    })
+    .map((part) => (part.type === 'text' ? part.text : ''))
     .filter(Boolean)
     .join('\n')
     .trim();
-};
-
-const extractNotificationLastMessage = (payload: Record<string, unknown>): string => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  if (!info) return '';
-  return extractNotificationTextFromParts(info.parts ?? properties.parts) || extractNotificationTextFromParts(info.content);
 };
 
 const fetchLastAssistantMessageText = async (sessionId: string, messageId?: string): Promise<string> => {
   if (!sessionId) return '';
 
   try {
-    const messages = await opencodeClient.getSessionMessages(sessionId, 5);
-    if (!Array.isArray(messages)) return '';
-
-    let target = messageId
-      ? messages.find((message) => {
-          const info = message && typeof message === 'object'
-            ? (message as { info?: { id?: unknown; role?: unknown } }).info
-            : undefined;
-          return info?.id === messageId && info?.role === 'assistant';
-        })
-      : null;
-
-    if (!target) {
-      for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        const info = message && typeof message === 'object'
-          ? (message as { info?: { role?: unknown; finish?: unknown } }).info
-          : undefined;
-        if (info?.role === 'assistant' && info?.finish === 'stop') {
-          target = message;
-          break;
-        }
-      }
-    }
-
-    if (!target || typeof target !== 'object') return '';
-    const message = target as { parts?: unknown; content?: unknown; info?: { parts?: unknown; content?: unknown } };
-    return extractNotificationTextFromParts(message.parts ?? message.info?.parts)
-      || extractNotificationTextFromParts(message.content ?? message.info?.content);
+    // Newest first: the message we want is at the front, not the back.
+    const page = await opencodeClient.getSessionMessages(sessionId, { limit: 5 });
+    const target = messageId
+      ? page.items.find((item) => item.info.id === messageId && item.info.role === 'assistant')
+      : page.items.find((item) => item.info.role === 'assistant' && item.info.finish === 'stop');
+    return target ? extractNotificationTextFromParts(target.parts) : '';
   } catch {
     return '';
   }
@@ -1886,86 +1932,69 @@ const getNotificationTemplate = (
   };
 };
 
-const buildNotificationVariables = (payload: Record<string, unknown>, sessionId: string, lastMessage: string): Record<string, string> => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  const pathInfo = info?.path as { root?: unknown; cwd?: unknown } | undefined;
-  const worktree = getPayloadString(pathInfo?.root ?? pathInfo?.cwd);
-  const modelId = getPayloadString(info?.modelID ?? info?.modelId ?? (info?.model as { modelID?: unknown } | undefined)?.modelID);
+/** The assistant message an event points at, when it carries one. */
+const notificationAssistantMessage = (event: SyncEvent): AssistantMessage | null => {
+  if (event.type !== 'message.updated') return null;
+  return event.properties.info.role === 'assistant' ? event.properties.info : null;
+};
+
+const buildNotificationVariables = (
+  event: SyncEvent,
+  directory: string | null,
+  sessionId: string,
+  lastMessage: string,
+): Record<string, string> => {
+  const assistant = notificationAssistantMessage(event);
+  const worktree = directory || '';
   return {
     project_name: worktree.split(/[\\/]/).filter(Boolean).pop() || '',
     worktree,
     branch: '',
-    session_name: getPayloadString(properties.sessionTitle ?? (properties.session as { title?: unknown } | undefined)?.title ?? info?.sessionTitle),
-    agent_name: formatNotificationLabel(getPayloadString(info?.agent ?? info?.mode), 'Agent'),
-    model_name: formatNotificationLabel(modelId, 'Assistant'),
+    session_name: '',
+    agent_name: formatNotificationLabel(assistant?.agent ?? '', 'Agent'),
+    model_name: formatNotificationLabel(assistant?.modelID ?? '', 'Assistant'),
     last_message: lastMessage,
     session_id: sessionId,
   };
 };
 
-const getNotificationSessionId = (payload: Record<string, unknown>): string => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  return getPayloadString(info?.sessionID ?? info?.sessionId ?? properties.sessionID ?? properties.sessionId ?? properties.session);
-};
-
-const getNotificationDirectory = (payload: Record<string, unknown>): string | null => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  return getPayloadString(properties.directory ?? info?.directory) || null;
-};
-
 window.addEventListener('openchamber:vscode-notification-event', (event) => {
-  const detail = (event as CustomEvent<{ directory?: string; payload?: unknown }>).detail;
-  const payload = detail?.payload;
-  if (!payload || typeof payload !== 'object') {
+  const detail = (event as CustomEvent<{ directory?: string; payload?: SyncEvent }>).detail;
+  const syncEvent = detail?.payload;
+  if (!syncEvent || typeof syncEvent !== 'object' || typeof syncEvent.type !== 'string') {
     return;
   }
 
-  const record = payload as Record<string, unknown>;
-  const type = getPayloadString(record.type);
-  const properties = (record.properties ?? record) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  const sessionId = getNotificationSessionId(record);
+  const sessionId = syncEventSessionID(syncEvent) ?? '';
   if (!sessionId) {
     return;
   }
+  const directory = detail?.directory && detail.directory !== 'global' ? detail.directory : null;
 
-  Promise.all([
-    import('@/stores/useUIStore'),
-  ]).then(async ([{ useUIStore }]) => {
+  void (async () => {
+    const { useUIStore } = await import('@/stores/useUIStore');
     await ensureNotificationSettingsSynced();
     const settings = useUIStore.getState();
     if (!settings.nativeNotificationsEnabled) {
       return;
     }
     const requireHidden = settings.notificationMode !== 'always';
-    const messageId = getPayloadString(info?.id);
-    const error = properties.error;
-    const errorMessage = getPayloadString(
-      typeof error === 'object' && error
-        ? (error as { message?: unknown }).message
-        : error,
-    );
-    const rawLastMessage = extractNotificationLastMessage(record)
-      || errorMessage
-      || await fetchLastAssistantMessageText(sessionId, messageId);
-    const lastMessage = prepareNotificationLastMessage(
-      rawLastMessage,
-      settings,
-    );
-    const variables = buildNotificationVariables(record, sessionId, lastMessage);
+    const assistant = notificationAssistantMessage(syncEvent);
+    const errorMessage = syncEvent.type === 'session.error'
+      ? syncEvent.properties.error.message
+      : assistant?.error?.message ?? '';
+    const rawLastMessage = errorMessage || await fetchLastAssistantMessageText(sessionId, assistant?.id);
+    const lastMessage = prepareNotificationLastMessage(rawLastMessage, settings);
+    const variables = buildNotificationVariables(syncEvent, directory, sessionId, lastMessage);
 
-    const isAssistantMessage = type === 'message.updated' && getPayloadString(info?.role) === 'assistant';
-    const finish = isAssistantMessage ? getPayloadString(info?.finish) : '';
-    const isCompletion = type === 'session.idle' || finish === 'stop';
-    const isError = type === 'session.error' || finish === 'error';
+    const finish = assistant?.finish;
+    const isCompletion = syncEvent.type === 'session.idle' || finish === 'stop';
+    const isError = syncEvent.type === 'session.error' || finish === 'error';
 
     if (isCompletion) {
-      const session = await opencodeClient.getSession(sessionId, getNotificationDirectory(record)).catch(() => undefined);
+      const session = await opencodeClient.getSession(sessionId, directory).catch(() => undefined);
       if (!session) return;
-      const isSubtask = Boolean(session?.parentID);
+      const isSubtask = Boolean(session.parentID);
       if (isSubtask ? !settings.notifyOnSubtasks : !settings.notifyOnCompletion) return;
       const now = Date.now();
       const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
@@ -2001,38 +2030,29 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       return;
     }
 
-    if (type === 'question.asked') {
+    // Forms replaced questions in OpenCode 2.x: one titled request the user answers.
+    if (syncEvent.type === 'form.created') {
       if (!settings.notifyOnQuestion) return;
-      const questions = Array.isArray(properties.questions) ? properties.questions : [];
-      const firstQuestion = questions[0] as Record<string, unknown> | undefined;
-      const header = getPayloadString(firstQuestion?.header);
-      const questionText = getPayloadString(firstQuestion?.question);
-      const questionVariables = { ...variables, last_message: questionText || header };
+      const header = syncEvent.properties.form.title;
+      const questionVariables = { ...variables, last_message: header };
       const template = getNotificationTemplate(settings, 'question', { title: 'Input needed', message: '{last_message}' });
-      const title = resolveTemplate(template.title, questionVariables) || (/plan\s*mode/i.test(header) ? 'Switch to plan mode' : /build\s*agent/i.test(header) ? 'Switch to build mode' : header || 'Input needed');
+      const title = resolveTemplate(template.title, questionVariables) || header || 'Input needed';
       const body = resolveTemplate(template.message, questionVariables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : questionText || 'Agent is waiting for your response',
+        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : header || 'Agent is waiting for your response',
         sessionId,
         requireHidden,
       });
       return;
     }
 
-    if (type === 'permission.asked') {
+    if (syncEvent.type === 'permission.asked') {
       if (!settings.notifyOnQuestion) return;
-      const requestId = getPayloadString(properties.id);
-      if (requestId) {
-        const accepted = await processVSCodePermissionAutoAccept(
-          properties as unknown as PermissionRequest,
-          detail?.directory,
-        );
-        if (accepted) return;
-      }
-      const permission = getPayloadString(properties.permission);
-      const sessionTitle = getPayloadString(properties.sessionTitle);
-      const fallbackMessage = sessionTitle || permission || 'Agent is waiting for your approval';
+      const request = syncEvent.properties;
+      const accepted = await processVSCodePermissionAutoAccept(request, directory ?? undefined);
+      if (accepted) return;
+      const fallbackMessage = request.message || request.action || 'Agent is waiting for your approval';
       const permissionVariables = { ...variables, last_message: fallbackMessage };
       const template = getNotificationTemplate(settings, 'question', { title: 'Permission required', message: '{last_message}' });
       const title = resolveTemplate(template.title, permissionVariables) || 'Permission required';
@@ -2044,7 +2064,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         requireHidden,
       });
     }
-  });
+  })();
 });
 
 // Listen for settings sync command from extension (broadcast to all VS Code webviews)

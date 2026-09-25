@@ -52,6 +52,11 @@ Nothing here may fail a send. A message without its background costs the agent
 some context; a failed send costs the user their message. Every caller treats an
 error as "no block this time".
 
+While memory is on, every session is told when to save, even with an empty
+store. The tool description alone is read only when the agent already means to
+call it, so agents told nothing here saved only when the user said "remember".
+The session hears "nothing is stored yet" only when both scopes loaded.
+
 A source that will not load never blanks the rest: an unreadable memory store
 still delivers the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it

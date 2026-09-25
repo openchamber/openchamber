@@ -15,8 +15,8 @@ export const PlainDiffFallback: React.FC<{ diff: string }> = ({ diff }) => {
         <pre
             className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-lg p-2 typography-code"
             style={{
-                backgroundColor: 'var(--syntax-base-background)',
-                color: 'var(--syntax-base-foreground)',
+                backgroundColor: 'var(--syntax-background)',
+                color: 'var(--syntax-foreground)',
             }}
         >
             {preview}

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 
 function createSession(id: string, overrides: Partial<Session> = {}): Session {
@@ -28,7 +27,7 @@ function createPart(id: string, messageID: string): Part {
 }
 
 describe("getReconnectCandidateSessionIds", () => {
-  test("includes non-idle, incomplete assistant, and parent sessions", () => {
+  test("includes non-idle, incomplete assistant, and active-child ancestor sessions", () => {
     const busyStatus = { type: "busy" } as SessionStatus
 
     expect(getReconnectCandidateSessionIds({
@@ -38,11 +37,35 @@ describe("getReconnectCandidateSessionIds", () => {
         createSession("parent"),
         createSession("incomplete"),
       ],
-      session_status: { busy: busyStatus },
+      session_status: { busy: busyStatus, child: busyStatus },
       message: {
         incomplete: [createAssistantMessage("m-1", "incomplete")],
       },
-    }).sort()).toEqual(["busy", "incomplete", "parent"])
+    }).sort()).toEqual(["busy", "child", "incomplete", "parent"])
+  })
+
+  test("closed historical children do not trigger parent recovery or a history scan", () => {
+    let parentReads = 0
+    const session: Session[] = Array.from({ length: 15_000 }, (_, index) => ({
+      id: `session-${index}`, projectID: "project", directory: "/repo",
+      title: "Historical session", time: { created: 1, updated: 1 }, cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      get parentID() { parentReads += 1; return `parent-${index}` },
+    }))
+    expect(getReconnectCandidateSessionIds({ session, session_status: {}, message: {} })).toEqual([])
+    expect(parentReads).toBe(0)
+  })
+
+  test("still recovers an incomplete turn when a plumbing message trails it", () => {
+    const synthetic = { id: "s-1", sessionID: "incomplete", role: "synthetic", time: { created: 2 }, text: "plugin prompt" } as unknown as Message
+
+    expect(getReconnectCandidateSessionIds({
+      session: [createSession("incomplete")],
+      session_status: { incomplete: { type: "idle" } as SessionStatus },
+      message: {
+        incomplete: [createAssistantMessage("m-1", "incomplete"), synthetic],
+      },
+    })).toContain("incomplete")
   })
 
   test("includes the currently viewed session even when it looks idle and complete", () => {

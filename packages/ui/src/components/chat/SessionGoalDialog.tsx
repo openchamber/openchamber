@@ -20,6 +20,7 @@ import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSmallModelAvailability } from '@/hooks/useSmallModelAvailability';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -36,6 +37,8 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
   const isMobile = useUIStore((state) => state.isMobile);
   const { goal } = useSessionGoal(sessionId, directory);
   const objectiveContent = useGoalObjectiveContent(sessionId, goal);
+  // Creating a goal needs the small model for its audits; managing an existing one does not.
+  const noSmallModel = useSmallModelAvailability(directory, open) === 'unavailable' && !goal;
 
   const [objective, setObjective] = React.useState('');
   const [budgetEnabled, setBudgetEnabled] = React.useState(false);
@@ -82,7 +85,7 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
   // "saving" over the outcome (re-saving used to spawn a fresh active goal
   // that the auditor instantly re-completed — a confusing status flash).
   const isCompleted = goal?.status === 'complete';
-  const canSave = !isCompleted && trimmedObjective.length > 0 && (!goal || objectiveChanged || budgetChanged);
+  const canSave = !isCompleted && !noSmallModel && trimmedObjective.length > 0 && (!goal || objectiveChanged || budgetChanged);
 
   const handleSave = () => run(
     () => setSessionGoal(sessionId, directory, { objective: trimmedObjective, tokenBudget: budgetValue }, goal),
@@ -180,6 +183,10 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
                 )}
               </div>
             </>
+          )}
+
+          {noSmallModel && (
+            <p className="typography-meta text-muted-foreground">{t('chat.goal.dialog.noSmallModel')}</p>
           )}
 
           <div className="flex items-center gap-2 pt-1">

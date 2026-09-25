@@ -120,10 +120,20 @@
     "agentWebToolEnabled": {
       "scope": "instance"
     },
+    "browserProvider": {
+      "scope": "instance"
+    },
+    "agentNotifyToolEnabled": {
+      "scope": "instance"
+    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
     "agentMemoryFeatureAvailable": {
+      "scope": "instance",
+      "computed": true
+    },
+    "routingFeatureAvailable": {
       "scope": "instance",
       "computed": true
     },
@@ -208,13 +218,20 @@
     "sidebarProjectDisplayMode": {
       "scope": "profile"
     },
-    "sidebarSessionGroupingMode": {
-      "scope": "profile"
+    "sidebarViewMode": {
+      "scope": "profile",
+      "perSurface": true
     },
     "sidebarProjectSortOrder": {
       "scope": "profile"
     },
+    "sidebarWorktreeSortOrder": {
+      "scope": "profile"
+    },
     "sidebarShowRecentSection": {
+      "scope": "profile"
+    },
+    "workStatusSectionOrder": {
       "scope": "profile"
     },
     "workStatusPanelEnabled": {
@@ -333,9 +350,6 @@
         "desktop",
         "vscode"
       ]
-    },
-    "showOpenCodeRestartConfirm": {
-      "scope": "profile"
     },
     "allowPromptingSubagentSessions": {
       "scope": "profile"
@@ -537,9 +551,6 @@
     "responseStyleCustomInstructions": {
       "scope": "profile"
     },
-    "optimizeSystemPrompt": {
-      "scope": "profile"
-    },
     "pwaAppName": {
       "scope": "instance",
       "surfaces": [
@@ -605,6 +616,10 @@
       "scope": "device",
       "local": true
     },
+    "contextEditorVisible": {
+      "scope": "device",
+      "local": true
+    },
     "contextEditorTreeWidth": {
       "scope": "device",
       "local": true
@@ -614,6 +629,10 @@
       "local": true
     },
     "workStatusExpandedSections": {
+      "scope": "device",
+      "local": true
+    },
+    "messageQueueExpanded": {
       "scope": "device",
       "local": true
     },
@@ -658,6 +677,14 @@
       "local": true
     },
     "walkthroughTocWidth": {
+      "scope": "device",
+      "local": true
+    },
+    "diffFileListMode": {
+      "scope": "device",
+      "local": true
+    },
+    "diffFileTreeWidth": {
       "scope": "device",
       "local": true
     },

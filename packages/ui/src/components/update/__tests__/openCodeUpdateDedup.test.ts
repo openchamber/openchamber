@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 
 import {
     resolveOpenCodeUpdateVersion,
+    isOpenCodeUpgradeSupported,
     resolveOpenCodeUpgradeStatusVersion,
     shouldShowOpenCodeUpdateToast,
     shouldShowPwaInstallToast,
@@ -213,20 +214,15 @@ describe('resolveOpenCodeUpgradeStatusVersion', () => {
         ).toBe('');
     });
 
-    test('fails closed when the server does not explicitly support upgrades', () => {
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: true,
-                latestVersion: '1.16.0',
-            }),
-        ).toBe('');
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: true,
-                latestVersion: '1.16.0',
-                upgrade: { supported: false },
-            }),
-        ).toBe('');
+    test('reports the version whether or not the runtime can install it', () => {
+        // OpenCode 2.x has no upgrade route: the toast still announces the
+        // version, and `isOpenCodeUpgradeSupported` decides whether it offers
+        // an Update button.
+        const unsupported = { available: true, latestVersion: '1.16.0', upgrade: { supported: false } };
+        expect(resolveOpenCodeUpgradeStatusVersion(unsupported)).toBe('1.16.0');
+        expect(isOpenCodeUpgradeSupported(unsupported)).toBe(false);
+        expect(isOpenCodeUpgradeSupported({ available: true, latestVersion: '1.16.0' })).toBe(false);
+        expect(isOpenCodeUpgradeSupported({ available: true, latestVersion: '1.16.0', upgrade: { supported: true } })).toBe(true);
     });
 
     test('returns empty string when available is missing or null', () => {

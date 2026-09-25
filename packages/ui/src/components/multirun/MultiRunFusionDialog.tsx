@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import type { Session } from '@/lib/opencode/model';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -12,18 +12,16 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
-import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
-import { flattenAssistantTextParts } from '@/lib/messages/messageText';
-import { getFusionSessionTitle, parseMultiRunSessionTitle } from '@/lib/multirun/title';
+import { getFusionSessionTitle } from '@/lib/multirun/title';
+import { getMultiRunIdentity, isFusionSource } from '@/lib/multirun/identity';
+import { loadFusionOutputs, type FusionSource } from '@/lib/multirun/fusion';
+import { createMultiRunSession } from '@/lib/multirun/createSession';
+import { registerMultiRunSession } from '@/stores/useMultiRunStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { AgentSelector } from './AgentSelector';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
-
-type FusionSource = {
-  session: Session;
-  directory: string | null;
-  projectDirectory: string | null;
-};
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 const buildSourcePart = (source: FusionSource, text: string, index: number): string => {
   const title = source.session.title?.trim() || source.session.id;
@@ -33,36 +31,6 @@ const buildSourcePart = (source: FusionSource, text: string, index: number): str
 const getSessionProjectDirectory = (sessionId: string, directory: string | null): string | null => {
   const metadata = useSessionUIStore.getState().getWorktreeMetadata(sessionId);
   return metadata?.projectDirectory ?? directory;
-};
-
-const getLastAssistantText = async (source: FusionSource): Promise<string> => {
-  const directory = source.directory ?? undefined;
-  const messages = getSyncMessages(source.session.id, directory);
-
-  if (messages.length === 0 && source.directory) {
-    const result = await opencodeClient.withDirectory(source.directory, () =>
-      opencodeClient.getSdkClient().session.messages({
-        sessionID: source.session.id,
-        directory: source.directory ?? undefined,
-        limit: 50,
-      })
-    );
-    const records = result.data ?? [];
-    for (let index = records.length - 1; index >= 0; index -= 1) {
-      const record = records[index] as { info?: { role?: string }; parts?: unknown[] };
-      if (record.info?.role !== 'assistant') continue;
-      return flattenAssistantTextParts((record.parts ?? []) as Parameters<typeof flattenAssistantTextParts>[0]).trim();
-    }
-    return '';
-  }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role !== 'assistant') continue;
-    return flattenAssistantTextParts(getSyncParts(message.id, directory)).trim();
-  }
-
-  return '';
 };
 
 export function MultiRunFusionDialog({
@@ -78,6 +46,7 @@ export function MultiRunFusionDialog({
   const liveSessions = useAllLiveSessions();
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const sessionsReady = useGlobalSessionsStore((state) => state.status === 'ready');
   const providers = useConfigStore((state) => state.providers);
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
   const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -91,10 +60,11 @@ export function MultiRunFusionDialog({
   ));
   const [variant, setVariant] = React.useState<string>('');
   const [agent, setAgent] = React.useState(currentAgentName ?? '');
-  const [sources, setSources] = React.useState<FusionSource[]>([]);
+  const [excludedSources, setExcludedSources] = React.useState<string[]>([]);
   const [isStarting, setIsStarting] = React.useState(false);
 
-  const parsed = React.useMemo(() => parseMultiRunSessionTitle(session.title), [session.title]);
+  const parsed = React.useMemo(() => getMultiRunIdentity(session,
+    getSessionProjectDirectory(session.id, session.directory) ?? session.directory), [session]);
   const allSessions = React.useMemo(() => {
     const byId = new Map<string, Session>();
     for (const candidate of liveSessions) byId.set(candidate.id, candidate);
@@ -104,32 +74,28 @@ export function MultiRunFusionDialog({
     return Array.from(byId.values());
   }, [activeSessions, archivedSessions, liveSessions, session]);
 
-  React.useEffect(() => {
-    if (!open || !parsed) return;
-
-    const currentDirectory = useSessionUIStore.getState().getDirectoryForSession(session.id);
-    const currentProjectDirectory = getSessionProjectDirectory(session.id, currentDirectory);
-    const nextSources = allSessions
+  React.useEffect(() => { setExcludedSources([]); }, [open, session.id]);
+  const sources = React.useMemo(() => {
+    if (!open || !parsed) return [];
+    return allSessions
       .map((candidate): FusionSource | null => {
-        const candidateParsed = parseMultiRunSessionTitle(candidate.title);
-        if (!candidateParsed || candidateParsed.groupSlug !== parsed.groupSlug || candidateParsed.fusion) return null;
-        if ((candidateParsed.runGroup ?? null) !== (parsed.runGroup ?? null)) return null;
+        if (excludedSources.includes(candidate.id)) return null;
         const directory = useSessionUIStore.getState().getDirectoryForSession(candidate.id)
           ?? resolveGlobalSessionDirectory(candidate);
         const projectDirectory = getSessionProjectDirectory(candidate.id, directory);
-        if (currentProjectDirectory && projectDirectory && currentProjectDirectory !== projectDirectory) return null;
-        return { session: candidate, directory, projectDirectory };
+        const identity = getMultiRunIdentity(candidate, projectDirectory ?? candidate.directory);
+        if (!identity || !isFusionSource(parsed, identity)) return null;
+        return { session: candidate, directory, projectDirectory, identity };
       })
       .filter((source): source is FusionSource => source !== null)
       .sort((a, b) => (a.session.time?.created ?? 0) - (b.session.time?.created ?? 0));
 
-    setSources(nextSources);
-  }, [allSessions, open, parsed, session.id]);
+  }, [allSessions, open, parsed, excludedSources]);
 
   const selectedProvider = providers.find((provider) => provider.id === providerID);
-  const selectedProviderModel = selectedProvider?.models.find((model) => model.id === modelID) as { variants?: Record<string, unknown> } | undefined;
-  const variantKeys = selectedProviderModel?.variants ? Object.keys(selectedProviderModel.variants) : [];
-  const canStart = Boolean(parsed && providerID && modelID && sources.length > 0 && !isStarting);
+  const selectedProviderModel = selectedProvider?.models.find((model) => model.id === modelID) as { variants?: ModelVariantSource } | undefined;
+  const variantKeys = listModelVariantIds(selectedProviderModel?.variants);
+  const canStart = Boolean(parsed && sessionsReady && providerID && modelID && sources.length > 0 && !isStarting);
 
   const handleModelSelect = React.useCallback((model: ModelSelectionWithId) => {
     setSelectedModelSelection([model]);
@@ -141,13 +107,15 @@ export function MultiRunFusionDialog({
   const selectedModelLabel = selectedModelSelection[0]?.displayName || selectedModelSelection[0]?.modelID || t('multirun.fusion.model.placeholder');
 
   const handleStart = async () => {
-    if (!parsed || !providerID || !modelID) return;
+    if (!parsed || !canStart) return;
+    const runtimeKey = getRuntimeKey();
+    const client = opencodeClient.getSdkClient();
+    const assertCurrent = () => {
+      if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) throw new Error('Runtime changed');
+    };
     setIsStarting(true);
     try {
-      const sourceTexts = await Promise.all(sources.map((source) => getLastAssistantText(source)));
-      const usableSources = sources
-        .map((source, index) => ({ source, text: sourceTexts[index] ?? '' }))
-        .filter((item) => item.text.trim().length > 0);
+      const usableSources = await loadFusionOutputs(sources, parsed, assertCurrent);
 
       if (usableSources.length === 0) {
         toast.error(t('multirun.fusion.toast.noOutputs'));
@@ -155,32 +123,40 @@ export function MultiRunFusionDialog({
       }
 
       const directory = sources[0]?.projectDirectory ?? sources[0]?.directory ?? null;
+      if (!directory) throw new Error('Fusion requires a session directory');
       const fusionTitle = getFusionSessionTitle(parsed.groupSlug, providerID, modelID, parsed.runGroup);
       const [visiblePrompt, instructionsPrompt] = await Promise.all([
         renderMagicPrompt('session.fusion.visible'),
         renderMagicPrompt('session.fusion.instructions'),
       ]);
-      const fusionSession = await useSessionUIStore.getState().createSession(fusionTitle, directory, null);
-      if (!fusionSession) throw new Error('Failed to create fusion session');
+      const fusionSession = await createMultiRunSession({
+        title: fusionTitle, directory,
+        identity: { group: parsed.group, groupSlug: parsed.groupSlug, runGroup: parsed.runGroup,
+          role: 'fusion', providerID, modelID },
+        selection: { model: { providerID, id: modelID, variant: variant || undefined }, agent: agent || undefined },
+      }, assertCurrent);
+      registerMultiRunSession(fusionSession, directory);
 
       useSessionUIStore.getState().setCurrentSession(fusionSession.id, directory);
       onOpenChange(false);
 
+      assertCurrent();
       await opencodeClient.sendMessage({
+        runtimeKey,
         id: fusionSession.id,
         providerID,
-        modelID,
-        variant: variant || undefined,
+        model: { providerID, id: modelID, variant: variant || undefined },
         agent: agent || undefined,
         text: visiblePrompt,
-        additionalParts: [
-          { text: instructionsPrompt, synthetic: true },
-          ...usableSources.map((item, index) => ({ text: buildSourcePart(item.source, item.text, index), synthetic: true })),
-          { text: '\n\n--- FUSION INPUTS END ---\nNow write the final fused answer.', synthetic: true },
+        context: [
+          { text: instructionsPrompt },
+          ...usableSources.map((item, index) => ({ text: buildSourcePart(item.source, item.text, index) })),
+          { text: '\n\n--- FUSION INPUTS END ---\nNow write the final fused answer.' },
         ],
-        directory: directory ?? opencodeClient.getDirectory(),
+        directory,
       });
     } catch (error) {
+      if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) return;
       console.error('[MultiRunFusion] Failed to start fusion', error);
       toast.error(t('multirun.fusion.toast.failed'));
     } finally {
@@ -239,9 +215,9 @@ export function MultiRunFusionDialog({
           <div className="max-h-56 space-y-1 overflow-auto rounded-lg border border-[var(--interactive-border)] p-1">
             {sources.map((source) => (
               <div key={source.session.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 typography-meta">
-                <ProviderLogo providerId={parseMultiRunSessionTitle(source.session.title)?.providerID ?? ''} className="h-4 w-4" />
+                <ProviderLogo providerId={source.identity.providerID} className="h-4 w-4" />
                 <span className="min-w-0 flex-1 truncate">{source.session.title || source.session.id}</span>
-                <button type="button" onClick={() => setSources((prev) => prev.filter((item) => item.session.id !== source.session.id))} className="text-muted-foreground hover:text-foreground">
+                <button type="button" onClick={() => setExcludedSources((prev) => [...prev, source.session.id])} className="text-muted-foreground hover:text-foreground">
                   <Icon name="close" className="h-4 w-4" />
                 </button>
               </div>

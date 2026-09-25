@@ -80,12 +80,12 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         }
 
         const searchPromise = opencodeClient
+          // OpenCode v2's file search takes a type filter only; hidden-file and
+          // gitignore handling are the server's, so those options stay in the
+          // cache key but are not sent.
           .searchFiles(normalizedQuery, {
             directory: normalizedDirectory,
             limit,
-            includeHidden,
-            respectGitignore,
-            dirs: type !== 'file',
             type,
           })
           .then((files) => {

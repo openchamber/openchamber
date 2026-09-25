@@ -1,0 +1,108 @@
+{
+  "metadata": {
+    "id": "osaka-jade-refined-light",
+    "name": "Osaka Jade Light",
+    "author": "tbcode-org",
+    "variant": "light",
+    "description": "Light companion to Osaka Jade Dark",
+    "version": "1.0.0",
+    "tags": ["vscode", "jade", "light"]
+  },
+  "colors": {
+    "primary": {
+      "base": "#206B5C",
+      "foreground": "#FFFDF4",
+      "hover": "#195849",
+      "active": "#164C40"
+    },
+    "surface": {
+      "background": "#F6F5E9",
+      "foreground": "#243A30",
+      "muted": "#EBEEE2",
+      "mutedForeground": "#52665A",
+      "elevated": "#FFFDF4"
+    },
+    "interactive": {
+      "border": "#60796933",
+      "borderHover": "#60796955",
+      "selection": "#D5E8D9",
+      "selectionForeground": "#203C30",
+      "focusRing": "#206B5C99",
+      "hover": "#427D6020",
+      "active": "#427D6030",
+      "cursor": "#206B5C"
+    },
+    "status": {
+      "error": "#AA3C36",
+      "errorBackground": "#AA3C361A",
+      "errorBorder": "#AA3C3655",
+      "warning": "#906A0D",
+      "warningBackground": "#906A0D1A",
+      "warningBorder": "#906A0D55",
+      "success": "#2D7048",
+      "successBackground": "#2D70481A",
+      "successBorder": "#2D704855",
+      "info": "#315F98",
+      "infoBackground": "#315F981A",
+      "infoBorder": "#315F9855"
+    },
+    "syntax": {
+      "base": {
+        "background": "#F0F1E6",
+        "comment": "#5B7063",
+        "keyword": "#88436E",
+        "string": "#A14E53",
+        "number": "#2D7048",
+        "function": "#82620E",
+        "variable": "#246C6B",
+        "type": "#206B5C",
+        "operator": "#52665A"
+      },
+      "tokens": {
+        "parameter": "#246C6B",
+        "constant": "#246C6B",
+        "boolean": "#2D7048",
+        "punctuation": "#52665A",
+        "stringEscape": "#82620E",
+        "keywordImport": "#88436E",
+        "tag": "#2D7048"
+      },
+      "highlights": {
+        "diffAdded": "#2D7048",
+        "diffAddedBackground": "#2D70481A",
+        "diffRemoved": "#AA3C36",
+        "diffRemovedBackground": "#AA3C361A",
+        "diffModified": "#906A0D",
+        "diffModifiedBackground": "#906A0D1A",
+        "lineNumber": "#66796B",
+        "lineNumberActive": "#206B5C"
+      }
+    },
+    "pr": { "merged": "#206B5C" },
+    "chat": {
+      "userMessageBackground": "#E8EBDD",
+      "divider": "#60796933"
+    },
+    "markdown": {
+      "link": "#206B5C",
+      "linkHover": "#195849",
+      "inlineCode": "#805D0E",
+      "inlineCodeBackground": "#EAEBDE",
+      "blockquote": "#5C7163",
+      "blockquoteBorder": "#639980",
+      "listMarker": "#206B5C99"
+    },
+    "tools": {
+      "border": "#60796933",
+      "icon": "#52665A",
+      "title": "#243A30",
+      "description": "#52665A",
+      "edit": {
+        "addedBackground": "#2D70481A",
+        "removedBackground": "#AA3C361A",
+        "modifiedBackground": "#906A0D1A",
+        "lineNumber": "#66796B"
+      }
+    }
+  }
+}

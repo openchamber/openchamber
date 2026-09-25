@@ -13,7 +13,7 @@ const decodeBase64Text = (value: string | undefined): string => {
 
 describe('VS Code webview request body transport', () => {
   test('preserves body from SDK-style Request objects', async () => {
-    const request = new Request('https://openchamber.local/api/session/abc/prompt_async', {
+    const request = new Request('https://openchamber.local/api/session/abc/prompt', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ messageID: 'msg_1' }),

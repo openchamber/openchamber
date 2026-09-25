@@ -13,6 +13,8 @@ import {
   deleteRemoteBranch,
   dropGitStash,
   getGitBranches,
+  getGitDiff,
+  getGitFileDiff,
   getGitRangeDiff,
   getGitRangeFiles,
   getGitCommitDiff,
@@ -21,6 +23,7 @@ import {
   getGitStatus,
   gitFetch,
   gitPush,
+  listGitDirectories,
   merge,
   popGitStash,
   rebase,
@@ -38,6 +41,7 @@ import type { GitStatus } from './api/types';
 import { sessionEvents } from './sessionEvents';
 import { gitPushScopeKey, subscribeGitPush } from './gitPushEvents';
 import { getRuntimeKey } from './runtime-switch';
+import { GitPathUnavailableError } from './api/git-path-diff';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -107,6 +111,26 @@ const captureError = async (callback: () => Promise<void>): Promise<unknown> => 
     return error;
   }
 };
+
+test('nested repository discovery scopes the workspace to the requested root', async () => {
+  installWindowMock();
+  const root = '/projects/plugin collection';
+  const repositories = [`${root}/first`, `${root}/second`];
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), 'http://localhost');
+    expect(url.pathname).toBe('/api/fs/git-dirs');
+    expect(url.searchParams.get('path')).toBe(root);
+    if (url.searchParams.get('directory') !== root) {
+      return Response.json({ error: 'Path is outside of active workspace' }, { status: 400 });
+    }
+    return Response.json({ repositories: repositories.map((path) => ({ path })) });
+  }, previousFetch);
+  try {
+    expect(await listGitDirectories(root)).toEqual(repositories);
+  } finally {
+    restoreMocks();
+  }
+});
 
 describe('gitApiHttp index mutations', () => {
   test('sends bulk stage payloads as paths', async () => {
@@ -233,6 +257,41 @@ describe('gitApiHttp branch comparisons', () => {
       globalThis.fetch = Object.assign(async () => Response.json({ error: 'Fetch the selected ref first.' }, { status: 500 }), previousFetch);
       await expect(getGitRangeDiff('/repo', options)).rejects.toThrow('Fetch the selected ref first.');
       await expect(getGitRangeFiles('/repo', options)).rejects.toThrow('Fetch the selected ref first.');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('reports a status path that no longer resolves as unavailable, not as a failed request', async () => {
+    installWindowMock();
+    try {
+      for (const [status, code] of [[404, 'path_not_found'], [422, 'nested_repository']] as const) {
+        globalThis.fetch = Object.assign(async () => Response.json({ error: `unavailable: ${code}`, code }, { status }), previousFetch);
+        for (const request of [() => getGitDiff('/repo', { path: 'nested/' }), () => getGitFileDiff('/repo', { path: 'nested/' })]) {
+          const error = await captureError(async () => { await request(); });
+          expect(error instanceof GitPathUnavailableError ? [error.reason, error.message] : error).toEqual([code, `unavailable: ${code}`]);
+        }
+      }
+      // A 404 without the route's body is some other failure.
+      globalThis.fetch = Object.assign(async () => new Response('Not Found', { status: 404, statusText: 'Not Found' }), previousFetch);
+      const error = await captureError(async () => { await getGitDiff('/repo', { path: 'file.ts' }); });
+      expect(error instanceof GitPathUnavailableError).toBe(false);
+      expect(error instanceof Error ? error.message : error).toBe('Failed to get git diff: Not Found');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('carries submodule state and treats its absence from an older server as an ordinary path', async () => {
+    installWindowMock();
+    const submodule = { headCommit: 'a'.repeat(40), indexCommit: 'a'.repeat(40), worktreeCommit: 'a'.repeat(40), hasTrackedChanges: false, hasUntrackedFiles: true, hasConflict: false };
+    try {
+      globalThis.fetch = Object.assign(async () => Response.json({ diff: '', submodule }), previousFetch);
+      expect(await getGitDiff('/repo', { path: 'sub' })).toEqual({ diff: '', submodule });
+      globalThis.fetch = Object.assign(async () => Response.json({ diff: 'patch' }), previousFetch);
+      expect(await getGitDiff('/repo', { path: 'file.ts' })).toEqual({ diff: 'patch', submodule: null });
+      globalThis.fetch = Object.assign(async () => Response.json({ original: 'a', modified: 'b', path: 'file.ts', isBinary: false }), previousFetch);
+      expect(await getGitFileDiff('/repo', { path: 'file.ts' })).toEqual({ original: 'a', modified: 'b', path: 'file.ts', isBinary: false, submodule: null });
     } finally {
       restoreMocks();
     }

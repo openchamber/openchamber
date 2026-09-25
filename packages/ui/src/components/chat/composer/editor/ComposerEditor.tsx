@@ -40,6 +40,7 @@ import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
+import { getComposerHeightLimit } from './heightLimit';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 
 export interface ComposerSelection {
@@ -115,6 +116,13 @@ export interface ComposerEditorProps {
     className?: string;
     contentClassName?: string;
     /**
+     * Value of the host's `data-chat-input` attribute. The default `"true"`
+     * marks the composer's prompt editor for global helpers (`focusChatInput`,
+     * shortcut guards); a second editor in the same column — the mobile
+     * comment editor — passes its own marker so those helpers skip it.
+     */
+    dataChatInput?: string;
+    /**
      * Keeps the underlying view alive across unmounts. Supply one from a parent
      * that outlives the swap; without it the view is built and destroyed with
      * the component, which is correct but expensive on an interaction path.
@@ -123,7 +131,6 @@ export interface ComposerEditorProps {
     'aria-label'?: string;
     'data-testid'?: string;
 }
-
 
 /**
  * The text inserted by a transaction, used to tell a typed `@` from a pasted
@@ -435,12 +442,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     getComputedStyle(view.contentDOM).lineHeight || '',
                 );
                 if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
-                let cap = lineHeight * maxLines;
-                if (boundEl && branch) {
-                    const chrome = branch.offsetHeight - view.scrollDOM.offsetHeight;
-                    const available = boundEl.clientHeight - chrome - boundGapPx;
-                    if (available > 0) cap = Math.min(cap, available);
-                }
+                const cap = getComposerHeightLimit({
+                    maxLinesHeight: lineHeight * maxLines,
+                    boundHeight: boundEl?.clientHeight,
+                    surroundingHeight: branch
+                        ? branch.offsetHeight - view.scrollDOM.offsetHeight
+                        : undefined,
+                    boundGapPx,
+                });
                 const next = `${cap}px`;
                 // The scroller growing re-fires the observer with an unchanged
                 // result; writing only on change keeps that loop silent.
@@ -553,7 +562,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             <div
                 ref={hostRef}
                 data-testid={props['data-testid']}
-                data-chat-input="true"
+                data-chat-input={props.dataChatInput ?? 'true'}
                 onMouseDown={handleHostMouseDown}
                 className={cn(
                     'composer-editor w-full',

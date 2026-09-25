@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, SessionStatus } from "@/lib/opencode/model"
 import { INITIAL_STATE, type State } from "./types"
 import {
   touchStreamingSession,
@@ -13,20 +13,22 @@ import {
   setSyncPerformanceDiagnosticsEnabled,
 } from "./performance-diagnostics"
 
-const message = (id: string, role: "user" | "assistant"): Message => ({
+const message = (id: string, role: "user" | "assistant"): Message =>
+  role === "user"
+    ? { id, sessionID: "ses_1", role, time: { created: 1 } }
+    : { id, sessionID: "ses_1", role, time: { created: 1 }, agent: "build", providerID: "provider", modelID: "model" }
+
+const completedAssistantMessage = (id: string): Message => ({
   id,
-  role,
-  time: { created: 1 },
-} as unknown as Message)
+  sessionID: "ses_1",
+  role: "assistant",
+  time: { created: 1, completed: 100 },
+  agent: "build",
+  providerID: "provider",
+  modelID: "model",
+})
 
-const completedAssistantMessage = (id: string): Message => {
-  const base = message(id, "assistant")
-  // SAFETY: test fixture — the streaming reducers read only `id`, `role`, and
-  // `time.completed`, which this literal provides.
-  return { ...base, time: { created: 1, completed: 100 } } as Message
-}
-
-const stateWithMessages = (messages: Message[], status: SessionStatus = { type: "busy" } as SessionStatus): State => ({
+const stateWithMessages = (messages: Message[], status: SessionStatus = { type: "busy" }): State => ({
   ...INITIAL_STATE,
   session_status: {
     ses_1: status,
@@ -105,7 +107,7 @@ describe("updateStreamingState", () => {
     const messages: State["message"] = {}
     for (let index = 0; index < 50; index += 1) {
       const sessionID = `ses_${index}`
-      session_status[sessionID] = { type: "busy" } as SessionStatus
+      session_status[sessionID] = { type: "busy" }
       messages[sessionID] = [
         message(`msg_user_${index}`, "user"),
         message(`msg_assistant_${index}`, "assistant"),

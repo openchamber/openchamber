@@ -1,4 +1,4 @@
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { Session } from "@/lib/opencode/model"
 import { Binary } from "./binary"
 
 function areSessionsEqual(left: Session, right: Session): boolean {

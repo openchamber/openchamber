@@ -20,7 +20,8 @@ has to ask for it.
   `PROMPT_VERSION`.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs via the shared GitHub octokit helper.
+- `pull-request.js` — PR diffs and per-file contents via the shared GitHub
+  octokit helper.
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.
@@ -101,6 +102,14 @@ readiness checks or generation. Successful empty patches return 200; auth,
 GitHub and malformed-response failures remain errors. Walkthrough generation
 keeps its existing empty-diff refusal. UI comparison behavior is documented in
 `packages/ui/src/components/views/DOCUMENTATION.md`.
+
+`GET /api/walkthrough/pr-file` takes the same `directory` and PR `source` plus
+`path`, optional `previousPath`, and `status`, and returns `{ original, modified }`
+for that one file as GitHub has it: the base side at the PR's merge base, the
+head side at the PR head. This is how the comparison view expands collapsed
+context for a PR: its patch arrives at fixed context and its commits may not be
+on disk, so the working tree is never read. Files above 5 MB answer `413`
+(`code: 'file-too-large'`).
 
 ## No truncation
 

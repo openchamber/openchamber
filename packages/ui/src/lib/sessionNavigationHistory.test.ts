@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { navigateSessionHistory } from './sessionNavigationHistory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
-// SAFETY: the history module only reads a session's id and directory metadata.
 const session = (id: string): Session => ({
   id,
   title: id,
   directory: '/repo',
   projectID: 'p1',
-  version: '1',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: 1 },
-} as Session);
+});
 
 describe('sessionNavigationHistory', () => {
   test('steps back and forward through the visit order', () => {

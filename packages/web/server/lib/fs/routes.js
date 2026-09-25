@@ -1,4 +1,5 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { resolveByteRange } from './byte-range.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
 
@@ -67,25 +68,6 @@ export const mintOutsideFileGrant = async (targetPath, {
   };
 };
 
-const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }) => {
-  pruneOutsideFileGrants();
-  if (typeof token !== 'string' || !token.trim()) {
-    return { ok: false, error: 'Outside workspace file access requires a grant' };
-  }
-  const grant = outsideFileGrants.get(token.trim());
-  if (!grant) {
-    return { ok: false, error: 'Outside workspace file grant is invalid or expired' };
-  }
-  if (!grant.scopes.has(scope)) {
-    return { ok: false, error: 'Outside workspace file grant does not allow this operation' };
-  }
-  const canonicalPath = await fsPromises.realpath(targetPath);
-  if (canonicalPath !== grant.canonicalPath) {
-    return { ok: false, error: 'Outside workspace file grant does not match requested path' };
-  }
-  return { ok: true, base: grant.base, resolved: canonicalPath, granted: true };
-};
-
 const createCommandTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw > 0) return raw;
@@ -125,14 +107,30 @@ const FILE_MIME_MAP = Object.freeze({
   '.xml': 'application/xml',
   '.txt': 'text/plain',
   '.md': 'text/markdown',
+  '.mmd': 'text/plain',
   '.pdf': 'application/pdf',
   '.csv': 'text/csv',
+  '.tsv': 'text/tab-separated-values',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
   '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
   '.eot': 'application/vnd.ms-fontobject',
   '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.weba': 'audio/webm',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.ogv': 'video/ogg',
+  '.mkv': 'video/x-matroska',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -196,6 +194,23 @@ const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   return true;
 };
 
+// A chats root may not exist until the first draft. Resolve its existing
+// ancestor so both that first mkdir and later OpenCode sessions use disk casing.
+const canonicalDirectoryPath = async (directory, fsPromises, path) => {
+  let ancestor = path.resolve(directory);
+  const missing = [];
+  for (;;) {
+    try {
+      return path.join(await fsPromises.realpath(ancestor), ...missing);
+    } catch (error) {
+      const parent = path.dirname(ancestor);
+      if (error.code !== 'ENOENT' || parent === ancestor) throw error;
+      missing.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
+};
+
 const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, managedRoots }) => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
@@ -253,7 +268,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, managedRoots }) => {
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
   const resolvedProject = await resolveProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
@@ -292,13 +307,30 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     }
   }
 
-  return resolveWorkspacePathFromWorktrees({
+  // Keep legacy lexical paths valid, but also accept the canonical roots
+  // returned by /fs/home. Never infer filesystem identity from letter case.
+  let resolutionError;
+  for (const root of managedRoots) {
+    try {
+      const canonicalRoot = await canonicalDirectoryPath(root, fsPromises, path);
+      const resolvedPath = path.resolve(normalizeDirectoryPath(targetPath));
+      if (isPathWithinRoot(resolvedPath, canonicalRoot, path, os)) {
+        return { ok: true, base: canonicalRoot, resolved: resolvedPath };
+      }
+    } catch (error) {
+      resolutionError ??= error;
+    }
+  }
+  const worktree = await resolveWorkspacePathFromWorktrees({
     targetPath,
     baseDirectory: resolvedProject.directory,
     path,
     os,
     normalizeDirectoryPath,
   });
+  if (worktree.ok) return worktree;
+  if (resolutionError) throw resolutionError;
+  return worktree;
 };
 
 // Nested repository discovery bounds: only shallow walks are useful for the
@@ -416,19 +448,14 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
     const resolved = path.resolve(normalized);
-    return resolveOutsideFileGrant({
-      token: req.query?.outsideFileGrant,
-      targetPath: resolved,
-      scope,
-      fsPromises,
-    });
+    return { ok: true, base: path.dirname(resolved), resolved };
   }
 
   return resolveWorkspacePathFromContext({
@@ -437,6 +464,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     resolveProjectDirectory,
     path,
     os,
+    fsPromises,
     normalizeDirectoryPath,
     managedRoots,
   });
@@ -704,13 +732,22 @@ export const registerFsRoutes = (app, dependencies) => {
     job.updatedAt = Date.now();
   };
 
-  app.get('/api/fs/home', (_req, res) => {
+  app.get('/api/fs/home', async (_req, res) => {
     try {
       const home = os.homedir();
       if (!home || typeof home !== 'string' || home.length === 0) {
         return res.status(500).json({ error: 'Failed to resolve home directory' });
       }
-      return res.json({ home, chatsRoot });
+      const [canonicalChatsRoot, canonicalLegacyChatsRoot] = await Promise.all([
+        canonicalDirectoryPath(chatsRoot, fsPromises, path),
+        canonicalDirectoryPath(path.join(home, '.config', 'openchamber', 'chats'), fsPromises, path).catch((error) => {
+          // A relocated root must remain usable if the old root is inaccessible.
+          // Omit only this optional alias; clients retain exact legacy matching.
+          console.warn('Failed to resolve legacy chats root:', error);
+          return undefined;
+        }),
+      ]);
+      return res.json({ home, chatsRoot, canonicalChatsRoot, canonicalLegacyChatsRoot });
     } catch (error) {
       console.error('Failed to resolve home directory:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to resolve home directory' });
@@ -730,6 +767,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Outside workspace directory creation requires a grant' });
       } else {
         const resolved = await resolveWorkspacePathFromContext({
+          fsPromises,
           req,
           targetPath: dirPath,
           resolveProjectDirectory,
@@ -1043,19 +1081,7 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       const ext = path.extname(canonicalPath).toLowerCase();
-      const mimeMap = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.svg': 'image/svg+xml',
-        '.webp': 'image/webp',
-        '.ico': 'image/x-icon',
-        '.bmp': 'image/bmp',
-        '.avif': 'image/avif',
-        '.pdf': 'application/pdf',
-      };
-      const mimeType = mimeMap[ext] || 'application/octet-stream';
+      const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
 
       const download = req.query.download === 'true';
       if (download) {
@@ -1069,11 +1095,35 @@ export const registerFsRoutes = (app, dependencies) => {
         res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
-      const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
-      if (resolved.granted) {
-        res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Accept-Ranges', 'bytes');
+
+      // A byte span is streamed from disk rather than read whole: the audio
+      // and video players ask for one on every seek, and a recording can be
+      // hundreds of megabytes.
+      const range = resolveByteRange(req.headers?.range, stats.size);
+      if (range.kind === 'unsatisfiable') {
+        res.setHeader('Content-Range', `bytes */${stats.size}`);
+        return res.status(416).end();
       }
+      if (range.kind === 'range') {
+        const handle = await fsPromises.open(canonicalPath, 'r');
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${stats.size}`);
+        res.setHeader('Content-Length', String(range.end - range.start + 1));
+        res.type(mimeType);
+        // The handle closes with the stream, on success and on failure alike.
+        const stream = handle.createReadStream({ start: range.start, end: range.end });
+        stream.on('error', (error) => {
+          console.error('Failed to stream raw file range:', error);
+          res.destroy(error);
+        });
+        stream.pipe(res);
+        return undefined;
+      }
+
+      const content = await fsPromises.readFile(canonicalPath);
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
@@ -1153,6 +1203,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
     try {
       const resolved = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath: filePath,
         resolveProjectDirectory,
@@ -1223,6 +1274,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
     try {
       const resolved = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath: filePath,
         resolveProjectDirectory,
@@ -1330,6 +1382,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
     try {
       const resolved = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath,
         resolveProjectDirectory,
@@ -1368,6 +1421,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
     try {
       const resolvedOld = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath: oldPath,
         resolveProjectDirectory,
@@ -1381,6 +1435,7 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       const resolvedNew = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath: newPath,
         resolveProjectDirectory,
@@ -1487,6 +1542,7 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       const resolvedCwdCandidate = path.resolve(normalizeDirectoryPath(cwd));
       const resolvedForWorkspace = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath: resolvedCwdCandidate,
         resolveProjectDirectory,
@@ -1619,7 +1675,8 @@ export const registerFsRoutes = (app, dependencies) => {
                 const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                   cwd: resolvedPath,
                   windowsHide: true,
-                  stdio: ['ignore', 'pipe', 'pipe'],
+                  // Diagnostics are unused here. An unread pipe can block Git forever.
+                  stdio: ['ignore', 'pipe', 'ignore'],
                 });
 
                 let stdout = '';
@@ -1725,6 +1782,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
     try {
       const resolved = await resolveWorkspacePathFromContext({
+        fsPromises,
         req,
         targetPath: rawPath,
         resolveProjectDirectory,

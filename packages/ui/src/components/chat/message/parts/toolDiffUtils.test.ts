@@ -20,8 +20,8 @@ import {
 const identity = (path: string) => path;
 
 describe('toolDiffUtils', () => {
-    test('prefers the absolute apply_patch path over its worktree-relative label', () => {
-        expect(getPrimaryToolPath('apply_patch', undefined, {
+    test('prefers the absolute patch path over its worktree-relative label', () => {
+        expect(getPrimaryToolPath('patch', undefined, {
             files: [{
                 filePath: '/workspace/project/src/file.ts',
                 relativePath: 'workspace/project/src/file.ts',
@@ -30,8 +30,8 @@ describe('toolDiffUtils', () => {
         })).toBe('/workspace/project/src/file.ts');
     });
 
-    test('opens the move destination and skips deleted apply_patch files', () => {
-        expect(getPrimaryToolPath('apply_patch', undefined, {
+    test('opens the move destination and skips deleted patch files', () => {
+        expect(getPrimaryToolPath('patch', undefined, {
             files: [
                 { filePath: '/workspace/deleted.ts', relativePath: 'deleted.ts', type: 'delete' },
                 {
@@ -44,13 +44,13 @@ describe('toolDiffUtils', () => {
         })).toBe('/workspace/new.ts');
     });
 
-    test('falls back to the relative apply_patch path for legacy metadata', () => {
-        expect(getPrimaryToolPath('apply_patch', undefined, {
+    test('falls back to the relative patch path for legacy metadata', () => {
+        expect(getPrimaryToolPath('patch', undefined, {
             files: [{ relativePath: 'src/file.ts', type: 'update' }],
         })).toBe('src/file.ts');
     });
 
-    test('resolves each apply_patch file independently', () => {
+    test('resolves each patch file independently', () => {
         expect(getApplyPatchFilePath({
             filePath: '/workspace/project/src/first.ts',
             relativePath: 'workspace/project/src/first.ts',
@@ -84,13 +84,13 @@ describe('toolDiffUtils', () => {
             ],
         };
 
-        expect(getPrimaryDiffFromMetadata('apply_patch', metadata, '/workspace/project/src/moved.ts'))
+        expect(getPrimaryDiffFromMetadata('patch', metadata, '/workspace/project/src/moved.ts'))
             .toBe(movedPatch);
-        expect(getFirstChangedLineFromMetadata('apply_patch', metadata, '/workspace/project/src/moved.ts'))
+        expect(getFirstChangedLineFromMetadata('patch', metadata, '/workspace/project/src/moved.ts'))
             .toBe(42);
     });
 
-    test('treats raw apply_patch envelopes as text, not visual diffs', () => {
+    test('treats raw patch envelopes as text, not visual diffs', () => {
         const entries = getDiffPatchEntries(undefined, [
             '*** Begin Patch',
             '*** Update File: src/app.ts',
@@ -207,7 +207,7 @@ describe('toolDiffUtils', () => {
         expect(entries).toHaveLength(1);
         expect(entries[0]?.renderMode).toBe('text');
         expect(entries[0]?.patch).toBe(patch);
-        expect(resolveToolQuickOpenTarget('apply_patch', undefined, metadata)?.patch).toBe(patch);
+        expect(resolveToolQuickOpenTarget('patch', undefined, metadata)?.patch).toBe(patch);
 
         const preview = getToolDiffPreviewText(entries[0]?.patch ?? '');
         expect(preview.endsWith('\n…')).toBe(true);
@@ -273,14 +273,14 @@ describe('toolDiffUtils', () => {
         };
         const entries = getDiffPatchEntries(metadata, undefined, identity);
 
-        expect(resolveToolQuickOpenTarget('apply_patch', undefined, metadata)).toEqual({
+        expect(resolveToolQuickOpenTarget('patch', undefined, metadata)).toEqual({
             filePath: '/workspace/project/src/file.ts',
             line: extractFirstChangedLineFromDiff(entries[0]?.patch ?? ''),
             patch: entries[0]?.patch,
         });
     });
 
-    test('picks the entry matching the primary path in a multi-file apply_patch', () => {
+    test('picks the entry matching the primary path in a multi-file patch', () => {
         const firstPatch = ['--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' a', '+first'].join('\n');
         const secondPatch = ['--- a/src/b.ts', '+++ b/src/b.ts', '@@ -30,2 +40,3 @@', ' b', '+second'].join('\n');
         const metadata = {
@@ -289,7 +289,7 @@ describe('toolDiffUtils', () => {
                 { filePath: '/workspace/project/src/b.ts', relativePath: 'src/b.ts', patch: secondPatch, type: 'update' },
             ],
         };
-        const target = resolveToolQuickOpenTarget('apply_patch', undefined, metadata);
+        const target = resolveToolQuickOpenTarget('patch', undefined, metadata);
 
         expect(target?.filePath).toBe('/workspace/project/src/b.ts');
         expect(target?.line).toBe(41);

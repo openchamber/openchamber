@@ -478,7 +478,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                           const newCommands = setupCommands.filter((_, i) => i !== index);
                           setSetupCommands(newCommands);
                         }}
-                        className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={t('agentManager.empty.setupCommands.removeCommandAria')}
                       >
                         <Icon name="close" className="h-4 w-4" />
@@ -535,7 +535,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           </label>
           <div className="relative">
             <div
-              className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-primary/50"
+              className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-ring"
               style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
             >
               {/* Text Area */}

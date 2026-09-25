@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { OpenCode, type OpenCodeClient } from '@opencode/client';
 import * as gitService from './gitService';
 import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel } from './bridge-git-generation-model';
 import type { BridgeContext, BridgeResponse } from './bridge';
@@ -19,54 +19,12 @@ type SpecialGitDeps = {
 };
 
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
-const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
 const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
 let bridgeGitModelCatalogCache: Set<string> | null = null;
 let bridgeGitModelCatalogCacheAt = 0;
 
-const sleep = (ms: number) => new Promise<void>((resolve) => {
-  setTimeout(resolve, ms);
-});
-
-type BridgeSdkResult<T> = {
-  data?: T;
-  error?: unknown;
-  response?: { status?: number };
-};
-
-const formatBridgeSdkError = (error: unknown): string => {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
-    return (error as { message: string }).message;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-};
-
-const unwrapBridgeSdkData = <T,>(result: BridgeSdkResult<T>, operation: string): T => {
-  if (result.error) {
-    const status = result.response?.status;
-    throw new Error(`${operation} failed${status ? ` (${status})` : ''}: ${formatBridgeSdkError(result.error)}`);
-  }
-  if (result.data === undefined || result.data === null) {
-    throw new Error(`${operation} failed: empty response`);
-  }
-  return result.data;
-};
-
-const assertBridgeSdkSuccess = (result: BridgeSdkResult<unknown>, operation: string): void => {
-  if (result.error) {
-    const status = result.response?.status;
-    throw new Error(`${operation} failed${status ? ` (${status})` : ''}: ${formatBridgeSdkError(result.error)}`);
-  }
-};
-
-const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, string>) => createOpencodeClient({
+const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, string>): OpenCodeClient => OpenCode.make({
   baseUrl: apiUrl.replace(/\/+$/, ''),
   headers: authHeaders || {},
 });
@@ -81,24 +39,13 @@ const fetchBridgeGitModelCatalog = async (
   }
 
   const client = createBridgeGitClient(apiUrl, authHeaders);
-  const payload = unwrapBridgeSdkData(
-    await client.v2.model.list(undefined, { signal: AbortSignal.timeout(8_000) }),
-    'model.list'
-  );
+  const payload = await client.model.list(undefined, { signal: AbortSignal.timeout(8_000) });
   const refs = new Set<string>();
-  if (Array.isArray(payload)) {
-    for (const item of payload) {
-      if (!item || typeof item !== 'object') {
-        continue;
-      }
-      const record = item as Record<string, unknown>;
-      const providerID = typeof record.providerID === 'string' ? record.providerID.trim() : '';
-      const modelID = typeof record.id === 'string'
-        ? record.id.trim()
-        : (typeof record.modelID === 'string' ? record.modelID.trim() : '');
-      if (providerID && modelID) {
-        refs.add(`${providerID}/${modelID}`);
-      }
+  for (const model of payload.data) {
+    const providerID = model.providerID.trim();
+    const modelID = model.id.trim();
+    if (providerID && modelID) {
+      refs.add(`${providerID}/${modelID}`);
     }
   }
 
@@ -130,117 +77,30 @@ const resolveBridgeGitGenerationModel = async (
   return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel);
 };
 
-const extractTextFromMessageParts = (parts: unknown): string => {
-  if (!Array.isArray(parts)) {
-    return '';
-  }
-
-  const textParts = parts
-    .filter((part) => {
-      if (!part || typeof part !== 'object') return false;
-      const record = part as Record<string, unknown>;
-      return record.type === 'text' && typeof record.text === 'string';
-    })
-    .map((part) => (part as Record<string, unknown>).text as string)
-    .map((text) => text.trim())
-    .filter((text) => text.length > 0);
-
-  return textParts.join('\n').trim();
-};
-
-const generateBridgeTextWithSessionFlow = async ({
+/**
+ * OpenCode 2.x generates one-off text without a session: `POST /api/experimental/generate`
+ * answers with the finished text, so the old create-session / prompt / poll /
+ * delete dance (and every way it could leave a stray session behind) is gone.
+ */
+const generateBridgeGitText = async ({
   apiUrl,
-  directory,
   prompt,
   providerID,
   modelID,
   authHeaders,
 }: {
   apiUrl: string;
-  directory: string;
   prompt: string;
   providerID: string;
   modelID: string;
   authHeaders?: Record<string, string>;
 }): Promise<string> => {
   const client = createBridgeGitClient(apiUrl, authHeaders);
-  const deadlineAt = Date.now() + BRIDGE_GIT_GENERATION_TIMEOUT_MS;
-  const remainingMs = () => Math.max(1_000, deadlineAt - Date.now());
-  let sessionId: string | null = null;
-
-  try {
-    const session = unwrapBridgeSdkData(
-      await client.session.create({
-        ...(directory ? { directory } : {}),
-        title: 'Git Generation',
-      }, { signal: AbortSignal.timeout(remainingMs()) }),
-      'session.create'
-    );
-    const sessionObj = session && typeof session === 'object' ? session as Record<string, unknown> : null;
-    const createdSessionId = sessionObj && typeof sessionObj.id === 'string' ? sessionObj.id : '';
-    if (!createdSessionId) {
-      throw new Error('Invalid session response');
-    }
-    sessionId = createdSessionId;
-
-    assertBridgeSdkSuccess(
-      await client.session.promptAsync({
-        sessionID: sessionId,
-        ...(directory ? { directory } : {}),
-        model: {
-          providerID,
-          modelID,
-        },
-        parts: [{ type: 'text', text: prompt }],
-      }, { signal: AbortSignal.timeout(remainingMs()) }),
-      'session.promptAsync'
-    );
-
-    while (Date.now() < deadlineAt) {
-      await sleep(BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS);
-
-      const messagesResponse = await client.session.messages({
-        sessionID: sessionId,
-        ...(directory ? { directory } : {}),
-        limit: 10,
-      }, { signal: AbortSignal.timeout(remainingMs()) });
-
-      if (messagesResponse.error) {
-        continue;
-      }
-
-      const messages = messagesResponse.data;
-      if (!Array.isArray(messages)) {
-        continue;
-      }
-
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const message = messages[i] as Record<string, unknown> | null;
-        if (!message || typeof message !== 'object') {
-          continue;
-        }
-        const info = message.info as Record<string, unknown> | undefined;
-        if (info?.role !== 'assistant' || info?.finish !== 'stop') {
-          continue;
-        }
-
-        const text = extractTextFromMessageParts(message.parts);
-        if (text) {
-          return text;
-        }
-      }
-    }
-
-    throw new Error('Timeout waiting for generation to complete');
-  } finally {
-    if (sessionId) {
-      try {
-        await client.session.delete({ sessionID: sessionId }, { signal: AbortSignal.timeout(5_000) });
-      } catch {
-        // ignore cleanup failures
-      }
-    }
-  }
+  const result = await client.generate.text(
+    { prompt, model: { id: modelID, providerID } },
+    { signal: AbortSignal.timeout(BRIDGE_GIT_GENERATION_TIMEOUT_MS) }
+  );
+  return result.text.trim();
 };
 
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
@@ -321,9 +181,8 @@ export async function handleSpecialGitBridgeMessage(
           apiUrl,
           ctx?.manager?.getOpenCodeAuthHeaders()
         );
-        const raw = await generateBridgeTextWithSessionFlow({
+        const raw = await generateBridgeGitText({
           apiUrl,
-          directory,
           prompt,
           providerID,
           modelID,

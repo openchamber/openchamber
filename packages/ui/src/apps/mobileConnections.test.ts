@@ -14,13 +14,14 @@ const createLocalStorageStub = () => {
   };
 };
 
-const installTestWindow = () => {
+const installTestWindow = (native = false) => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
       setTimeout: globalThis.setTimeout.bind(globalThis),
       clearTimeout: globalThis.clearTimeout.bind(globalThis),
       location: { protocol: 'https:' },
+      Capacitor: { isNativePlatform: () => native },
       localStorage: createLocalStorageStub(),
     },
   });
@@ -40,6 +41,143 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
+  test('native LAN metadata keeps both instances and their secure-token flags', async () => {
+    try {
+      installTestWindow(true);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        {
+          id: 'native-a', label: 'Server A', lastUsedAt: 10, hasToken: true,
+          candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        },
+      ]));
+      await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === 'native-a')).toMatchObject({
+        label: 'Server A', hasToken: true,
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+      });
+      expect(reloaded.find((connection) => connection.label === 'Server B')?.id).not.toBe('native-a');
+      expect(reloaded.every((connection) => connection.clientToken === undefined)).toBe(true);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('LAN servers keep separate identities and credentials after re-pairing and reload', async () => {
+    try {
+      installTestWindow();
+      const first = await upsertMobileConnection({
+        label: 'Server A',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        clientToken: 'token-a',
+      });
+      const firstId = first[0]?.id;
+      const second = await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+        clientToken: 'token-b',
+      });
+      expect(second).toHaveLength(2);
+      const secondId = second[0]?.id;
+      expect(secondId).not.toBe(firstId);
+
+      await upsertMobileConnection({
+        label: 'Server A paired again',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606/' }],
+        clientToken: 'token-a-new',
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === firstId)).toMatchObject({
+        label: 'Server A paired again', clientToken: 'token-a-new',
+      });
+      expect(reloaded.find((connection) => connection.id === secondId)).toMatchObject({
+        label: 'Server B', clientToken: 'token-b',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('adding a LAN server preserves a legacy saved LAN server', async () => {
+    try {
+      installTestWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        { id: 'legacy-a', label: 'Server A', url: 'http://192.168.1.10:2606', lastUsedAt: 10, clientToken: 'token-a' },
+      ]));
+      await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+        clientToken: 'token-b',
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === 'legacy-a')).toMatchObject({
+        label: 'Server A', clientToken: 'token-a',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('relay servers stay distinct and re-pair by server identity when the LAN address changes', async () => {
+    try {
+      installTestWindow();
+      const first = await upsertMobileConnection({
+        label: 'Server A',
+        candidates: [
+          { kind: 'direct', url: 'http://192.168.1.10:2606' },
+          { kind: 'relay', relay: testRelay },
+        ],
+        clientToken: 'token-a',
+      });
+      const firstId = first[0]?.id;
+      const secondRelay = { ...testRelay, serverId: 'srv_second' };
+      const second = await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'relay', relay: secondRelay }],
+        clientToken: 'token-b',
+      });
+      const secondId = second[0]?.id;
+      expect(second).toHaveLength(2);
+      expect(secondId).not.toBe(firstId);
+
+      await upsertMobileConnection({
+        label: 'Server A paired again',
+        candidates: [
+          { kind: 'direct', url: 'http://192.168.1.30:2606' },
+          { kind: 'relay', relay: testRelay },
+        ],
+        clientToken: 'token-a-new',
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === firstId)).toMatchObject({
+        label: 'Server A paired again', clientToken: 'token-a-new',
+        candidates: [
+          { kind: 'direct', url: 'http://192.168.1.30:2606' },
+          { kind: 'relay', relay: testRelay },
+        ],
+      });
+      expect(reloaded.find((connection) => connection.id === secondId)).toMatchObject({
+        label: 'Server B', clientToken: 'token-b',
+        candidates: [{ kind: 'relay', relay: secondRelay }],
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
   test('cancellation invalidates an in-flight password completion', async () => {
     const tracker = createMobilePasswordOperationTracker();
     const operation = tracker.begin();

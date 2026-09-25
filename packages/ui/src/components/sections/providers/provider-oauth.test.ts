@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
+import type { FormField } from '@opencode/client';
 import {
-  collectPromptInputs,
-  defaultPromptValues,
+  collectFieldAnswer,
+  defaultFieldValues,
   describeOAuthError,
-  firstUnansweredPrompt,
-  isPromptVisible,
-  parseAuthPrompts,
-  parseAuthorization,
+  extractUserCode,
+  fieldLabel,
+  firstUnansweredField,
+  isFieldVisible,
   shouldOpenAuthorizationUrl,
-  visiblePrompts,
-  type AuthPrompt,
+  visibleFields,
   type ProviderOAuthTranslator,
 } from './provider-oauth';
 
@@ -20,191 +20,134 @@ describe('shouldOpenAuthorizationUrl', () => {
   });
 });
 
-/** Mirrors the github-copilot auth method shipped by OpenCode. */
-const copilotPrompts = [
+/** Mirrors the github-copilot integration method shipped by OpenCode. */
+const copilotFields: FormField[] = [
   {
-    type: 'select',
+    type: 'string',
     key: 'deploymentType',
-    message: 'Select GitHub deployment type',
+    title: 'Select GitHub deployment type',
+    required: true,
     options: [
-      { label: 'GitHub.com', value: 'github.com', hint: 'Public' },
+      { label: 'GitHub.com', value: 'github.com', description: 'Public' },
       { label: 'GitHub Enterprise', value: 'enterprise' },
     ],
   },
   {
-    type: 'text',
+    type: 'string',
     key: 'enterpriseUrl',
-    message: 'Enter your GitHub Enterprise URL or domain',
+    title: 'Enter your GitHub Enterprise URL or domain',
+    required: true,
     placeholder: 'company.ghe.com',
-    when: { key: 'deploymentType', op: 'eq', value: 'enterprise' },
+    when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
   },
 ];
 
-describe('parseAuthPrompts', () => {
-  test('parses select and conditional text prompts', () => {
-    const prompts = parseAuthPrompts(copilotPrompts);
-
-    expect(prompts).toHaveLength(2);
-    expect(prompts[0]).toEqual({
-      type: 'select',
-      key: 'deploymentType',
-      message: 'Select GitHub deployment type',
-      options: [
-        { value: 'github.com', label: 'GitHub.com', hint: 'Public' },
-        { value: 'enterprise', label: 'GitHub Enterprise' },
-      ],
-    });
-    expect(prompts[1]).toEqual({
-      type: 'text',
-      key: 'enterpriseUrl',
-      message: 'Enter your GitHub Enterprise URL or domain',
-      options: [],
-      placeholder: 'company.ghe.com',
-      when: { key: 'deploymentType', op: 'eq', value: 'enterprise' },
-    });
-  });
-
-  test('returns an empty list for a method without prompts', () => {
-    expect(parseAuthPrompts(undefined)).toEqual([]);
-    expect(parseAuthPrompts(null)).toEqual([]);
-    expect(parseAuthPrompts({})).toEqual([]);
-  });
-
-  test('drops entries that could never be answered', () => {
-    const prompts = parseAuthPrompts([
-      { type: 'text', message: 'no key' },
-      { type: 'select', key: 'empty', message: 'no options', options: [] },
-      { type: 'text', key: 'keep', message: 'keep me' },
-    ]);
-
-    expect(prompts.map((prompt) => prompt.key)).toEqual(['keep']);
-  });
-
-  test('falls back to the key when a message is missing', () => {
-    expect(parseAuthPrompts([{ type: 'text', key: 'token' }])[0]?.message).toBe('token');
-  });
-
-  test('ignores a malformed when condition instead of hiding the prompt', () => {
-    const [prompt] = parseAuthPrompts([
-      { type: 'text', key: 'url', message: 'URL', when: { key: 'other', op: 'contains', value: 'x' } },
-    ]);
-
-    expect(prompt.when).toBe(undefined);
-    expect(isPromptVisible(prompt, {})).toBe(true);
+describe('fieldLabel', () => {
+  test('falls back to the key when a field has no title', () => {
+    expect(fieldLabel({ type: 'string', key: 'token' })).toBe('token');
+    expect(fieldLabel(copilotFields[0])).toBe('Select GitHub deployment type');
   });
 });
 
-describe('prompt visibility', () => {
-  const prompts = parseAuthPrompts(copilotPrompts);
-
-  test('hides a conditional prompt until its branch is selected', () => {
-    expect(visiblePrompts(prompts, { deploymentType: 'github.com' }).map((p) => p.key))
+describe('field visibility', () => {
+  test('hides a conditional field until its branch is selected', () => {
+    expect(visibleFields(copilotFields, { deploymentType: 'github.com' }).map((f) => f.key))
       .toEqual(['deploymentType']);
-    expect(visiblePrompts(prompts, { deploymentType: 'enterprise' }).map((p) => p.key))
+    expect(visibleFields(copilotFields, { deploymentType: 'enterprise' }).map((f) => f.key))
       .toEqual(['deploymentType', 'enterpriseUrl']);
   });
 
   test('supports neq conditions', () => {
-    const prompt: AuthPrompt = {
-      type: 'text',
+    const field: FormField = {
+      type: 'string',
       key: 'custom',
-      message: 'Custom',
-      options: [],
-      when: { key: 'mode', op: 'neq', value: 'default' },
+      title: 'Custom',
+      when: [{ key: 'mode', op: 'neq', value: 'default' }],
     };
 
-    expect(isPromptVisible(prompt, { mode: 'default' })).toBe(false);
-    expect(isPromptVisible(prompt, { mode: 'other' })).toBe(true);
-    expect(isPromptVisible(prompt, {})).toBe(true);
+    expect(isFieldVisible(field, { mode: 'default' })).toBe(false);
+    expect(isFieldVisible(field, { mode: 'other' })).toBe(true);
+    // An unanswered controlling field satisfies neither `eq` nor `neq`, as on the server.
+    expect(isFieldVisible(field, {})).toBe(false);
+  });
+
+  test('a hidden field cannot reveal a later one through its value', () => {
+    const fields: FormField[] = [
+      { type: 'string', key: 'mode', title: 'Mode' },
+      { type: 'string', key: 'region', title: 'Region', when: [{ key: 'mode', op: 'eq', value: 'cloud' }] },
+      { type: 'string', key: 'endpoint', title: 'Endpoint', when: [{ key: 'region', op: 'eq', value: 'eu' }] },
+    ];
+    expect(visibleFields(fields, { mode: 'local', region: 'eu' }).map((f) => f.key)).toEqual(['mode']);
+    expect(visibleFields(fields, { mode: 'cloud', region: 'eu' }).map((f) => f.key)).toEqual(['mode', 'region', 'endpoint']);
+  });
+
+  test('an external field carries no conditions and always shows', () => {
+    expect(isFieldVisible({ type: 'external', key: 'docs', url: 'https://example.com' }, {})).toBe(true);
   });
 });
 
-describe('prompt answers', () => {
-  const prompts = parseAuthPrompts(copilotPrompts);
-
-  test('preselects the first select option so the form starts answerable', () => {
-    expect(defaultPromptValues(prompts)).toEqual({ deploymentType: 'github.com', enterpriseUrl: '' });
-    expect(firstUnansweredPrompt(prompts, defaultPromptValues(prompts))).toBeNull();
+describe('field answers', () => {
+  test('preselects the first option so the form starts answerable', () => {
+    expect(defaultFieldValues(copilotFields)).toEqual({ deploymentType: 'github.com', enterpriseUrl: '' });
+    expect(firstUnansweredField(copilotFields, defaultFieldValues(copilotFields))).toBeNull();
   });
 
-  test('reports the hidden-then-revealed field as unanswered', () => {
+  test('honours a declared default over the first option', () => {
+    const values = defaultFieldValues([
+      { type: 'string', key: 'region', default: 'eu', options: [{ label: 'US', value: 'us' }] },
+      { type: 'boolean', key: 'beta', default: true },
+      { type: 'integer', key: 'retries', default: 3 },
+      { type: 'multiselect', key: 'scopes', options: [{ label: 'Read', value: 'read' }] },
+    ]);
+
+    expect(values).toEqual({ region: 'eu', beta: true, retries: 3, scopes: [] });
+  });
+
+  test('reports the hidden-then-revealed required field as unanswered', () => {
     const values = { deploymentType: 'enterprise', enterpriseUrl: '   ' };
 
-    expect(firstUnansweredPrompt(prompts, values)?.key).toBe('enterpriseUrl');
+    expect(firstUnansweredField(copilotFields, values)?.key).toBe('enterpriseUrl');
   });
 
-  test('omits answers whose prompt is no longer visible', () => {
+  test('never blocks on an optional field left blank', () => {
+    const optional: FormField[] = [{ type: 'string', key: 'note' }];
+
+    expect(firstUnansweredField(optional, { note: '' })).toBeNull();
+  });
+
+  test('omits answers whose field is no longer visible', () => {
     const values = { deploymentType: 'github.com', enterpriseUrl: 'left-over.ghe.com' };
 
-    expect(collectPromptInputs(prompts, values)).toEqual({ deploymentType: 'github.com' });
+    expect(collectFieldAnswer(copilotFields, values)).toEqual({ deploymentType: 'github.com' });
   });
 
-  test('trims submitted answers', () => {
+  test('trims submitted answers and drops blanks', () => {
     const values = { deploymentType: 'enterprise', enterpriseUrl: '  company.ghe.com  ' };
 
-    expect(collectPromptInputs(prompts, values)).toEqual({
+    expect(collectFieldAnswer(copilotFields, values)).toEqual({
       deploymentType: 'enterprise',
       enterpriseUrl: 'company.ghe.com',
     });
+    expect(collectFieldAnswer(copilotFields, { deploymentType: '  ' })).toEqual({});
+  });
+
+  test('keeps non-string answers as they are', () => {
+    const fields: FormField[] = [
+      { type: 'boolean', key: 'beta' },
+      { type: 'multiselect', key: 'scopes', options: [{ label: 'Read', value: 'read' }] },
+    ];
+
+    expect(collectFieldAnswer(fields, { beta: false, scopes: ['read'] })).toEqual({
+      beta: false,
+      scopes: ['read'],
+    });
   });
 });
 
-describe('parseAuthorization', () => {
-  test('reads a device-code authorization and recovers the code from instructions', () => {
-    const authorization = parseAuthorization({
-      url: 'https://github.com/login/device',
-      instructions: 'Enter code: 1A2B-3C4D',
-      method: 'auto',
-    });
-
-    expect(authorization).toEqual({
-      method: 'auto',
-      url: 'https://github.com/login/device',
-      instructions: 'Enter code: 1A2B-3C4D',
-      userCode: '1A2B-3C4D',
-    });
-  });
-
-  test('keeps an explicitly reported code over the instructions match', () => {
-    expect(parseAuthorization({
-      url: 'https://example.com',
-      instructions: 'Enter code: AAAA-BBBB',
-      user_code: 'ZZZZ-9999',
-      method: 'auto',
-    })?.userCode).toBe('ZZZZ-9999');
-  });
-
-  test('preserves the code method', () => {
-    expect(parseAuthorization({ url: 'https://example.com', method: 'code' })?.method).toBe('code');
-  });
-
-  test('treats a missing or unknown method as auto', () => {
-    expect(parseAuthorization({ url: 'https://example.com' })?.method).toBe('auto');
-    expect(parseAuthorization({ url: 'https://example.com', method: 'device' })?.method).toBe('auto');
-  });
-
-  test('unwraps a nested data envelope', () => {
-    expect(parseAuthorization({ data: { url: 'https://example.com', method: 'code' } })).toEqual({
-      method: 'code',
-      url: 'https://example.com',
-    });
-  });
-
-  test('accepts device-authorization field names', () => {
-    expect(parseAuthorization({
-      verification_uri_complete: 'https://example.com/activate?code=1',
-      message: 'Open the link',
-    })).toEqual({
-      method: 'auto',
-      url: 'https://example.com/activate?code=1',
-      instructions: 'Open the link',
-    });
-  });
-
-  test('returns null when nothing is actionable', () => {
-    expect(parseAuthorization(null)).toBeNull();
-    expect(parseAuthorization({})).toBeNull();
-    expect(parseAuthorization({ method: 'auto' })).toBeNull();
+describe('extractUserCode', () => {
+  test('recovers a device code out of the instructions', () => {
+    expect(extractUserCode('Enter code: 1A2B-3C4D')).toBe('1A2B-3C4D');
+    expect(extractUserCode('Open the link')).toBe(undefined);
   });
 });
 
@@ -212,19 +155,19 @@ describe('describeOAuthError', () => {
   const t: ProviderOAuthTranslator = (key) => key;
   const fallback = 'settings.providers.page.toast.oauthCompleteFailed';
 
-  /** Names come from OpenCode's ProviderAuthApiError schema. */
-  test('maps each provider auth error name to its own message', () => {
-    expect(describeOAuthError({ name: 'ProviderAuthOauthMissing', data: {} }, t, fallback))
+  /** Names come from OpenCode's integration OAuth error schema. */
+  test('maps each integration OAuth error name to its own message', () => {
+    expect(describeOAuthError({ name: 'IntegrationOauthAttemptMissing', data: {} }, t, fallback))
       .toBe('settings.providers.page.auth.oauth.error.sessionExpired');
-    expect(describeOAuthError({ name: 'ProviderAuthOauthCodeMissing', data: {} }, t, fallback))
+    expect(describeOAuthError({ name: 'IntegrationOauthCodeMissing', data: {} }, t, fallback))
       .toBe('settings.providers.page.auth.oauth.error.codeRequired');
-    expect(describeOAuthError({ name: 'ProviderAuthOauthCallbackFailed', data: {} }, t, fallback))
+    expect(describeOAuthError({ name: 'IntegrationOauthFailed', data: {} }, t, fallback))
       .toBe('settings.providers.page.auth.oauth.error.declined');
   });
 
-  test('surfaces the plugin-authored validation message verbatim', () => {
+  test('surfaces the integration-authored validation message verbatim', () => {
     const error = {
-      name: 'ProviderAuthValidationFailed',
+      name: 'IntegrationValidationFailed',
       data: { field: 'enterpriseUrl', message: 'URL or domain is required' },
     };
 
@@ -232,13 +175,17 @@ describe('describeOAuthError', () => {
   });
 
   test('falls back when a validation failure carries no message', () => {
-    expect(describeOAuthError({ name: 'ProviderAuthValidationFailed', data: {} }, t, fallback))
+    expect(describeOAuthError({ name: 'IntegrationValidationFailed', data: {} }, t, fallback))
       .toBe('settings.providers.page.auth.oauth.error.invalidInput');
+  });
+
+  test('prefers a server-authored message over the fallback key', () => {
+    expect(describeOAuthError({ message: 'network down' }, t, fallback)).toBe('network down');
   });
 
   test('falls back for unknown, empty, and non-object errors', () => {
     expect(describeOAuthError({ name: 'BadRequest', data: {} }, t, fallback)).toBe(fallback);
-    expect(describeOAuthError(new Error('network down'), t, fallback)).toBe(fallback);
     expect(describeOAuthError(undefined, t, fallback)).toBe(fallback);
+    expect(describeOAuthError({}, t, fallback)).toBe(fallback);
   });
 });

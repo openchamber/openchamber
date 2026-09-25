@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -16,14 +16,22 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
     persistSettings: async (changes) => { settings = { ...settings, ...changes }; },
     fetchImpl: fetchImpl ?? vi.fn(async () => new Response('[]')),
     retryDelaysMs,
+    evaluatePermission,
+    onPermissionReplied,
   });
   runtime.start();
   return {
     runtime,
     getSettings: () => settings,
-    emit: (payload, directory = '/project') => eventHandler({ payload, directory }),
+    // The hub hands server-side subscribers already-translated events.
+    emit: (payload, directory = '/project') => eventHandler({ payload, directory, translated: () => [payload] }),
     connect: () => statusHandler({ type: 'connect' }),
   };
+};
+
+const directoryHeader = (init) => {
+  const value = init?.headers?.['x-opencode-directory'];
+  return typeof value === 'string' ? decodeURIComponent(value) : null;
 };
 
 const flush = async () => {
@@ -61,11 +69,24 @@ describe('permission auto-accept runtime', () => {
     await expect(runtime.isSessionAutoAccepting('grandchild', '/project')).resolves.toBe(true);
   });
 
+  it('keeps a subagent\'s lineage when a later partial update names only its title', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({}));
+    const { runtime, emit } = createRuntime({ fetchImpl });
+    await runtime.setSessionPolicy('root', true);
+    emit({ type: 'session.created', properties: { info: { id: 'child', parentID: 'root', directory: '/project' } } });
+    // v2 renames arrive as partial session records without parentID.
+    emit({ type: 'session.updated', properties: { info: { id: 'child', title: 'Subagent' } } });
+    emit({ type: 'permission.asked', properties: { id: 'p1', sessionID: 'child', permission: 'bash', metadata: {} } });
+    await flush();
+    const replies = fetchImpl.mock.calls.map(([url]) => new URL(url).pathname).filter((path) => path.endsWith('/reply'));
+    expect(replies).toEqual(['/api/session/child/permission/p1/reply']);
+  });
+
   it('fetches missing subagent lineage before replying', async () => {
     const fetchImpl = vi.fn(async (url, init = {}) => {
       const path = new URL(url).pathname;
-      if (path === '/permission') return new Response('[]');
-      if (path === '/session/child') return Response.json({ id: 'child', parentID: 'root', directory: '/project' });
+      if (path === '/api/permission/request') return new Response('[]');
+      if (path === '/api/session/child') return Response.json({ id: 'child', parentID: 'root', directory: '/project' });
       if (init.method === 'POST') return Response.json({});
       return new Response('', { status: 404 });
     });
@@ -74,15 +95,16 @@ describe('permission auto-accept runtime', () => {
       fetchImpl,
     });
     await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(true);
-    expect(fetchImpl.mock.calls.some(([url, init]) => new URL(url).pathname === '/permission/perm/reply' && init.method === 'POST')).toBe(true);
+    // v2 scopes a permission reply under its session.
+    expect(fetchImpl.mock.calls.some(([url, init]) => new URL(url).pathname === '/api/session/child/permission/perm/reply' && init.method === 'POST')).toBe(true);
   });
 
   it('retries a transient reply failure and deduplicates concurrent events', async () => {
     let replyAttempts = 0;
     const fetchImpl = vi.fn(async (url, init = {}) => {
       const path = new URL(url).pathname;
-      if (path === '/permission') return new Response('[]');
-      if (path === '/permission/perm/reply' && init.method === 'POST') {
+      if (path === '/api/permission/request') return new Response('[]');
+      if (path === '/api/session/root/permission/perm/reply' && init.method === 'POST') {
         replyAttempts += 1;
         return replyAttempts === 1 ? new Response('', { status: 503 }) : Response.json({});
       }
@@ -103,8 +125,8 @@ describe('permission auto-accept runtime', () => {
   it('reconciles pending permissions after reconnect', async () => {
     const fetchImpl = vi.fn(async (url, init = {}) => {
       const path = new URL(url).pathname;
-      if (path === '/permission') return Response.json([{ id: 'pending', sessionID: 'root' }]);
-      if (path === '/permission/pending/reply' && init.method === 'POST') return Response.json({});
+      if (path === '/api/permission/request') return Response.json([{ id: 'pending', sessionID: 'root' }]);
+      if (path === '/api/session/root/permission/pending/reply' && init.method === 'POST') return Response.json({});
       return Response.json({ id: 'root' });
     });
     const { connect } = createRuntime({
@@ -113,23 +135,23 @@ describe('permission auto-accept runtime', () => {
     });
     connect();
     await flush();
-    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/permission/pending/reply')).toBe(true);
+    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/root/permission/pending/reply')).toBe(true);
   });
 
   it('accepts existing pending permissions when a session policy is enabled', async () => {
     const fetchImpl = vi.fn(async (url, init = {}) => {
       const parsed = new URL(url);
       const path = parsed.pathname;
-      if (path === '/permission') {
-        return parsed.searchParams.get('directory') === '/project'
+      if (path === '/api/permission/request') {
+        return directoryHeader(init) === '/project'
           ? Response.json([
             { id: 'root-pending', sessionID: 'root' },
             { id: 'other-pending', sessionID: 'other' },
           ])
           : Response.json([]);
       }
-      if (path === '/permission/root-pending/reply' && init.method === 'POST') return Response.json({});
-      if (path === '/session/other') return Response.json({ id: 'other' });
+      if (path === '/api/session/root/permission/root-pending/reply' && init.method === 'POST') return Response.json({});
+      if (path === '/api/session/other') return Response.json({ id: 'other' });
       return new Response('', { status: 404 });
     });
     const { runtime } = createRuntime({ fetchImpl });
@@ -139,8 +161,44 @@ describe('permission auto-accept runtime', () => {
     const replyPaths = fetchImpl.mock.calls
       .filter(([, init]) => init?.method === 'POST')
       .map(([url]) => new URL(url).pathname);
-    expect(replyPaths).toEqual(['/permission/root-pending/reply']);
-    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.get('directory') === '/project')).toBe(true);
+    expect(replyPaths).toEqual(['/api/session/root/permission/root-pending/reply']);
+    // OpenCode 2.x scopes the pending list by header, not by query.
+    expect(fetchImpl.mock.calls.some(([, init]) => directoryHeader(init) === '/project')).toBe(true);
     expect(await runtime.load()).toEqual({ sessions: { root: true }, revision: 1 });
+  });
+
+  it('leaves a request held by the safety net unanswered and forgets it once replied', async () => {
+    const fetchImpl = vi.fn(async () => new Response('[]'));
+    const verdicts = { held: { action: 'hold', score: 0.9, kind: 'git_history' }, safe: { action: 'accept', score: 0.1 } };
+    const evaluatePermission = vi.fn(async (permission) => verdicts[permission.id]);
+    const onPermissionReplied = vi.fn();
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: true } } },
+      fetchImpl,
+      evaluatePermission,
+      onPermissionReplied,
+    });
+    await runtime.load();
+
+    emit({ type: 'permission.asked', properties: { id: 'held', sessionID: 'root', permission: 'bash', metadata: {} } });
+    emit({ type: 'permission.asked', properties: { id: 'safe', sessionID: 'root', permission: 'bash', metadata: {} } });
+    await flush();
+
+    const replies = fetchImpl.mock.calls.filter(([url]) => String(url).includes('/reply'));
+    expect(replies.map(([url]) => String(url))).toEqual(['http://opencode.test/api/session/root/permission/safe/reply']);
+    expect(directoryHeader(replies[0]?.[1])).toBe('/project');
+    expect(evaluatePermission).toHaveBeenCalledTimes(2);
+
+    emit({ type: 'permission.replied', properties: { sessionID: 'root', requestID: 'held', reply: 'once' } });
+    expect(onPermissionReplied).toHaveBeenCalledWith('held');
+  });
+
+  it('does not consult the safety net for sessions that are not auto-accepting', async () => {
+    const evaluatePermission = vi.fn(async () => ({ action: 'hold' }));
+    const { runtime, emit } = createRuntime({ evaluatePermission });
+    await runtime.load();
+    emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'manual', permission: 'bash', metadata: {} } });
+    await flush();
+    expect(evaluatePermission).not.toHaveBeenCalled();
   });
 });

@@ -1,11 +1,13 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
+import { describeSessionActionError } from './sessionActionError';
 
 export type DeleteSessionSource = {
   archivedBucket?: boolean;
@@ -25,20 +27,18 @@ type Args = {
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  isSessionSearchOpen: boolean;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (value: string) => void;
-  setIsSessionSearchOpen: (open: boolean) => void;
+  resetSessionSearch: () => void;
   descendantIds: readonly string[];
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   deleteSessionConfirm: DeleteSessionConfirmState;
   setEditingId: (id: string | null) => void;
+  setEditingRowKey: (key: string | null) => void;
+  editingSessionId: string;
+  editingOccurrenceKey: string;
   setEditTitle: (value: string) => void;
   editingId: string | null;
   editTitle: string;
-  copiedSessionId: string | null;
-  setCopiedSessionId: (sessionId: string | null) => void;
 };
 
 export const useSessionActions = (args: Args) => {
@@ -54,8 +54,6 @@ export const useSessionActions = (args: Args) => {
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
-  const shareSession = useSessionUIStore((state) => state.shareSession);
-  const unshareSession = useSessionUIStore((state) => state.unshareSession);
   const deleteSession = useSessionUIStore((state) => state.deleteSession);
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const archiveSession = useSessionUIStore((state) => state.archiveSession);
@@ -66,16 +64,15 @@ export const useSessionActions = (args: Args) => {
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    isSessionSearchOpen,
-    sessionSearchQuery,
-    setSessionSearchQuery,
-    setIsSessionSearchOpen,
+    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
     setEditingId,
+    setEditingRowKey,
+    editingSessionId,
+    editingOccurrenceKey,
     setEditTitle,
-    setCopiedSessionId,
   } = args;
 
   React.useEffect(() => {
@@ -92,14 +89,6 @@ export const useSessionActions = (args: Args) => {
       // Selecting a session always leaves any full-page surface, even when
       // the session is already the current one (no store transition fires).
       useUIStore.getState().closeMainSurfaces();
-      const resetSessionSearch = () => {
-        if (!isSessionSearchOpen && sessionSearchQuery.length === 0) {
-          return;
-        }
-        setSessionSearchQuery('');
-        setIsSessionSearchOpen(false);
-      };
-
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
       }
@@ -116,65 +105,42 @@ export const useSessionActions = (args: Args) => {
       onSessionSelected?.(sessionId);
       resetSessionSearch();
     },
-    [allowReselect, isSessionSearchOpen, mobileVariant, onSessionSelected, sessionSearchQuery, setCurrentSession, setIsSessionSearchOpen, setSessionSearchQuery, setSessionSwitcherOpen],
+    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
     setEditingId(sessionId);
+    setEditingRowKey(editingOccurrenceKey);
     setEditTitle(sessionTitle);
-  }, [setEditTitle, setEditingId]);
+  }, [editingOccurrenceKey, setEditTitle, setEditingId, setEditingRowKey]);
 
   const handleSaveEdit = React.useCallback(async (titleOverride?: string) => {
     const editingId = editingIdRef.current;
     if (!editingId) return;
     const trimmed = (titleOverride ?? editTitleRef.current).trim();
     if (trimmed) {
-      await updateSessionTitle(editingId, trimmed);
+      try {
+        await updateSessionTitle(editingSessionId, trimmed);
+      } catch (error) {
+        // The form closes either way: a rename that silently stays open
+        // reads as "Enter does nothing". The toast says what OpenCode
+        // answered, with its log ref, so the failure can be looked up.
+        console.error('[session-actions] rename failed', error);
+        toast.error(t('sessions.sidebar.session.rename.error', {
+          detail: describeSessionActionError(error instanceof Error ? error : new Error(String(error)), t),
+        }));
+      }
     }
     setEditingId(null);
+    setEditingRowKey(null);
     setEditTitle('');
-  }, [setEditTitle, setEditingId, updateSessionTitle]);
+  }, [editingSessionId, setEditTitle, setEditingId, setEditingRowKey, t, updateSessionTitle]);
 
   const handleCancelEdit = React.useCallback(() => {
     setEditingId(null);
+    setEditingRowKey(null);
     setEditTitle('');
-  }, [setEditTitle, setEditingId]);
-
-  const copyShareUrl = React.useCallback(async (url: string, sessionId: string): Promise<boolean> => {
-    try {
-      const result = await copyTextToClipboard(url);
-      if (!result.ok) return false;
-      setCopiedSessionId(sessionId);
-      if (copyTimeout.current) clearTimeout(copyTimeout.current);
-      copyTimeout.current = window.setTimeout(() => {
-        setCopiedSessionId(null);
-        copyTimeout.current = null;
-      }, 2000);
-      return true;
-    } catch {
-      return false;
-    }
-  }, [setCopiedSessionId]);
-
-  const handleShareSession = React.useCallback(async (session: Session) => {
-    const result = await shareSession(session.id);
-    if (!result?.share?.url) {
-      toast.error(t('sessions.sidebar.session.share.error'));
-      return;
-    }
-    const copied = await copyShareUrl(result.share.url, session.id);
-    toast[copied ? 'success' : 'warning'](t('sessions.sidebar.session.share.successTitle'), {
-      description: t(copied
-        ? 'sessions.sidebar.session.share.successDescription'
-        : 'sessions.sidebar.session.share.copyUrlError'),
-    });
-  }, [copyShareUrl, shareSession, t]);
-
-  const handleCopyShareUrl = React.useCallback((url: string, sessionId: string) => {
-    void copyShareUrl(url, sessionId).then((copied) => {
-      if (!copied) toast.error(t('sessions.sidebar.session.share.copyUrlError'));
-    });
-  }, [copyShareUrl, t]);
+  }, [setEditTitle, setEditingId, setEditingRowKey]);
 
   const handleCopySessionId = React.useCallback((sessionId: string) => {
     void copyTextToClipboard(sessionId)
@@ -188,15 +154,6 @@ export const useSessionActions = (args: Args) => {
       .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
   }, [t]);
 
-  const handleUnshareSession = React.useCallback(async (sessionId: string) => {
-    const result = await unshareSession(sessionId);
-    if (result) {
-      toast.success(t('sessions.sidebar.session.unshare.success'));
-    } else {
-      toast.error(t('sessions.sidebar.session.unshare.error'));
-    }
-  }, [t, unshareSession]);
-
   const executeDeleteSession = React.useCallback(
     async (
       session: Session,
@@ -209,50 +166,13 @@ export const useSessionActions = (args: Args) => {
       // collection for direct-execute (no-dialog) callers.
       const effectiveDescendantIds = precomputed?.descendantIds
         ?? descendantIds;
-      if (effectiveDescendantIds.length === 0) {
-        const success = shouldHardDelete
-          ? await deleteSession(session.id)
-          : await archiveSession(session.id);
-        if (success) {
-          toast.success(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.success')
-            : t('sessions.sidebar.session.archive.success'));
-        } else {
-          toast.error(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.error')
-            : t('sessions.sidebar.session.archive.error'));
-        }
-        return;
-      }
-
-      const ids = [session.id, ...effectiveDescendantIds];
-      if (shouldHardDelete) {
-        // Delete root + all descendants individually. If the server
-        // cascade-deletes some children before we get to them, 404 is
-        // treated as success by deleteSession and no rollback occurs.
-        const { deletedIds, failedIds } = await deleteSessions(ids);
-        if (failedIds.length === 0) {
-          const totalDeleted = deletedIds.length;
-          toast.success(totalDeleted === 1
-            ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
-            : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));
-        } else {
-          toast.error(t('sessions.sidebar.session.delete.error'));
-        }
-        return;
-      }
-
-      const { archivedIds, failedIds } = await archiveSessions(ids);
-      if (archivedIds.length > 0) {
-        toast.success(archivedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
-          : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
-      }
-      if (failedIds.length > 0) {
-        toast.error(failedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
-      }
+      await runSessionSubtreeAction(
+        shouldHardDelete ? 'delete' : 'archive',
+        session,
+        effectiveDescendantIds,
+        { archiveSession, archiveSessions, deleteSession, deleteSessions },
+        t,
+      );
     },
     [archiveSession, archiveSessions, deleteSession, deleteSessions, descendantIds, t],
   );
@@ -260,7 +180,7 @@ export const useSessionActions = (args: Args) => {
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: DeleteSessionSource) => {
       const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
-      const effectiveDescendantIds = [...descendantIds];
+      const effectiveDescendantIds = collectSessionSubtreeIds(session.id, descendantIds, shouldHardDelete);
       if (!showDeletionDialog || source?.skipConfirm === true) {
         void executeDeleteSession(session, source, { descendantIds: effectiveDescendantIds });
         return;
@@ -300,14 +220,11 @@ export const useSessionActions = (args: Args) => {
     handleSessionDoubleClick,
     handleSaveEdit,
     handleCancelEdit,
-    handleShareSession,
-    handleCopyShareUrl,
     handleCopySessionId,
-    handleUnshareSession,
     handleDeleteSession,
     handleRestoreSession,
     confirmDeleteSession,
-  }), [handleCancelEdit, handleCopySessionId, handleCopyShareUrl, handleDeleteSession,
-    handleRestoreSession, handleSaveEdit, handleSessionDoubleClick, handleSessionSelect, handleShareSession,
-    handleUnshareSession, confirmDeleteSession]);
+  }), [handleCancelEdit, handleCopySessionId, handleDeleteSession,
+    handleRestoreSession, handleSaveEdit, handleSessionDoubleClick, handleSessionSelect,
+    confirmDeleteSession]);
 };

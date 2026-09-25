@@ -1,4 +1,4 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 
 export interface ChatMessageEntry {
     info: Message;
@@ -10,7 +10,6 @@ type TurnActivityKind = 'tool' | 'reasoning' | 'justification';
 export interface TurnMessageRecord {
     messageId: string;
     role: string;
-    parentMessageId?: string;
     message: ChatMessageEntry;
     order: number;
 }
@@ -129,7 +128,8 @@ export interface TurnGroupingContext {
     diffStats?: TurnDiffStats;
     changedFiles?: TurnChangedFile[];
     userMessageCreatedAt?: number;
-    userMessageVariant?: string;
+    /** Model variant ("thinking" etc.) the turn ran with, read off its assistant messages. */
+    assistantVariant?: string;
     isWorking: boolean;
     isGroupExpanded?: boolean;
     toggleGroup?: () => void;

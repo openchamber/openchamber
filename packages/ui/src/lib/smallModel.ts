@@ -45,7 +45,8 @@ export async function summarizeSelectionForNotes(text: string, sessionId?: strin
         ...(preferredProviderID ? { preferredProviderID } : {}),
         ...(preferredModelID ? { preferredModelID } : {}),
       }),
-    });
+    // No small model is not an error here: the note keeps the original text.
+    }, { silentStatuses: [404] });
     if (!response.ok) {
       return trimmed;
     }

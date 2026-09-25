@@ -43,19 +43,27 @@ export const SettingsInfoHint: React.FC<SettingsInfoHintProps> = ({
 
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger asChild>
+      <TooltipTrigger
+        asChild
+        // The toggle lives on the trigger, not the button: Base UI runs its own
+        // "close on trigger press" on pointerdown and again after our click
+        // handler, which turned a tap into open-then-close and made the hint
+        // unreachable on touch. Only our click may change the open state.
+        onPointerDown={(event) => event.preventBaseUIHandler()}
+        onClick={(event) => {
+          event.preventBaseUIHandler();
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
         <button
           ref={triggerRef}
           type="button"
           aria-label={t('settings.common.infoAria')}
           aria-expanded={open}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setOpen((current) => !current);
-          }}
           className={cn(
-            'inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+            'inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             className,
           )}
         >

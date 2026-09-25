@@ -37,7 +37,7 @@ describe('VS Code webview bridge requests', () => {
       assert.equal(result.name, 'AbortError');
       assert.equal(messages.length, 0);
 
-      const startPromise = startSseProxy({ path: '/global/event', streamId: 'sse_webview_1_1' });
+      const startPromise = startSseProxy({ path: '/api/event', streamId: 'sse_webview_1_1' });
       assert.deepEqual(messages[0], { type: 'webview:ready' });
       const request = messages[1] as { id: string; payload?: { streamId?: string } };
       assert.equal(request.payload?.streamId, 'sse_webview_1_1');

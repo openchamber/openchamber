@@ -41,9 +41,10 @@ describe('PWA manifest route', () => {
               time: { updated: 2 },
             },
           ];
+      // v2 pages the session list as `{ data, cursor }`.
       return {
         ok: true,
-        json: async () => sessions,
+        json: async () => ({ data: sessions, cursor: {} }),
       };
     };
 
@@ -118,7 +119,7 @@ describe('PWA manifest route', () => {
       await handler({ query: {} }, res);
 
       const manifest = JSON.parse(res.body);
-      expect(fetchCalls).toEqual(['/session?directory=%2F']);
+      expect(fetchCalls).toEqual(['/api/session?directory=%2F']);
       expect(manifest.shortcuts).toContainEqual({
         name: 'Root child',
         short_name: 'Root child',

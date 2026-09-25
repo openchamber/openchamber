@@ -5,15 +5,15 @@ import {
   type DirectoryBootstrapContext,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
-  subscribeDirectoryQuestion,
-  subscribeDirectoryQuestions,
+  subscribeDirectoryForm,
+  subscribeDirectoryForms,
   subscribeDirectorySessionMessages,
 } from './child-store';
 import {
   getSyncPerformanceDiagnostics,
   setSyncPerformanceDiagnosticsEnabled,
 } from './performance-diagnostics';
-import { DIR_IDLE_TTL_MS } from './types';
+import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES } from './types';
 import { FilesystemError } from '@/lib/api/files-errors';
 
 const deferred = () => {
@@ -93,6 +93,33 @@ describe('ChildStoreManager directory lifecycle', () => {
       manager.disposeAll();
     }
   });
+
+  test('keeps expanded off-screen directories alive while foreground demand exists', () => {
+    const manager = new ChildStoreManager();
+    const originalDateNow = Date.now;
+    let currentTime = 10_000;
+    Date.now = () => currentTime;
+    const directories = Array.from({ length: MAX_DIR_STORES + 5 }, (_, index) => `/workspace-${index}`);
+
+    try {
+      for (const directory of directories) {
+        manager.ensureChild(directory, { bootstrap: false }).setState({ status: 'complete' });
+      }
+      manager.setBootstrapDemand('expanded-sidebar', directories.map((directory) => ({
+        directory,
+        priority: 'expanded',
+        reason: 'project-expanded',
+      })));
+      currentTime += EVICTION_GRACE_MS + 1;
+
+      manager.runEviction();
+
+      expect(directories.every((directory) => manager.getChild(directory) !== undefined)).toBe(true);
+    } finally {
+      Date.now = originalDateNow;
+      manager.disposeAll();
+    }
+  });
 });
 
 describe('ChildStoreManager permission subscriptions', () => {
@@ -124,14 +151,14 @@ describe('ChildStoreManager permission subscriptions', () => {
   });
 });
 
-describe('ChildStoreManager question subscriptions', () => {
+describe('ChildStoreManager form subscriptions', () => {
   test('notifies only the owning session and ignores unrelated high-frequency updates', () => {
     const manager = new ChildStoreManager();
     const child = manager.ensureChild('/workspace', { bootstrap: false });
     const notifications = new Map<string, number>();
     const unsubscribers = Array.from({ length: 50 }, (_, index) => {
       const sessionID = `session-${index}`;
-      return subscribeDirectoryQuestion(child, sessionID, () => {
+      return subscribeDirectoryForm(child, sessionID, () => {
         notifications.set(sessionID, (notifications.get(sessionID) ?? 0) + 1);
       });
     });
@@ -142,26 +169,26 @@ describe('ChildStoreManager question subscriptions', () => {
     }
 
     expect(notifications.size).toBe(0);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(0);
 
-    child.setState({ question: { 'session-17': [{ id: 'question-1' }] as never[] } });
+    child.setState({ form: { 'session-17': [{ id: 'form-1' }] as never[] } });
 
     expect(notifications.get('session-17')).toBe(1);
     expect(notifications.size).toBe(1);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(1);
 
     // A new map that preserves session-17's bucket must not notify it again.
-    child.setState({ question: { ...child.getState().question, 'session-18': [{ id: 'question-2' }] as never[] } });
+    child.setState({ form: { ...child.getState().form, 'session-18': [{ id: 'form-2' }] as never[] } });
 
     expect(notifications.get('session-17')).toBe(1);
     expect(notifications.get('session-18')).toBe(1);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(2);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(2);
 
-    child.setState({ question: {} });
+    child.setState({ form: {} });
 
     expect(notifications.get('session-17')).toBe(2);
     expect(notifications.get('session-18')).toBe(2);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(4);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(4);
 
     for (const unsubscribe of unsubscribers) unsubscribe();
     setSyncPerformanceDiagnosticsEnabled(false);
@@ -173,16 +200,16 @@ describe('ChildStoreManager question subscriptions', () => {
     const child = manager.ensureChild('/workspace', { bootstrap: false });
     let parentNotifications = 0;
     let childNotifications = 0;
-    const unsubscribeParent = subscribeDirectoryQuestions(child, ['parent', 'child'], () => {
+    const unsubscribeParent = subscribeDirectoryForms(child, ['parent', 'child'], () => {
       parentNotifications += 1;
     });
-    const unsubscribeChild = subscribeDirectoryQuestion(child, 'child', () => {
+    const unsubscribeChild = subscribeDirectoryForm(child, 'child', () => {
       childNotifications += 1;
     });
-    const parentQuestions = [{ id: 'question-parent' }] as never[];
-    const childQuestions = [{ id: 'question-child' }] as never[];
+    const parentForms = [{ id: 'form-parent' }] as never[];
+    const childForms = [{ id: 'form-child' }] as never[];
 
-    child.setState({ question: { parent: parentQuestions, child: childQuestions } });
+    child.setState({ form: { parent: parentForms, child: childForms } });
 
     expect(parentNotifications).toBe(1);
     expect(childNotifications).toBe(1);
@@ -192,16 +219,16 @@ describe('ChildStoreManager question subscriptions', () => {
     expect(childNotifications).toBe(1);
 
     child.setState({
-      question: {
-        parent: parentQuestions,
-        child: [{ id: 'question-child-replacement' }] as never[],
+      form: {
+        parent: parentForms,
+        child: [{ id: 'form-child-replacement' }] as never[],
       },
     });
 
     expect(parentNotifications).toBe(2);
     expect(childNotifications).toBe(2);
 
-    child.setState({ question: {} });
+    child.setState({ form: {} });
 
     expect(parentNotifications).toBe(3);
     expect(childNotifications).toBe(3);
@@ -211,7 +238,7 @@ describe('ChildStoreManager question subscriptions', () => {
     manager.disposeAll();
   });
 
-  test('aggregates exact question buckets across directory stores', () => {
+  test('aggregates exact form buckets across directory stores', () => {
     const manager = new ChildStoreManager();
     const parentStore = manager.ensureChild('/repo', { bootstrap: false });
     const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
@@ -220,29 +247,29 @@ describe('ChildStoreManager question subscriptions', () => {
       notifications += 1;
     };
     const unsubscribers = [
-      subscribeDirectoryQuestions(parentStore, ['parent'], notify),
-      subscribeDirectoryQuestions(childStore, ['child'], notify),
+      subscribeDirectoryForms(parentStore, ['parent'], notify),
+      subscribeDirectoryForms(childStore, ['child'], notify),
     ];
-    const questionCount = () => (
-      (parentStore.getState().question.parent?.length ?? 0)
-      + (childStore.getState().question.child?.length ?? 0)
+    const formCount = () => (
+      (parentStore.getState().form.parent?.length ?? 0)
+      + (childStore.getState().form.child?.length ?? 0)
     );
 
-    childStore.setState({ question: { child: [{ id: 'child-question' }] as never[] } });
-    expect(questionCount()).toBe(1);
+    childStore.setState({ form: { child: [{ id: 'child-form' }] as never[] } });
+    expect(formCount()).toBe(1);
     expect(notifications).toBe(1);
 
     childStore.setState({
-      question: {
-        ...childStore.getState().question,
-        unrelated: [{ id: 'unrelated-question' }] as never[],
+      form: {
+        ...childStore.getState().form,
+        unrelated: [{ id: 'unrelated-form' }] as never[],
       },
     });
-    expect(questionCount()).toBe(1);
+    expect(formCount()).toBe(1);
     expect(notifications).toBe(1);
 
-    parentStore.setState({ question: { parent: [{ id: 'parent-question' }] as never[] } });
-    expect(questionCount()).toBe(2);
+    parentStore.setState({ form: { parent: [{ id: 'parent-form' }] as never[] } });
+    expect(formCount()).toBe(2);
     expect(notifications).toBe(2);
 
     for (const unsubscribe of unsubscribers) unsubscribe();
@@ -295,6 +322,127 @@ describe('ChildStoreManager session message subscriptions', () => {
 });
 
 describe('ChildStoreManager directory bootstrap scheduler', () => {
+  test('finishes all directory lists while environment initialization is still blocked', async () => {
+    const manager = new ChildStoreManager();
+    const environment = deferred();
+    const directories = Array.from({ length: 24 }, (_, index) => `/workspace-${index}`);
+    const listed = new Promise<void>((resolve) => {
+      const unsubscribe = manager.subscribeBootstrap(() => {
+        if (!directories.every((directory) => manager.getBootstrapState(directory) === 'complete')) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    manager.configure({ onBootstrap: (context) => { context.trackInitialization(environment.promise); } });
+    try {
+      manager.setBootstrapDemand('sidebar', directories.map((directory) => ({
+        directory, priority: 'expanded', reason: 'worktree-expanded',
+      })));
+      await listed;
+      expect(directories.every((directory) => manager.getInitializationState(directory) === 'running')).toBe(true);
+      environment.resolve();
+      await settle();
+      expect(directories.every((directory) => manager.getInitializationState(directory) === 'complete')).toBe(true);
+    } finally {
+      environment.resolve();
+      manager.disposeAll();
+    }
+  });
+
+  test('reports initialization permission failures without invalidating a complete session list', async () => {
+    const manager = new ChildStoreManager();
+    manager.configure({ onBootstrap: (context) => {
+      context.trackInitialization(Promise.reject(new FilesystemError('Access denied', { reason: 'os-permission' })));
+    } });
+    manager.requestBootstrap({ directory: '/protected', priority: 'selected', reason: 'selected-session' });
+    await settle();
+    expect(manager.getBootstrapState('/protected')).toBe('complete');
+    expect(manager.getInitializationState('/protected')).toBe('failed');
+    expect(manager.getInitializationFailure('/protected')).toBe('os-permission');
+    manager.disposeAll();
+  });
+
+  test('a superseded initialization cannot replace the result of a forced retry', async () => {
+    const manager = new ChildStoreManager();
+    const old = deferred();
+    let calls = 0;
+    manager.configure({ onBootstrap: (context) => {
+      calls += 1;
+      context.trackInitialization(calls === 1 ? old.promise : Promise.reject(new Error('new initialization failed')));
+    } });
+    const demand = { directory: '/workspace', priority: 'selected', reason: 'selected-session' } as const;
+    manager.requestBootstrap(demand);
+    await settle();
+    manager.requestBootstrap({ ...demand, force: true });
+    await settle();
+    old.resolve();
+    await settle();
+    expect(calls).toBe(2);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    expect(manager.getInitializationState('/workspace')).toBe('failed');
+    manager.disposeAll();
+  });
+
+  test('disposal rejects initialization completion from the old store', async () => {
+    const manager = new ChildStoreManager();
+    const environment = deferred();
+    manager.configure({ onBootstrap: (context) => { context.trackInitialization(environment.promise); } });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'selected-session' });
+    await settle();
+    manager.disposeAll();
+    environment.resolve();
+    await settle();
+    expect(manager.getInitializationState('/workspace')).toBeUndefined();
+  });
+
+  test('reconfiguration restarts initialization whose list slot has already finished', async () => {
+    const manager = new ChildStoreManager();
+    const old = deferred();
+    let runs = 0;
+    const cleanup = manager.configure({ onBootstrap: (context) => {
+      runs += 1;
+      context.trackInitialization(old.promise);
+    } });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'selected-session' });
+    await settle();
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    cleanup();
+    manager.configure({ onBootstrap: (context) => {
+      runs += 1;
+      context.trackInitialization(Promise.resolve());
+    } });
+    await settle();
+    old.resolve();
+    await settle();
+    expect(runs).toBe(2);
+    expect(manager.getInitializationState('/workspace')).toBe('complete');
+    manager.disposeAll();
+  });
+
+  test('an invalid runtime scope queues recovery without starting reads against the superseded endpoint', async () => {
+    const manager = new ChildStoreManager();
+    const oldList = deferred();
+    let current = true;
+    let runs = 0;
+    manager.configure({
+      isCurrentScope: () => current,
+      onBootstrap: () => { runs += 1; return oldList.promise; },
+    });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'selected-session' });
+    current = false;
+    oldList.resolve();
+    await settle();
+    await settle();
+    expect(runs).toBe(1);
+    expect(manager.getBootstrapState('/workspace')).toBe('queued');
+    current = true;
+    manager.configure({ isCurrentScope: () => current, onBootstrap: () => { runs += 1; } });
+    await settle();
+    expect(runs).toBe(2);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    manager.disposeAll();
+  });
+
   test('bounds concurrency and eventually refreshes every queued directory', async () => {
     const manager = new ChildStoreManager();
     const running = new Map<string, ReturnType<typeof deferred>>();

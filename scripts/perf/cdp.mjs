@@ -96,6 +96,19 @@ export const createPageTarget = async (port) => {
 }
 
 /**
+ * The page target of a browser that is already running, such as the desktop
+ * shell launched with `--remote-debugging-port`: its application window, not
+ * a DevTools page and not a blank tab.
+ */
+export const findPageTarget = async (port) => {
+  const targets = await waitForJson(`http://127.0.0.1:${port}/json`)
+  const pages = targets.filter((entry) => entry.type === "page" && entry.webSocketDebuggerUrl && !entry.url.startsWith("devtools://"))
+  const target = pages.find((entry) => entry.url !== "about:blank") ?? pages[0]
+  if (!target) throw new Error(`No page target is exposed on port ${port}`)
+  return target
+}
+
+/**
  * Chrome throttles timers and stops producing frames for windows it considers
  * backgrounded or occluded. A profiling run must never silently measure a
  * throttled renderer, so occlusion and background throttling are disabled for

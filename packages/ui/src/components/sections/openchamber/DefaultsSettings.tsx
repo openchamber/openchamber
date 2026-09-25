@@ -13,6 +13,7 @@ import {
   SETTINGS_SELECT_SIZE,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { SessionWarmingCheckbox } from './SessionWarmingCheckbox';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -21,8 +22,10 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { isAutoModel } from '@/lib/routing/autoModel';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -53,11 +56,20 @@ export const DefaultsSettings: React.FC = () => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
   const getSessionAgentSelection = useSelectionStore((state) => state.getSessionAgentSelection);
+  const agentIsPicked = useConfigStore((state) => state.agentSelectionSource === 'manual');
+  // An agent picked for this chat brings the model its config pins, and a pin
+  // outranks the global default the same way it does in `setAgent`.
+  const pickedAgentPinsModel = useConfigStore((state) => {
+    if (state.agentSelectionSource !== 'manual') return false;
+    const agent = state.agents.find((candidate) => candidate.name === state.currentAgentName);
+    return Boolean(agent?.model?.providerID && agent.model.id);
+  });
   const chatHasOwnModel = Boolean(
-    selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId),
+    pickedAgentPinsModel
+    || (selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId)),
   );
   const chatHasOwnAgent = Boolean(
-    selectionIsManual && currentSessionId && getSessionAgentSelection(currentSessionId),
+    agentIsPicked && currentSessionId && getSessionAgentSelection(currentSessionId),
   );
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
@@ -119,7 +131,8 @@ export const DefaultsSettings: React.FC = () => {
 
         if (providerId && modelId) {
           const provider = providers.find((p) => p.id === providerId);
-          if (provider) {
+          // Auto is not a provider OpenCode lists; the picker only offers it while the server can honour it.
+          if (provider || isAutoModel(providerId, modelId)) {
             setProvider(providerId);
             setModel(modelId);
           }
@@ -264,11 +277,9 @@ export const DefaultsSettings: React.FC = () => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];
     const provider = providers.find((p) => p.id === parsedModel.providerId);
     const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === parsedModel.modelId) as
-      | { variants?: Record<string, unknown> }
+      | { variants?: ModelVariantSource }
       | undefined;
-    const variants = model?.variants;
-    if (!variants) return [];
-    return Object.keys(variants);
+    return listModelVariantIds(model?.variants);
   }, [parsedModel.modelId, parsedModel.providerId, providers]);
 
   const supportsVariants = availableVariants.length > 0;
@@ -310,6 +321,7 @@ export const DefaultsSettings: React.FC = () => {
                 modelId={parsedModel.modelId}
                 onChange={handleModelChange}
                 className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                offerAuto
               />
             </SettingsFieldRow>
 
@@ -355,6 +367,7 @@ export const DefaultsSettings: React.FC = () => {
               label={t('settings.openchamber.defaults.field.showDeletionDialog')}
               ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')}
             />
+            <SessionWarmingCheckbox />
           </SettingsInset>
 
           <div className="space-y-3 pt-6">

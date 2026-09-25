@@ -32,7 +32,6 @@ const deps = (overrides: Partial<OutgoingMessageDeps> = {}): OutgoingMessageDeps
     },
     sanitizeAttachments: (files) => [...(files ?? [])],
     collectSkillNames: (text) => [...text.matchAll(/\/(\w+)/g)].map((m) => m[1]),
-    buildSkillInstruction: (names) => (names.length ? `use: ${names.join(',')}` : null),
     ...overrides,
 });
 
@@ -45,6 +44,7 @@ const input = (overrides: Partial<OutgoingMessageInput> = {}): OutgoingMessageIn
     linkedIssue: null,
     linkedPr: null,
     linkedLinearIssue: null,
+    linkedGuestIssue: null,
     ...overrides,
 });
 
@@ -244,6 +244,70 @@ describe('synthetic context', () => {
             .toEqual({ kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
     });
 
+    test('a linked guest issue is sent as context', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedGuestIssue: {
+                providerId: 'hello',
+                id: 'HELLO-1',
+                title: 'Sample ticket',
+                url: 'https://example.com/HELLO-1',
+                contextText: 'guest body',
+            },
+        }), deps());
+        expect(result.additionalParts).toHaveLength(1);
+        expect(result.additionalParts[0].text).toBe('guest body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({
+                kind: 'guest-issue',
+                providerId: 'hello',
+                id: 'HELLO-1',
+                title: 'Sample ticket',
+                url: 'https://example.com/HELLO-1',
+            });
+    });
+
+    test('a linked guest issue keeps its opaque data in metadata only', () => {
+        const data = { status: 'open', comments: ['hi'] };
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedGuestIssue: {
+                providerId: 'hello',
+                id: 'HELLO-1',
+                title: 'Sample ticket',
+                url: 'https://example.com/HELLO-1',
+                contextText: 'guest body',
+                data,
+            },
+        }), deps());
+        expect(result.additionalParts[0].text).toBe('guest body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY]).toMatchObject({ kind: 'guest-issue', data });
+    });
+
+    test('a linked guest pull is sent as guest-pr context', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedGuestIssue: {
+                providerId: 'gitlab',
+                id: '!12',
+                title: 'Fix login',
+                url: 'https://gitlab.com/acme/app/-/merge_requests/12',
+                contextText: 'guest pr body',
+                thread: 'pull',
+            },
+        }), deps());
+        expect(result.additionalParts).toHaveLength(1);
+        expect(result.additionalParts[0].text).toBe('guest pr body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({
+                kind: 'guest-pr',
+                providerId: 'gitlab',
+                id: '!12',
+                title: 'Fix login',
+                url: 'https://gitlab.com/acme/app/-/merge_requests/12',
+            });
+    });
+
     test('synthetic texts precede the linked references', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'x',
@@ -254,21 +318,27 @@ describe('synthetic context', () => {
             .toEqual(['conflict note', 'issue body']);
     });
 
-    test('skills named inline are collected into a trailing instruction', () => {
+    // Skills are attached to the prompt by the send, not written into it.
+    test('skills named inline are reported, not turned into a part', () => {
         const result = buildOutgoingMessage(input({ composerText: 'use /deploy now' }), deps());
-        expect(result.additionalParts.at(-1)).toEqual({ text: 'use: deploy', synthetic: true });
+        expect(result.skillNames).toEqual(['deploy']);
+        expect(result.additionalParts).toEqual([]);
     });
 
-    test('skills named in the composer are collected without duplicates', () => {
+    test('skills named in the composer are collected in order without duplicates', () => {
         const result = buildOutgoingMessage(input({
             composerText: '/deploy and /audit and /deploy',
         }), deps());
-        expect(result.additionalParts.at(-1)?.text).toBe('use: deploy,audit');
+        expect(result.skillNames).toEqual(['deploy', 'audit']);
     });
 
-    test('no skills means no instruction', () => {
-        const result = buildOutgoingMessage(input({ composerText: 'plain text' }), deps());
-        expect(result.additionalParts).toEqual([]);
+    test('queued text is not scanned again: its instruction was captured when it was queued', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ text: '/deploy', context: [{ kind: 'instruction', text: 'use: deploy' }] }],
+            composerText: null,
+        }), deps());
+        expect(result.skillNames).toEqual([]);
+        expect(result.additionalParts).toEqual([{ text: 'use: deploy', synthetic: true }]);
     });
 
     test('context alone is still worth sending', () => {
@@ -288,7 +358,7 @@ describe('synthetic context', () => {
 });
 
 describe('full assembly order', () => {
-    test('queued, then typed, then synthetic, then references, then skills', () => {
+    test('queued, then typed, then synthetic, then references', () => {
         const result = buildOutgoingMessage(input({
             queued: [{ text: 'q1' }, { text: 'q2' }],
             composerText: 'typed /deploy',
@@ -307,8 +377,8 @@ describe('full assembly order', () => {
             'pr-how',
             'pr-diff',
             'linear',
-            'use: deploy',
         ]);
+        expect(result.skillNames).toEqual(['deploy']);
     });
 });
 
@@ -319,6 +389,7 @@ describe('capturing composer context for the queue', () => {
         linkedIssue: null,
         linkedPr: null,
         linkedLinearIssue: null,
+        linkedGuestIssue: null,
         ...overrides,
     });
 
@@ -355,8 +426,11 @@ describe('capturing composer context for the queue', () => {
             syntheticTexts: ['conflict note'],
             linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
         });
+        // The skill instruction is the one intended difference: a direct send
+        // attaches the skill to the prompt, a queued one carries the instruction.
         const captured: QueuedContextPart[] = buildComposerContext(input, 'use: deploy');
         const direct = buildOutgoingMessage({ ...input, queued: [], composerText: 'use /deploy', composerAttachments: [] }, deps());
-        expect(queuedContextToParts(captured)).toEqual(direct.additionalParts);
+        expect(queuedContextToParts(captured)).toEqual([...direct.additionalParts, { text: 'use: deploy', synthetic: true }]);
+        expect(direct.skillNames).toEqual(['deploy']);
     });
 });

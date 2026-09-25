@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { WalkthroughSource } from '@/lib/walkthrough/types';
 import { useGitStore } from '@/stores/useGitStore';
-import { fetchPullRequestDiff } from '@/lib/diff/pullRequestDiff';
+import { fetchPullRequestDiff, fetchPullRequestFile } from '@/lib/diff/pullRequestDiff';
 import { PullRequestSnapshotCache } from '@/lib/diff/pullRequestSnapshotCache';
 import { gitPushScopeKey, subscribeGitPush } from '@/lib/gitPushEvents';
 
@@ -90,6 +90,15 @@ export function useGitComparison(directory: string | null, source: GitComparison
       : getGitCommitDiff(directory, { hash: target.hash, path: filePath, previousPath: file.previousPath, contextLines });
   }, [directory, enabled, filesByPath, key, t]);
 
+  // PR patches come from GitHub at fixed context, so expanding one file means
+  // reading both of its sides from GitHub rather than asking git for more lines.
+  const fetchFullFile = useCallback(async (filePath: string): Promise<{ original: string; modified: string }> => {
+    const { key: targetKey, source: target, enabled: active } = sourceRef.current;
+    const file = filesByPath.get(filePath);
+    if (!directory || targetKey !== key || target?.kind !== 'pr' || !file || !enabled || !active) throw new Error(t('diffView.state.failedToLoadDiff'));
+    return fetchPullRequestFile(directory, target, { path: file.path, previousPath: file.previousPath, status: file.status });
+  }, [directory, enabled, filesByPath, key, t]);
+
   return {
     key,
     revision: current?.status === 'ready' ? current.revision : 0,
@@ -98,5 +107,6 @@ export function useGitComparison(directory: string | null, source: GitComparison
     error: current?.status === 'error' ? current.message : null,
     refresh,
     fetchDiff,
+    fetchFullFile,
   };
 }

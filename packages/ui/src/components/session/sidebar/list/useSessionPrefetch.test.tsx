@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useSessionPrefetch } from './useSessionPrefetch';
 import { installHookTestDom } from '../test-utils/testDom';
 
 const session = (id: string): Session => ({
   id,
-  slug: id,
   projectID: 'project',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   title: id,
-  version: '1',
   directory: '/workspace',
   time: { created: 1, updated: 1 },
 });

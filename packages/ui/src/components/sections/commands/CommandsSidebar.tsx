@@ -170,6 +170,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       template: command.template,
       agent: command.agent,
       model: command.model,
+      subagent: command.subagent,
     });
     setSelectedCommand(newName);
 
@@ -207,6 +208,8 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       template: renameDialogCommand.template,
       agent: renameDialogCommand.agent,
       model: renameDialogCommand.model,
+      subagent: renameDialogCommand.subagent,
+      scope: renameDialogCommand.scope,
     }, settingsDirectory);
 
     if (success) {
@@ -436,7 +439,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
-          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           tabIndex={0}
         >
           <div className="flex items-center gap-2">

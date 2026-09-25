@@ -38,7 +38,7 @@ describe('OpenCode global config paths', () => {
     expect(AGENT_DIR).toBe(path.join(configDir, 'agents'));
     expect(COMMAND_DIR).toBe(path.join(configDir, 'commands'));
     expect(SKILL_DIR).toBe(path.join(configDir, 'skills'));
-    expect(CONFIG_FILE).toBe(path.join(configDir, 'config.json'));
+    expect(CONFIG_FILE).toBe(path.join(configDir, 'opencode.json'));
 
     fs.rmSync(xdgConfigHome, { recursive: true, force: true });
   });
@@ -70,7 +70,7 @@ describe('OpenCode global config paths', () => {
     expect(fs.existsSync(path.join(configDir, 'commands', 'global-command.md'))).toBe(true);
     expect(fs.existsSync(path.join(configDir, 'skills', 'global-skill', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(configDir, 'snippet', 'global-snippet.md'))).toBe(true);
-    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'config.json'), 'utf8')).plugin).toEqual(['global-plugin']);
+    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'opencode.json'), 'utf8')).plugins).toEqual(['global-plugin']);
 
     agents.createAgent('project-agent', { description: 'Project', prompt: 'Project prompt' }, projectDir, 'project');
     commands.createCommand('project-command', { description: 'Project', template: 'Project template' }, projectDir, 'project');

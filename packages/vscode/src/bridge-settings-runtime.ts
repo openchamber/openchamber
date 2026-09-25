@@ -116,16 +116,14 @@ export const fetchOpenCodeSkillsFromApi = async (
   }
 
   try {
-    const base = apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`;
-    const url = new URL('skill', base);
-    if (workingDirectory) {
-      url.searchParams.set('directory', workingDirectory);
-    }
+    const url = new URL('/api/skill', apiUrl);
 
+    // OpenCode 2.x resolves the directory from this header, not a query param.
     const response = await fetch(url.toString(), {
       method: 'GET',
       headers: {
         Accept: 'application/json',
+        ...(workingDirectory ? { 'x-opencode-directory': encodeURIComponent(workingDirectory) } : {}),
         ...(ctx?.manager?.getOpenCodeAuthHeaders() || {}),
       },
       signal: AbortSignal.timeout(8_000),
@@ -135,15 +133,22 @@ export const fetchOpenCodeSkillsFromApi = async (
       return null;
     }
 
-    const payload = await response.json();
-    if (!Array.isArray(payload)) {
+    const payload = await response.json() as { data?: unknown } | null;
+    const skills = payload?.data;
+    if (!Array.isArray(skills)) {
       return null;
     }
 
-    return payload
+    return skills
       .map((item) => {
         const name = typeof item?.name === 'string' ? item.name.trim() : '';
-        const location = typeof item?.location === 'string' ? item.location : '';
+        // OpenCode v1's skill payload used `location`; v2 renamed the field
+        // to `path`. Accept both, or the whole authoritative list is dropped
+        // and the panel falls back to the (smaller) local disk scan.
+        const rawLocation = typeof item?.path === 'string' ? item.path : (typeof item?.location === 'string' ? item.location : '');
+        // v1 marked built-in skills with `<built-in>`; v2 gives them a synthetic
+        // `/builtin/<id>.md` path. Normalize so they stay read-only in the panel.
+        const location = rawLocation.startsWith('/builtin/') ? BUILT_IN_SKILL_LOCATION : rawLocation;
         const description = typeof item?.description === 'string' ? item.description : '';
         const content = typeof item?.content === 'string' ? item.content : '';
         if (!name || !location) {

@@ -10,7 +10,10 @@ import {
   deleteCommand,
   deleteSnippet,
   getAgentSources,
+  getAgentConfig,
+  getAgentPermissions,
   getCommandSources,
+  getCommandConfig,
   getSnippet,
   updateAgent,
   updateCommand,
@@ -50,15 +53,19 @@ import {
   updateMcpConfig,
   deleteMcpConfig,
   expandSnippets,
+  setWebSearchSelection,
+  setWarmingEnabled,
+  getWebSearchSource,
   type SnippetScope,
 } from './opencodeConfig';
+import { parseWebSearchSelection } from './opencode-config-v2';
 import {
   getSkillsCatalog,
   scanSkillsRepository as scanSkillsRepositoryFromGit,
   installSkillsFromRepository as installSkillsFromGit,
   type SkillsCatalogSourceConfig,
 } from './skillsCatalog';
-import { buildDeferredRestartResponse } from './config-mutation-response';
+import { buildAppliedResponse } from './config-mutation-response';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -87,8 +94,8 @@ const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: str
     : (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
 );
 
-const pluginMutationPayload = (label: string) => buildDeferredRestartResponse(
-  `${label}. Restart OpenCode to apply.`,
+const pluginMutationPayload = (label: string) => buildAppliedResponse(
+  `${label}.`,
 );
 
 const parseSkillsCatalogSources = (settings: Record<string, unknown>): SkillsCatalogSourceConfig[] => {
@@ -207,7 +214,7 @@ export async function handleConfigBridgeMessage(
         id,
         type,
         success: true,
-        data: buildDeferredRestartResponse('AGENTS.md saved. Restart OpenCode to apply.'),
+        data: buildAppliedResponse('AGENTS.md saved.'),
       };
     }
 
@@ -249,11 +256,13 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:config/agents': {
-      const { method, name, body, directory } = (payload || {}) as {
+      const { method, name, body, directory, resource } = (payload || {}) as {
         method?: string;
         name?: string;
         body?: Record<string, unknown>;
         directory?: string;
+        /** `config` or `permissions`, mirroring the web sub-routes. */
+        resource?: string;
       };
       const agentName = typeof name === 'string' ? name.trim() : '';
       if (!agentName) {
@@ -264,6 +273,14 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
+        // Mirrors the web routes: `/config` answers the canonical v2 entity and
+        // `/permissions` the effective rule list.
+        if (resource === 'config') {
+          return { id, type, success: true, data: getAgentConfig(agentName, workingDirectory) };
+        }
+        if (resource === 'permissions') {
+          return { id, type, success: true, data: getAgentPermissions(agentName, workingDirectory) };
+        }
         const sources = getAgentSources(agentName, workingDirectory);
         const scope = sources.md.exists
           ? sources.md.scope
@@ -279,22 +296,22 @@ export async function handleConfigBridgeMessage(
       if (normalizedMethod === 'POST') {
         const scopeValue = body?.scope as string | undefined;
         const scope: AgentScope | undefined = scopeValue === 'project' ? AGENT_SCOPE.PROJECT : scopeValue === 'user' ? AGENT_SCOPE.USER : undefined;
-        createAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
+        const created = createAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
         return {
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Agent ${agentName} created successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Agent ${agentName} created successfully.`, created),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
-        updateAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory);
+        const updated = updateAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory);
         return {
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Agent ${agentName} updated successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Agent ${agentName} updated successfully.`, updated),
         };
       }
 
@@ -306,7 +323,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Agent ${agentName} deleted successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Agent ${agentName} deleted successfully.`),
         };
       }
 
@@ -314,11 +331,13 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:config/commands': {
-      const { method, name, body, directory } = (payload || {}) as {
+      const { method, name, body, directory, resource } = (payload || {}) as {
         method?: string;
         name?: string;
         body?: Record<string, unknown>;
         directory?: string;
+        /** `config`, mirroring the web sub-route. */
+        resource?: string;
       };
       const commandName = typeof name === 'string' ? name.trim() : '';
       if (!commandName) {
@@ -329,6 +348,9 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
+        if (resource === 'config') {
+          return { id, type, success: true, data: getCommandConfig(commandName, workingDirectory) };
+        }
         const sources = getCommandSources(commandName, workingDirectory);
         const scope = sources.md.exists
           ? sources.md.scope
@@ -349,7 +371,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Command ${commandName} created successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Command ${commandName} created successfully.`),
         };
       }
 
@@ -359,7 +381,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Command ${commandName} updated successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Command ${commandName} updated successfully.`),
         };
       }
 
@@ -369,11 +391,39 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Command ${commandName} deleted successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Command ${commandName} deleted successfully.`),
         };
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    // GET/PUT /api/config/websearch — see the web routes in
+    // packages/web/server/lib/opencode/routes.js.
+    case 'api:config/websearch': {
+      // SAFETY: every field is checked before use: `method` against a literal,
+      // `directory` by resolveWorkingDirectory, `selection` by parseWebSearchSelection.
+      const body = (payload || {}) as { method?: string; directory?: string; selection?: unknown };
+      if (body.method === 'GET') {
+        return { id, type, success: true, data: getWebSearchSource(resolveWorkingDirectory(ctx, body.directory)) };
+      }
+      const selection = parseWebSearchSelection(body.selection);
+      if (selection === undefined) {
+        return { id, type, success: false, error: 'selection must be false, null, "random" or a provider id' };
+      }
+      const result = setWebSearchSelection(selection);
+      return { id, type, success: true, data: { success: true, changed: result.changed } };
+    }
+
+    // PUT /api/config/warming — see the web route in
+    // packages/web/server/lib/opencode/routes.js.
+    case 'api:config/warming': {
+      const enabled = (payload as { enabled?: unknown } | undefined)?.enabled;
+      if (typeof enabled !== 'boolean') {
+        return { id, type, success: false, error: 'enabled must be a boolean' };
+      }
+      const result = setWarmingEnabled(enabled);
+      return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 
     case 'api:config/mcp': {
@@ -406,32 +456,32 @@ export async function handleConfigBridgeMessage(
 
       if (normalizedMethod === 'POST') {
         const scope = body?.scope as 'user' | 'project' | undefined;
-        createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
+        const created = createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
         return {
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`MCP server "${mcpName}" created. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`MCP server "${mcpName}" created.`, created),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
-        updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
+        const updated = updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
         return {
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`MCP server "${mcpName}" updated. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`MCP server "${mcpName}" updated.`, updated),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
-        deleteMcpConfig(mcpName, workingDirectory);
+        const deleted = deleteMcpConfig(mcpName, workingDirectory);
         return {
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`MCP server "${mcpName}" deleted. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`MCP server "${mcpName}" deleted.`, deleted),
         };
       }
 
@@ -582,12 +632,16 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (!name && normalizedMethod === 'GET') {
-        const skills = await resolveDiscoveredSkills(deps, ctx, workingDirectory);
+        // A failed OpenCode list is flagged so the store treats the disk scan as
+        // partial instead of caching it as the complete list (#3921).
+        const openCodeSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
+        const skills = mergeDiscoveredSkills(openCodeSkills || [], discoverSkills(workingDirectory));
         return {
           id,
           type,
           success: true,
           data: {
+            ...(openCodeSkills === null ? { openCodeSkillsUnavailable: true } : {}),
             skills: skills.map((skill) => ({
               ...skill,
               renamable: Boolean(
@@ -627,7 +681,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Skill ${skillName} created successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Skill ${skillName} created successfully.`),
         };
       }
 
@@ -655,7 +709,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Skill ${skillName} updated successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Skill ${skillName} updated successfully.`),
         };
       }
 
@@ -665,7 +719,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: buildDeferredRestartResponse(`Skill ${skillName} deleted successfully. Restart OpenCode to apply.`),
+          data: buildAppliedResponse(`Skill ${skillName} deleted successfully.`),
         };
       }
 
@@ -718,7 +772,7 @@ export async function handleConfigBridgeMessage(
       if (data.ok) {
         const installed = data.installed || [];
         const skipped = data.skipped || [];
-        const requiresRestart = installed.length > 0;
+        const installedAny = installed.length > 0;
 
         return {
           id,
@@ -728,8 +782,8 @@ export async function handleConfigBridgeMessage(
             ok: true,
             installed,
             skipped,
-            ...(requiresRestart
-              ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.')
+            ...(installedAny
+              ? buildAppliedResponse('Skills installed successfully.')
               : {
                 requiresReload: false,
                 message: 'No skills were installed',

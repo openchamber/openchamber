@@ -1,607 +1,359 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionGoalRuntime } from './runtime.js';
 
-const SESSION_ID = 'ses_parent';
-const CHILD_ID = 'ses_child';
-const DIRECTORY = '/workspace';
+/**
+ * The goal record — status, turns, token accounting, audit notes — lives in
+ * OpenChamber's own session metadata store, because OpenCode 2.x accepts
+ * session metadata only when a session is created. `readSessionMetadata` and
+ * `persistSessionGoal` are the seams.
+ *
+ * What is pinned here is the wiring: the runtime stays inert and costs nothing
+ * when no store is given, it reads the goal from the store rather than from the
+ * OpenCode record, and a goal that starts or resumes arms the loop through
+ * `notifyGoalChanged` instead of through an OpenCode `session.updated` event
+ * (which no longer carries our metadata).
+ *
+ * The previous suite drove the whole audit loop against a fake v1 OpenCode; it
+ * is gone rather than rewritten because every route and shape it asserted on
+ * belongs to v1. Subagents come from `GET /api/session?parentID=` now.
+ */
 
-const goal = {
+const SESSION_ID = 'ses_parent';
+const runtimes = [];
+
+const activeGoal = (extra = {}) => ({
   id: 'goal_1',
   objective: 'Finish the task',
   status: 'active',
-  turnsUsed: 1,
+  turnsUsed: 0,
   createdAt: 1,
   updatedAt: 1,
-};
-
-const session = {
-  id: SESSION_ID,
-  directory: DIRECTORY,
-  metadata: { openchamber: { goal } },
-};
-
-const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
-  status,
-  headers: { 'Content-Type': 'application/json' },
+  ...extra,
 });
 
-const requestPath = (input) => new URL(typeof input === 'string' ? input : input.url).pathname;
-
-const startIdleTick = async (fetchImpl) => {
-  const getSmallModelService = vi.fn();
-  vi.stubGlobal('fetch', fetchImpl);
+const makeRuntime = (overrides = {}) => {
+  const buildOpenCodeUrl = vi.fn((fetchPath) => `http://opencode.test${fetchPath}`);
+  const getSmallModelService = vi.fn(async () => {
+    throw new Error('the small model must not be consulted in this test');
+  });
+  const emitGoalNotification = vi.fn();
   const runtime = createSessionGoalRuntime({
-    buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
+    buildOpenCodeUrl,
     getOpenCodeAuthHeaders: () => ({}),
     getSmallModelService,
+    emitGoalNotification,
     isEnabled: () => true,
-    idleQuietMs: 10,
+    idleQuietMs: 1,
+    kickoffQuietMs: 1,
+    ...overrides,
   });
-  runtime.processPayload({
-    type: 'session.status',
-    properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-  });
-  await vi.runOnlyPendingTimersAsync();
-  return { runtime, getSmallModelService };
+  runtimes.push(runtime);
+  return { runtime, buildOpenCodeUrl, getSmallModelService, emitGoalNotification };
 };
 
-const assistantMessage = (id, infoOverrides = {}) => ({
-  info: {
-    id,
-    sessionID: SESSION_ID,
-    role: 'assistant',
-    providerID: 'provider',
-    modelID: 'model',
-    time: { created: 2, completed: 2 },
-    tokens: { input: 1, output: 1, cache: { read: 0 } },
-    ...infoOverrides,
-  },
-  parts: [{ type: 'text', text: 'The agent made progress.' }],
+const wired = (metadata = {}) => ({
+  readSessionMetadata: vi.fn(async () => metadata),
+  persistSessionGoal: vi.fn(async () => undefined),
 });
 
-const createRuntimeHarness = ({ messages, messageFactory, goalOverrides = {}, maxAutoTurns = 20 }) => {
-  const requests = [];
-  let messageFetchCount = 0;
-  const activeSession = {
-    ...session,
-    metadata: { openchamber: { goal: { ...goal, ...goalOverrides } } },
-  };
-  const service = {
-    generateSmallModelText: vi.fn(async () => ({
-      text: '{"verdict":"continue","note":"More work remains"}',
-      providerID: 'provider',
-      modelID: 'model',
-    })),
-  };
-  const fetchImpl = vi.fn(async (input, init = {}) => {
-    const pathname = requestPath(input);
-    requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
-    if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') {
-      activeSession.metadata = JSON.parse(init.body).metadata;
-      return jsonResponse(activeSession);
+const idle = (sessionID = SESSION_ID) => ({
+  type: 'session.status',
+  properties: { sessionID, status: { type: 'idle' } },
+});
+
+afterEach(() => {
+  while (runtimes.length > 0) runtimes.pop().stop?.();
+  vi.restoreAllMocks();
+});
+
+/**
+ * A fake v2 OpenCode over the global fetch: flat message records (`type`,
+ * `content[]`, `model`, `finish`, `tokens`), `{ location, data }` envelopes,
+ * `/api/session/active` for busy state, and the three continuation calls.
+ */
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200 }) => {
+  const calls = [];
+  const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+  const fetchMock = vi.fn(async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null });
+    // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
+    if (url.pathname === '/api/session/active') return Response.json({ data: active });
+    if (url.pathname === '/api/session') {
+      // Children of the parent, cursor paged: the first page is selected by
+      // `parentID`, later ones by the cursor alone.
+      const index = url.searchParams.has('cursor') ? Number(url.searchParams.get('cursor').replace('page-', '')) : 0;
+      if (index === 0 && url.searchParams.get('parentID') !== SESSION_ID) return json({ data: [], cursor: {} });
+      const data = childPages[index] ?? [];
+      const next = index + 1 < childPages.length ? { next: `page-${index + 1}` } : {};
+      return json({ data, cursor: next }, childrenStatus);
     }
-    if (pathname === `/session/${SESSION_ID}`) return jsonResponse(activeSession);
-    if (pathname === '/session/status') return jsonResponse({});
-    if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
-    if (pathname === `/session/${SESSION_ID}/message`) {
-      const nextMessages = messageFactory ? messageFactory(messageFetchCount) : messages;
-      messageFetchCount += 1;
-      return jsonResponse(nextMessages);
-    }
-    if (pathname === `/session/${SESSION_ID}/prompt_async`) return jsonResponse({ ok: true });
-    throw new Error(`Unexpected request: ${pathname}`);
+    if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
+    if (url.pathname === `/api/session/${SESSION_ID}`) return json({ id: SESSION_ID, location: { directory: '/repo' } });
+    return json({});
   });
-  vi.stubGlobal('fetch', fetchImpl);
-  const runtime = createSessionGoalRuntime({
-    buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-    getOpenCodeAuthHeaders: () => ({}),
-    getSmallModelService: async () => service,
-    isEnabled: () => true,
-    idleQuietMs: 10,
-    maxAutoTurns,
-  });
-  return { runtime, requests, service, activeSession };
+  vi.stubGlobal('fetch', fetchMock);
+  return { calls };
 };
 
-const runIdleTick = async (runtime) => {
-  runtime.processPayload({
-    type: 'session.status',
-    properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-  });
-  await vi.runOnlyPendingTimersAsync();
+const assistantRecord = (overrides = {}) => ({
+  id: 'msg_a1',
+  sessionID: SESSION_ID,
+  type: 'assistant',
+  agent: 'build',
+  model: { providerID: 'anthropic', id: 'claude-sonnet-5' },
+  content: [{ type: 'text', text: 'Done with step one.' }],
+  finish: 'stop',
+  tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 20, write: 0 } },
+  time: { created: 10, completed: 20 },
+  ...overrides,
+});
+
+const runTick = async (runtime) => {
+  await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+  // idleQuietMs / kickoffQuietMs are 1 ms; the tick itself is async.
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
 };
 
-const lastPatchedGoal = (requests) => {
-  const patches = requests.filter((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
-  expect(patches.length).toBeGreaterThan(0);
-  return JSON.parse(patches.at(-1).body).metadata.openchamber.goal;
-};
+describe('session goal tick on v2 messages', () => {
+  it('reads the flat v2 assistant record, audits it, and continues on the same model and agent', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord(),
+      ],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: JSON.stringify({ verdict: 'continue', note: 'more to do' }), providerID: 'anthropic', modelID: 'claude-haiku-5' }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+    });
 
-describe('session goal live activity gate', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
+    await runTick(runtime);
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
-
-  it('waits for the next parent idle when the parent resumed during the quiet window', async () => {
-    const paths = [];
-    const { runtime, getSmallModelService } = await startIdleTick(vi.fn(async (input) => {
-      const pathname = requestPath(input);
-      paths.push(pathname);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({ [SESSION_ID]: { type: 'busy' } });
-      throw new Error(`Unexpected request: ${pathname}`);
-    }));
-
-    expect(paths).toEqual([`/session/${SESSION_ID}`, '/session/status']);
-    expect(getSmallModelService).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(paths).toHaveLength(2);
-    runtime.stop();
-  });
-
-  it('waits for the parent result cycle while a direct child is working', async () => {
-    const paths = [];
-    const { runtime, getSmallModelService } = await startIdleTick(vi.fn(async (input) => {
-      const pathname = requestPath(input);
-      paths.push(pathname);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({ [CHILD_ID]: { type: 'busy' } });
-      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([{ id: CHILD_ID, parentID: SESSION_ID }]);
-      throw new Error(`Unexpected request: ${pathname}`);
-    }));
-
-    expect(paths).toEqual([
-      `/session/${SESSION_ID}`,
-      '/session/status',
-      `/session/${SESSION_ID}/children`,
-    ]);
-    expect(getSmallModelService).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(paths).toHaveLength(3);
-    runtime.stop();
-  });
-
-  it('retries the quiet window when live status cannot be read', async () => {
-    const paths = [];
-    const { runtime, getSmallModelService } = await startIdleTick(vi.fn(async (input) => {
-      const pathname = requestPath(input);
-      paths.push(pathname);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({ error: 'unavailable' }, 503);
-      throw new Error(`Unexpected request: ${pathname}`);
-    }));
-
-    expect(paths).toEqual([`/session/${SESSION_ID}`, '/session/status']);
-    expect(getSmallModelService).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(10);
-    expect(paths).toEqual([
-      `/session/${SESSION_ID}`,
-      '/session/status',
-      `/session/${SESSION_ID}`,
-      '/session/status',
+    // The audit saw the assistant's text and ran within the session's provider.
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate.mock.calls[0][0]).toMatchObject({ preferredProviderID: 'anthropic', preferredModelID: 'claude-sonnet-5', restrictToPreferredProvider: true });
+    expect(generate.mock.calls[0][0].prompt).toContain('Done with step one.');
+    // Tokens were accounted from the v2 record: input + cache.read + output.
+    const written = seam.persistSessionGoal.mock.calls.at(-1)[2];
+    expect(written).toMatchObject({ turnsUsed: 1, tokensUsed: 170 });
+    // The continuation is one plain prompt: the session keeps its own model
+    // and agent, nothing is re-selected.
+    const continuation = calls.filter((call) => call.method === 'POST').map((call) => [call.path, call.body]);
+    expect(continuation).toEqual([
+      [`/api/session/${SESSION_ID}/prompt`, { text: expect.stringContaining('Finish the task') }],
     ]);
     runtime.stop();
   });
 
-  it('audits normally when the idle parent has no working children', async () => {
-    const requests = [];
-    const fetchImpl = vi.fn(async (input, init = {}) => {
-      const pathname = requestPath(input);
-      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
-      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({});
-      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
-      if (pathname === `/session/${SESSION_ID}/message`) {
-        return jsonResponse([{
-          info: {
-            id: 'msg_assistant',
-            sessionID: SESSION_ID,
-            role: 'assistant',
-            providerID: 'provider',
-            modelID: 'model',
-            time: { completed: 2 },
-            tokens: { input: 1, output: 1, cache: { read: 0 } },
-          },
-          parts: [{ type: 'text', text: 'The task is verified complete.' }],
-        }]);
-      }
-      throw new Error(`Unexpected request: ${pathname}`);
-    });
-    const service = {
-      generateSmallModelText: vi.fn(async () => ({
-        text: '{"verdict":"complete","note":"Task verified complete"}',
-        providerID: 'provider',
-        modelID: 'model',
-      })),
-    };
-    vi.stubGlobal('fetch', fetchImpl);
-    const runtime = createSessionGoalRuntime({
-      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-      getOpenCodeAuthHeaders: () => ({}),
-      getSmallModelService: async () => service,
-      isEnabled: () => true,
-      idleQuietMs: 10,
+  it('settles the goal as complete when the audit says so, without a continuation', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({ messages: [assistantRecord()] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime, emitGoalNotification } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({
+        generateSmallModelText: async () => ({ text: JSON.stringify({ verdict: 'complete', note: 'all done' }) }),
+      }),
     });
 
-    runtime.processPayload({
-      type: 'session.status',
-      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-    });
-    await vi.runOnlyPendingTimersAsync();
+    await runTick(runtime);
 
-    expect(service.generateSmallModelText).toHaveBeenCalledOnce();
-    const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
-    expect(patch).toBeDefined();
-    const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
-    expect(writtenGoal).toMatchObject({
-      status: 'complete',
-      evaluationProviderID: 'provider',
-      evaluationModelID: 'model',
-    });
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'complete', note: 'all done' });
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(emitGoalNotification).toHaveBeenCalledTimes(1);
     runtime.stop();
   });
 
-  it('skips audit and sends continuation prompt when assistant message finishes with length stop', async () => {
-    const requests = [];
-    const fetchImpl = vi.fn(async (input, init = {}) => {
-      const pathname = requestPath(input);
-      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
-      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({});
-      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
-      if (pathname === `/session/${SESSION_ID}/prompt_async`) return jsonResponse({ ok: true });
-      if (pathname === `/session/${SESSION_ID}/message`) {
-        return jsonResponse([{
-          info: {
-            id: 'msg_assistant_len',
-            sessionID: SESSION_ID,
-            role: 'assistant',
-            providerID: 'provider',
-            modelID: 'model',
-            finish: 'length',
-            time: { completed: 2 },
-            tokens: { input: 100, output: 4096, reasoning: 4096, cache: { read: 0 } },
-          },
-          parts: [{ type: 'reasoning', text: 'Drafting extensive implementation...' }],
-        }]);
-      }
-      throw new Error(`Unexpected request: ${pathname}`);
+  it('treats a finished compaction as a summary turn: no audit, continuation sent', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({
+      messages: [
+        assistantRecord(),
+        { id: 'msg_c1', sessionID: SESSION_ID, type: 'compaction', status: 'completed', summary: 'Summary so far', time: { created: 30, completed: 40 } },
+      ],
     });
-    const service = {
-      generateSmallModelText: vi.fn(),
-    };
-    vi.stubGlobal('fetch', fetchImpl);
-    const runtime = createSessionGoalRuntime({
-      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-      getOpenCodeAuthHeaders: () => ({}),
-      getSmallModelService: async () => service,
-      isEnabled: () => true,
-      idleQuietMs: 10,
-    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    runtime.processPayload({
-      type: 'session.status',
-      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-    });
-    await vi.runOnlyPendingTimersAsync();
+    await runTick(runtime);
 
-    // Audit must be skipped on length-truncated turn
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-
-    // Goal accounting is persisted and turnsUsed incremented
-    const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
-    expect(patch).toBeDefined();
-    const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
-    expect(writtenGoal).toMatchObject({
-      status: 'active',
-      turnsUsed: 2,
-    });
-
-    // Continuation prompt is dispatched
-    const promptAsync = requests.find((request) => request.pathname === `/session/${SESSION_ID}/prompt_async` && request.method === 'POST');
-    expect(promptAsync).toBeDefined();
-    const promptBody = JSON.parse(promptAsync.body);
-    expect(promptBody.parts[0].text).toContain('Continue working toward the active session goal.');
+    expect(generate).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.path.endsWith('/prompt') && call.method === 'POST')).toBe(true);
     runtime.stop();
   });
 
-  it('skips audit and sends continuation prompt when assistant message carries MessageOutputLengthError', async () => {
-    const requests = [];
-    const fetchImpl = vi.fn(async (input, init = {}) => {
-      const pathname = requestPath(input);
-      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
-      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({});
-      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
-      if (pathname === `/session/${SESSION_ID}/prompt_async`) return jsonResponse({ ok: true });
-      if (pathname === `/session/${SESSION_ID}/message`) {
-        return jsonResponse([{
-          info: {
-            id: 'msg_assistant_len_err',
-            sessionID: SESSION_ID,
-            role: 'assistant',
-            providerID: 'provider',
-            modelID: 'model',
-            error: { name: 'MessageOutputLengthError', message: 'Maximum token limit reached' },
-            time: { completed: 2 },
-            tokens: { input: 100, output: 4096, reasoning: 4096, cache: { read: 0 } },
-          },
-          parts: [{ type: 'reasoning', text: 'Drafting extensive implementation...' }],
-        }]);
-      }
-      throw new Error(`Unexpected request: ${pathname}`);
-    });
-    const service = {
-      generateSmallModelText: vi.fn(),
-    };
-    vi.stubGlobal('fetch', fetchImpl);
-    const runtime = createSessionGoalRuntime({
-      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-      getOpenCodeAuthHeaders: () => ({}),
-      getSmallModelService: async () => service,
-      isEnabled: () => true,
-      idleQuietMs: 10,
-    });
+  it('waits when the session is still running or the user just sent a message', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const generate = vi.fn();
+    const busy = v2OpenCode({ messages: [assistantRecord()], active: { [SESSION_ID]: { status: 'running' } } });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runTick(runtime);
+    expect(busy.calls.some((call) => call.method === 'POST')).toBe(false);
+    runtime.stop();
 
-    runtime.processPayload({
-      type: 'session.status',
-      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
+    const trailing = v2OpenCode({
+      messages: [assistantRecord(), { id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'wait', time: { created: 50 } }],
     });
-    await vi.runOnlyPendingTimersAsync();
+    const { runtime: second } = makeRuntime({ ...wired({ openchamber: { goal: activeGoal() } }), getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runTick(second);
+    expect(trailing.calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(generate).not.toHaveBeenCalled();
+    second.stop();
+  });
+});
 
-    // Audit must be skipped on MessageOutputLengthError
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
+describe('session goal tick and subagents', () => {
+  const quiet = () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  };
+  const child = (id) => ({ id, parentID: SESSION_ID, time: { updated: 1 } });
 
-    // Goal remains active and turnsUsed incremented
-    const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
-    expect(patch).toBeDefined();
-    const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
-    expect(writtenGoal).toMatchObject({
-      status: 'active',
-      turnsUsed: 2,
+  it('waits while a subagent listed on a later page is still working', async () => {
+    quiet();
+    const generate = vi.fn();
+    const server = v2OpenCode({
+      messages: [assistantRecord()],
+      active: { ses_child_2: { status: 'running' } },
+      childPages: [[child('ses_child_1')], [child('ses_child_2')]],
     });
+    const { runtime } = makeRuntime({ ...wired({ openchamber: { goal: activeGoal() } }), getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runTick(runtime);
+    const listCalls = server.calls.filter((call) => call.path === '/api/session');
+    expect(listCalls.map((call) => call.query.parentID ?? call.query.cursor)).toEqual([SESSION_ID, 'page-1']);
+    expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(generate).not.toHaveBeenCalled();
+  });
 
-    // Continuation prompt is dispatched
-    const promptAsync = requests.find((request) => request.pathname === `/session/${SESSION_ID}/prompt_async` && request.method === 'POST');
-    expect(promptAsync).toBeDefined();
+  it('audits once every subagent is idle', async () => {
+    quiet();
+    const server = v2OpenCode({
+      messages: [assistantRecord()],
+      childPages: [[child('ses_child_1')]],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({
+        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        generateSmallModelText: async () => ({ text: '{"verdict":"complete","reason":"done"}' }),
+      }),
+    });
+    await runTick(runtime);
+    expect(server.calls.some((call) => call.path === '/api/session' && call.query.parentID === SESSION_ID)).toBe(true);
+    expect(seam.persistSessionGoal).toHaveBeenCalled();
+  });
+
+  it('does not treat an unreadable children list as "no subagents"', async () => {
+    quiet();
+    const generate = vi.fn();
+    const server = v2OpenCode({ messages: [assistantRecord()], childrenStatus: 500 });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runTick(runtime);
+    expect(server.calls.some((call) => call.path === '/api/session')).toBe(true);
+    expect(server.calls.some((call) => call.path.endsWith('/message'))).toBe(false);
+    expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+  });
+});
+
+describe('session goal runtime', () => {
+  it('arms the loop when a goal starts, without waiting for an OpenCode event', async () => {
+    const seam = wired();
+    const { runtime, buildOpenCodeUrl } = makeRuntime(seam);
+
+    await runtime.notifyGoalChanged('ses_1', '/repo', { openchamber: { goal: activeGoal() } });
+    // The kickoff timer is armed; the directory came with the notification, so
+    // nothing had to be looked up.
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
     runtime.stop();
   });
 
-  it.each([
-    { name: 'APIError', error: { name: 'APIError', message: 'provider failed' } },
-    { name: 'StructuredOutputError', error: { name: 'StructuredOutputError', message: 'invalid output' } },
-    { name: 'unnamed errors', error: {} },
-  ])('blocks a length finish when the assistant also has a non-length $name', async ({ error }) => {
-    const { runtime, requests, service } = createRuntimeHarness({
-      messages: [assistantMessage('msg_assistant_error', { finish: 'length', error })],
-    });
+  it('looks the directory up when a UI patch does not name one', async () => {
+    const seam = wired();
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ location: { directory: '/resolved' } }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime(seam);
 
-    await runIdleTick(runtime);
+    await runtime.notifyGoalChanged('ses_1', '', { openchamber: { goal: activeGoal() } });
 
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.some((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toBe(false);
-    expect(lastPatchedGoal(requests)).toMatchObject({
-      status: 'blocked',
-      statusReason: error.name || 'assistant turn failed',
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/session/ses_1');
     runtime.stop();
   });
 
-  it('blocks after two consecutive length-truncated agent turns without persisting a counter, regardless of message IDs', async () => {
-    const firstLength = assistantMessage('z', { finish: 'length', time: { created: 10, completed: 11 } });
-    const summary = assistantMessage('summary', { summary: true, time: { created: 15, completed: 16 } });
-    const secondLength = assistantMessage('a', { finish: 'length', time: { created: 20, completed: 21 } });
-    const { runtime, requests, service } = createRuntimeHarness({
-      messageFactory: (fetchCount) => fetchCount < 2 ? [firstLength] : [firstLength, summary, secondLength],
-    });
+  it('does not arm for a goal that is not active or already under way', async () => {
+    const seam = wired();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime(seam);
 
-    await runIdleTick(runtime);
-    runtime.processPayload({
-      type: 'session.status',
-      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-    });
-    await vi.runOnlyPendingTimersAsync();
+    await runtime.notifyGoalChanged('ses_1', '', { openchamber: { goal: activeGoal({ status: 'paused' }) } });
+    await runtime.notifyGoalChanged('ses_1', '', { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } });
+    await runtime.notifyGoalChanged('ses_1', '', {});
 
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toHaveLength(1);
-    expect(lastPatchedGoal(requests)).toMatchObject({
-      status: 'blocked',
-      statusReason: 'repeated output truncation',
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
     runtime.stop();
   });
 
-  it('allows one explicit Resume after repeated truncation, then blocks another cutoff', async () => {
-    const first = assistantMessage('first', { finish: 'length', time: { created: 10, completed: 11 } });
-    const second = assistantMessage('second', { finish: 'length', time: { created: 20, completed: 21 } });
-    const messages = [first, second];
-    const { runtime, requests, activeSession } = createRuntimeHarness({ messages });
-    try {
-      await runIdleTick(runtime);
-      expect(lastPatchedGoal(requests).status).toBe('blocked');
-      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(0);
-      Object.assign(activeSession.metadata.openchamber.goal, { status: 'active', statusReason: 'resumed', turnsUsed: 0 });
-      await runIdleTick(runtime);
-      expect(lastPatchedGoal(requests)).toMatchObject({ status: 'active', statusReason: '', turnsUsed: 1 });
-      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(1);
-      messages.push(assistantMessage('third', { finish: 'length', time: { created: 30, completed: 31 } }));
-      await runIdleTick(runtime);
-      expect(lastPatchedGoal(requests)).toMatchObject({ status: 'blocked', statusReason: 'repeated output truncation' });
-      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(1);
-    } finally {
-      runtime.stop();
-    }
+  it('does no work and reaches no service while no goal store is injected', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime, buildOpenCodeUrl, getSmallModelService, emitGoalNotification } = makeRuntime();
+
+    runtime.processPayload(idle());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
+    expect(getSmallModelService).not.toHaveBeenCalled();
+    expect(emitGoalNotification).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { tokenBudget: 1, error: undefined, expectedStatus: 'budgetLimited' },
-    { tokenBudget: null, error: { name: 'APIError' }, expectedStatus: 'blocked' },
-  ])('keeps $expectedStatus protection on explicit Resume', async ({ tokenBudget, error, expectedStatus }) => {
-    const { runtime, requests } = createRuntimeHarness({
-      goalOverrides: { statusReason: 'resumed', tokenBudget },
-      messages: [assistantMessage('resumed', { finish: 'length', error })],
-    });
-    try {
-      await runIdleTick(runtime);
-      expect(lastPatchedGoal(requests).status).toBe(expectedStatus);
-      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(0);
-    } finally {
-      runtime.stop();
-    }
+  it('explains itself once, not on every event', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime } = makeRuntime();
+
+    runtime.processPayload(idle('ses_1'));
+    runtime.processPayload(idle('ses_2'));
+    runtime.processPayload({ type: 'session.updated', properties: { info: { id: 'ses_3' } } });
+
+    const notices = log.mock.calls.filter(([line]) => String(line).includes('[session-goal] parked'));
+    expect(notices).toHaveLength(1);
   });
 
-  it('continues after a truncated agent turn followed by a length-finished summary', async () => {
-    const firstLength = assistantMessage('agent-length', { finish: 'length', time: { created: 10, completed: 11 } });
-    const summary = assistantMessage('summary', {
-      summary: true,
-      finish: 'length',
-      time: { created: 15, completed: 16 },
-    });
-    const { runtime, requests, service } = createRuntimeHarness({
-      messageFactory: (fetchCount) => fetchCount < 2 ? [firstLength] : [firstLength, summary],
-    });
+  it('ignores everything after stop', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime } = makeRuntime();
 
-    await runIdleTick(runtime);
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toHaveLength(2);
-    expect(lastPatchedGoal(requests)).toMatchObject({ status: 'active' });
     runtime.stop();
+    runtime.processPayload(idle());
+
+    expect(log).not.toHaveBeenCalled();
   });
 
-  it('does not infer a repeated streak when a completed assistant timestamp is missing', async () => {
-    const firstLength = assistantMessage('z', { finish: 'length', time: { completed: 11 } });
-    const secondLength = assistantMessage('a', { finish: 'length', time: { created: 20, completed: 21 } });
-    const { runtime, requests, service } = createRuntimeHarness({
-      messageFactory: (fetchCount) => fetchCount < 2 ? [firstLength] : [firstLength, secondLength],
-    });
+  it('reads a user abort off the aborted idle event v2 produces', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime } = makeRuntime(wired());
 
-    await runIdleTick(runtime);
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toHaveLength(2);
-    expect(lastPatchedGoal(requests)).toMatchObject({ status: 'active' });
-    runtime.stop();
-  });
-
-  it('ignores a missing timestamp on an older assistant when known post-goal turns establish a streak', async () => {
-    const olderLength = assistantMessage('legacy', { finish: 'length', time: { completed: 5 } });
-    const firstLength = assistantMessage('z', { finish: 'length', time: { created: 10, completed: 11 } });
-    const secondLength = assistantMessage('a', { finish: 'length', time: { created: 20, completed: 21 } });
-    const { runtime, requests, service } = createRuntimeHarness({
-      goalOverrides: { createdAt: 6 },
-      messageFactory: (fetchCount) => fetchCount < 2 ? [firstLength] : [olderLength, firstLength, secondLength],
-    });
-
-    await runIdleTick(runtime);
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toHaveLength(1);
-    expect(lastPatchedGoal(requests)).toMatchObject({
-      status: 'blocked',
-      statusReason: 'repeated output truncation',
-    });
-    runtime.stop();
-  });
-
-  it('does not count a previous truncated turn created at the goal boundary', async () => {
-    const firstLength = assistantMessage('before-boundary', { finish: 'length', time: { created: 10, completed: 11 } });
-    const secondLength = assistantMessage('after-boundary', { finish: 'length', time: { created: 20, completed: 21 } });
-    const { runtime, requests, service } = createRuntimeHarness({
-      goalOverrides: { createdAt: 10 },
-      messageFactory: (fetchCount) => fetchCount < 2 ? [firstLength] : [firstLength, secondLength],
-    });
-
-    await runIdleTick(runtime);
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toHaveLength(2);
-    expect(lastPatchedGoal(requests)).toMatchObject({ status: 'active' });
-    runtime.stop();
-  });
-
-  it('allows length recovery after an ordinary assistant turn breaks the streak', async () => {
-    const firstLength = assistantMessage('msg_length_before_normal', { finish: 'length' });
-    const normal = assistantMessage('msg_normal');
-    const secondLength = assistantMessage('msg_length_after_normal', { finish: 'length' });
-    const { runtime, requests, service } = createRuntimeHarness({
-      messageFactory: (fetchCount) => fetchCount < 2
-        ? [firstLength]
-        : [firstLength, normal, secondLength],
-    });
-
-    await runIdleTick(runtime);
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toHaveLength(2);
-    expect(lastPatchedGoal(requests)).toMatchObject({ status: 'active' });
-    runtime.stop();
-  });
-
-  it('keeps MessageAbortedError pause behavior instead of continuing', async () => {
-    const { runtime, requests, service } = createRuntimeHarness({
-      messages: [assistantMessage('msg_aborted', { error: { name: 'MessageAbortedError' } })],
-    });
-
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.some((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toBe(false);
-    expect(lastPatchedGoal(requests)).toMatchObject({
-      status: 'paused',
-      statusReason: 'paused after abort',
-    });
-    runtime.stop();
-  });
-
-  it('checks the token budget before allowing length recovery', async () => {
-    const { runtime, requests, service } = createRuntimeHarness({
-      goalOverrides: { tokenBudget: 5 },
-      messages: [assistantMessage('msg_budget_length', {
-        finish: 'length',
-        tokens: { input: 3, output: 3, cache: { read: 0 } },
-      })],
-    });
-
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.some((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toBe(false);
-    expect(lastPatchedGoal(requests)).toMatchObject({ status: 'budgetLimited' });
-    runtime.stop();
-  });
-
-  it('checks the auto-continuation cap before allowing length recovery', async () => {
-    const { runtime, requests, service } = createRuntimeHarness({
-      maxAutoTurns: 1,
-      messages: [assistantMessage('msg_cap_length', { finish: 'length' })],
-    });
-
-    await runIdleTick(runtime);
-
-    expect(service.generateSmallModelText).not.toHaveBeenCalled();
-    expect(requests.some((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`)).toBe(false);
-    expect(lastPatchedGoal(requests)).toMatchObject({
-      status: 'blocked',
-      statusReason: 'auto-continuation limit reached',
-    });
-    runtime.stop();
+    // The old signal was an assistant message carrying MessageAbortedError;
+    // accepting the new one must not throw or be mistaken for a normal idle.
+    expect(() => runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    })).not.toThrow();
   });
 });

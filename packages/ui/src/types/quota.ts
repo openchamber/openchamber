@@ -17,7 +17,6 @@ export type QuotaProviderId =
   | 'ollama-cloud'
   | 'wafer'
   | 'opencode-go'
-  | 'crof'
   | 'deepseek'
   | 'exe-dev'
   | 'hyper'

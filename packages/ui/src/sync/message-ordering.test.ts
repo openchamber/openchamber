@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message } from "@opencode-ai/sdk/v2/client"
+import type { Message } from "@/lib/opencode/model"
 import {
   insertMessageChronologically,
   messagesBefore,
@@ -12,7 +12,7 @@ const message = (id: string, created: number): Message => ({
   sessionID: "session-a",
   role: "user",
   time: { created },
-} as Message)
+})
 
 describe("message chronology", () => {
   test("orders post-rollover IDs after legacy IDs by creation time", () => {

@@ -1,3 +1,4 @@
+import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import React from 'react';
 import { isDesktopShell, requestFileAccess, startDesktopWindowDrag } from '@/lib/desktop';
 import { Input } from '@/components/ui/input';
@@ -12,8 +13,9 @@ import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/install | bash';
-const DOCS_URL = 'https://opencode.ai/docs';
+const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/v2/install | bash';
+const WINDOWS_INSTALL_COMMAND = 'npm install -g @opencode/cli';
+const DOCS_URL = 'https://opencode.ai/download';
 const POLL_INTERVAL_MS = 2500;
 
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
@@ -24,15 +26,21 @@ type ChooserScreenProps = {
   localAvailable?: boolean;
 };
 
-function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: string }) {
+function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCopy: () => void; copyTitle: string }) {
   return (
     <div className="flex items-center justify-between gap-3 w-full">
-      <code className="flex-1 text-left overflow-x-auto whitespace-nowrap">
-        <span style={{ color: 'var(--syntax-keyword)' }}>curl</span>
-        <span className="text-muted-foreground"> -fsSL </span>
-        <span style={{ color: 'var(--syntax-string)' }}>https://opencode.ai/install</span>
-        <span className="text-muted-foreground"> | </span>
-        <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
+      <code className="flex-1 min-w-0 text-left overflow-x-auto whitespace-nowrap">
+        {windows ? (
+          <span style={{ color: 'var(--syntax-keyword)' }}>{WINDOWS_INSTALL_COMMAND}</span>
+        ) : (
+          <>
+            <span style={{ color: 'var(--syntax-keyword)' }}>curl</span>
+            <span className="text-muted-foreground"> -fsSL </span>
+            <span style={{ color: 'var(--syntax-string)' }}>https://opencode.ai/v2/install</span>
+            <span className="text-muted-foreground"> | </span>
+            <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
+          </>
+        )}
       </code>
       <button
         onClick={onCopy}
@@ -205,22 +213,22 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
   }, [isDesktopApp, opencodeBinary, persistFirstChoice]);
 
   const handleCopy = React.useCallback(async () => {
-    const result = await copyTextToClipboard(INSTALL_COMMAND);
+    const result = await copyTextToClipboard(platform === 'windows' ? WINDOWS_INSTALL_COMMAND : INSTALL_COMMAND);
     if (result.ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } else {
       console.error('Failed to copy:', result.error);
     }
-  }, []);
+  }, [platform]);
 
   const docsUrl = DOCS_URL;
   const binaryPlaceholder =
     platform === 'windows'
       ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
       : platform === 'linux'
-        ? '/home/you/.bun/bin/opencode'
-        : '/Users/you/.bun/bin/opencode';
+        ? '/home/you/.opencode/bin/opencode'
+        : '/Users/you/.opencode/bin/opencode';
 
   const showLocal = localAvailable && (!isDesktopApp || activeTab === 'local');
 
@@ -229,25 +237,28 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
       className="app-region-drag h-full flex items-center justify-center bg-transparent p-8 cursor-default select-none overflow-y-auto"
       onMouseDown={handleDragStart}
     >
-      <div className="w-full max-w-md space-y-7">
-        <header className="text-center space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+      <div className="w-full max-w-md">
+        <header className="flex flex-col items-center text-center">
+          <OpenChamberLogo width={48} height={48} />
+          <h1 className="mt-6 text-xl font-semibold tracking-tight text-foreground">
             {t('onboarding.chooser.title')}
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="mt-2 text-sm text-muted-foreground">
             {t('onboarding.chooser.description')}
           </p>
         </header>
 
         {isDesktopApp && localAvailable && (
-          <div className="app-region-no-drag flex gap-1.5">
+          <div role="tablist" className="app-region-no-drag mt-7 flex gap-1 rounded-lg border border-border p-1">
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'local'}
               className={cn(
-                'flex-1 px-4 py-2 rounded-lg border transition-colors text-sm',
+                'flex-1 rounded-md px-3 py-1.5 text-sm transition-colors',
                 activeTab === 'local'
-                  ? 'border-[var(--interactive-selection)] text-foreground bg-[var(--interactive-selection)]/10'
-                  : 'border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground'
+                  ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
               onClick={() => setActiveTab('local')}
             >
@@ -255,11 +266,13 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'remote'}
               className={cn(
-                'flex-1 px-4 py-2 rounded-lg border transition-colors text-sm',
+                'flex-1 rounded-md px-3 py-1.5 text-sm transition-colors',
                 activeTab === 'remote'
-                  ? 'border-[var(--interactive-selection)] text-foreground bg-[var(--interactive-selection)]/10'
-                  : 'border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground'
+                  ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
               onClick={() => setActiveTab('remote')}
             >
@@ -269,7 +282,7 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
         )}
 
         {isDesktopApp && activeTab === 'remote' ? (
-          <div className="app-region-no-drag">
+          <div className="app-region-no-drag mt-6">
             <RemoteConnectionForm
               onBack={() => localAvailable && setActiveTab('local')}
               showBackButton={false}
@@ -280,9 +293,9 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
         ) : null}
 
         {showLocal && (
-          <div className="space-y-4">
+          <div className="mt-6">
             {platform === 'windows' && (
-              <div className="rounded-lg border border-border bg-background/50 p-4">
+              <div className="mb-4 rounded-lg border border-border p-4">
                 <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
                 <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                   <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
@@ -291,142 +304,106 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
               </div>
             )}
 
-            <p className="text-sm text-muted-foreground text-center leading-relaxed">
+            <p className="text-center text-sm leading-relaxed text-muted-foreground text-balance">
               {t('onboarding.localSetup.intro')}
             </p>
 
-            <div className="app-region-no-drag rounded-lg border border-border bg-background/60 backdrop-blur-sm px-4 py-3 font-mono text-sm">
+            <div className="app-region-no-drag mt-3 rounded-lg border border-border bg-background/60 px-4 py-3 font-mono text-sm">
               {copied ? (
                 <div className="flex items-center gap-2" style={{ color: 'var(--status-success)' }}>
                   <Icon name="check" className="h-4 w-4" />
                   {t('onboarding.common.status.copiedToClipboard')}
                 </div>
               ) : (
-                <BashCommand onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
+                <InstallCommand windows={platform === 'windows'} onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
               )}
             </div>
 
-            <div className="app-region-no-drag flex items-center justify-between">
-              <a
-                href={docsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
-              >
-                {platform === 'windows' ? t('onboarding.localSetup.docs.windows') : t('onboarding.localSetup.docs.default')}
-                <Icon name="external-link" className="h-3 w-3" />
-              </a>
+            <div className="app-region-no-drag mt-3 flex items-center gap-2.5 px-1" role="status" aria-live="polite">
+              <span className="relative inline-flex h-2 w-2 shrink-0" aria-hidden>
+                <span
+                  className="absolute inset-0 rounded-full"
+                  style={{ backgroundColor: 'var(--primary-base)', animation: 'pulse-opacity 1.6s ease-in-out infinite' }}
+                />
+              </span>
+              <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+                <span className="text-foreground">{t('onboarding.localSetup.status.watching')}</span>
+                {' · '}
+                {t('onboarding.localSetup.status.autoContinue')}
+              </span>
               <button
                 type="button"
                 onClick={handleManualCheck}
                 disabled={isManualChecking}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
               >
                 {isManualChecking ? t('onboarding.localSetup.actions.checking') : t('onboarding.localSetup.actions.checkNow')}
               </button>
             </div>
 
-            <div
-              className="rounded-lg border px-4 py-3 flex items-center gap-3"
-              style={{
-                borderColor: 'color-mix(in srgb, var(--primary-base) 20%, transparent)',
-                backgroundColor: 'color-mix(in srgb, var(--primary-base) 6%, transparent)',
-              }}
-              role="status"
-              aria-live="polite"
-            >
-              <span className="relative inline-flex h-2.5 w-2.5 shrink-0" aria-hidden>
-                <span
-                  className="absolute inset-0 rounded-full"
-                  style={{
-                    backgroundColor: 'var(--primary-base)',
-                    animation: 'pulse-opacity 1.6s ease-in-out infinite',
-                  }}
-                />
-                <span
-                  className="absolute inset-[-4px] rounded-full"
-                  style={{
-                    backgroundColor: 'var(--primary-base)',
-                    animation: 'pulse-opacity-dim 1.6s ease-in-out infinite',
-                    opacity: 0,
-                  }}
-                />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-foreground leading-tight">
-                  {t('onboarding.localSetup.status.watching')}
+            <div className="mt-6 divide-y divide-border/60 border-y border-border/60">
+              <details
+                className="app-region-no-drag group"
+                open={advancedOpen}
+                onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+                  <span>{t('onboarding.localSetup.advanced.title')}</span>
+                  <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="space-y-2 pb-4">
+                  <div className="flex gap-2">
+                    <Input
+                      value={opencodeBinary}
+                      onChange={(e) => setOpencodeBinary(e.target.value)}
+                      placeholder={binaryPlaceholder}
+                      disabled={isApplyingPath}
+                      className="flex-1 font-mono text-xs"
+                    />
+                    <Button type="button" variant="secondary" size="sm" onClick={handleBrowse} disabled={isApplyingPath || !isDesktopApp}>
+                      {t('onboarding.localSetup.actions.browse')}
+                    </Button>
+                    <Button type="button" size="sm" onClick={handleApplyPath} disabled={isApplyingPath || !opencodeBinary.trim()}>
+                      {t('onboarding.localSetup.actions.apply')}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground/70">{t('onboarding.localSetup.helper.saveAndReload')}</p>
                 </div>
-                <div className="text-xs text-muted-foreground leading-tight mt-0.5">
-                  {t('onboarding.localSetup.status.autoContinue')}
-                </div>
-              </div>
+              </details>
+              <details
+                className="app-region-no-drag group"
+                open={troubleOpen}
+                onToggle={(e) => setTroubleOpen(e.currentTarget.open)}
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+                  <span>{t('onboarding.localSetup.troubleshoot.title')}</span>
+                  <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <ul className="list-disc space-y-1.5 pb-4 pl-4 text-xs text-muted-foreground">
+                  {platform === 'windows' ? (
+                    <li>{t('onboarding.localSetup.windows.hintDetectionFailed')}</li>
+                  ) : (
+                    <>
+                      <li>{t('onboarding.localSetup.hint.ensurePath')}</li>
+                      <li>{t('onboarding.localSetup.hint.setEnv')}</li>
+                      <li>{t('onboarding.localSetup.hint.missingRuntime')}</li>
+                    </>
+                  )}
+                </ul>
+              </details>
             </div>
 
-            <details
-              className="app-region-no-drag group rounded-lg border border-border/60 px-4 open:bg-background/40 transition-colors"
-              open={advancedOpen}
-              onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
-            >
-              <summary className="flex items-center justify-between cursor-pointer py-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors list-none [&::-webkit-details-marker]:hidden">
-                <span>{t('onboarding.localSetup.advanced.title')}</span>
-                <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="pb-4 space-y-2">
-                <div className="flex gap-2">
-                  <Input
-                    value={opencodeBinary}
-                    onChange={(e) => setOpencodeBinary(e.target.value)}
-                    placeholder={binaryPlaceholder}
-                    disabled={isApplyingPath}
-                    className="flex-1 font-mono text-xs"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleBrowse}
-                    disabled={isApplyingPath || !isDesktopApp}
-                  >
-                    {t('onboarding.localSetup.actions.browse')}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleApplyPath}
-                    disabled={isApplyingPath || !opencodeBinary.trim()}
-                  >
-                    {t('onboarding.localSetup.actions.apply')}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground/70">
-                  {t('onboarding.localSetup.helper.saveAndReload')}
-                </p>
-              </div>
-            </details>
-
-            <details
-              className="app-region-no-drag group rounded-lg border border-border/60 px-4 open:bg-background/40 transition-colors"
-              open={troubleOpen}
-              onToggle={(e) => setTroubleOpen((e.currentTarget as HTMLDetailsElement).open)}
-            >
-              <summary className="flex items-center justify-between cursor-pointer py-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors list-none [&::-webkit-details-marker]:hidden">
-                <span>{t('onboarding.localSetup.troubleshoot.title')}</span>
-                <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
-              </summary>
-              <ul className="pb-4 space-y-1.5 text-xs text-muted-foreground list-disc pl-4">
-                {platform === 'windows' ? (
-                  <>
-                    <li>{t('onboarding.localSetup.windows.hintDetectionFailed')}</li>
-                  </>
-                ) : (
-                  <>
-                    <li>{t('onboarding.localSetup.hint.ensurePath')}</li>
-                    <li>{t('onboarding.localSetup.hint.setEnv')}</li>
-                    <li>{t('onboarding.localSetup.hint.missingRuntime')}</li>
-                  </>
-                )}
-              </ul>
-            </details>
+            <div className="app-region-no-drag mt-5 text-center">
+              <a
+                href={docsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {platform === 'windows' ? t('onboarding.localSetup.docs.windows') : t('onboarding.localSetup.docs.default')}
+                <Icon name="external-link" className="h-3 w-3" />
+              </a>
+            </div>
           </div>
         )}
       </div>

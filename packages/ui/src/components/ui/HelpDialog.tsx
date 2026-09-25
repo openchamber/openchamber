@@ -16,7 +16,6 @@ import {
   type ShortcutActionId,
 } from "@/lib/shortcuts";
 import { useI18n, type I18nKey } from "@/lib/i18n";
-import { isVSCodeRuntime } from "@/lib/desktop";
 import type { IconName } from "@/components/icon/icons";
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
 
@@ -45,7 +44,6 @@ export const HelpDialog: React.FC = () => {
   const isHelpDialogOpen = useUIStore((state) => state.isHelpDialogOpen);
   const setHelpDialogOpen = useUIStore((state) => state.setHelpDialogOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const isVSCode = isVSCodeRuntime();
 
   const shortcuts: ShortcutSection[] = [
     {
@@ -233,7 +231,6 @@ export const HelpDialog: React.FC = () => {
                 </h3>
                 <div className="space-y-1">
                   {section.items
-                    .filter((shortcut) => !(isVSCode && shortcut.id === 'toggle_prompt_navigator'))
                     .map((shortcut) => {
                       const action = shortcut.id ? getShortcutAction(shortcut.id) : undefined;
                       const descriptionKey = shortcut.descriptionKey
