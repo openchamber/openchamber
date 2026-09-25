@@ -268,6 +268,8 @@ export function createSpaceJourney({
    * the answer says so with `networkRestored` false.
    */
   const startSpace = (spaceId) => exclusive(spaceId, async () => {
+    // As for a creation: no start may slip in while the switch is stopping the spaces one by one.
+    if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     requireNotPending(spaceId);
     await manager.startSpace({ placeId: place.id, spaceId });
     const { record } = records.read(spaceId);

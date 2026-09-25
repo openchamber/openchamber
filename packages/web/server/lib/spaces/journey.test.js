@@ -263,11 +263,14 @@ describe('the journey: start, stop, remove', () => {
     expect(await journey.stopAllSpaces()).toEqual({ stopped: [{ id, name: 'Fix login' }], stillRunning: [] });
   });
 
-  it('takes no creation once the switch is being turned off, until the turn-off is undone', async () => {
-    const { journey } = journeyWith();
+  it('takes no creation and no start once the switch is being turned off, until the turn-off is undone', async () => {
+    const { journey, manager } = journeyWith();
+    const stopped = await manager.createSpace({ placeId: 'memory', projectDirectory: PROJECT, name: 'Stopped' });
     await journey.stopAllSpaces();
     await expect(journey.createSpace(REQUEST)).rejects.toMatchObject({ code: 'isolated_spaces_off' });
+    await expect(journey.startSpace(stopped.id)).rejects.toMatchObject({ code: 'isolated_spaces_off' });
     journey.reopen();
+    expect((await journey.startSpace(stopped.id)).state).toBe('running');
     const { id } = await journey.createSpace(REQUEST);
     expect(id).toMatch(/^[0-9a-f]{12}$/);
   });
