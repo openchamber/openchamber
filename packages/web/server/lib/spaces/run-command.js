@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { SpaceError } from './errors.js';
@@ -91,13 +93,28 @@ const abortReason = (signal, file, args) => (signal.reason instanceof SpaceError
  * caller that cleans up afterwards does not race processes that still hold its files. Measured on
  * Windows: without the wait, removing the temporary folder failed with EBUSY and hid the timeout.
  * `options.killWaitMs` changes that bound, for the tests. While a `killTree` child runs, an exit of
- * this process kills its tree too, see `liveTrees`.
+ * this process kills its tree too, see `liveTrees`, unless `options.keepAtExit` is true: then only a
+ * timeout or an abort kills it, and it outlives an exit of this process, as a child without `killTree`
+ * does on POSIX. It is for `git apply`, which, killed in the middle of writing, leaves the user's project
+ * half changed, while left to run it finishes. Such a child also has no pipe back to this process on
+ * its output, because a pipe dies with this process, and a filter of git's that then printed got
+ * SIGPIPE and stopped the apply in the middle all the same, measured by a reviewer. Its stdout goes
+ * nowhere and resolves as empty; its stderr goes into a file this process made and removed at once,
+ * which it and the child each hold open, so no clean-up of anybody's can break the child's writes. At
+ * `close` the last `maxOutputBytes` of it are read: the same window as `keepTail`, and without
+ * `keepTail` a longer stderr is `command_output_too_large` then, after the child has ended.
  *
  * `options.signal` is an `AbortSignal` that lets the caller stop the child from outside: the child is
  * killed as a timeout kills it, and the rejection is the signal's reason when that reason is a
  * SpaceError, and `command_aborted` otherwise, so every rejection of this function is a SpaceError.
  * The caller then knows that it stopped the child, which the exit code cannot tell: on Windows a tree
  * ended by `taskkill` exits with code 1, not a signal. A signal that is already aborted starts nothing.
+ *
+ * `options.keepTail: true` turns the output cap into a window: past `maxOutputBytes`, each stream keeps
+ * its last `maxOutputBytes` bytes and the child runs on. It is for a child whose exit code is the answer
+ * and whose output is only shown: a `git apply --check` that fails prints a line or two for every path
+ * that does not fit, and measured by a reviewer, tens of thousands of such paths passed four megabytes,
+ * where the cap stopped the check and its answer was lost.
  *
  * Rejects with a SpaceError when the process cannot start (`command_spawn_failed`),
  * runs past `timeoutMs` (`command_timeout`), prints more than `maxOutputBytes`
@@ -107,8 +124,10 @@ const abortReason = (signal, file, args) => (signal.reason instanceof SpaceError
 export function runCommand(file, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const keepTail = options.keepTail === true;
   const stdin = options.stdin ?? '';
   const killTree = options.killTree === true;
+  const keepAtExit = options.keepAtExit === true;
   const killWaitMs = options.killWaitMs ?? KILL_WAIT_MS;
   const abortSignal = options.signal;
 
@@ -116,6 +135,23 @@ export function runCommand(file, args, options = {}) {
     if (abortSignal?.aborted) {
       reject(abortReason(abortSignal, file, args));
       return;
+    }
+    // Where a keepAtExit child's stderr goes: a file already removed from its folder, open here and in the child.
+    let errorFile = null;
+    const closeErrorFile = () => {
+      if (errorFile === null) return;
+      try { fs.closeSync(errorFile.fd); } catch { /* already closed */ }
+      fs.rmSync(errorFile.folder, { recursive: true, force: true });
+      errorFile = null;
+    };
+    if (keepAtExit) {
+      try {
+        const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-stderr-'));
+        errorFile = { folder, fd: fs.openSync(path.join(folder, 'stderr'), 'w+') };
+      } catch (error) {
+        reject(new SpaceError('command_spawn_failed', `Could not start ${file}: no file for its output: ${error.message}`, { errno: error.code ?? null }));
+        return;
+      }
     }
     let child;
     try {
@@ -127,18 +163,23 @@ export function runCommand(file, args, options = {}) {
         // On POSIX the child leads a process group of its own, so the kill can reach its children.
         // Never on Windows: there `detached` gives the child a console of its own.
         detached: killTree && process.platform !== 'win32',
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: errorFile === null ? ['pipe', 'pipe', 'pipe'] : ['pipe', 'ignore', errorFile.fd],
       });
     } catch (error) {
+      closeErrorFile();
       reject(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null }));
       return;
     }
 
-    if (killTree) trackTree(child);
+    if (killTree && !keepAtExit) trackTree(child);
+    // The child holds its own copy now; with the name gone, nothing that cleans folders can take it away.
+    // Where the system refuses to remove an open file, the folder goes at `close`.
+    if (errorFile !== null) fs.rmSync(errorFile.folder, { recursive: true, force: true });
 
     const stdoutChunks = [];
     const stderrChunks = [];
     let capturedBytes = 0;
+    const heldBytes = new Map([[stdoutChunks, 0], [stderrChunks, 0]]);
     let settled = false;
     let closed = false;
     const closeWaiters = [];
@@ -170,20 +211,39 @@ export function runCommand(file, args, options = {}) {
     const stop = () => fail(abortReason(abortSignal, file, args));
     abortSignal?.addEventListener('abort', stop, { once: true });
 
-    const capture = (chunks) => (chunk) => {
+    // Only the last `maxOutputBytes` of the stream stay, and nothing fails.
+    const window = (chunks) => (chunk) => {
+      chunks.push(chunk);
+      let held = heldBytes.get(chunks) + chunk.length;
+      while (held - chunks[0].length >= maxOutputBytes) held -= chunks.shift().length;
+      if (held > maxOutputBytes) {
+        chunks[0] = chunks[0].subarray(held - maxOutputBytes);
+        held = maxOutputBytes;
+      }
+      heldBytes.set(chunks, held);
+    };
+    const capture = (chunks) => (keepTail ? window(chunks) : (chunk) => {
       capturedBytes += chunk.length;
       if (capturedBytes > maxOutputBytes) {
         fail(new SpaceError('command_output_too_large', `${file} ${args[0] ?? ''} printed more than ${maxOutputBytes} bytes and was stopped`));
         return;
       }
       chunks.push(chunk);
-    };
+    });
 
-    child.stdout.on('data', capture(stdoutChunks));
-    child.stderr.on('data', capture(stderrChunks));
+    child.stdout?.on('data', capture(stdoutChunks));
+    child.stderr?.on('data', capture(stderrChunks));
+    /** The last `maxOutputBytes` of the stderr file, and its whole length. */
+    const readErrorFile = () => {
+      const size = fs.fstatSync(errorFile.fd).size;
+      const kept = Buffer.alloc(Math.min(size, maxOutputBytes));
+      fs.readSync(errorFile.fd, kept, 0, kept.length, size - kept.length);
+      return { size, kept };
+    };
 
     child.on('error', (error) => {
       liveTrees.delete(child);
+      closeErrorFile();
       fail(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null }));
     });
 
@@ -194,13 +254,33 @@ export function runCommand(file, args, options = {}) {
     child.on('close', (code, signal) => {
       closed = true;
       for (const wake of closeWaiters.splice(0)) wake();
-      if (settled) return;
+      if (settled) {
+        closeErrorFile();
+        return;
+      }
       settled = true;
       clearTimeout(timer);
       abortSignal?.removeEventListener('abort', stop);
       if (code === null) {
+        closeErrorFile();
         reject(new SpaceError('command_killed', `${file} ${args[0] ?? ''} was stopped by signal ${signal}`));
         return;
+      }
+      if (errorFile !== null) {
+        let read;
+        try {
+          read = readErrorFile();
+        } catch (error) {
+          reject(new SpaceError('command_output_unreadable', `The output of ${file} ${args[0] ?? ''} could not be read back: ${error.message}`, { exitCode: code }));
+          return;
+        } finally {
+          closeErrorFile();
+        }
+        if (!keepTail && read.size > maxOutputBytes) {
+          reject(new SpaceError('command_output_too_large', `${file} ${args[0] ?? ''} printed more than ${maxOutputBytes} bytes`));
+          return;
+        }
+        stderrChunks.push(read.kept);
       }
       resolve({
         code,

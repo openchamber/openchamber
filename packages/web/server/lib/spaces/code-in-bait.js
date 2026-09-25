@@ -176,7 +176,9 @@ export const hostState = (directory) => {
 // 3. new packs, which a fetch writes when it brings many objects, as additions only;
 // 4. the result ref of the spaces named, `.git/refs/openchamber/spaces/<id>/result`, the ref of what
 //    the last apply as uncommitted changes wrote, `.../applied`, the intent written while an apply
-//    runs, `.../applying`, and the one that says this space is applied as a branch from now on,
+//    runs, `.../applying`, what the patch of each was built from, `.../applied-from` and
+//    `.../applying-from`, the user's HEAD at each, `.../applied-head` and `.../applying-head`, and the
+//    one that says this space is applied as a branch from now on,
 //    `.../changes-closed`, added, removed or moved, because a later call moves each of them.
 const LOOSE_OBJECT = /^\.git\/objects\/[0-9a-f]{2}(?:\/(?:[0-9a-f]{38}|[0-9a-f]{62}))?$/;
 const NEW_PACK = /^\.git\/objects\/pack\/pack-(?:[0-9a-f]{40}|[0-9a-f]{64})\.(?:pack|idx|rev)$/;
@@ -194,7 +196,7 @@ const spaceRefPaths = (spaceId) => [
 export const unexpectedChanges = (before, after, { spaceIds = [], codeOut = false } = {}) => {
   const ownRefs = new Set(spaceIds.flatMap(spaceRefPaths));
   const resultRefs = new Set(codeOut
-    ? spaceIds.flatMap((spaceId) => ['result', 'applied', 'applying', 'changes-closed'].map((name) => `.git/refs/openchamber/spaces/${spaceId}/${name}`))
+    ? spaceIds.flatMap((spaceId) => ['result', 'applied', 'applied-from', 'applied-head', 'applying', 'applying-from', 'applying-head', 'changes-closed'].map((name) => `.git/refs/openchamber/spaces/${spaceId}/${name}`))
     : []);
   const names = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...names].filter((name) => {
