@@ -28,6 +28,14 @@ it rebuilt a catalog. The sync layer calls it from `reloadCatalog`; see
 pending-restart queue: config mutations take effect as soon as OpenCode has
 re-read the file, and only the OpenCode binary path restarts the server.
 
+Agent refreshes keep the ambient project and each location that raised the
+catalog event in the same batch. Settings can show a different project from the
+app, so refreshing only the ambient cache leaves its list stale. Invalidating a
+directory retires the Settings store, the composer store and the shared client
+request for that key. Their older responses cannot restore a pre-change list or
+stamp a fresh TTL over the replacement request. A runtime switch clears the
+directory maps and rejects loads captured from the previous runtime.
+
 Plugin catalogs carry `loadedDirectory` and `loadedRuntimeKey`, the owner of
 the installed list. The editor waits for that directory's catalog before hydrating a draft;
 plugin IDs alone are not unique across projects. Catalog requests and their

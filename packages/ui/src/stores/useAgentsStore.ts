@@ -17,6 +17,7 @@ import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
 import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { formatModelSelection, parseModelSelection } from "@/lib/modelIdentifier";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
 // useDirectoryStore -> useAgentsStore (for refreshAfterOpenCodeRestart)
@@ -79,13 +80,19 @@ const AGENTS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_AGENTS_CACHE_KEY = '__default__';
 const agentsLastLoadedAt = new Map<string, number>();
 const agentsLoadInFlight = new Map<string, Promise<boolean>>();
+const agentsLoadGeneration = new Map<string, number>();
+let agentsGeneration = 0;
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
 };
 
 export const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
-  agentsLastLoadedAt.delete(getAgentsCacheKey(directory));
+  const cacheKey = getAgentsCacheKey(directory);
+  agentsLastLoadedAt.delete(cacheKey);
+  agentsLoadGeneration.set(cacheKey, (agentsLoadGeneration.get(cacheKey) ?? 0) + 1);
+  agentsLoadInFlight.delete(cacheKey);
+  opencodeClient.invalidateAgentList(directory);
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -337,6 +344,7 @@ interface AgentsStore {
   setSelectedAgent: (name: string | null) => void;
   setAgentDraft: (draft: AgentDraft | null) => void;
   loadAgents: (directory?: string | null) => Promise<boolean>;
+  resetForRuntimeSwitch: () => void;
   /** The agent's own config entry, as stored — never the resolved `AgentInfo`. */
   fetchAgentEntity: (name: string, directory?: string | null) => Promise<AgentEntityEnvelope | null>;
   /** Global + agent + effective permission rules for one agent. */
@@ -420,6 +428,15 @@ export const useAgentsStore = create<AgentsStore>()(
           set({ agentDraft: draft });
         },
 
+        resetForRuntimeSwitch: () => {
+          agentsGeneration += 1;
+          agentsLastLoadedAt.clear();
+          agentsLoadInFlight.clear();
+          agentsLoadGeneration.clear();
+          opencodeClient.clearAgentListRequests();
+          set({ agents: [], agentsByDirectory: {}, isLoading: false });
+        },
+
         loadAgents: async (requestedDirectory?: string | null) => {
           const configDirectory = resolveDirectory(requestedDirectory);
           const cacheKey = getAgentsCacheKey(configDirectory);
@@ -437,6 +454,14 @@ export const useAgentsStore = create<AgentsStore>()(
             return inFlight;
           }
 
+          const generation = agentsGeneration;
+          const cacheGeneration = agentsLoadGeneration.get(cacheKey) ?? 0;
+          const runtimeKey = getRuntimeKey();
+          const isCurrentLoad = () => (
+            agentsGeneration === generation
+            && (agentsLoadGeneration.get(cacheKey) ?? 0) === cacheGeneration
+            && getRuntimeKey() === runtimeKey
+          );
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
@@ -445,6 +470,7 @@ export const useAgentsStore = create<AgentsStore>()(
             const previousSignature = buildAgentsSignature(previousAgents);
 
             for (let attempt = 0; attempt < 3; attempt++) {
+              if (!isCurrentLoad()) return false;
               try {
                 const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
@@ -503,6 +529,9 @@ export const useAgentsStore = create<AgentsStore>()(
                   })
                 );
 
+                // Invalidation retires requests formed before the catalog
+                // change. Their lists and TTLs must not replace the fresh load.
+                if (!isCurrentLoad()) return false;
                 const nextSignature = buildAgentsSignature(agentsWithScope);
                 if (previousSignature !== nextSignature) {
                   set((state) => {
@@ -519,11 +548,14 @@ export const useAgentsStore = create<AgentsStore>()(
                 agentsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch {
+                if (!isCurrentLoad()) return false;
                 // ignore error
               }
             }
 
-            set({ isLoading: false });
+            if (isCurrentLoad()) {
+              set({ isLoading: false });
+            }
             return false;
           })();
 
@@ -531,7 +563,9 @@ export const useAgentsStore = create<AgentsStore>()(
           try {
             return await request;
           } finally {
-            agentsLoadInFlight.delete(cacheKey);
+            if (agentsLoadInFlight.get(cacheKey) === request) {
+              agentsLoadInFlight.delete(cacheKey);
+            }
           }
         },
 

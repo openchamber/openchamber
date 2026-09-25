@@ -1464,37 +1464,49 @@ async function resyncDirectoryAfterReconnect(
 /**
  * OpenCode reports a catalog change (`config.updated`, `agent.updated`, ...)
  * without saying what changed, so the affected slice is re-read rather than
- * patched. Agents, commands, config and providers resolve per directory, so
- * every open directory refreshes its own copy; projects are global.
+ * patched. Agents, commands, config and providers resolve per directory. Every
+ * open directory refreshes its own copy, and Settings also refreshes the
+ * locations that raised the event; projects are global.
  *
  * The sync stores only hold what chat needs; the Settings lists and the
  * composer read their own stores, which `refreshStoresForCatalogKind` re-reads
  * for the same kind.
  */
-async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager): Promise<void> {
+async function reloadCatalog(
+  kind: CatalogKind,
+  childStores: ChildStoreManager,
+  eventDirectories: readonly string[],
+  runtimeKey: string,
+): Promise<void> {
+  if (runtimeKey !== getRuntimeKey()) return
   // Before anything re-reads: a fresh GET must not be served the config the
   // client cached seconds ago.
   if (kind === "config") opencodeClient.clearConfigCache()
 
-  void refreshStoresForCatalogKind(kind)
+  void refreshStoresForCatalogKind(kind, eventDirectories)
 
   if (kind === "project") {
     const projects = await opencodeClient.listProjects().catch(() => null)
-    if (projects) useGlobalSyncStore.getState().actions.set({ projects })
+    if (runtimeKey === getRuntimeKey() && projects) {
+      useGlobalSyncStore.getState().actions.set({ projects })
+    }
     return
   }
   // No sync-store slice of their own: their consumers read them on demand.
   if (kind === "skill" || kind === "plugin" || kind === "websearch") return
 
   await Promise.all([...childStores.children.entries()].map(async ([directory, store]) => {
+    if (runtimeKey !== getRuntimeKey()) return
     try {
       if (kind === "agent") {
-        store.setState({ agent: await opencodeClient.listAgents(directory) })
+        const agent = await opencodeClient.listAgents(directory)
+        if (runtimeKey === getRuntimeKey()) store.setState({ agent })
       } else if (kind !== "command") {
         // Commands have no sync-store slice: `refreshStoresForCatalogKind`
         // re-reads `useCommandsStore`, the only consumer, on demand.
         if (kind === "config") {
           const config = await opencodeClient.getConfig(directory)
+          if (runtimeKey !== getRuntimeKey()) return
           store.setState({ config })
           emitSyncConfigChanged(directory, config)
         }
@@ -1502,6 +1514,7 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
         // `provider.updated` / `model.updated` (2.0.8's own announcements), a
         // credential change, and the config (which can declare providers).
         const provider = await opencodeClient.getProvidersForConfig(directory)
+        if (runtimeKey !== getRuntimeKey()) return
         // Same catalog, same object: a re-read that changes nothing must not
         // re-render every provider consumer.
         if (JSON.stringify(store.getState().provider) !== JSON.stringify(provider)) {
@@ -1521,17 +1534,34 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
  * the same kind anyway.
  */
 const CATALOG_RELOAD_DEBOUNCE_MS = 250
-const pendingCatalogKinds = new Set<CatalogKind>()
+const pendingCatalogReloads = new Map<CatalogKind, Set<string>>()
+let pendingCatalogRuntimeKey: string | null = null
 let catalogReloadTimer: ReturnType<typeof setTimeout> | null = null
 
-function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager): void {
-  pendingCatalogKinds.add(kind)
+function scheduleCatalogReload(
+  kind: CatalogKind,
+  directory: string,
+  childStores: ChildStoreManager,
+  runtimeKey: string,
+): void {
+  if (pendingCatalogRuntimeKey !== null && pendingCatalogRuntimeKey !== runtimeKey) {
+    pendingCatalogReloads.clear()
+  }
+  pendingCatalogRuntimeKey = runtimeKey
+  const directories = pendingCatalogReloads.get(kind) ?? new Set<string>()
+  if (directory && directory !== "global") directories.add(directory)
+  pendingCatalogReloads.set(kind, directories)
   if (catalogReloadTimer) clearTimeout(catalogReloadTimer)
   catalogReloadTimer = setTimeout(() => {
     catalogReloadTimer = null
-    const kinds = [...pendingCatalogKinds]
-    pendingCatalogKinds.clear()
-    for (const pending of kinds) void reloadCatalog(pending, childStores)
+    const scheduledRuntimeKey = pendingCatalogRuntimeKey
+    pendingCatalogRuntimeKey = null
+    const reloads = [...pendingCatalogReloads.entries()]
+    pendingCatalogReloads.clear()
+    if (scheduledRuntimeKey === null || scheduledRuntimeKey !== getRuntimeKey()) return
+    for (const [pendingKind, pendingDirectories] of reloads) {
+      void reloadCatalog(pendingKind, childStores, [...pendingDirectories], scheduledRuntimeKey)
+    }
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }
 
@@ -1661,6 +1691,14 @@ export function handleEvent(
     return
   }
 
+  // Catalog events belong to their location even when the sync child store is
+  // already open. Handle them before the global/directory split so both cases
+  // reach the same debounced reload.
+  if (payload.type === "catalog.updated") {
+    scheduleCatalogReload(payload.properties.kind, directory, childStores, expectedRuntimeKey)
+    return
+  }
+
   if (payload.type === "session.patched") {
     noteForkedSessionPatched(payload.properties.sessionID)
   }
@@ -1728,8 +1766,6 @@ export function handleEvent(
       if (!recent) {
         useGlobalSyncStore.setState({ reload: "pending" })
       }
-    } else if (result.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
     }
     // On server.connected, re-bootstrap all directories
     // but only if not during recent boot
@@ -1778,8 +1814,6 @@ export function handleEvent(
     const result = reduceGlobalEvent(payload)
     if (result?.type === "refresh") {
       useGlobalSyncStore.setState({ reload: "pending" })
-    } else if (result?.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
     }
     return
   }
