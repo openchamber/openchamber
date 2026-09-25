@@ -1,5 +1,6 @@
 import type { Project as OpenCodeProject, Session } from '@/lib/opencode/model';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
+import type { SpaceMark } from '@/lib/spaces/spaces-store';
 
 type Project = {
   id: string;
@@ -27,7 +28,9 @@ export type DirectoryOwner = {
   projectId: string;
   projectRoot: string;
   scopeDirectory: string;
-  kind: 'project' | 'worktree';
+  kind: 'project' | 'worktree' | 'space';
+  /** The isolated space that owns the scope, for `kind: 'space'`. */
+  spaceId?: string;
 };
 
 export type SessionOwnershipIndex = {
@@ -70,6 +73,7 @@ export const createSessionOwnershipIndex = (
   isVSCode: boolean,
   archivedSessions: SessionOwnershipRecord[] = [],
   authoritativeProjects: readonly AuthoritativeOpenCodeProject[] = [],
+  spaces: readonly SpaceMark[] = [],
 ): SessionOwnershipIndex => {
   const ownerByDirectory = new Map<string, DirectoryOwner>();
   const projectByRoot = new Map<string, Project>();
@@ -104,6 +108,26 @@ export const createSessionOwnershipIndex = (
           kind: 'worktree',
         });
       }
+    }
+  }
+
+  // An isolated space belongs to the registered project it was made for, as the host resolved
+  // it from the space's label; a space whose project is not registered here owns nothing, so
+  // its sessions stay out of every project, as any session without an owner does. VS Code never
+  // has spaces (decision 16 of the design).
+  if (!isVSCode) {
+    for (const space of spaces) {
+      const projectRoot = normalizePath(space.projectDirectory);
+      const directory = normalizePath(space.directory);
+      const project = projectRoot ? projectByRoot.get(projectRoot) : undefined;
+      if (!project || !projectRoot || !directory) continue;
+      setOwner(ownerByDirectory, directory, {
+        projectId: project.id,
+        projectRoot,
+        scopeDirectory: directory,
+        kind: 'space',
+        spaceId: space.id,
+      });
     }
   }
 

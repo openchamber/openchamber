@@ -249,8 +249,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
 
     React.useEffect(() => {
         if (!terminalSessionId || !terminal.updateAppearance) return;
-        void terminal.updateAppearance(terminalSessionId, terminalAppearanceRef.current).catch(() => {});
-    }, [currentTheme.colors.surface.background, currentTheme.colors.syntax.base.foreground, currentTheme.metadata.variant, terminal, terminalSessionId]);
+        void terminal.updateAppearance(terminalSessionId, terminalAppearanceRef.current, terminalDirectory).catch(() => {});
+    }, [currentTheme.colors.surface.background, currentTheme.colors.syntax.base.foreground, currentTheme.metadata.variant, terminal, terminalDirectory, terminalSessionId]);
 
     React.useEffect(() => {
         activeTabIdRef.current = activeTabId;
@@ -466,7 +466,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
                         setTabSessionId(directory, tabId, null);
                         disconnectStream();
                     },
-                }
+                },
+                directory,
             );
 
             streamCleanupRef.current = () => {
@@ -520,7 +521,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
             const owningTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((entry) => entry.id === tabId);
             if (!owningTab) {
                 try {
-                    await terminal.close(session.sessionId);
+                    await terminal.close(session.sessionId, directory);
                 } catch { /* ignored */ }
                 return;
             }
@@ -533,7 +534,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
                 viewportSize &&
                 (viewportSize.cols !== initialSize.cols || viewportSize.rows !== initialSize.rows)
             ) {
-                void terminal.resize({ sessionId: session.sessionId, ...viewportSize }).catch(() => {});
+                void terminal.resize({ sessionId: session.sessionId, ...viewportSize, directory }).catch(() => {});
             }
             // Storing the session ID reruns the session effect. Let that
             // effect own stream startup.
@@ -804,7 +805,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
             setIsReconnectPending(false);
             const sessionId = useTerminalStore.getState().getDirectoryState(terminalDirectory)?.tabs.find((tab) => tab.id === tabId)?.terminalSessionId;
             void (async () => {
-                if (sessionId) await terminal.close(sessionId);
+                if (sessionId) await terminal.close(sessionId, terminalDirectory);
                 closeTab(terminalDirectory, tabId);
             })().catch((error) => setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sessionEnded')));
         },
@@ -828,7 +829,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
             const terminalId = terminalIdRef.current;
             if (!terminalId) return;
 
-            void terminal.sendInput(terminalId, payload).catch((error) => {
+            void terminal.sendInput(terminalId, payload, directoryRef.current).catch((error) => {
                 if (!isReconnectPending) {
                     setConnectionError(
                         error instanceof Error ? error.message : t('terminalView.error.sendInputFailed')
@@ -874,7 +875,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
             }
             const terminalId = terminalIdRef.current;
             if (!terminalId) return;
-            void terminal.resize({ sessionId: terminalId, cols, rows }).catch(() => {});
+            void terminal.resize({ sessionId: terminalId, cols, rows, directory }).catch(() => {});
         },
         [createTerminalSession, isTerminalVisible, terminal]
     );

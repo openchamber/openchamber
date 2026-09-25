@@ -247,4 +247,31 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.directoryResolutions).toBeLessThan(14_561 * 2);
     expect([...ownership.sessionsByProject.values()].reduce((total, bucket) => total + bucket.length, 0)).toBe(14_561);
   });
+
+  test('assigns a space\'s sessions to the project the host resolved for it, and drops those of a space without one', () => {
+    const SPACE = 'a1b2c3d4e5f6';
+    const ORPHAN = '0f0f0f0f0f0f';
+    const sessions = [
+      { id: 'in-space', directory: `/spaces/${SPACE}/app/src` },
+      { id: 'orphan-space', directory: `/spaces/${ORPHAN}/app` },
+    ] as unknown as Session[];
+    const projects = [{ id: 'app', normalizedPath: '/projects/app' }];
+    const spaces = [
+      { id: SPACE, name: 'Fix login', state: 'complete' as const, projectDirectory: '/projects/app', directory: `/spaces/${SPACE}/app` },
+      { id: ORPHAN, name: 'Old', state: 'stale' as const, projectDirectory: null, directory: null },
+    ];
+
+    const ownership = createSessionOwnershipIndex(sessions, projects, new Map(), false, [], [], spaces);
+
+    expect(ownership.bySessionId.get('in-space')).toEqual({
+      projectId: 'app',
+      projectRoot: '/projects/app',
+      scopeDirectory: `/spaces/${SPACE}/app`,
+      kind: 'space',
+      spaceId: SPACE,
+    });
+    expect(ownership.bySessionId.has('orphan-space')).toBe(false);
+    // VS Code never has spaces.
+    expect(createSessionOwnershipIndex(sessions, projects, new Map(), true, [], [], spaces).bySessionId.has('in-space')).toBe(false);
+  });
 });

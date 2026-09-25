@@ -1881,6 +1881,11 @@ async function main(options = {}) {
       spacesHost = createSpacesHost({
         dataDir: OPENCHAMBER_DATA_DIR,
         dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
+        // So the session list can say which registered project each space was made for.
+        listProjectDirectories: async () => {
+          const settings = await readSettingsFromDiskMigrated();
+          return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+        },
       });
     } catch (error) {
       // The feature is absent then, and the rest of the server starts as with the switch off.

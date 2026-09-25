@@ -96,12 +96,16 @@ describe('mergeSessionLists', () => {
 
   it('lists the host first, then each space, with a mark per space', () => {
     const merged = mergeSessionLists(host, [
-      { spaceId: ID, state: 'complete', records: [record('s1', `/spaces/${ID}/repo`)] },
+      { spaceId: ID, state: 'complete', records: [record('s1', `/spaces/${ID}/repo`)], name: 'First', projectDirectory: '/home/me/repo', directory: `/spaces/${ID}/repo` },
       { spaceId: OTHER, state: 'stale', records: [record('s2', `/spaces/${OTHER}/repo`), record('s3', `/spaces/${OTHER}/repo`)] },
     ]);
     expect(merged.data.map((item) => item.id)).toEqual(['h1', 's1', 's2', 's3']);
     expect(merged.cursor).toEqual({ next: 'abc' });
-    expect(merged.spaces).toEqual([{ id: ID, state: 'complete', sessions: 1 }, { id: OTHER, state: 'stale', sessions: 2 }]);
+    // A space whose project is not registered on this host is marked with no project and no directory.
+    expect(merged.spaces).toEqual([
+      { id: ID, name: 'First', state: 'complete', sessions: 1, projectDirectory: '/home/me/repo', directory: `/spaces/${ID}/repo` },
+      { id: OTHER, name: '', state: 'stale', sessions: 2, projectDirectory: null, directory: null },
+    ]);
   });
 });
 

@@ -71,6 +71,8 @@ import {
 import { useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
+import { useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
@@ -730,7 +732,7 @@ async function resyncDirectorySessionStatuses(
   mode: StatusSnapshotMode,
   isStale?: () => boolean,
 ): Promise<DirectorySessionStatusSnapshot | null> {
-  const nextStatuses = await opencodeClient.getActiveSessionStatuses()
+  const nextStatuses = await opencodeClient.getActiveSessionStatuses(directory)
   // null = fetch failed; preserve existing state. {} or populated = a snapshot
   // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
   if (nextStatuses === null || isStale?.()) return null
@@ -2228,7 +2230,7 @@ export async function recoverInterruptedTurnAfterMessageLoad(
   if ((initial.permission?.[sessionID] ?? []).length > 0) return
 
   if (!initial.session_status?.[sessionID]) {
-    const snapshot = await opencodeClient.getActiveSessionStatuses()
+    const snapshot = await opencodeClient.getActiveSessionStatuses(directory)
     if (snapshot === null || isStale?.()
       || getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== sdk) return
 
@@ -2583,6 +2585,19 @@ export function SyncProvider(props: {
         } finally {
           publishDirectoryEventBatch(batch)
         }
+      },
+      onSpaceStream: ({ spaceId, status }) => {
+        // A space's stream went: its sessions may be old until it answers again. Back: re-read
+        // that one space, the directories the global list knows for it, so a session made or
+        // finished during the gap shows up without a full global reload.
+        useSpacesStore.getState().noteStream(spaceId, status)
+        if (status !== "connected") return
+        const directories = Array.from(useGlobalSessionsStore.getState().sessionsByDirectory.keys())
+          .filter((directory) => spaceIdOfDirectory(directory) === spaceId)
+        const spaceDirectory = useSpacesStore.getState().spaces.get(spaceId)?.directory
+        if (spaceDirectory) directories.push(spaceDirectory)
+        if (directories.length === 0) return
+        void useGlobalSessionsStore.getState().refreshSessionsForDirectories(directories).catch(() => undefined)
       },
       onReconnect: ({ replayReset }) => {
         // Queue recovery is independent of the directory-bootstrap debounce.

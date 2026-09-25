@@ -120,6 +120,31 @@ describe("request fidelity", () => {
     expect(requests[0].url.searchParams.has("directory")).toBe(false)
     expect(requests[0].headers.has("x-opencode-directory")).toBe(false)
   })
+
+  test("the active-session snapshot is the host's, except for a directory inside an isolated space", async () => {
+    responses.push(json({ data: { ses_host: { type: "running" } } }))
+    await opencodeClient.getActiveSessionStatuses("/repo/app")
+    expect(requests[0].url.pathname).toBe("/api/session/active")
+    expect(requests[0].headers.has("x-opencode-directory")).toBe(false)
+    responses.push(json({ data: { ses_space: { type: "running" } } }))
+    const statuses = await opencodeClient.getActiveSessionStatuses("/spaces/a1b2c3d4e5f6/app")
+    // The space's directory travels on the request; `runtimeFetch` turns it into the space's prefix.
+    expect(requests[1].url.pathname).toBe("/api/session/active")
+    expect(requests[1].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/spaces/a1b2c3d4e5f6/app"))
+    expect(statuses).toEqual({ ses_space: { type: "busy" } })
+  })
+
+  test("a global page carries the isolated-space marks the host merged in, a directory page never does", async () => {
+    const spaces = [{ id: "a1b2c3d4e5f6", name: "One", state: "stale", sessions: 1, projectDirectory: "/repo/app", directory: "/spaces/a1b2c3d4e5f6/app" }]
+    responses.push(json({ data: [], cursor: {}, spaces }))
+    const page = await opencodeClient.listSessionsPage({ global: true })
+    expect(page.spaces).toEqual([{ id: "a1b2c3d4e5f6", name: "One", state: "stale", projectDirectory: "/repo/app", directory: "/spaces/a1b2c3d4e5f6/app" }])
+    responses.push(json({ data: [], cursor: {}, spaces }))
+    expect((await opencodeClient.listSessionsPage({ directory: "/repo/app" })).spaces).toBeUndefined()
+    // A mark the client cannot read is no mark, not a broken list.
+    responses.push(json({ data: [], cursor: {}, spaces: [{ id: "bad" }] }))
+    expect((await opencodeClient.listSessionsPage({ global: true })).spaces).toBeUndefined()
+  })
 test('Windows drive roots remain absolute in directory selection and SDK client identity', () => {
   const previous = opencodeClient.getDirectory();
   try {

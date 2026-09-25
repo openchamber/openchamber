@@ -13,6 +13,8 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { createSpaceDispatcher } from './dispatcher.js';
+import { hashProjectDirectory } from './labels.js';
+import { spaceProjectPath } from './layout.js';
 import { createSpaceManager } from './manager.js';
 import { createSpaceEventSources } from './space-events.js';
 import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js';
@@ -59,11 +61,14 @@ export function readOrCreateOwner(dataDir) {
 /**
  * `dataDir` is the host's data directory and `dockerPath` the docker CLI to run. `place`
  * replaces the Docker place, for the tests; `runCommand` and `openCommandStream` are the two
- * ways this module starts a process, injectable for the same reason.
+ * ways this module starts a process, injectable for the same reason. `listProjectDirectories`
+ * answers the host's registered project paths, so a space's project label can be resolved
+ * to the project it was made for; without it every space is marked as of an unknown project.
  */
 export function createSpacesHost({
   dataDir,
   dockerPath = 'docker',
+  listProjectDirectories = async () => [],
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
   place = null,
@@ -84,11 +89,11 @@ export function createSpacesHost({
   const manager = createSpaceManager({ registry });
   const serverInside = createSpaceServerChannel({ exec: dockerPlace.exec });
 
-  const listSpaceIds = async () => (await manager.listSpaces({ placeId: dockerPlace.id })).map((space) => space.id);
+  const listSpaces = () => manager.listSpaces({ placeId: dockerPlace.id });
   const dispatcher = createSpaceDispatcher({
     logger,
     transport: {
-      listSpaceIds,
+      listSpaceIds: async () => (await listSpaces()).map((space) => space.id),
       connect: (spaceId) => dockerPlace.connect(spaceId),
       readToken: (spaceId) => serverInside.readToken(spaceId),
     },
@@ -98,23 +103,57 @@ export function createSpacesHost({
   let events = null;
   let unsubscribeHostEvents = null;
   let followTimer = null;
-  let known = { ids: [], readAt: -Infinity };
+  let known = { spaces: [], readAt: -Infinity };
   let listing = null;
   // When each space's session list was last read; within the TTL the accepted list is served again.
   const listReadAt = new Map();
 
-  /** The ids of this host's spaces, read again when older than the TTL. A failed read keeps the last ones. */
-  const spaceIds = async () => {
-    if (now() - known.readAt < LIST_TTL_MS) return known.ids;
+  /**
+   * Which registered project a space was made for, by the label's hash of the project path. A
+   * failed read of the projects, or a project since removed, leaves the space with no project.
+   */
+  const resolveProjects = async (spaces) => {
+    if (spaces.length === 0) return new Map();
+    let directories = [];
+    try {
+      directories = await listProjectDirectories();
+    } catch (error) {
+      logger.warn?.(`[spaces] could not read the projects: ${error?.code ?? error?.message ?? error}`);
+    }
+    const byHash = new Map(directories.map((directory) => [hashProjectDirectory(directory), directory]));
+    return new Map(spaces.map((space) => [space.id, byHash.get(space.project) ?? null]));
+  };
+
+  /**
+   * This host's spaces, each with its name and the project it was made for, read again when
+   * older than the TTL. A failed read keeps the last ones.
+   */
+  const knownSpaces = async () => {
+    if (now() - known.readAt < LIST_TTL_MS) return known.spaces;
     if (!listing) {
-      listing = listSpaceIds()
-        .then((ids) => { known = { ids, readAt: now() }; })
+      listing = listSpaces()
+        .then(async (spaces) => {
+          const projects = await resolveProjects(spaces);
+          known = {
+            spaces: spaces.map((space) => {
+              const projectDirectory = projects.get(space.id) ?? null;
+              return {
+                id: space.id,
+                name: space.name,
+                projectDirectory,
+                directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
+              };
+            }),
+            readAt: now(),
+          };
+        })
         .catch((error) => { logger.warn?.(`[spaces] could not list the spaces: ${error?.code ?? error?.message ?? error}`); })
         .finally(() => { listing = null; });
     }
     await listing;
-    return known.ids;
+    return known.spaces;
   };
+  const spaceIds = async () => (await knownSpaces()).map((space) => space.id);
 
   const follow = async () => {
     const ids = await spaceIds();
@@ -161,9 +200,9 @@ export function createSpacesHost({
   const mergeSessionList = async (hostPayload) => {
     const hostRecords = Array.isArray(hostPayload) ? hostPayload : hostPayload?.data;
     if (Array.isArray(hostRecords)) index.observeHostRecords(hostRecords);
-    const ids = await spaceIds();
-    if (ids.length === 0) return hostPayload;
-    await Promise.all(ids.map(async (spaceId) => {
+    const spaces = await knownSpaces();
+    if (spaces.length === 0) return hostPayload;
+    await Promise.all(spaces.map(async ({ id: spaceId }) => {
       if (now() - (listReadAt.get(spaceId) ?? -Infinity) < LIST_TTL_MS) return;
       try {
         const { records, complete } = await readSpaceSessions(spaceId);
@@ -175,8 +214,11 @@ export function createSpacesHost({
       }
     }));
     // In the place's order, so the merged list reads the same from one call to the next.
-    const known = new Map(index.snapshot().map((entry) => [entry.spaceId, entry]));
-    return mergeSessionLists(hostPayload, ids.map((spaceId) => known.get(spaceId)).filter((entry) => entry !== undefined));
+    const answers = new Map(index.snapshot().map((entry) => [entry.spaceId, entry]));
+    return mergeSessionLists(hostPayload, spaces.flatMap((space) => {
+      const answer = answers.get(space.id);
+      return answer === undefined ? [] : [{ ...answer, name: space.name, projectDirectory: space.projectDirectory, directory: space.directory }];
+    }));
   };
 
   let sockets = null;

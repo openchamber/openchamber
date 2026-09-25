@@ -1013,7 +1013,7 @@ export async function patchSessionMetadata(
   // explicitly. A runtime without that route cannot persist the change, and
   // reporting success would strand a review or btw link that the next load
   // silently drops.
-  const result = await requestSessionMetadataUpdate(sessionId, buildMetadataMergePatch(currentMetadata, nextMetadata))
+  const result = await requestSessionMetadataUpdate(sessionId, buildMetadataMergePatch(currentMetadata, nextMetadata), targetDirectory)
   if (result.outcome !== "updated") throw new Error(`session metadata update failed: ${result.reason}`)
   const updated: Session = { ...current, metadata: result.metadata }
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
@@ -1597,7 +1597,7 @@ export async function unarchiveSession(sessionId: string, expectedRuntimeKey = g
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
-    const result = await requestSessionUnarchiveBatch([sessionId])
+    const result = await requestSessionUnarchiveBatch([sessionId], sessionDirectory)
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (result.outcome !== "restored") {
       throw new Error(`unarchive failed: ${result.reason}`)

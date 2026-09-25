@@ -100,6 +100,11 @@ const startInside = async ({ password = TOKEN } = {}) => {
     res.setHeader('clear-site-data', '"*"');
     res.status(307).end();
   });
+  app.get('/api/unchanged', (req, res) => {
+    if (req.headers['if-none-match'] === '"v1"') { res.status(304).end(); return; }
+    res.setHeader('etag', '"v1"');
+    res.json({ version: 1 });
+  });
   app.get('/api/wipe', (_req, res) => {
     res.setHeader('clear-site-data', '"*"');
     res.setHeader('refresh', '0; url=/api/session');
@@ -330,11 +335,17 @@ describe('space dispatcher', () => {
     expect(byHeader.status).toBe(400);
     const encoded = await fetch(host.url(`/api/spaces/${ID}/echo`), { headers: { 'x-opencode-directory': encodeURIComponent('/home/me'), 'x-opencode-directory-encoding': 'uri' } });
     expect(encoded.status).toBe(400);
+    const sdkStyleOutside = await fetch(host.url(`/api/spaces/${ID}/echo`), { headers: { 'x-opencode-directory': encodeURIComponent('/home/me') } });
+    expect(sdkStyleOutside.status).toBe(400);
     expect(inside.seen).toHaveLength(0);
+    // The SDK encodes the header on every request and sends no marker; OpenCode decodes it, so the guard reads it decoded too.
+    const sdkStyle = await fetch(host.url(`/api/spaces/${ID}/echo`), { headers: { 'x-opencode-directory': encodeURIComponent(`/spaces/${ID}/repo`) } });
+    expect(sdkStyle.status).toBe(200);
+    expect(inside.seen).toHaveLength(1);
 
     const inside_ok = await fetch(host.url(`/api/spaces/${ID}/echo?directory=${encodeURIComponent(`/spaces/${ID}/repo`)}`), { headers: { 'x-opencode-directory': `/spaces/${ID}/repo/src` } });
     expect(inside_ok.status).toBe(200);
-    expect(inside.seen).toHaveLength(1);
+    expect(inside.seen).toHaveLength(2);
   });
 
   // Guard two.
@@ -347,6 +358,9 @@ describe('space dispatcher', () => {
     }
     const byHeader = await fetch(host.url('/api/host'), { headers: { 'x-opencode-directory': `/spaces/${ID}/repo` } });
     expect(byHeader.status).toBe(400);
+    // An SDK-style header, URI-encoded with no marker, names the same directory to OpenCode.
+    const byEncodedHeader = await fetch(host.url('/api/host'), { headers: { 'x-opencode-directory': encodeURIComponent(`/spaces/${ID}/repo`) } });
+    expect(byEncodedHeader.status).toBe(400);
 
     const ordinary = await fetch(host.url('/api/host?directory=/home/me/spaces/project'));
     expect(ordinary.status).toBe(200);
@@ -405,6 +419,16 @@ describe('space dispatcher', () => {
     const page = await fetch(host.url(`/api/spaces/${ID}/page`));
     expect(page.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     expect(await page.text()).toBe('<script>alert(1)</script>');
+  });
+
+  it('passes a 304 through: a browser revalidating its own copy is not a redirect', async () => {
+    await start();
+    const first = await fetch(host.url(`/api/spaces/${ID}/unchanged`));
+    expect(first.status).toBe(200);
+    expect(first.headers.get('etag')).toBe('"v1"');
+    const again = await fetch(host.url(`/api/spaces/${ID}/unchanged`), { headers: { 'if-none-match': '"v1"' } });
+    expect(again.status).toBe(304);
+    expect(await again.text()).toBe('');
   });
 
   it('lets no redirect and no origin-acting header out of a space', async () => {

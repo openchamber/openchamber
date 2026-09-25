@@ -298,6 +298,38 @@ full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
 explicit lifecycle edge; the store coalesces an overlapping in-flight load.
 
+**Isolated spaces.** With the feature on, the first global page carries the
+host's `spaces` mark: one entry per space with its name, the state of its last
+answer (`complete`, `partial`, `stale`, `unknown`), the registered project it
+was made for and its directory inside. `lib/spaces/spaces-store.ts` keeps the
+marks of the last complete load, reset on a runtime switch. A space's sessions
+live at `/spaces/<id>/<folder>`; `lib/spaces/space-route.ts` turns that
+directory into the `/api/spaces/<id>/` prefix at call time, and `runtimeFetch`
+applies it from the directory a request names in the open, so the sidebar's
+per-directory reads of a space go to the space. Rules that follow from the
+mark: a session of a space whose answer was not `complete` may be missing from
+the snapshot without being deleted, so the authoritative cleanup skips it; the
+event pipeline hands the host's `openchamber:space-stream` announcement to
+`sync-context.tsx`, which marks a lost stream as stale and, when it is back,
+re-reads that one space's directories with `refreshSessionsForDirectories`,
+whose answer marks the space reachable again. The active-session snapshot that
+settles an unfinished turn is the host's, global, and never covers a space, so
+`getActiveSessionStatuses` asks a space directory's own server for it; the
+host's empty answer would otherwise mark a turn running inside as interrupted.
+A space that dies in the middle of a turn sends no settle event, so the
+session keeps the busy state it last reported until the space answers again
+or the user acts; the group's stale mark is what says the space is gone. The
+status and repair actions of a later stage own that. VS Code never applies
+the prefix and never shows a space (decision 16 of the design).
+
+Not done here: the session-keyed actions still fall back to the current
+directory when nothing confirmed the session's own, in `session-actions.ts`
+and inside the SDK wrapper's `clientFor`. A guess that names the wrong side is
+refused by the server's guards or answered not-found by the far side, which
+cannot act on a foreign id, so nothing crosses the boundary; the action fails
+where it used to succeed by luck. Making those actions fail before the request
+is a later stage.
+
 ### Session retention
 
 `session-retention.ts` owns eligibility and cleanup execution;

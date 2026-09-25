@@ -44,6 +44,7 @@ import { getDescendantIds, partitionSidebarSessions } from '@/components/session
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { collectSessionSubtreeIds, runSessionSubtreeAction, type SessionSubtreeAction } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
 import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
+import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { resolveSidebarSessionLocations } from '@/components/session/sidebar/recent/sessionLocation';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
@@ -161,6 +162,8 @@ type WorktreeBucket = {
   path: string;
   /** Underlying worktree metadata, null when this bucket represents the project root. */
   worktree: WorktreeMetadata | null;
+  /** The isolated space this bucket shows, null for the project root and for a worktree. */
+  space: SpaceMark | null;
   /** Sessions matched into this bucket, sorted by recency desc. */
   sessions: Session[];
 };
@@ -865,6 +868,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     () => partitionSidebarSessions(sessions, false),
     [sessions],
   );
+  const spaces = useSpacesStore((state) => state.spaces);
+  const spaceList = React.useMemo(() => Array.from(spaces.values()), [spaces]);
+  const spaceLabelById = React.useMemo(
+    () => new Map(spaceList.map((space) => [space.id, space.name || t('sessions.sidebar.grouping.spaceUnnamed')])),
+    [spaceList, t],
+  );
   const sessionOwnership = React.useMemo(() => createSessionOwnershipIndex(
     projectSessions,
     projectsMeta.map((project) => ({ id: project.id, normalizedPath: project.path })),
@@ -872,12 +881,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     false,
     [],
     authoritativeProjects,
-  ), [authoritativeProjects, projectSessions, projectsMeta]);
+    spaceList,
+  ), [authoritativeProjects, projectSessions, projectsMeta, spaceList]);
   const chatsBucket = React.useMemo<WorktreeBucket>(() => ({
     key: CHAT_DRAFT_PROJECT_ID,
     label: '',
     path: '',
     worktree: null,
+    space: null,
     sessions: orderSessionsByLifecycleScopes(chatSessions, pinnedSessionIds, sessionOrderRanks),
   }), [chatSessions, pinnedSessionIds, sessionOrderRanks]);
   const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
@@ -912,16 +923,17 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       isActive: project.id === activeProjectId,
     }));
 
-    const ensureBucket = (node: ProjectNode, path: string, worktree: WorktreeMetadata | null): WorktreeBucket => {
+    const ensureBucket = (node: ProjectNode, path: string, worktree: WorktreeMetadata | null, space: SpaceMark | null = null): WorktreeBucket => {
       const normalizedBucketPath = normalizePath(path) || node.project.path;
       const key = normalizedBucketPath || '__root__';
       let bucket = node.buckets.find((entry) => entry.key === key);
       if (!bucket) {
         bucket = {
           key,
-          label: worktree?.branch || getProjectLabel(normalizedBucketPath),
+          label: (space ? space.name || t('sessions.sidebar.grouping.spaceUnnamed') : null) || worktree?.branch || getProjectLabel(normalizedBucketPath),
           path: normalizedBucketPath,
           worktree,
+          space,
           sessions: [],
         };
         node.buckets.push(bucket);
@@ -940,9 +952,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       const node = nodes.find((entry) => entry.project.id === owner.projectId);
       if (!node) continue;
       const matchedWorktree = findExactWorktreeMatch(node.project, owner.scopeDirectory);
-      const bucket = matchedWorktree
-        ? ensureBucket(node, matchedWorktree.path, matchedWorktree)
-        : ensureBucket(node, node.project.path, null);
+      // An isolated space is a bucket of its own, named after the space.
+      const space = owner.kind === 'space' && owner.spaceId ? spaces.get(owner.spaceId) ?? null : null;
+      const bucket = space
+        ? ensureBucket(node, owner.scopeDirectory, null, space)
+        : matchedWorktree
+          ? ensureBucket(node, matchedWorktree.path, matchedWorktree)
+          : ensureBucket(node, node.project.path, null);
       bucket.sessions.push(session);
     }
 
@@ -956,7 +972,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectSessions, projectsMeta, sessionOrderRanks, sessionOwnership]);
+  }, [activeProjectId, pinnedSessionIds, projectSessions, projectsMeta, sessionOrderRanks, sessionOwnership, spaces, t]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -1243,11 +1259,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       const owner = sessionOwnership.bySessionId.get(session.id);
       const project = owner ? projectsMeta.find((candidate) => candidate.id === owner.projectId) ?? null : null;
       if (!project) return getProjectLabel(directory) || directory;
+      const space = owner?.kind === 'space' && owner.spaceId ? spaces.get(owner.spaceId) : undefined;
+      if (space) return `${project.label} · ${space.name || t('sessions.sidebar.grouping.spaceUnnamed')}`;
       const matchedWorktree = findExactWorktreeMatch(project, owner?.scopeDirectory ?? '');
       if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
       return project.label;
     },
-    [projectsMeta, sessionOwnership, t],
+    [projectsMeta, sessionOwnership, spaces, t],
   );
 
   const handleSelectProject = (project: ProjectMeta) => {
@@ -1328,6 +1346,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       gitBranches: gitBranchesByDirectory,
       homeDirectory: null,
       hideBranchMatchingProjectLabel: false,
+      spaceLabelById,
     });
     for (const session of projectSessions) {
       if (getParentId(session)) continue;
@@ -1337,7 +1356,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       contexts.set(session.id, { project, branch: location.branchLabel });
     }
     return contexts;
-  }, [gitBranchesByDirectory, projectSessions, projectsMeta, sessionOwnership, timelineActive]);
+  }, [gitBranchesByDirectory, projectSessions, projectsMeta, sessionOwnership, spaceLabelById, timelineActive]);
 
   const timelineEntries = React.useMemo<TimelineEntry[]>(() => {
     if (!timelineActive) return [];
@@ -1772,8 +1791,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           // Root (project-level) sessions always render as a flat list
                           // at the top — same as a project without worktrees — never
                           // hidden behind a worktree-style group.
-                          const rootBucket = buckets.find((bucket) => bucket.worktree === null);
-                          const worktreeBuckets = buckets.filter((bucket) => bucket.worktree !== null);
+                          const rootBucket = buckets.find((bucket) => bucket.worktree === null && bucket.space === null);
+                          const worktreeBuckets = buckets.filter((bucket) => bucket !== rootBucket);
                           return (
                             <>
                               {rootBucket && rootBucket.sessions.length > 0
@@ -1785,10 +1804,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                 return (
                                   <div key={bucket.key}>
                                     <MobileSwipeActionsRow
-                                      actionsWidth={48}
+                                      // A space has no delete-worktree action; its actions are a later stage.
+                                      actionsWidth={bucket.space ? 0 : 48}
                                       revealed={revealedRowId === `wt:${bucket.key}`}
                                       onRevealedChange={(nextRevealed) => handleRowKeyRevealedChange(`wt:${bucket.key}`, nextRevealed)}
-                                      actions={(
+                                      actions={bucket.worktree ? (
                                         <button
                                           type="button"
                                           tabIndex={revealedRowId === `wt:${bucket.key}` ? 0 : -1}
@@ -1804,7 +1824,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                         >
                                           <RiDeleteBinLine className="size-[18px]" />
                                         </button>
-                                      )}
+                                      ) : null}
                                     >
                                     <button
                                       type="button"
@@ -1829,7 +1849,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                           worktree headers recede while plain-
                                           foreground session titles stand out. */}
                                       <Icon
-                                        name="git-branch"
+                                        name={bucket.space ? 'box-3' : 'git-branch'}
                                         className={cn(
                                           'size-4 shrink-0',
                                           isActiveWt ? 'text-primary' : 'text-muted-foreground',

@@ -62,7 +62,7 @@ describe('terminal viewport remount guard', () => {
         expect(terminalViewSource).not.toContain('if (!size && isTerminalVisibleRef.current)');
         expect(terminalViewSource).toContain('cols: initialSize.cols');
         expect(terminalViewSource).toContain('rows: initialSize.rows');
-        expect(terminalViewSource).toContain('void terminal.resize({ sessionId: session.sessionId, ...viewportSize })');
+        expect(terminalViewSource).toContain('void terminal.resize({ sessionId: session.sessionId, ...viewportSize, directory })');
         expect(terminalViewSource).toContain('if (!isTerminalVisible) {');
         expect(terminalViewSource).not.toContain('if (!size && isTerminalVisibleRef.current)');
     });

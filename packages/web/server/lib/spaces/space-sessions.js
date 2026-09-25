@@ -93,7 +93,17 @@ export function spaceEventDropCode({ spaceId, payload, isHostSessionId }) {
 export function mergeSessionLists(hostPayload, spaceLists) {
   if (spaceLists.length === 0) return hostPayload;
   const records = spaceLists.flatMap((entry) => entry.records);
-  const spaces = spaceLists.map((entry) => ({ id: entry.spaceId, state: entry.state, sessions: entry.records.length }));
+  // The mark names the space for the client: its label name, the host project it was made for,
+  // as the host resolved it from the label, and the project's path inside, or null for both when
+  // the project is no longer registered on this host.
+  const spaces = spaceLists.map((entry) => ({
+    id: entry.spaceId,
+    name: entry.name ?? '',
+    state: entry.state,
+    sessions: entry.records.length,
+    projectDirectory: entry.projectDirectory ?? null,
+    directory: entry.directory ?? null,
+  }));
   if (Array.isArray(hostPayload)) return [...hostPayload, ...records];
   if (isRecord(hostPayload) && Array.isArray(hostPayload.data)) {
     return { ...hostPayload, data: [...hostPayload.data, ...records], spaces };

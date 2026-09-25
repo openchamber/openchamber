@@ -42,6 +42,12 @@ type ResolveArgs = {
    * already carries that label. Timeline shows both lines unconditionally.
    */
   hideBranchMatchingProjectLabel: boolean;
+  /**
+   * The display name of each isolated space by id. A session owned by a space
+   * is labelled with the space's name where a worktree session shows its
+   * branch, and its group is the space's directory.
+   */
+  spaceLabelById?: ReadonlyMap<string, string>;
 };
 
 // One owner for "where does this session live": the project it belongs to, the
@@ -56,6 +62,7 @@ export const resolveSidebarSessionLocations = ({
   homeDirectory,
   rootBranchByProjectId,
   hideBranchMatchingProjectLabel,
+  spaceLabelById,
 }: ResolveArgs): Map<string, SidebarSessionLocation> => {
   const locations = new Map<string, SidebarSessionLocation>();
   // Canonical exact worktree index (normalized keys, project-root exclusion,
@@ -65,10 +72,21 @@ export const resolveSidebarSessionLocations = ({
   for (const session of sessions) {
     const directory = normalizePath(session.directory ?? null);
     if (!directory) continue;
-    const indexedOwnerId = ownerBySessionId.get(session.id)?.projectId ?? null;
+    const indexedOwner = ownerBySessionId.get(session.id) ?? null;
+    const indexedOwnerId = indexedOwner?.projectId ?? null;
     let owner: SidebarSessionLocationProject | null = indexedOwnerId
       ? projects.find((project) => project.id === indexedOwnerId) ?? null
       : null;
+    if (owner && indexedOwner?.kind === 'space') {
+      locations.set(session.id, {
+        projectId: owner.id,
+        groupDirectory: indexedOwner.scopeDirectory,
+        projectLabel: formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath),
+        branchLabel: (indexedOwner.spaceId && spaceLabelById?.get(indexedOwner.spaceId)) || null,
+        worktree: null,
+      });
+      continue;
+    }
     if (!owner) {
       let ownerLength = -1;
       for (const project of projects) {

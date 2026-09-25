@@ -36,6 +36,7 @@ import { useSidebarGroupStatus } from './useSidebarGroupStatus';
 import { getSessionFolderOwnerKey, getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
 import { SessionRowOrderProvider } from '../sessions/sessionRowOrder';
 import { canRequestNativeDirectoryAccess } from '@/lib/desktop';
+import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 
 const PR_NO_PR_RETRY_MS = 5 * 60_000;
 
@@ -112,7 +113,7 @@ type SessionProjectCollectionProps = {
     notifyOnSubtasks: boolean;
     setActiveProjectIdOnly: (id: string) => void;
     setSessionSwitcherOpen: (open: boolean) => void;
-    openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
+    openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean }) => void;
     openNewWorktreeDialog: () => void;
     openWorktreesPage: (id: string) => void;
     openProjectEditDialog: (id: string) => void;
@@ -139,9 +140,24 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject } = projectViewActions;
   const collection = useSessionProjectCollection({ knownDirectories: topology.knownDirectories, isVSCode: topology.isVSCode, isVisible: true });
   const authoritativeProjects = useGlobalSyncStore((state) => state.projects);
+  const spaces = useSpacesStore((state) => state.spaces);
+  const spaceList = React.useMemo(() => Array.from(spaces.values()), [spaces]);
+  // Recent and Timeline rows label a space session with the space's name where a worktree session shows its branch.
+  const spaceLabelById = React.useMemo(() => new Map(spaceList.map((space) => [space.id, space.name])), [spaceList]);
+  const spacesByProject = React.useMemo(() => {
+    const byProject = new Map<string, SpaceMark[]>();
+    for (const space of spaceList) {
+      const projectRoot = normalizePath(space.projectDirectory);
+      if (!projectRoot) continue;
+      const list = byProject.get(projectRoot);
+      if (list) list.push(space);
+      else byProject.set(projectRoot, [space]);
+    }
+    return byProject;
+  }, [spaceList]);
   const ownership = React.useMemo(
-    () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions, authoritativeProjects),
-    [authoritativeProjects, collection.archivedSessions, collection.sessions, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
+    () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions, authoritativeProjects, spaceList),
+    [authoritativeProjects, collection.archivedSessions, collection.sessions, spaceList, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
   );
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
   const [collapsedActivityKeys, setCollapsedActivityKeys] = React.useState<Set<string>>(new Set());
@@ -201,6 +217,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     isVSCode: topology.isVSCode,
     worktreeSortOrder,
     sessionOwners: ownership.bySessionId,
+    spacesByProject,
   });
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({ ownership });
   // Built before the sections hook runs, because that hook owns the search data
@@ -347,6 +364,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       sessions: recentTreeSessions,
       projects: topology.projects,
       ownerBySessionId: ownership.bySessionId,
+      spaceLabelById,
       availableWorktreesByProject: topology.availableWorktreesByProject,
       gitBranches: topology.gitBranches,
       homeDirectory: view.homeDirectory,
@@ -370,6 +388,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       sessions,
       projects: topology.projects,
       ownerBySessionId: ownership.bySessionId,
+      spaceLabelById,
       availableWorktreesByProject: topology.availableWorktreesByProject,
       gitBranches: topology.gitBranches,
       homeDirectory: view.homeDirectory,

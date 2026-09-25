@@ -1,3 +1,4 @@
+import { spaceApiPath } from '@/lib/spaces/space-route';
 import { z } from 'zod';
 import type {
   GitStatus,
@@ -140,7 +141,8 @@ function buildUrl(
   const query: Record<string, string | number | boolean | undefined> = { ...params };
   if (directory) query.directory = directory;
 
-  return getRuntimeUrlResolver().api(path, query);
+  // A directory inside an isolated space addresses that space's git.
+  return getRuntimeUrlResolver().api(spaceApiPath(path, directory), query);
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {

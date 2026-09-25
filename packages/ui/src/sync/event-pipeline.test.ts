@@ -171,4 +171,30 @@ describe("createEventPipeline", () => {
     const { events } = await collect([{ type: "something.else", properties: {} }, textEnded("x")], 1)
     expect(events.map(describeEvent)).toEqual(["updated:x"])
   })
+
+  test("hands a space-stream announcement to its owner and delivers no event for it", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const delivered: SyncEvent[] = []
+    const announced: Array<{ spaceId: string; status: string; wasReady: boolean }> = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        { type: "openchamber:space-stream", properties: { spaceId: "a1b2c3d4e5f6", status: "connected", wasReady: false, timestamp: 1 } as never },
+        { type: "openchamber:space-stream", properties: { spaceId: "not-an-id", status: "connected", wasReady: false } as never },
+        textEnded("a"),
+      ], resolveStreamFinished),
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onSpaceStream: (details) => { announced.push(details) },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      await streamFinished
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    expect(announced).toEqual([{ spaceId: "a1b2c3d4e5f6", status: "connected", wasReady: false }])
+    expect(delivered.map(describeEvent)).toEqual(["updated:a"])
+  })
 })

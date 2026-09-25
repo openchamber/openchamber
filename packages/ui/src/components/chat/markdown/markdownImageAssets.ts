@@ -1,3 +1,4 @@
+import { spaceApiPath } from '@/lib/spaces/space-route';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
@@ -142,6 +143,8 @@ export const prepareLocalMarkdownImages = async ({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ directory, messageId, sources }),
+      // The grant is issued by the server that holds the file: a space's for a space directory.
+      directory,
       signal,
     },
   );
@@ -250,7 +253,7 @@ export const getPreparedMarkdownImageUrl = (
   image: Extract<PreparedMarkdownImage, { status: 'ready' }>,
   directory: string,
 ): string => getRuntimeUrlResolver().authenticatedAsset(
-  '/api/fs/raw',
+  spaceApiPath('/api/fs/raw', directory),
   {
     path: image.path,
     directory,

@@ -69,6 +69,12 @@ export type EventPipelineInput = {
   onDisconnect?: (reason: string) => void
   /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
   onTransportSwitch?: () => void
+  /**
+   * Called when the host announces that an isolated space's own event connection came or
+   * went; after a gap that one space is re-read. `wasReady` says whether the space's stream
+   * had been connected before.
+   */
+  onSpaceStream?: (details: { spaceId: string; status: "connected" | "disconnected"; wasReady: boolean }) => void
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -129,6 +135,17 @@ const openchamberNotificationSchema = z.object({
       desktopStdoutActive: z.boolean(),
     })
     .partial(),
+})
+
+// The host's announcement of an isolated space's event connection. It is not an event of any
+// session, so it never enters a directory queue; the pipeline hands it to its owner.
+const openchamberSpaceStreamSchema = z.object({
+  type: z.literal("openchamber:space-stream"),
+  properties: z.object({
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/),
+    status: z.enum(["connected", "disconnected"]),
+    wasReady: z.boolean(),
+  }),
 })
 
 const openchamberAutoAcceptSchema = z.object({
@@ -284,6 +301,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onReconnect,
     onDisconnect,
     onTransportSwitch,
+    onSpaceStream,
     routeDirectory,
     transport = "auto",
     heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
@@ -525,6 +543,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueuePayload = (payload: unknown, frameDirectory: string | undefined) => {
+    const spaceStream = openchamberSpaceStreamSchema.safeParse(payload)
+    if (spaceStream.success) {
+      onSpaceStream?.(spaceStream.data.properties)
+      return
+    }
     for (const { directory, event } of translatePayload(payload, frameDirectory)) {
       enqueueEvent(directory, event)
     }

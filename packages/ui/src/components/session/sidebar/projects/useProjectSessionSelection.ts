@@ -20,7 +20,7 @@ type Args = {
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean }) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
 };
 

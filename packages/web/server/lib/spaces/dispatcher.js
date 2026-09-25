@@ -198,7 +198,12 @@ const safeDecode = (value) => {
   }
 };
 
-/** Every directory a request names in its query or its directory header, as the host reads them. */
+// A percent-escape in the header: the SDK sends the directory URI-encoded on every request,
+// with no marker, and OpenCode decodes it on its side, so the guards must read what OpenCode
+// will. The marker still says so for the values the UI encodes because they are not Latin-1.
+const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
+
+/** Every directory a request names in its query or its directory header, as OpenCode reads them. */
 export function requestedDirectories(req, url) {
   const directories = [];
   for (const key of ['directory', 'location[directory]']) {
@@ -206,7 +211,8 @@ export function requestedDirectories(req, url) {
   }
   const header = req.headers['x-opencode-directory'];
   if (header !== undefined && header.length > 0) {
-    directories.push(req.headers['x-opencode-directory-encoding'] === 'uri' ? safeDecode(header) : header);
+    const encoded = req.headers['x-opencode-directory-encoding'] === 'uri' || PERCENT_ESCAPE.test(header);
+    directories.push(encoded ? safeDecode(header) : header);
   }
   return directories;
 }
@@ -519,7 +525,9 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
         upstream.on('error', () => finish('unauthorized'));
         return;
       }
-      if (upstream.statusCode >= 300 && upstream.statusCode < 400) {
+      // A 304 answers a browser's own revalidation of a body it holds: no location, no body,
+      // nothing to follow, and the sidebar's list requests carry an ETag on every reload.
+      if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.statusCode !== 304) {
         // A redirect from a space would send the user's next request wherever the agent says.
         upstream.resume();
         fail(new SpaceError('space_redirected', 'The server inside the space answered with a redirect, which is not followed'));

@@ -9,6 +9,7 @@ import express from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createSpacesHost, readOrCreateOwner } from './host.js';
+import { hashProjectDirectory } from './labels.js';
 import { createMemoryPlace } from './places/memory-place.js';
 
 const folders = [];
@@ -145,7 +146,7 @@ const fakePlace = (spaces) => ({
   id: 'fake',
   check: async () => ({ available: true }),
   create: async () => {},
-  list: async () => Array.from(spaces.entries(), ([id, space]) => ({ id, name: id, project: 'p', created: '', state: space.running ? 'running' : 'exited', orphans: [], damaged: false, missing: [] })),
+  list: async () => Array.from(spaces.entries(), ([id, space]) => ({ id, name: id, project: space.project ?? 'p', created: '', state: space.running ? 'running' : 'exited', orphans: [], damaged: false, missing: [] })),
   exec: async (_spaceId, argv) => (argv[0] === IMAGE_CAT ? { code: 0, stdout: `${TOKEN}\n`, stderr: '' } : { code: 127, stdout: '', stderr: 'not found' }),
   execArgv: async () => [],
   connect: async (spaceId) => {
@@ -176,10 +177,13 @@ describe('createSpacesHost: sessions and events', () => {
     // Two spaces that list the same id are read at the same time, so which one keeps it is not
     // fixed; that rule is proved in `space-sessions.test.js`, and here the two lists are apart.
     const second = await startSpaceServer({ sessions: [{ id: 'b1', location: { directory: `/spaces/${OTHER}/repo` } }] });
-    const spaces = new Map([[ID, { port: first.port, running: true }], [OTHER, { port: second.port, running: true }]]);
-    const host = createSpacesHost({ dataDir: temporary(), place: fakePlace(spaces), logger, setTimer: () => null, clearTimer: () => {} });
+    // The first space was made for a registered project, the second for one this host no longer has.
+    const spaces = new Map([[ID, { port: first.port, running: true, project: hashProjectDirectory('/home/me/project') }], [OTHER, { port: second.port, running: true }]]);
+    const host = createSpacesHost({ dataDir: temporary(), place: fakePlace(spaces), logger, setTimer: () => null, clearTimer: () => {}, listProjectDirectories: async () => ['/home/me/project', '/home/me/other'] });
     hosts.push(host);
     const hostList = { data: [{ id: 'host-1', location: { directory: '/home/me' } }], cursor: {} };
+    const first_mark = { id: ID, name: ID, state: 'complete', sessions: 3, projectDirectory: '/home/me/project', directory: `/spaces/${ID}/project` };
+    const other_mark = (state, sessions) => ({ id: OTHER, name: OTHER, state, sessions, projectDirectory: null, directory: null });
 
     const merged = await host.mergeSessionList(hostList);
     expect(merged.data.map((item) => item.id)).toEqual(['host-1', 'a1', 'a2', 'a3', 'b1']);
@@ -190,7 +194,7 @@ describe('createSpacesHost: sessions and events', () => {
     expect(first.state.listRequests).toBe(pagesRead);
     await sleep(2_100);
     expect(merged.data[1]).not.toHaveProperty('permissions');
-    expect(merged.spaces).toEqual([{ id: ID, state: 'complete', sessions: 3 }, { id: OTHER, state: 'complete', sessions: 1 }]);
+    expect(merged.spaces).toEqual([first_mark, other_mark('complete', 1)]);
     expect(logs.join('\n')).toContain('space_session_host_id');
     expect(logs.join('\n')).toContain('space_session_outside_root');
     expect(logs.join('\n')).not.toContain('a host session, claimed');
@@ -201,13 +205,13 @@ describe('createSpacesHost: sessions and events', () => {
     second.state.sessions.length = 0;
     const stale = await host.mergeSessionList(hostList);
     expect(stale.data.map((item) => item.id)).toEqual(['host-1', 'a1', 'a2', 'a3', 'b1']);
-    expect(stale.spaces).toEqual([{ id: ID, state: 'complete', sessions: 3 }, { id: OTHER, state: 'stale', sessions: 1 }]);
+    expect(stale.spaces).toEqual([first_mark, other_mark('stale', 1)]);
     expect(logs.join('\n')).toContain(`the session list of space ${OTHER} did not come`);
 
     // Back, and empty: an empty answer is an answer.
     await host.manager.startSpace({ placeId: 'fake', spaceId: OTHER });
     const empty = await host.mergeSessionList(hostList);
-    expect(empty.spaces[1]).toEqual({ id: OTHER, state: 'complete', sessions: 0 });
+    expect(empty.spaces[1]).toEqual(other_mark('complete', 0));
 
     // A space that is gone is not listed; a host without spaces answers with the very same object.
     spaces.clear();

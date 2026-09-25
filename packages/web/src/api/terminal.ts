@@ -29,19 +29,20 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
     return listTerminalSessions(cwd);
   },
 
-  async touchSessions(sessionIds: string[]) {
-    await touchTerminalSessions(sessionIds);
+  async touchSessions(sessionIds: string[], directory?: string | null) {
+    await touchTerminalSessions(sessionIds, directory);
   },
 
   async createSession(options: CreateTerminalOptions): Promise<TerminalSession> {
     return createTerminalSession(options);
   },
 
-  connect(sessionId: string, handlers: TerminalHandlers) {
+  connect(sessionId: string, handlers: TerminalHandlers, directory?: string | null) {
     const unsubscribe = connectTerminalStream(
       sessionId,
       handlers.onEvent,
-      handlers.onError
+      handlers.onError,
+      directory,
     );
 
     return {
@@ -49,20 +50,20 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
     };
   },
 
-  async sendInput(sessionId: string, input: string): Promise<void> {
-    await sendTerminalInput(sessionId, input);
+  async sendInput(sessionId: string, input: string, directory?: string | null): Promise<void> {
+    await sendTerminalInput(sessionId, input, directory);
   },
 
   async resize(payload: ResizeTerminalPayload): Promise<void> {
-    await resizeTerminal(payload.sessionId, payload.cols, payload.rows);
+    await resizeTerminal(payload.sessionId, payload.cols, payload.rows, payload.directory);
   },
 
-  async updateAppearance(sessionId, appearance): Promise<void> {
-    await updateTerminalAppearance(sessionId, appearance);
+  async updateAppearance(sessionId, appearance, directory?: string | null): Promise<void> {
+    await updateTerminalAppearance(sessionId, appearance, directory);
   },
 
-  async close(sessionId: string): Promise<void> {
-    await closeTerminal(sessionId);
+  async close(sessionId: string, directory?: string | null): Promise<void> {
+    await closeTerminal(sessionId, directory);
   },
 
   async restartSession(
