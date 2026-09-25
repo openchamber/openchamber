@@ -3,13 +3,31 @@ import { parseSseEventEnvelope } from './protocol.js';
 export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
 export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS * 3;
 export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MS = 250;
+const DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS = 5_000;
+const DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER = 2;
+const INITIAL_RECONNECT_DELAY_MS = 0;
+
+function resolveReconnectDelay(consecutiveFailures, baseMs, maxMs, multiplier) {
+  const safeBase = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : 0;
+  const safeMax = Number.isFinite(maxMs) && maxMs > 0 ? maxMs : DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS;
+  const safeMultiplier = Number.isFinite(multiplier) && multiplier > 1 ? multiplier : DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER;
+  if (safeBase <= 0) {
+    return INITIAL_RECONNECT_DELAY_MS;
+  }
+  // Conventional exponential backoff: first failure waits `base`, then `base * multiplier`,
+  // `base * multiplier^2`, etc., capped at `max`. The counter passed in is incremented BEFORE this
+  // call (so the first failure uses counter = 1 and waits `base * multiplier^0` = base).
+  const exponent = Math.min(Math.max(consecutiveFailures - 1, 0), 30);
+  const candidate = safeBase * Math.pow(safeMultiplier, exponent);
+  return Math.min(candidate, safeMax);
+}
 
 function resolveTimeoutMs(value, fallback) {
   const resolved = typeof value === 'function' ? value() : value;
   return Number.isFinite(resolved) ? resolved : fallback;
 }
 
-function waitForReconnectDelay(ms, signal) {
+function waitForReconnectDelay(ms, signal, setTimeoutImpl = globalThis.setTimeout) {
   if (signal?.aborted) {
     return Promise.resolve();
   }
@@ -22,7 +40,7 @@ function waitForReconnectDelay(ms, signal) {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     };
-    const timeout = setTimeout(finish, Math.max(0, ms));
+    const timeout = setTimeoutImpl(finish, Math.max(0, ms));
     const onAbort = () => {
       clearTimeout(timeout);
       finish();
@@ -54,6 +72,9 @@ export function createUpstreamSseReader({
   signal,
   stallTimeoutMs = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
   reconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
+  reconnectMaxDelayMs = DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS,
+  reconnectBackoffMultiplier = DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER,
+  setTimeoutImpl = globalThis.setTimeout,
   onEvent,
   onConnect,
   onDisconnect,
@@ -64,6 +85,7 @@ export function createUpstreamSseReader({
   let activeController = null;
   let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
   let stopListenerAttached = false;
+  let consecutiveReconnectFailures = 0;
 
   function detachStopListener() {
     if (!stopListenerAttached) return;
@@ -138,16 +160,24 @@ export function createUpstreamSseReader({
           });
 
           if (!response?.ok || !response.body) {
+            consecutiveReconnectFailures += 1;
             onError?.({
               type: 'upstream_unavailable',
               status: response?.status ?? 0,
               response,
             });
             await cancelResponseBody(response);
-            await waitForReconnectDelay(reconnectDelayMs, signal);
+            const delay = resolveReconnectDelay(
+              consecutiveReconnectFailures,
+              reconnectDelayMs,
+              reconnectMaxDelayMs,
+              reconnectBackoffMultiplier,
+            );
+            await waitForReconnectDelay(delay, signal, setTimeoutImpl);
             continue;
           }
 
+          consecutiveReconnectFailures = 0;
           onConnect?.({ response, lastEventId });
 
           const decoder = new TextDecoder();
@@ -204,6 +234,7 @@ export function createUpstreamSseReader({
           }
         } catch (error) {
           if (!stopped && !signal?.aborted && abortReason !== 'upstream_stalled') {
+            consecutiveReconnectFailures += 1;
             onError?.({
               type: 'stream_error',
               error,
@@ -219,7 +250,13 @@ export function createUpstreamSseReader({
         }
 
         if (!stopped && !signal?.aborted) {
-          await waitForReconnectDelay(reconnectDelayMs, signal);
+          const delay = resolveReconnectDelay(
+            consecutiveReconnectFailures,
+            reconnectDelayMs,
+            reconnectMaxDelayMs,
+            reconnectBackoffMultiplier,
+          );
+          await waitForReconnectDelay(delay, signal, setTimeoutImpl);
         }
       }
     })().finally(() => {

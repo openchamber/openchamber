@@ -620,6 +620,7 @@
 - Server: an `OPENCODE_BINARY` from the environment is kept when `settings.json` clears its own override (thanks to @bashrusakh).
 - Server: recovery through `OPENCODE_HOST` keeps the configured host and port (thanks to @colinmollenhour).
 - Server: `openchamber connect-url` no longer risks tearing `settings.json` while the desktop app runs, which could unpair every device (thanks to @shijie152).
+- Server: upstream SSE reconnects use exponential backoff (5 s cap) instead of a tight 250 ms retry loop, which previously flooded `main.log` with thousands of `ECONNRESET`/`ECONNREFUSED` errors when the managed OpenCode process died (thanks to @herjarsa).
 - Sessions: switching quickly no longer saves the wrong scroll position, and the log no longer fills with worktree warnings for folders that are not Git repositories (thanks to @herjarsa).
 - VS Code: the extension starts in the current workspace folder instead of one restored from storage (thanks to @makeittech).
 
