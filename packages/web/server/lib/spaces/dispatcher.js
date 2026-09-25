@@ -329,22 +329,34 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
   });
 
   /** Logs in to the server inside with the space's token, once per space at a time. */
+  /** One login attempt with the token as it is remembered or freshly read. Null when refused. */
+  const attemptLogin = async (spaceId, fresh) => {
+    const token = await tokenFor(spaceId, fresh);
+    const response = await sendInside(spaceId, {
+      method: 'POST',
+      path: '/auth/session',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: token }),
+    });
+    const session = response.status === 200 ? parseSetCookie(response.headers['set-cookie']) : null;
+    return session ? { session, status: response.status } : { session: null, status: response.status };
+  };
+
   const logIn = (spaceId, { fresh }) => {
     if (logins.has(spaceId)) return logins.get(spaceId);
     const login = (async () => {
-      const token = await tokenFor(spaceId, fresh);
-      const response = await sendInside(spaceId, {
-        method: 'POST',
-        path: '/auth/session',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ password: token }),
-      });
-      const session = response.status === 200 ? parseSetCookie(response.headers['set-cookie']) : null;
-      if (!session) {
-        throw new SpaceError('space_login_failed', `The server inside the space did not accept the space's token (status ${response.status})`);
+      let attempt = await attemptLogin(spaceId, fresh);
+      if (!attempt.session && !fresh) {
+        // The remembered token may be stale: the agent can rewrite the file and the server inside
+        // can restart on the new one. One more read, one more login, and no more.
+        tokens.delete(spaceId);
+        attempt = await attemptLogin(spaceId, true);
       }
-      sessions.set(spaceId, { cookie: session.cookie, renewAt: now() + session.ttlMs * SESSION_RENEW_FRACTION });
-      return session.cookie;
+      if (!attempt.session) {
+        throw new SpaceError('space_login_failed', `The server inside the space did not accept the space's token (status ${attempt.status})`);
+      }
+      sessions.set(spaceId, { cookie: attempt.session.cookie, renewAt: now() + attempt.session.ttlMs * SESSION_RENEW_FRACTION });
+      return attempt.session.cookie;
     })().finally(() => logins.delete(spaceId));
     logins.set(spaceId, login);
     return login;

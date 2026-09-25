@@ -116,7 +116,7 @@ const startInside = async ({ password = TOKEN } = {}) => {
 };
 
 /** A transport over a plain socket to the stand-in, with the calls counted. */
-const transportTo = (inside, { ids = [ID], token = TOKEN } = {}) => {
+const transportTo = (currentInside, { ids = [ID], token = TOKEN } = {}) => {
   const calls = { connect: 0, readToken: 0, list: 0 };
   return {
     calls,
@@ -125,7 +125,7 @@ const transportTo = (inside, { ids = [ID], token = TOKEN } = {}) => {
     connect: async (spaceId) => {
       calls.connect += 1;
       if (!ids.includes(spaceId)) throw new SpaceError('space_not_found', `Space ${spaceId} has no container`);
-      return net.connect({ host: '127.0.0.1', port: inside.port });
+      return net.connect({ host: '127.0.0.1', port: currentInside().port });
     },
     readToken: async () => { calls.readToken += 1; return token; },
   };
@@ -203,7 +203,7 @@ describe('space dispatcher', () => {
 
   const start = async (options = {}) => {
     inside = await startInside(options.inside);
-    transport = transportTo(inside, options.transport);
+    transport = transportTo(() => inside, options.transport);
     dispatcher = createSpaceDispatcher({ transport, logger, now: options.now });
     host = await startHost(dispatcher, options.host);
   };
@@ -481,6 +481,28 @@ describe('space dispatcher', () => {
     const next = await fetch(host.url(`/api/spaces/${ID}/echo`), { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'twice' });
     expect(next.status).toBe(200);
     expect(await next.json()).toMatchObject({ bytes: 5 });
+  });
+
+  it('reads the token again when a login with the remembered one is refused', async () => {
+    let clock = 1_000_000;
+    await start({ now: () => clock });
+    expect((await fetch(host.url(`/api/spaces/${ID}/echo`))).status).toBe(200);
+    expect(transport.calls.readToken).toBe(1);
+    // The server inside comes back with a new token, as after the agent rewrote the file and the
+    // server restarted on it; the host still remembers the old one and has no session left.
+    const previous = inside;
+    const rotated = 'tok_' + 'c'.repeat(40);
+    inside = await startInside({ password: rotated });
+    await previous.stop();
+    transport.readToken = async () => { transport.calls.readToken += 1; return rotated; };
+    // The pooled connections to the old server are gone; the remembered token is not.
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+    clock += 11 * 60 * 60 * 1000;
+
+    const response = await fetch(host.url(`/api/spaces/${ID}/echo?rotated=1`));
+    expect(response.status).toBe(200);
+    expect(transport.calls.readToken).toBe(2);
+    expect(inside.state.logins).toBe(2);
   });
 
   it('renews the session before it expires', async () => {
