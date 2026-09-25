@@ -24,6 +24,8 @@ export function createGlobalMessageStreamHub({
     throw new RangeError('Replay limits must be nonnegative safe integers');
   }
   const eventSubscribers = new Set();
+  // The event subscribers that also take the events of isolated spaces.
+  const spaceSubscribers = new Set();
   const statusSubscribers = new Set();
   const replay = [];
   let replayBytes = 0;
@@ -69,6 +71,10 @@ export function createGlobalMessageStreamHub({
     const eventId = typeof envelope?.eventId === 'string' && envelope.eventId.length > 0
       ? envelope.eventId
       : `${replayIdPrefix}${String(++replaySequence).padStart(12, '0')}`;
+    // An event of an isolated space carries the space's id; subscribers see it only when they
+    // asked for space events, because a consumer that acts on the host's OpenCode by
+    // directory must never act on a space's directory.
+    const spaceId = typeof envelope?.spaceId === 'string' && envelope.spaceId.length > 0 ? envelope.spaceId : null;
     let serializedFrame;
     let translated;
     return {
@@ -76,6 +82,7 @@ export function createGlobalMessageStreamHub({
       payload,
       directory,
       eventId,
+      spaceId,
       serialize() {
         serializedFrame ??= serializeMessageStreamWsEvent(payload, { directory, eventId });
         return serializedFrame;
@@ -112,6 +119,7 @@ export function createGlobalMessageStreamHub({
     }
 
     for (const subscriber of Array.from(eventSubscribers)) {
+      if (normalized.spaceId !== null && !spaceSubscribers.has(subscriber)) continue;
       notifySubscriber('event', subscriber, normalized);
     }
   };
@@ -191,11 +199,25 @@ export function createGlobalMessageStreamHub({
     hasConnected() {
       return everConnected;
     },
-    subscribeEvent(subscriber) {
+    /**
+     * `spaces: true` also delivers the events of isolated spaces, which carry `spaceId`.
+     * Without it a subscriber sees the host's events only, as every consumer did before spaces.
+     */
+    subscribeEvent(subscriber, { spaces = false } = {}) {
       eventSubscribers.add(subscriber);
+      if (spaces) spaceSubscribers.add(subscriber);
       return () => {
         eventSubscribers.delete(subscriber);
+        spaceSubscribers.delete(subscriber);
       };
+    },
+    /**
+     * One event of an isolated space, from that space's own connection, entered here as if it
+     * had arrived upstream: numbered, coalesced, replayed and fanned out with the host's, so
+     * a client keeps one cursor for everything. `directory` is the space's, `spaceId` marks it.
+     */
+    injectEvent({ payload, directory, spaceId }) {
+      coalescer.push({ envelope: { directory, spaceId }, payload });
     },
     subscribeStatus(subscriber) {
       statusSubscribers.add(subscriber);

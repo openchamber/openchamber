@@ -1112,6 +1112,10 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   // down, while the proxy is registered later still.
   getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
   getStoredSessionMetadata: () => sessionMetadataStore.listUnmigrated(),
+  // Isolated spaces: with the switch on, the session list carries every space's sessions and
+  // the global SSE stream their events. Called, not captured: the host is made in `main`.
+  getMergeSpaceSessionList: () => (spacesHost ? (payload) => spacesHost.mergeSessionList(payload) : null),
+  getSpaceEventHub: () => (spacesHost ? globalMessageStreamHub : null),
   fs,
   os,
   path,
@@ -2057,6 +2061,13 @@ async function main(options = {}) {
   uiAuthController = bootstrapResult.uiAuthController;
   // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
   spacesHost?.registerRoutes(app);
+  spacesHost?.attachUpgrades(server, { uiAuthController, isRequestOriginAllowed });
+  // Every space's events join the host's hub, and the host asks each space for its live status.
+  if (spacesHost) {
+    void spacesHost.startEvents(globalMessageStreamHub).catch((error) => {
+      console.warn(`[spaces] could not follow the spaces: ${error?.message ?? error}`);
+    });
+  }
   realtimeProxyRuntime = attachRealtimeProxy({
     app,
     server,

@@ -311,6 +311,35 @@ describe('ui auth client credential seam', () => {
     };
     expect(await auth.ensureSessionToken(devTunnelWsReq, null)).toBe('client:device-1');
 
+    // The sockets and the raw file of an isolated space, by path shape, and nothing else under the prefix.
+    for (const socket of ['terminal/ws', 'dev-tunnel', 'event/ws', 'global/event/ws']) {
+      const spaceWsReq = {
+        method: 'GET',
+        path: `/api/spaces/a1b2c3d4e5f6/${socket}`,
+        url: `/api/spaces/a1b2c3d4e5f6/${socket}?oc_url_token=${encodeURIComponent(urlToken)}`,
+        headers: { upgrade: 'websocket' },
+      };
+      expect(await auth.ensureSessionToken(spaceWsReq, null)).toBe('client:device-1');
+    }
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/dictation/ws',
+      url: `/api/spaces/a1b2c3d4e5f6/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    }, null)).toBe(null);
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/fs/raw',
+      url: `/api/spaces/a1b2c3d4e5f6/fs/raw?path=x.png&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    }, null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/session',
+      url: `/api/spaces/a1b2c3d4e5f6/session?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'application/json' },
+    }, null)).toBe(null);
+
     const devTunnelSubpathWsReq = {
       method: 'GET',
       path: '/api/dev-tunnel/private',

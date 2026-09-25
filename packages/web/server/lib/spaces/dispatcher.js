@@ -6,7 +6,9 @@
 // path and nothing else to decide that: no directory, no body, no session id. It runs after the
 // host has authenticated the user, strips the prefix and the user's credentials, adds the
 // space's own session, and streams the rest untouched, HTTP and SSE alike. WebSocket upgrades
-// are not forwarded here; that is stage 4b.
+// under the prefix are forwarded by `websocket.js`, which shares the rules and the session
+// of this module; the merged session list and the event connection of a space use
+// `requestInside` for their own requests to the server inside.
 //
 // Two guards only reject. A prefixed request whose directory lies outside that space's root is
 // refused, and an unprefixed request whose directory lies under `/spaces/` is refused before
@@ -197,7 +199,7 @@ const safeDecode = (value) => {
 };
 
 /** Every directory a request names in its query or its directory header, as the host reads them. */
-function requestedDirectories(req, url) {
+export function requestedDirectories(req, url) {
   const directories = [];
   for (const key of ['directory', 'location[directory]']) {
     for (const value of url.searchParams.getAll(key)) directories.push(value);
@@ -220,7 +222,7 @@ const answer = (res, status, code, message) => {
 };
 
 /** The status and code an error of the transport or of a place gets on the way back to the client. */
-const describeFailure = (error) => {
+export const describeFailure = (error) => {
   const code = error instanceof SpaceError ? error.code : null;
   switch (code) {
     case 'space_not_found':
@@ -258,6 +260,28 @@ const parseSetCookie = (header) => {
 };
 
 const hasBody = (req) => 'content-length' in req.headers || 'transfer-encoding' in req.headers;
+
+/**
+ * The headers a request carries into a space: the client's, without the user's credentials and
+ * the hop-by-hop ones, plus the space's session, the loopback host and identity encoding.
+ */
+export const forwardRequestHeaders = (requestHeaders, cookie) => {
+  const headers = {};
+  for (const [name, value] of Object.entries(requestHeaders)) {
+    const lower = name.toLowerCase();
+    if (DROPPED_REQUEST_HEADERS.has(lower) || DROPPED_REQUEST_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix))) continue;
+    if (value !== undefined) headers[lower] = value;
+  }
+  headers.host = `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`;
+  headers.cookie = cookie;
+  headers['accept-encoding'] = 'identity';
+  return headers;
+};
+
+/** Takes the user's URL credentials off a query before it travels. */
+export const stripCredentialQuery = (url) => {
+  for (const parameter of DROPPED_QUERY_PARAMETERS) url.searchParams.delete(parameter);
+};
 
 /**
  * `transport` is `{ listSpaceIds(), connect(spaceId), readToken(spaceId) }`: the ids from the
@@ -371,21 +395,44 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
 
   const forgetSession = (spaceId) => { sessions.delete(spaceId); };
 
-  const buildForwardHeaders = (req, cookie) => {
-    const headers = {};
-    for (const [name, value] of Object.entries(req.headers)) {
-      const lower = name.toLowerCase();
-      if (DROPPED_REQUEST_HEADERS.has(lower) || DROPPED_REQUEST_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix))) continue;
-      if (value !== undefined) headers[lower] = value;
+  /**
+   * One request of the host's own to the server inside, for the session list and the event
+   * connection: the space must be known, the session is renewed once after a 401, and a request
+   * that met a dead pooled stream is sent once more. Resolves the response with its body still
+   * to be read; the caller ends or destroys it. Rejects with the place's or the transport's code.
+   */
+  const requestInside = async (spaceId, { method = 'GET', path: requestPath, headers = {}, timeoutMs = 0 }) => {
+    if (!await isKnownSpace(spaceId)) throw new SpaceError('space_not_found', `There is no space ${spaceId}`);
+    const once = (cookie) => new Promise((resolve, reject) => {
+      const request = http.request({
+        agent: agentFor(spaceId),
+        method,
+        path: requestPath,
+        headers: { ...headers, host: `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`, cookie, 'accept-encoding': 'identity' },
+        ...(timeoutMs > 0 ? { timeout: timeoutMs } : {}),
+      });
+      request.on('timeout', () => request.destroy(new SpaceError('space_unreachable', 'The server inside the space did not answer in time')));
+      request.on('response', resolve);
+      request.on('error', reject);
+      request.end();
+    });
+    let response;
+    try {
+      response = await once(await sessionFor(spaceId));
+    } catch (error) {
+      if (error?.code !== 'command_stream_failed') throw error;
+      response = await once(await sessionFor(spaceId));
     }
-    headers.host = `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`;
-    headers.cookie = cookie;
-    headers['accept-encoding'] = 'identity';
-    return headers;
-  };
-
-  const stripQuery = (url) => {
-    for (const parameter of DROPPED_QUERY_PARAMETERS) url.searchParams.delete(parameter);
+    if (response.statusCode !== 401) return response;
+    response.resume();
+    forgetSession(spaceId);
+    const renewed = await logIn(spaceId, { fresh: true });
+    const again = await once(renewed);
+    if (again.statusCode === 401) {
+      again.resume();
+      throw new SpaceError('space_login_failed', 'The server inside the space refused a session it had just issued');
+    }
+    return again;
   };
 
   /** Copies a response from inside onto the client's, with the origin rules applied. */
@@ -450,7 +497,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       agent: agentFor(spaceId),
       method: req.method,
       path: `${innerPath}${search}`,
-      headers: buildForwardHeaders(req, cookie),
+      headers: forwardRequestHeaders(req.headers, cookie),
     });
     let settled = false;
     const settle = (fn) => (value) => {
@@ -586,7 +633,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       answer(res, 400, 'directory_outside_space', `A request to space ${route.spaceId} may name a directory under ${spaceWorkPath(route.spaceId)} only.`);
       return;
     }
-    stripQuery(url);
+    stripCredentialQuery(url);
     forward(req, res, route.spaceId, route.path, url.search).catch((error) => {
       const failure = describeFailure(error);
       answer(res, failure.status, failure.code, failure.message);
@@ -601,5 +648,15 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     tokens.clear();
   };
 
-  return { middleware, close, isSpaceDirectory, isSpaceRequestPath };
+  /** What the WebSocket forwarder shares with the middleware: the list of spaces and the session inside. */
+  const spaceSessions = {
+    isKnownSpace,
+    cookieFor: sessionFor,
+    renew: (spaceId) => {
+      forgetSession(spaceId);
+      return logIn(spaceId, { fresh: true });
+    },
+  };
+
+  return { middleware, close, isSpaceDirectory, isSpaceRequestPath, requestInside, spaceSessions };
 }

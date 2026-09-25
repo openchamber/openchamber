@@ -344,6 +344,10 @@ const parseUrlAuthScope = (value) => {
 
 const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guests/${guestId}/`);
 
+// An isolated space's raw file and its sockets, under `/api/spaces/<id>/`, matched by shape.
+const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
+const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
+
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
@@ -356,7 +360,8 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
     || pathname === '/api/guests'
-    || /^\/api\/guests\/[a-z][a-z0-9-]*\//.test(pathname);
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\//.test(pathname)
+    || SPACE_RAW_FILE_PATH.test(pathname);
 };
 
 const isUrlAuthWebSocketPath = (pathname) => {
@@ -367,7 +372,8 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname === '/api/dictation/ws'
     || pathname === '/api/dev-tunnel'
     || /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/.test(pathname)
-    || pathname.startsWith('/api/preview/proxy/');
+    || pathname.startsWith('/api/preview/proxy/')
+    || SPACE_WS_PATH.test(pathname);
 };
 
 const canUseUrlAuthTokenForRequest = (req, scope = null) => {
