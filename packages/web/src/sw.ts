@@ -64,8 +64,13 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const data = (event.notification.data ?? null) as { url?: string } | null;
-  const url = data?.url ?? '/';
+  // SAFETY: notification data is only ever written by our own showNotification
+  // and push payloads as { url, sessionId }; both fields are re-validated as
+  // trimmed strings below before use.
+  const data = (event.notification.data ?? null) as { url?: string; sessionId?: string } | null;
+  const rawUrl = typeof data?.url === 'string' ? data.url.trim() : '';
+  const rawSessionId = typeof data?.sessionId === 'string' ? data.sessionId.trim() : '';
+  const url = rawUrl || (rawSessionId ? `/?session=${encodeURIComponent(rawSessionId)}` : '/');
 
   event.waitUntil((async () => {
     // Prefer focusing an already-open window (e.g. the installed PWA) and
