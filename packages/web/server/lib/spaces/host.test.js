@@ -61,7 +61,7 @@ describe('createSpacesHost', () => {
     const { id } = await host.manager.createSpace({ placeId: 'memory', projectDirectory: '/home/me/project', name: 'Host test' });
 
     const app = express();
-    host.registerRoutes(app);
+    app.use(host.middleware);
     app.get('/api/host', (req, res) => res.json({ directory: req.query.directory ?? null }));
     const server = http.createServer(app);
     servers.push(server);
@@ -85,6 +85,20 @@ describe('createSpacesHost', () => {
     expect(host.refuseDirectory('/home/me/spaces')).toBeNull();
     expect(started).toBe(0);
     await place.remove(id);
+  });
+
+  it('carries the journey and its places, and takes no upgrade before the forwarder is made', async () => {
+    const place = createMemoryPlace();
+    const host = createSpacesHost({ dataDir: temporary(), place, listProjectDirectories: async () => ['/home/me/project'], logger: { warn: () => {} } });
+    hosts.push(host);
+    expect(host.places().map((entry) => entry.id)).toEqual(['memory']);
+    expect(await host.journey.listSpaces()).toEqual([]);
+    // The slot in index.js calls this whether or not the forwarder exists yet.
+    expect(() => host.upgradeHandler({ url: '/api/spaces/a1b2c3d4e5f6/api/event/ws', headers: {} }, { destroy: () => {} }, Buffer.alloc(0))).not.toThrow();
+    // The middleware is the dispatcher's: a request outside the prefix passes through.
+    let passed = false;
+    host.middleware({ path: '/api/host', url: '/api/host', headers: {}, query: {}, method: 'GET' }, {}, () => { passed = true; });
+    expect(passed).toBe(true);
   });
 });
 
@@ -241,7 +255,8 @@ describe('createSpacesHost: sessions and events', () => {
 
     const server = http.createServer((_req, res) => { res.statusCode = 404; res.end(); });
     servers.push(server);
-    host.attachUpgrades(server, { uiAuthController: { enabled: false }, isRequestOriginAllowed: async () => true });
+    host.prepareUpgrades({ uiAuthController: { enabled: false }, isRequestOriginAllowed: async () => true });
+    server.on('upgrade', host.upgradeHandler);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/api/spaces/${ID}/terminal/ws`, { headers: { origin: 'http://app.test' } });
     const echoed = await new Promise((resolve, reject) => {

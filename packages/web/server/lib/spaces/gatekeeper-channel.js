@@ -195,6 +195,8 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
         };
       }),
       dropped: Number.isSafeInteger(parsed.dropped) && parsed.dropped >= 0 ? parsed.dropped : 0,
+      // When the gatekeeper started: the journal holds nothing older, and the UI has to say so.
+      since: text(parsed.since),
     };
   };
 

@@ -111,6 +111,8 @@ let networkMode = 'allowlist';
 let allowedDomains = new Set();
 const grants = new Map();
 
+// When this program started, for the journal: nothing before it is on record.
+const STARTED_AT = new Date().toISOString();
 const journal = [];
 let journalDropped = 0;
 
@@ -783,7 +785,8 @@ async function serveControl(request, response) {
     return;
   }
   if (request.method === 'GET' && path === '/journal') {
-    answerJson(response, 200, { records: journal.slice(), dropped: journalDropped });
+    // Since when: the journal is memory only, so the host says that nothing older exists.
+    answerJson(response, 200, { records: journal.slice(), dropped: journalDropped, since: STARTED_AT });
     return;
   }
   if (request.method !== 'POST' || (path !== '/network' && path !== '/grants')) {

@@ -1,5 +1,5 @@
 import { SpaceError } from './errors.js';
-import { createSpaceId, hashProjectDirectory, normalizeSpaceName } from './labels.js';
+import { createSpaceId, hashProjectDirectory, normalizeSpaceName, requireSpaceId } from './labels.js';
 
 // Memory limit of a new space. Swap adds nothing on top of it.
 const DEFAULT_SPACE_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
@@ -29,10 +29,11 @@ export function createSpaceManager({ registry, now = () => new Date() }) {
     return result;
   };
 
-  const createSpace = async ({ placeId, projectDirectory, name }) => {
+  // `id` may be given, so a caller that announces a creation before it is done names the same space.
+  const createSpace = async ({ placeId, projectDirectory, name, id = createSpaceId() }) => {
     const place = requirePlace(placeId);
     const spec = {
-      id: createSpaceId(),
+      id: requireSpaceId(id),
       name: normalizeSpaceName(name),
       project: hashProjectDirectory(projectDirectory),
       created: now().toISOString(),

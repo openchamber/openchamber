@@ -958,6 +958,9 @@ describe('gatekeeper program', () => {
       const after = await journal();
       expect(after.records).toHaveLength(500);
       expect(after.dropped).toBeGreaterThan(before.dropped);
+      // Since when it records: its own start, as an instant, so the host can say that nothing older exists.
+      expect(after.since).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      expect(after.since).toBe(before.since);
       // The oldest records went, the newest stayed.
       expect(after.records.at(-1).host).toBe('blocked.test');
     }, 60_000);

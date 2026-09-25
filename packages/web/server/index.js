@@ -113,6 +113,7 @@ import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
 import { createSpacesHost } from './lib/spaces/host.js';
+import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
 import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -1873,20 +1874,24 @@ async function main(options = {}) {
   // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
   const sayTTSCapability = detectSayTtsCapability(process);
 
-  // The isolated-spaces switch is read once, here. While it is off the feature has no place, no
-  // manager, no route and runs no `docker`; a change of the switch takes effect at the next start.
+  // The isolated-spaces switch, read here at start and changed live through its route below.
+  // While it is off the feature has no place, no manager, no route and runs no `docker`.
+  const buildSpacesHost = () => createSpacesHost({
+    dataDir: OPENCHAMBER_DATA_DIR,
+    dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
+    gitPath: searchPathFor('git', buildAugmentedPath()) ?? 'git',
+    // git starts `docker exec` itself when code moves in or out, so its PATH must find docker.
+    hostEnvironment: { ...process.env, PATH: buildAugmentedPath() },
+    // So the session list can say which registered project each space was made for.
+    listProjectDirectories: async () => {
+      const settings = await readSettingsFromDiskMigrated();
+      return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+    },
+  });
   const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
   if (startupSettings?.isolatedSpacesEnabled === true) {
     try {
-      spacesHost = createSpacesHost({
-        dataDir: OPENCHAMBER_DATA_DIR,
-        dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
-        // So the session list can say which registered project each space was made for.
-        listProjectDirectories: async () => {
-          const settings = await readSettingsFromDiskMigrated();
-          return sanitizeProjects(settings?.projects || []).map((project) => project.path);
-        },
-      });
+      spacesHost = buildSpacesHost();
     } catch (error) {
       // The feature is absent then, and the rest of the server starts as with the switch off.
       console.error(`[spaces] isolated spaces are unavailable this start: ${error?.code ?? ''} ${error?.message ?? error}`.trim());
@@ -2065,14 +2070,31 @@ async function main(options = {}) {
   });
   uiAuthController = bootstrapResult.uiAuthController;
   // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
-  spacesHost?.registerRoutes(app);
-  spacesHost?.attachUpgrades(server, { uiAuthController, isRequestOriginAllowed });
-  // Every space's events join the host's hub, and the host asks each space for its live status.
-  if (spacesHost) {
-    void spacesHost.startEvents(globalMessageStreamHub).catch((error) => {
+  // The slot is mounted once and reads the host at call time, so the switch can turn the feature
+  // on and off live: with no host it passes every request on and no upgrade is taken.
+  app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
+  server.on('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
+  const startSpacesHost = (host) => {
+    host.prepareUpgrades({ uiAuthController, isRequestOriginAllowed });
+    // Every space's events join the host's hub, and the host asks each space for its live status.
+    void host.startEvents(globalMessageStreamHub).catch((error) => {
       console.warn(`[spaces] could not follow the spaces: ${error?.message ?? error}`);
     });
-  }
+  };
+  if (spacesHost) startSpacesHost(spacesHost);
+  const spacesSwitch = createSwitchController({
+    getHost: () => spacesHost,
+    setHost: (host) => { spacesHost = host; },
+    buildHost: buildSpacesHost,
+    startHost: startSpacesHost,
+    persist: (enabled) => persistSettings({ isolatedSpacesEnabled: enabled }),
+  });
+  registerSpaceRoutes(app, {
+    getJourney: () => spacesHost?.journey ?? null,
+    getPlaces: () => spacesHost?.places() ?? [],
+    readSwitch: spacesSwitch.readSwitch,
+    setSwitch: spacesSwitch.setSwitch,
+  });
   realtimeProxyRuntime = attachRealtimeProxy({
     app,
     server,

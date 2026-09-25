@@ -119,9 +119,14 @@ describe('gatekeeper channel: control requests', () => {
 describe('gatekeeper channel: journal', () => {
   const record = { at: '2026-09-20T10:00:00.000Z', listener: 'corridor', host: 'api.anthropic.com', port: 443, decision: 'allow' };
 
-  it('reads the records and how many the ring buffer dropped', async () => {
-    const { channel } = channelWith(ok(http(200, JSON.stringify({ records: [record], dropped: 12 }))));
-    expect(await channel.readJournal(ID)).toEqual({ records: [record], dropped: 12 });
+  it('reads the records, how many the ring buffer dropped, and since when the gatekeeper records', async () => {
+    const { channel } = channelWith(ok(http(200, JSON.stringify({ records: [record], dropped: 12, since: '2026-09-20T09:00:00.000Z' }))));
+    expect(await channel.readJournal(ID)).toEqual({ records: [record], dropped: 12, since: '2026-09-20T09:00:00.000Z' });
+  });
+
+  it('leaves "since" empty for a gatekeeper that does not say, and never takes an object for it', async () => {
+    const { channel } = channelWith(ok(http(200, JSON.stringify({ records: [], dropped: 0, since: { at: 1 } }))));
+    expect(await channel.readJournal(ID)).toEqual({ records: [], dropped: 0, since: '' });
   });
 
   it('keeps the five fields of a record and nothing else the gatekeeper sends', async () => {
@@ -168,6 +173,7 @@ describe('gatekeeper channel: journal', () => {
         { at: '', listener: '', host: '', port: 0, decision: '' },
       ],
       dropped: 0,
+      since: '',
     });
   });
 });

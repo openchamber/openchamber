@@ -2,9 +2,9 @@
 // is off: the place, the manager, the dispatcher, the WebSocket forwarder, the session index
 // with the event connection of every space, and the hooks the rest of the server takes.
 //
-// `server/index.js` reads the switch once at start. While it is off this module is never
-// imported for its effect: no place, no manager, no route, no `docker`. A change of the switch
-// takes effect at the next start of the server.
+// `server/index.js` reads the switch at start and changes it live through the switch route.
+// While it is off this module is never imported for its effect: no place, no manager, no
+// route, no `docker`.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -12,10 +12,16 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { createCodeIn } from './code-in.js';
+import { createCodeOut } from './code-out.js';
 import { createSpaceDispatcher } from './dispatcher.js';
+import { createGatekeeperChannel } from './gatekeeper-channel.js';
+import { createHostGit } from './host-git.js';
+import { createSpaceJourney } from './journey.js';
 import { hashProjectDirectory } from './labels.js';
 import { spaceProjectPath } from './layout.js';
 import { createSpaceManager } from './manager.js';
+import { createSpaceRecords } from './space-records.js';
 import { createSpaceEventSources } from './space-events.js';
 import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js';
 import { createSpaceWebSocketForwarder } from './websocket.js';
@@ -59,15 +65,19 @@ export function readOrCreateOwner(dataDir) {
 }
 
 /**
- * `dataDir` is the host's data directory and `dockerPath` the docker CLI to run. `place`
- * replaces the Docker place, for the tests; `runCommand` and `openCommandStream` are the two
- * ways this module starts a process, injectable for the same reason. `listProjectDirectories`
- * answers the host's registered project paths, so a space's project label can be resolved
- * to the project it was made for; without it every space is marked as of an unknown project.
+ * `dataDir` is the host's data directory, `dockerPath` the docker CLI to run and `gitPath` the
+ * host git that moves code in and out, with `hostEnvironment` as its environment: git starts
+ * `docker exec` itself, so the PATH in it must find docker. `place` replaces the Docker place,
+ * for the tests; `runCommand` and `openCommandStream` are the two ways this module starts a
+ * process, injectable for the same reason. `listProjectDirectories` answers the host's registered
+ * project paths, so a space's project label can be resolved to the project it was made for;
+ * without it every space is marked as of an unknown project.
  */
 export function createSpacesHost({
   dataDir,
   dockerPath = 'docker',
+  gitPath = 'git',
+  hostEnvironment = process.env,
   listProjectDirectories = async () => [],
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
@@ -88,6 +98,11 @@ export function createSpacesHost({
   registry.seal();
   const manager = createSpaceManager({ registry });
   const serverInside = createSpaceServerChannel({ exec: dockerPlace.exec });
+  const gatekeeper = createGatekeeperChannel({ exec: dockerPlace.exec });
+  const git = createHostGit({ runCommand, gitPath, environment: hostEnvironment });
+  const codeIn = createCodeIn({ git, place: dockerPlace });
+  const codeOut = createCodeOut({ git, place: dockerPlace });
+  const records = createSpaceRecords({ dataDir, logger });
 
   const listSpaces = () => manager.listSpaces({ placeId: dockerPlace.id });
   const dispatcher = createSpaceDispatcher({
@@ -159,6 +174,25 @@ export function createSpacesHost({
     const ids = await spaceIds();
     events?.sync(ids);
   };
+  /** The list is read again at once, and the event connections follow it: for a space just made or removed. */
+  const refresh = () => {
+    known = { spaces: known.spaces, readAt: -Infinity };
+    return follow();
+  };
+
+  let hub = null;
+  const journey = createSpaceJourney({
+    manager,
+    place: dockerPlace,
+    gatekeeper,
+    codeIn,
+    codeOut,
+    records,
+    listProjectDirectories,
+    announce: (spaceId, payload) => { hub?.injectEvent({ payload, directory: 'global', spaceId }); },
+    onSpacesChanged: () => { void refresh().catch(() => {}); },
+    logger,
+  });
 
   const readBody = (response, cap) => new Promise((resolve, reject) => {
     const chunks = [];
@@ -227,15 +261,22 @@ export function createSpacesHost({
     manager,
     dispatcher,
     index,
-    /** Mounts the dispatcher: after the API auth gate, before every route that reads a directory. */
-    registerRoutes: (app) => { app.use(dispatcher.middleware); },
-    /** Takes the WebSocket upgrades under the prefix, with the host's own auth and origin checks. */
-    attachUpgrades: (server, { uiAuthController, isRequestOriginAllowed }) => {
+    journey,
+    /** The places a space can be made on, for the funnel. */
+    places: () => registry.list(),
+    /** The dispatcher, to mount after the API auth gate and before every route that reads a directory. */
+    middleware: dispatcher.middleware,
+    /**
+     * Makes the WebSocket forwarder, with the host's own auth and origin checks. `upgradeHandler`
+     * then takes the upgrades under the prefix, and nothing before this call.
+     */
+    prepareUpgrades: ({ uiAuthController, isRequestOriginAllowed }) => {
       sockets = createSpaceWebSocketForwarder({ dispatcher, connect: (spaceId) => dockerPlace.connect(spaceId), uiAuthController, isRequestOriginAllowed, logger });
-      server.on('upgrade', sockets.upgradeHandler);
     },
+    upgradeHandler: (...args) => sockets?.upgradeHandler(...args),
     /** Follows the spaces: an event connection for each, into the host's hub, and the host's own ids from its events. */
     startEvents: (globalEventHub) => {
+      hub = globalEventHub;
       events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, logger, now });
       unsubscribeHostEvents = globalEventHub.subscribeEvent((event) => { if (event.spaceId === null) index.observeHostEvent(event.payload); });
       followTimer = setTimer(() => { void follow(); }, FOLLOW_INTERVAL_MS);

@@ -80,7 +80,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('sessions and events of a real space: dock
     hub.subscribeEvent((event) => received.push(event), { spaces: true });
 
     const app = express();
-    host.registerRoutes(app);
+    app.use(host.middleware);
     app.all('/api/git/status', (req, res) => { hostRouteRuns += 1; res.json({ ranOnHost: true, directory: req.query.directory ?? null }); });
     registerOpenCodeProxy(app, {
       fs: {}, os: {}, path, OPEN_CODE_READY_GRACE_MS: 0,
@@ -92,7 +92,8 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('sessions and events of a real space: dock
       spaceEventHub: hub,
     });
     server = await listen(app);
-    host.attachUpgrades(server, { uiAuthController: { enabled: false }, isRequestOriginAllowed: async () => true });
+    host.prepareUpgrades({ uiAuthController: { enabled: false }, isRequestOriginAllowed: async () => true });
+    server.on('upgrade', host.upgradeHandler);
     await host.startEvents(hub);
   }, CREATE_TIMEOUT_MS);
 

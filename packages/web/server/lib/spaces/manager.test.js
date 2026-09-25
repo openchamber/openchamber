@@ -29,6 +29,12 @@ describe('createSpaceManager', () => {
     expect(await manager.listSpaces({ placeId: 'memory' })).toEqual([{ ...listedFields, state: 'running', orphans: [], damaged: false, missing: [] }]);
   });
 
+  it('takes the id a caller announced before the creation, and refuses one that is not a space id', async () => {
+    const manager = managerFor(createMemoryPlace());
+    expect((await manager.createSpace({ ...REQUEST, id: 'a1b2c3d4e5f6' })).id).toBe('a1b2c3d4e5f6');
+    await expect(manager.createSpace({ ...REQUEST, id: 'not-an-id' })).rejects.toMatchObject({ code: 'invalid_space_id' });
+  });
+
   it('names the place that does not exist', async () => {
     const manager = managerFor(createMemoryPlace());
 
