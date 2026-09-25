@@ -2213,6 +2213,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.actions.stopGeneratingAria': '停止生成',
   'chat.statusRow.tasksTitle': '任务',
   'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.compacting': '正在压缩上下文…',
   'chat.statusRow.summary.activeLeft': '{active} 个活跃 · 剩余 {left} 个',
   'chat.revertIndicator.redo': '重做',
   'chat.revertIndicator.redoAria': '重做 — 恢复已撤回的消息',

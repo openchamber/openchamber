@@ -2217,6 +2217,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.actions.stopGeneratingAria': '停止生成',
   'chat.statusRow.tasksTitle': '任務',
   'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.compacting': '正在壓縮上下文…',
   'chat.statusRow.summary.activeLeft': '{active} 個活躍 · 剩餘 {left} 個',
   'chat.revertIndicator.redo': '重做',
   'chat.revertIndicator.redoAria': '重做 — 恢復已收回的訊息',

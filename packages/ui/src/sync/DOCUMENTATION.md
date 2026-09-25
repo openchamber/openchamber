@@ -142,6 +142,10 @@ settle it. The settled event carries no input id, so the reducer keeps the
 running record's id and creation time instead of adding a second record, the
 way OpenCode's own message store does. The timeline notice shows the summary
 as it grows and collapses it behind a toggle once settled.
+The assistant status row reads this message record directly. It shows the
+localized compaction label while the latest session message is a running
+compaction and the authoritative session status is `busy`; an idle status
+suppresses the label.
 
 ## A location's services going away
 

@@ -3318,6 +3318,7 @@ export const dict = {
   'terminalView.quickKeys.altModifierAria': 'Alt-Taste',
   'chat.draftPresets.scheduleTask.label': 'Aufgabe planen',
   'chat.statusRow.modelStatus': '{model} ist {status}',
+  'chat.statusRow.compacting': 'Kontext wird komprimiert…',
   'chat.commandAutocomplete.command.scheduleTaskDescription': 'Eine geplante Aufgabe erstellen',
   'chat.chatInput.toast.scheduleTaskFailed': 'Aufgabe konnte nicht geplant werden',
   'chat.container.sessionLoadError.title': 'Sitzung konnte nicht geladen werden',

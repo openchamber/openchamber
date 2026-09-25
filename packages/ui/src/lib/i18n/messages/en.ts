@@ -2247,6 +2247,7 @@ export const dict = {
   'chat.statusRow.actions.stopGeneratingAria': 'Stop generating',
   'chat.statusRow.tasksTitle': 'Tasks',
   'chat.statusRow.modelStatus': '{model} is {status}',
+  'chat.statusRow.compacting': 'Compacting context…',
   'chat.statusRow.summary.activeLeft': '{active} active · {left} left',
   'chat.revertIndicator.redo': 'Redo',
   'chat.revertIndicator.redoAria': 'Redo — restore reverted messages',

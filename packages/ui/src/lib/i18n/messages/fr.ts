@@ -1980,6 +1980,7 @@ export const dict = {
   'chat.statusRow.actions.stopGeneratingAria': 'Arrêter de générer',
   'chat.statusRow.tasksTitle': 'Tâches',
   'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.compacting': 'Compactage du contexte…',
   'chat.statusRow.summary.activeLeft': '{active} actif · {left} gauche',
   'chat.revertIndicator.redo': 'Refaire',
   'chat.revertIndicator.redoAria': 'Rétablir : restaurer les messages annulés',

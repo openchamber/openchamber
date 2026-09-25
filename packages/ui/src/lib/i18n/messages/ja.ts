@@ -2243,6 +2243,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.actions.stopGeneratingAria': '生成を停止',
   'chat.statusRow.tasksTitle': 'タスク',
   'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.compacting': 'コンテキストを圧縮中…',
   'chat.statusRow.summary.activeLeft': '{active}アクティブ · {left}残り',
   'chat.revertIndicator.redo': 'やり直し',
   'chat.revertIndicator.redoAria': 'やり直し — 元に戻したメッセージを復元',

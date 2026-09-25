@@ -871,6 +871,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.actions.stopGeneratingAria': 'Zatrzymaj generowanie',
   'chat.statusRow.tasksTitle': 'Zadania',
   'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.compacting': 'Kompaktowanie kontekstu…',
   'chat.statusRow.summary.activeLeft': '{active} aktywne · {left} pozostało',
   'chat.revertIndicator.redo': 'Ponów',
   'chat.revertIndicator.redoAria': 'Ponów — przywróć cofnięte wiadomości',

@@ -2225,6 +2225,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.actions.stopGeneratingAria": "Detener la generación",
   "chat.statusRow.tasksTitle": "Tareas",
   "chat.statusRow.modelStatus": "{model} · {status}",
+  "chat.statusRow.compacting": "Comprimiendo el contexto…",
   "chat.statusRow.summary.activeLeft": "{active} activas · {left} restantes",
   "chat.revertIndicator.redo": "Rehacer",
   "chat.revertIndicator.redoAria": "Rehacer — restaurar mensajes revertidos",
