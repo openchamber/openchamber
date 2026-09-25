@@ -6,6 +6,7 @@ import os from 'os';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
+import { applyShellEnv } from '../projects/shell-env.js';
 
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
@@ -138,11 +139,34 @@ const isSafeSimpleGitBinary = (candidate) => (
   typeof candidate === 'string' && SIMPLE_GIT_SAFE_BINARY_PATTERN.test(candidate)
 );
 
-const createSimpleGit = (options) => {
-  if (!options?.unsafe?.allowUnsafeCustomBinary) {
-    return simpleGit(options);
-  }
+// simple-git only reads `env` through its `.env()` builder method, not as a
+// constructor option: an `env` passed to `simpleGit()` is silently ignored, so
+// git and its hooks run on the server's `process.env` and never see the project
+// shell environment, SSH_AUTH_SOCK, or GIT_TERMINAL_PROMPT. `.env()` also runs
+// simple-git's safety check over the environment, which rejects variables that
+// configure git itself (EDITOR, PAGER, GIT_SSH, ...). Those never reached git
+// before this call and OpenChamber runs git non-interactively, so they are
+// dropped rather than turning on the matching allowUnsafe* options.
+const SIMPLE_GIT_UNSAFE_ENV_KEYS = new Set([
+  'EDITOR', 'VISUAL', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR',
+  'PAGER', 'GIT_PAGER',
+  'GIT_ASKPASS', 'SSH_ASKPASS',
+  'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_PROXY_COMMAND',
+  'GIT_EXTERNAL_DIFF',
+  'GIT_TEMPLATE_DIR', 'GIT_EXEC_PATH',
+  'GIT_CONFIG', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
+  'PREFIX',
+]);
 
+const sanitizeGitSpawnEnv = (env) => {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!SIMPLE_GIT_UNSAFE_ENV_KEYS.has(key.toUpperCase())) sanitized[key] = value;
+  }
+  return sanitized;
+};
+
+const suppressSimpleGitUnsafeBinaryWarning = (create) => {
   const originalWarn = console.warn;
   console.warn = (...args) => {
     if (String(args[0] || '').includes(SIMPLE_GIT_UNSAFE_BINARY_WARNING)) {
@@ -152,10 +176,20 @@ const createSimpleGit = (options) => {
   };
 
   try {
-    return simpleGit(options);
+    return create();
   } finally {
     console.warn = originalWarn;
   }
+};
+
+const createSimpleGit = (options) => {
+  const git = options?.unsafe?.allowUnsafeCustomBinary
+    ? suppressSimpleGitUnsafeBinaryWarning(() => simpleGit(options))
+    : simpleGit(options);
+  if (options?.env) {
+    git.env(sanitizeGitSpawnEnv(options.env));
+  }
+  return git;
 };
 
 const listPathExecutableCandidates = (binaryName) => {
@@ -342,7 +376,7 @@ const resolveSshAuthSock = async () => {
   return null;
 };
 
-const buildGitEnv = async () => {
+const buildGitEnv = async (directory) => {
   const env = { ...process.env };
   if (!env.SSH_AUTH_SOCK || !env.SSH_AUTH_SOCK.trim()) {
     const resolved = await resolveSshAuthSock();
@@ -356,11 +390,41 @@ const buildGitEnv = async () => {
   if (env.GIT_TERMINAL_PROMPT === undefined) {
     env.GIT_TERMINAL_PROMPT = '0';
   }
+  const terminalPrompt = env.GIT_TERMINAL_PROMPT;
+  // A project's opted-in shell environment puts its dev tools on PATH for
+  // hooks, credential helpers, and diffs the user configured. Resolution is
+  // cached and bounded, and a failure leaves the base environment intact.
+  if (projectShellEnvResolver && directory) {
+    try {
+      const resolved = await projectShellEnvResolver.resolveForDirectory(directory);
+      if (resolved) {
+        const overlaid = applyShellEnv(env, resolved, path.delimiter);
+        // A project env can set GIT_TERMINAL_PROMPT; the server has no terminal
+        // a prompt could be answered on, so the no-prompt value stays.
+        overlaid.GIT_TERMINAL_PROMPT = terminalPrompt;
+        return overlaid;
+      }
+    } catch {
+      // Never let environment resolution break a Git operation.
+    }
+  }
   return env;
 };
 
+// The spawn-path resolver is created by the server composition root, where the
+// projects dir, the config reader, and child_process.spawn live. Git functions
+// are module-level (not injected), so the server registers it here once.
+let projectShellEnvResolver = null;
+export const setGitProjectShellEnvResolver = (resolver) => {
+  projectShellEnvResolver = resolver?.resolveForDirectory ? resolver : null;
+};
+
 const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false, stallTimeoutMs = 0 } = {}) => {
-  const env = await buildGitEnv();
+  const baseDir = normalizeDirectoryPath(directory);
+  if (typeof baseDir !== 'string' || !baseDir.trim()) {
+    throw new Error('Git directory is required');
+  }
+  const env = await buildGitEnv(baseDir);
   const spawnOptions = { windowsHide: true };
   // simple-git's block timeout kills the process once it has produced no
   // output for this long. Opt-in per caller: a background read must never hold
@@ -380,10 +444,6 @@ const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafe
   // server was launched from a neutral directory (e.g. $HOME) and the opened
   // project lives elsewhere — session/project discovery then sees spurious
   // "not a git repository" errors and can abort enumeration.
-  const baseDir = normalizeDirectoryPath(directory);
-  if (typeof baseDir !== 'string' || !baseDir.trim()) {
-    throw new Error('Git directory is required');
-  }
   return createSimpleGit({
     baseDir,
     env,
@@ -1023,7 +1083,7 @@ const runGitCommand = async (cwd, args, { timeoutMs = 0 } = {}) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
-      env: await buildGitEnv(),
+      env: await buildGitEnv(cwd),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
       // Only short probes pass a timeout; commands that legitimately run long
@@ -1218,7 +1278,7 @@ const runPostCheckoutHook = async (directory) => {
     await execFileAsync(hookPath, [GIT_NULL_REF, head, '1'], {
       cwd: directory,
       env: {
-        ...(await buildGitEnv()),
+        ...(await buildGitEnv(directory)),
         GIT_DIR: gitDir,
         GIT_WORK_TREE: path.resolve(directory),
       },
@@ -1810,7 +1870,7 @@ const runWorktreeStartCommand = async (directory, command) => {
   if (process.platform === 'win32') {
     const result = await execFileAsync('cmd', ['/c', text], {
       cwd: directory,
-      env: await buildGitEnv(),
+      env: await buildGitEnv(directory),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
     }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
@@ -1824,7 +1884,7 @@ const runWorktreeStartCommand = async (directory, command) => {
 
   const result = await execFileAsync('bash', ['-lc', text], {
     cwd: directory,
-    env: await buildGitEnv(),
+    env: await buildGitEnv(directory),
     maxBuffer: 20 * 1024 * 1024,
   }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
     success: false,
@@ -2357,7 +2417,7 @@ const killProcessTree = (child) => {
 // huge directory is never listed in full. `paths` is complete when
 // `truncated` is false.
 const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
-  const env = await buildGitEnv();
+  const env = await buildGitEnv(repoRoot);
   return new Promise((resolve, reject) => {
     const child = spawn(getGitBinary(), ['ls-files', '--others', '--exclude-standard', '-z', '--', dirPath], {
       cwd: repoRoot,

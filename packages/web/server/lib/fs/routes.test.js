@@ -107,7 +107,7 @@ const createDeferredSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
   return { spawn, calls, closeNext };
 };
 
-const registerExec = ({ spawn }) => {
+const registerExec = ({ spawn, projectShellEnvResolver } = {}) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
     os: { homedir: () => '/home/user' },
@@ -123,6 +123,7 @@ const registerExec = ({ spawn }) => {
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
+    projectShellEnvResolver,
   });
   return getRoute('POST', '/api/fs/exec');
 };
@@ -901,6 +902,28 @@ describe('fs exec git-read cache', () => {
     warn.mockRestore();
   });
 
+  it('applies the project shell environment to executed commands', async () => {
+    const envs = [];
+    const spawn = vi.fn((_shell, _args, options) => {
+      envs.push(options.env);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      queueMicrotask(() => child.emit('close', 0, null));
+      return child;
+    });
+    const handler = registerExec({
+      spawn,
+      projectShellEnvResolver: { resolveForDirectory: async () => ({ vars: { PROJECT_TOOL: '1' }, mode: 'overlay' }) },
+    });
+
+    const res = await callExec(handler, { commands: ['echo hi'], cwd: '/repo' });
+
+    expect(res.statusCode).toBe(200);
+    expect(envs[0].PROJECT_TOOL).toBe('1');
+  });
+
   it('caches an allowlisted git rev-parse across identical requests', async () => {
     const command = 'git rev-parse --absolute-git-dir --git-common-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/repo/.git\n.git\n' } });
@@ -1549,9 +1572,11 @@ describe('fs stat directory error handling', () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'openchamber-fs-import-'));
     try {
       await mkdir(path.join(directory, 'fs'));
+      await mkdir(path.join(directory, 'projects'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
       await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
       await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
+      await copyFile(new URL('../projects/shell-env.js', import.meta.url), path.join(directory, 'projects/shell-env.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',

@@ -28,6 +28,7 @@ const emptyPersonal: PersonalProjectSetup = {
   draftStarters: [],
   hiddenSharedActionIds: [],
   sharedTrust: null,
+  shellEnv: null,
 };
 
 const projectIdFor = (projectPath: string): string => `path_${Buffer.from(projectPath, 'utf8').toString('base64url')}`;
@@ -66,6 +67,7 @@ describe('project setup sanitizers', () => {
       projectActions: [{ id: 'a', name: 'A', command: 'x' }],
       projectActionsPrimaryId: 'missing',
       hiddenSharedActionIds: ['dev', 'dev', 3],
+      shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { GOFLAGS: '-mod=vendor' } },
     }), {
       setupWorktree: ['bun install'],
       setupWorktreeWait: true,
@@ -75,6 +77,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [],
       hiddenSharedActionIds: ['dev'],
       sharedTrust: null,
+      shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { GOFLAGS: '-mod=vendor' }, mode: 'overlay' },
     });
     assert.deepEqual(personalProjectSetupOf(null), emptyPersonal);
   });
@@ -130,6 +133,16 @@ describe('project setup sanitizers', () => {
     assert.equal(sharedTrustHashOf({ ...shared, setupWorktree: [] }), null);
     assert.deepEqual(projectSetupPatchToStored({ sharedTrustHash: null }), { sharedTrust: undefined });
     assert.throws(() => projectSetupPatchToStored({ sharedTrustHash: '' }), ProjectSetupValidationError);
+  });
+
+  test('stores the personal shell environment and clears it with null', () => {
+    assert.deepEqual(
+      projectSetupPatchToStored({ shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { FOO: 'bar' }, mode: 'replace' } }),
+      { shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { FOO: 'bar' }, mode: 'replace' } },
+    );
+    assert.deepEqual(projectSetupPatchToStored({ shellEnv: { enabled: true } }), { shellEnv: { enabled: true } });
+    assert.deepEqual(projectSetupPatchToStored({ shellEnv: null }), { shellEnv: undefined });
+    assert.throws(() => projectSetupPatchToStored({ shellEnv: 'cmd' }), ProjectSetupValidationError);
   });
 
   test('rejects wrongly shaped patch keys', () => {

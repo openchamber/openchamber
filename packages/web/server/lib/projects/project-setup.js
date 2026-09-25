@@ -14,6 +14,8 @@
 
 import crypto from 'node:crypto';
 
+import { sanitizeShellEnv, shellEnvToStored } from './shell-env.js';
+
 const ACTION_NAME_MAX_LENGTH = 80;
 const ACTION_COMMAND_MAX_LENGTH = 4000;
 const ACTION_OPEN_URL_MAX_LENGTH = 2000;
@@ -136,6 +138,7 @@ export const projectSetupViewOf = (raw) => {
     projectActions,
     projectActionsPrimaryId: primaryRaw && projectActions.some((action) => action.id === primaryRaw) ? primaryRaw : null,
     draftStarters: sanitizeDraftStarters(document.draftStarters),
+    shellEnv: sanitizeShellEnv(document.shellEnv),
     hiddenSharedActionIds: sanitizeIdList(document.hiddenSharedActionIds),
     sharedTrust: sharedTrustOf(document.sharedTrust),
   };
@@ -180,6 +183,12 @@ export const projectSetupPatchToStored = (patch) => {
   if ('draftStarters' in patch) {
     if (!Array.isArray(patch.draftStarters)) throw new Error('draftStarters must be an array');
     stored.draftStarters = sanitizeDraftStarters(patch.draftStarters);
+  }
+  // Personal only: a repository must not be able to describe a command that
+  // runs on every spawn. A null patch removes the key from the file.
+  if ('shellEnv' in patch) {
+    if (patch.shellEnv !== null && !isObjectRecord(patch.shellEnv)) throw new Error('shellEnv must be an object or null');
+    stored.shellEnv = shellEnvToStored(patch.shellEnv);
   }
   if ('hiddenSharedActionIds' in patch) {
     if (!Array.isArray(patch.hiddenSharedActionIds)) throw new Error('hiddenSharedActionIds must be an array');

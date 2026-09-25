@@ -60,6 +60,16 @@ src/main/resources/webview/
 .env
 .env.local
 
+# devenv (kept local to this checkout, not tracked)
+.devenv*
+.direnv/
+.envrc
+devenv.nix
+devenv.yaml
+devenv.lock
+devenv.local.nix
+devenv.local.yaml
+
 # IntelliJ plugin (separate project)
 packages/intellij/
 

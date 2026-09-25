@@ -2,6 +2,7 @@ import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 
 import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
+import { sanitizeShellEnv } from './shell-env.js';
 import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
@@ -986,6 +987,17 @@ export const createProjectConfigRuntime = (deps) => {
 
   const readProjectSetup = async (projectID) => mergedProjectSetupOf(projectID, await readRawProjectConfigFromDisk(projectID));
 
+  /**
+   * The personal `shellEnv` (or null) for the spawn-path resolver. Personal
+   * only: the shared file is deliberately never consulted here, because a
+   * repository must not be able to point at a command that runs on every
+   * process OpenChamber spawns for the project.
+   */
+  const readProjectShellEnv = async (projectID) => {
+    const personalRaw = await readRawProjectConfigFromDisk(projectID);
+    return sanitizeShellEnv(personalRaw.shellEnv);
+  };
+
   const updateProjectSetup = async (projectID, patch) => {
     const stored = projectSetupPatchToStored(patch);
     return withProjectWriteLock(projectID, async () => {
@@ -1065,6 +1077,7 @@ export const createProjectConfigRuntime = (deps) => {
 
   return {
     readProjectSetup,
+    readProjectShellEnv,
     updateProjectSetup,
     updateSharedProjectSetup,
     resolveSharedPlansDir,

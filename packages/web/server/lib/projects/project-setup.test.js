@@ -29,6 +29,7 @@ const emptyPersonal = {
   draftStarters: [],
   hiddenSharedActionIds: [],
   sharedTrust: null,
+  shellEnv: null,
 };
 
 const createRuntime = async () => {
@@ -114,6 +115,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [{ type: 'skill', name: 's' }],
       hiddenSharedActionIds: ['dev', '', 'dev', 7],
       sharedTrust: { hash: 'sha256:abc', trustedAt: 5 },
+      shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { FOO: 'bar' } },
       scheduledTasks: [{ id: 't' }],
     })).toEqual({
       setupWorktree: ['bun install'],
@@ -124,6 +126,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [{ type: 'skill', name: 's' }],
       hiddenSharedActionIds: ['dev'],
       sharedTrust: { hash: 'sha256:abc', trustedAt: 5 },
+      shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { FOO: 'bar' }, mode: 'overlay' },
     });
     expect(projectSetupViewOf(null)).toEqual(emptyPersonal);
   });
@@ -150,6 +153,12 @@ describe('project setup sanitizers', () => {
     expect(() => projectSetupPatchToStored({ sharedTrustHash: '' })).toThrow('sharedTrustHash must be');
     expect(projectSetupPatchToStored({ sharedTrustHash: null })).toEqual({ sharedTrust: undefined });
     expect(projectSetupPatchToStored({ sharedTrustHash: 'sha256:x' }).sharedTrust).toMatchObject({ hash: 'sha256:x' });
+    expect(projectSetupPatchToStored({
+      shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { FOO: 'bar' }, mode: 'replace' },
+    })).toEqual({ shellEnv: { enabled: true, command: 'devenv print-dev-env --json', vars: { FOO: 'bar' }, mode: 'replace' } });
+    expect(projectSetupPatchToStored({ shellEnv: { enabled: true } })).toEqual({ shellEnv: { enabled: true } });
+    expect(projectSetupPatchToStored({ shellEnv: null })).toEqual({ shellEnv: undefined });
+    expect(() => projectSetupPatchToStored({ shellEnv: 'cmd' })).toThrow('shellEnv must be');
     expect(() => projectSetupPatchToStored([])).toThrow('patch must be');
   });
 });

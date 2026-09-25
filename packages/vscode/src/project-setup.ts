@@ -35,6 +35,16 @@ export type DraftStarter = { type: 'command' | 'skill'; name: string };
 
 export type SetupWorktreeMode = 'append' | 'replace';
 
+export type ProjectShellEnvMode = 'overlay' | 'replace';
+
+/** The personal, opted-in development shell environment; personal only. */
+export type ProjectShellEnv = {
+  enabled: boolean;
+  command: string;
+  vars: Record<string, string>;
+  mode: ProjectShellEnvMode;
+};
+
 /** The personal file's part of the setup; the wait flag is `null` when the file does not set it. */
 export type PersonalProjectSetup = {
   setupWorktree: string[];
@@ -46,6 +56,8 @@ export type PersonalProjectSetup = {
   hiddenSharedActionIds: string[];
   /** The recorded answer to the trust prompt: which shared commands were trusted, and when. */
   sharedTrust: { hash: string; trustedAt: number } | null;
+  /** The personal, opted-in development shell environment; `null` when unset. */
+  shellEnv: ProjectShellEnv | null;
 };
 
 export type SharedProjectConfig = {
@@ -92,6 +104,8 @@ type StoredProjectSetupPatch = {
   draftStarters?: DraftStarter[];
   hiddenSharedActionIds?: string[];
   sharedTrust?: { hash: string; trustedAt: number } | undefined;
+  /** The stored `shellEnv`; `undefined` removes the key. */
+  shellEnv?: { enabled: boolean; command?: string; vars?: Record<string, string>; mode?: ProjectShellEnvMode } | undefined;
   projectPath?: string;
 };
 
@@ -186,6 +200,45 @@ const sanitizeIdList = (value: unknown): string[] => {
 
 const setupWorktreeModeOf = (value: unknown): SetupWorktreeMode => (value === 'replace' ? 'replace' : 'append');
 
+const SHELL_ENV_COMMAND_MAX_LENGTH = 4000;
+const SHELL_ENV_VARS_MAX = 200;
+const SHELL_ENV_VAR_VALUE_MAX = 8000;
+const SHELL_ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const sanitizeShellEnvVars = (value: unknown): Record<string, string> => {
+  if (!isObjectRecord(value)) return {};
+  const vars: Record<string, string> = {};
+  let count = 0;
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (count >= SHELL_ENV_VARS_MAX) break;
+    const key = trimmedString(rawKey);
+    if (!key || !SHELL_ENV_VAR_NAME_PATTERN.test(key) || typeof rawValue !== 'string') continue;
+    vars[key] = clamp(rawValue, SHELL_ENV_VAR_VALUE_MAX);
+    count += 1;
+  }
+  return vars;
+};
+
+const sanitizeShellEnv = (value: unknown): ProjectShellEnv | null => {
+  if (!isObjectRecord(value)) return null;
+  const enabled = value.enabled === true;
+  const command = clamp(trimmedString(value.command), SHELL_ENV_COMMAND_MAX_LENGTH);
+  const vars = sanitizeShellEnvVars(value.vars);
+  const mode: ProjectShellEnvMode = value.mode === 'replace' ? 'replace' : 'overlay';
+  if (!enabled && !command && Object.keys(vars).length === 0) return null;
+  return { enabled, command, vars, mode };
+};
+
+const shellEnvToStored = (value: unknown): StoredProjectSetupPatch['shellEnv'] => {
+  const shellEnv = sanitizeShellEnv(value);
+  if (!shellEnv) return undefined;
+  const stored: NonNullable<StoredProjectSetupPatch['shellEnv']> = { enabled: shellEnv.enabled };
+  if (shellEnv.command) stored.command = shellEnv.command;
+  if (Object.keys(shellEnv.vars).length > 0) stored.vars = shellEnv.vars;
+  if (shellEnv.mode === 'replace') stored.mode = 'replace';
+  return stored;
+};
+
 /** The personal part of the view, straight from the personal file. */
 export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
   const document = isObjectRecord(raw) ? raw : {};
@@ -201,6 +254,7 @@ export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
     draftStarters: sanitizeDraftStarters(document.draftStarters),
     hiddenSharedActionIds: sanitizeIdList(document.hiddenSharedActionIds),
     sharedTrust: sharedTrustOf(document.sharedTrust),
+    shellEnv: sanitizeShellEnv(document.shellEnv),
   };
 };
 
@@ -418,6 +472,14 @@ export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPat
   if ('draftStarters' in patch) {
     if (!Array.isArray(patch.draftStarters)) throw new ProjectSetupValidationError('draftStarters must be an array');
     stored.draftStarters = sanitizeDraftStarters(patch.draftStarters);
+  }
+  // Personal only (a repository must not describe a command that runs on every
+  // spawn); `null` removes the key from the file.
+  if ('shellEnv' in patch) {
+    if (patch.shellEnv !== null && !isObjectRecord(patch.shellEnv)) {
+      throw new ProjectSetupValidationError('shellEnv must be an object or null');
+    }
+    stored.shellEnv = shellEnvToStored(patch.shellEnv);
   }
   if ('hiddenSharedActionIds' in patch) {
     if (!Array.isArray(patch.hiddenSharedActionIds)) throw new ProjectSetupValidationError('hiddenSharedActionIds must be an array');

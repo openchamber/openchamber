@@ -12,6 +12,7 @@ import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-re
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
+import { applyShellEnv } from '../projects/shell-env.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -89,10 +90,22 @@ const trimHistory = (history) => {
   return bytes.subarray(start).toString('utf8');
 };
 
+// The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
+// (even an empty one) makes Node CLIs warn about an unparsable IPC channel.
+// AppImage exports ARGV0, which makes zsh rewrite argv[0] for every command
+// (#2588). Applied again after the project env overlay, which could reintroduce
+// any of these.
+const applyPtyEnvHygiene = (env) => {
+  delete env.NODE_CHANNEL_FD;
+  delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
+  stripAppImageArgv0Leak(env);
+};
+
 export function createTerminalRuntime({
   app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS, shutdownProcesses = shutdownTerminalProcesses,
+  projectShellEnvResolver = null,
 }) {
   const sessions = new Map();
   const pendingSessionCreates = new Map();
@@ -125,17 +138,24 @@ export function createTerminalRuntime({
     for (const executable of resolvedShell.executables) {
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
-        // The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
-        // (even an empty one) makes Node CLIs warn about an unparsable IPC channel.
-        delete env.NODE_CHANNEL_FD;
-        delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
-        // AppImage exports ARGV0; zsh would otherwise rewrite argv[0] for every command (#2588).
-        stripAppImageArgv0Leak(env);
+        applyPtyEnvHygiene(env);
+        // The project's opted-in dev environment goes last so its PATH reaches
+        // the shell, which is what Project Actions and interactive commands use.
+        let spawnEnv = env;
+        if (projectShellEnvResolver) {
+          try {
+            const resolved = await projectShellEnvResolver.resolveForDirectory(cwd);
+            if (resolved) spawnEnv = applyShellEnv(env, resolved, path.delimiter);
+          } catch {
+            // Environment resolution must never prevent a terminal from starting.
+          }
+        }
+        applyPtyEnvHygiene(spawnEnv);
         const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell });
         // bun-pty merges the native OS environ back in, so the POSIX launch is
         // wrapped with `env -u` for the variables deleted above.
         const launch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
-        const options = { name: 'xterm-256color', cwd, cols, rows, env };
+        const options = { name: 'xterm-256color', cwd, cols, rows, env: spawnEnv };
         if (process.platform === 'win32') options.useConpty = true;
         return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, shellExecutable: executable, loginShell };
       } catch (error) { lastError = error; }

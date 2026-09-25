@@ -12,6 +12,7 @@ import {
   checkoutBranch,
   checkoutCommit,
   cherryPick,
+  commit,
   createWorktree,
   getWorktreeBootstrapStatus,
   getBranches,
@@ -33,6 +34,7 @@ import {
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
+  setGitProjectShellEnvResolver,
   setLocalIdentity,
   stageFiles,
   subscribeWorktreeTopologyChanges,
@@ -2684,6 +2686,42 @@ describe('getStatus untracked directories', () => {
       const { status: httpStatus, body } = await callDiffRoute(endpoint, { directory: repo, path: 'node_modules/' });
       expect(httpStatus).toBe(422);
       expect(body).toEqual({ code: 'untracked_directory', error: 'Path is a directory of untracked files: node_modules/' });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// child environment
+// ---------------------------------------------------------------------------
+
+describe('git child environment', () => {
+  it('runs hooks with the project shell environment, minus unsafe env config', async () => {
+    if (!canRunGit()) return;
+
+    const { tmpDir } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'content\n');
+    await simpleGit(tmpDir).add('file.txt');
+
+    const markerPath = path.join(tmpDir, 'hook-env.txt');
+    const hookPath = path.join(tmpDir, '.git', 'hooks', 'pre-commit');
+    fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+    fs.writeFileSync(hookPath, `#!/bin/sh\nprintf '%s' "$PROJECT_MARKER" > ${JSON.stringify(markerPath)}\nexit 0\n`);
+    fs.chmodSync(hookPath, 0o755);
+
+    // An unsafe env-config key would make simple-git reject the command, and a
+    // dropped `env` would leave the hook without the project marker: both have
+    // to reach git through `.env()` for this commit to succeed.
+    setGitProjectShellEnvResolver({
+      resolveForDirectory: async () => ({
+        vars: { PROJECT_MARKER: 'from-project-env', EDITOR: 'must-not-reach-git' },
+        mode: 'overlay',
+      }),
+    });
+    try {
+      await commit(tmpDir, 'run hooks with the project environment');
+      expect(fs.readFileSync(markerPath, 'utf8')).toBe('from-project-env');
+    } finally {
+      setGitProjectShellEnvResolver(null);
     }
   });
 });

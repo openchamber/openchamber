@@ -758,6 +758,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['plans', 'folder', 'shared', 'team', 'docs'],
   },
   {
+    id: 'projects.shellEnv',
+    page: 'projects',
+    titleKey: 'settings.projects.shellEnv.title',
+    descriptionKey: 'settings.projects.shellEnv.description',
+    keywords: ['shell', 'environment', 'devenv', 'direnv', 'nix', 'envrc', 'path', 'dev environment'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'remote-instances.client-auth',
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',

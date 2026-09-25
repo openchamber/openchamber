@@ -50,6 +50,20 @@ export interface OpenChamberProjectActionsState {
   primaryActionId: string | null;
 }
 
+export type ProjectShellEnvMode = 'overlay' | 'replace';
+
+/**
+ * The project's opted-in development shell environment. `enabled` is the
+ * explicit local opt-in; `command` describes the environment and `vars` are
+ * literal overrides. Personal only: a repository never carries this.
+ */
+export interface ProjectShellEnv {
+  enabled: boolean;
+  command: string;
+  vars: Record<string, string>;
+  mode: ProjectShellEnvMode;
+}
+
 export type ProjectDraftStarter = DraftStarterRef & { source: ProjectSetupSource };
 
 /** The view the server returns; the server sanitizes, the client only checks the shape. */
@@ -95,6 +109,12 @@ const personalSchema = z.object({
   draftStarters: starterRefsSchema,
   hiddenSharedActionIds: z.array(z.string()),
   sharedTrust: z.object({ hash: z.string(), trustedAt: z.number() }).nullable(),
+  shellEnv: z.object({
+    enabled: z.boolean(),
+    command: z.string(),
+    vars: z.record(z.string(), z.string()),
+    mode: z.enum(['overlay', 'replace']),
+  }).nullable().optional(),
 });
 
 const projectSetupSchema = z.object({
@@ -122,6 +142,8 @@ export type ProjectSetupPatch = Partial<{
   hiddenSharedActionIds: string[];
   /** The trust answer for the shared commands with this hash; `null` forgets it. */
   sharedTrustHash: string | null;
+  /** The personal dev environment; `null` removes it. */
+  shellEnv: ProjectShellEnv | null;
 }>;
 
 const EMPTY_PROJECT_SETUP: ProjectSetup = {
@@ -149,6 +171,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     draftStarters: [],
     hiddenSharedActionIds: [],
     sharedTrust: null,
+    shellEnv: null,
   },
 };
 
@@ -296,6 +319,30 @@ export async function saveProjectActionsState(
     projectActions: value.actions.map(withoutSource),
     projectActionsPrimaryId: value.primaryActionId,
   });
+}
+
+/**
+ * The project's own dev environment, or `null` when it has none. A failed read
+ * rejects instead of reading as "none", so a settings editor cannot overwrite a
+ * real value with an empty draft after a transient read failure.
+ */
+export async function readProjectShellEnv(project: ProjectRef): Promise<ProjectShellEnv | null> {
+  const projectId = resolveProjectSetupId(project);
+  if (!projectId) throw new Error('Project path is required');
+  const response = await runtimeFetch(endpointFor(projectId), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await parseSetupResponse(response)).personal.shellEnv ?? null;
+}
+
+/** Save the project's dev environment; `null` clears it. */
+export async function saveProjectShellEnv(project: ProjectRef, shellEnv: ProjectShellEnv | null): Promise<boolean> {
+  return updateProjectSetup(project, { shellEnv });
 }
 
 /** The source mark is the server's to add; it never travels back in a write. */

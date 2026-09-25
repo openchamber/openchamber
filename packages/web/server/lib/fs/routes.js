@@ -1,5 +1,6 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { resolveByteRange } from './byte-range.js';
+import { applyShellEnv } from '../projects/shell-env.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
 
@@ -470,14 +471,22 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirec
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }) => {
+const runCommandInDirectory = async ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs, projectShellEnvResolver = null, delimiter = ':' }) => {
+  const envPath = buildAugmentedPath();
+  let execEnv = { ...process.env, PATH: envPath };
+  if (projectShellEnvResolver) {
+    try {
+      const resolved = await projectShellEnvResolver.resolveForDirectory(resolvedCwd);
+      if (resolved) execEnv = applyShellEnv(execEnv, resolved, delimiter);
+    } catch {
+      // Environment resolution must never block a command; fall back to base.
+    }
+  }
+
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-
-    const envPath = buildAugmentedPath();
-    const execEnv = { ...process.env, PATH: envPath };
 
     const child = spawn(shell, [shellFlag, command], {
       cwd: resolvedCwd,
@@ -553,6 +562,7 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
     managedChatsRoot,
+    projectShellEnvResolver = null,
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
   // roots stay valid filesystem targets.
@@ -675,6 +685,8 @@ export const registerFsRoutes = (app, dependencies) => {
       spawn,
       buildAugmentedPath,
       commandTimeoutMs,
+      projectShellEnvResolver,
+      delimiter: path.delimiter,
     }).then((result) => {
       // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {

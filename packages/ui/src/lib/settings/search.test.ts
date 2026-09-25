@@ -89,6 +89,18 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(false);
   });
 
+  test('offers the project shell environment everywhere except VS Code', () => {
+    for (const isVSCode of [false, true]) {
+      const results = buildSettingsSearchResults({
+        query: 'devenv',
+        runtimeCtx: { ...runtimeCtx, isVSCode },
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.some((result) => result.id === 'projects.shellEnv')).toBe(!isVSCode);
+    }
+  });
+
   test('finds guest extension panels on the integrations page', () => {
     const results = buildSettingsSearchResults({
       query: 'gitlab',

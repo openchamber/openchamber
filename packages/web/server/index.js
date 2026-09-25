@@ -106,13 +106,15 @@ import { extensionsPersistPath } from './lib/guests/persist.js';
 import { createGuestSurfaceRuntime } from './lib/guests/surface.js';
 import { BROWSER_PROVIDER_IDLE_MS } from '@openchamber/sdk';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createProjectShellEnvResolver } from './lib/projects/shell-env.js';
+import { createProjectIdFromPath, projectConfigFileStemOf } from './lib/projects/project-id.js';
 import { migrateLegacyUserDirs } from './lib/data-dir-migration.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
 import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
-import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+import { resolvePrimaryWorktreeRoot, setGitProjectShellEnvResolver } from './lib/git/service.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -570,6 +572,29 @@ const projectConfigRuntime = createProjectConfigRuntime({
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
 });
+
+/**
+ * Shared per-project shell environment resolver: Git, the terminal (and so
+ * Project Actions), and fs exec all read the same cached result. The command
+ * is personal-only and opt-in; see `lib/projects/shell-env.js`.
+ */
+const projectShellEnvResolver = createProjectShellEnvResolver({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  readShellEnvForProject: (projectId) => projectConfigRuntime.readProjectShellEnv(projectId),
+  createProjectIdFromPath,
+  projectConfigFileStemOf,
+  spawn,
+  // The command runs at spawn time with the same augmented PATH a terminal
+  // gets. A packaged server (systemd user unit) starts with a minimal PATH
+  // that has no devenv, direnv, or nix, so resolving with `process.env` alone
+  // would silently return no environment. A getter keeps the login-shell probe
+  // lazy; `buildAugmentedPath` is initialized below.
+  baseEnv: () => ({ ...process.env, PATH: buildAugmentedPath() }),
+});
+// Git functions are module-level, so the resolver is registered once here.
+setGitProjectShellEnvResolver(projectShellEnvResolver);
 
 const projectContextRuntime = createProjectContextRuntime({
   fsPromises,
@@ -2166,6 +2191,7 @@ async function main(options = {}) {
     getOwnPorts: () => [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
     devServerScanner,
     buildAugmentedPath,
+    projectShellEnvResolver,
     projectConfigRuntime,
     projectContextRuntime,
     agentMemoryRuntime,
@@ -2203,6 +2229,7 @@ async function main(options = {}) {
     path,
     uiAuthController,
     buildAugmentedPath,
+    projectShellEnvResolver,
     searchPathFor,
     isExecutable,
     isRequestOriginAllowed,

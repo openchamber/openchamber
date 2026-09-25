@@ -24,7 +24,7 @@ const respondWithError = (res, error, fallbackMessage) => {
 };
 
 export const registerProjectSetupRoutes = (app, dependencies) => {
-  const { projectConfigRuntime } = dependencies;
+  const { projectConfigRuntime, projectShellEnvResolver = null } = dependencies;
 
   app.get('/api/projects/:projectId/config', async (req, res) => {
     try {
@@ -51,7 +51,11 @@ export const registerProjectSetupRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'Body must be an object' });
     }
     try {
-      return res.json(await projectConfigRuntime.updateProjectSetup(req.params.projectId, req.body));
+      const result = await projectConfigRuntime.updateProjectSetup(req.params.projectId, req.body);
+      // The shell environment may have just changed; drop its cached entry so
+      // the next spawn re-resolves instead of waiting out the TTL.
+      projectShellEnvResolver?.invalidateProject(req.params.projectId);
+      return res.json(result);
     } catch (error) {
       return respondWithError(res, error, 'Failed to save project config');
     }

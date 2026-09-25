@@ -85,7 +85,9 @@ const {
   getProjectSetup,
   getWorktreeSetupCommands,
   getWorktreeSetupWaitEnabled,
+  readProjectShellEnv,
   saveProjectActionsState,
+  saveProjectShellEnv,
   saveWorktreeSetupCommands,
   updateSharedProjectSetup,
 } = await import('./openchamberConfig');
@@ -194,5 +196,28 @@ describe('project config client', () => {
     expect(await getWorktreeSetupCommands({ id: 'x', path: '' })).toEqual([]);
     expect(await saveWorktreeSetupCommands({ id: 'x', path: '' }, ['x'])).toBe(false);
     expect(requests).toHaveLength(0);
+  });
+
+  test('reads and writes the project shell environment, and clears it with null', async () => {
+    expect(await readProjectShellEnv(project)).toBeNull();
+
+    const shellEnv = {
+      enabled: true,
+      command: 'devenv print-dev-env --json',
+      vars: { GOFLAGS: '-mod=vendor' },
+      mode: 'overlay' as const,
+    };
+    expect(await saveProjectShellEnv(project, shellEnv)).toBe(true);
+    expect(requests[1]).toEqual({ url: endpoint, method: 'PUT', body: { shellEnv, projectPath: project.path } });
+    expect(await readProjectShellEnv(project)).toEqual(shellEnv);
+
+    expect(await saveProjectShellEnv(project, null)).toBe(true);
+    expect(requests[3]).toEqual({ url: endpoint, method: 'PUT', body: { shellEnv: null, projectPath: project.path } });
+    expect(await readProjectShellEnv(project)).toBeNull();
+  });
+
+  test('readProjectShellEnv rejects on failure instead of reading as none', async () => {
+    failWith = 500;
+    await expect(readProjectShellEnv(project)).rejects.toThrow();
   });
 });

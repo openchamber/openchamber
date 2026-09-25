@@ -122,8 +122,8 @@ mount these Git panels and keeps its separate extension-host Git implementation.
 
 The following functions are internal helpers used by exported functions:
 - `buildSshCommand(sshKeyPath)`: Build SSH command string for git config.
-- `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution and `GIT_TERMINAL_PROMPT=0` (unless the server was started with it set): the server has no terminal a user could answer, so a Git command that would ask for a username or password fails instead of waiting forever on a console nobody sees. Credential helpers, including GUI ones, still run before Git would prompt.
-- `createGit(directory)`: Create simple-git instance with environment.
+- `buildGitEnv(directory)`: Build Git environment with SSH_AUTH_SOCK resolution and `GIT_TERMINAL_PROMPT=0` (unless the server was started with it set): the server has no terminal a user could answer, so a Git command that would ask for a username or password fails instead of waiting forever on a console nobody sees. Credential helpers, including GUI ones, still run before Git would prompt. It then overlays the project's opted-in shell environment (`../projects/shell-env.js`) for `directory`, so hooks and helpers see the project's dev tools; a resolution failure leaves the base environment intact. The resolver is registered once by the composition root via `setGitProjectShellEnvResolver`.
+- `createGit(directory)`: Create a simple-git instance whose child Git (and its hooks) run with the env from `buildGitEnv`. simple-git ignores an `env` constructor option, so the environment is applied through `.env()`; the variables simple-git treats as git configuration through the environment (`EDITOR`, `PAGER`, `GIT_SSH`, ...) are dropped first, because they never reached Git before and OpenChamber runs Git non-interactively.
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.

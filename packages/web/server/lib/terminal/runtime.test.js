@@ -459,6 +459,25 @@ describe('terminal runtime', () => {
     }
   });
 
+  it('applies the project shell environment to the PTY and re-applies PTY hygiene after it', async () => {
+    const harness = createHarness({
+      projectShellEnvResolver: {
+        resolveForDirectory: async (cwd) => (cwd === '/repo' ? { vars: { PROJECT_TOOL: '1', BASH_ENV: '/tmp/evil' }, mode: 'overlay' } : null),
+      },
+    });
+    try {
+      const response = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-shell-env', cwd: '/repo' } }, response);
+      expect(response.statusCode).toBe(200);
+      const env = harness.processes[0].options.env;
+      expect(env.PROJECT_TOOL).toBe('1');
+      // A project env cannot reintroduce a variable the PTY must not see.
+      expect(env).not.toHaveProperty('BASH_ENV');
+    } finally {
+      await harness.runtime.shutdown();
+    }
+  });
+
   it('lists available shells and uses the selected shell for create and restart', async () => {
     const executables = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
     const harness = createHarness({

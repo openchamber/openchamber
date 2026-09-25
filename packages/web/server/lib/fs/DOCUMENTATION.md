@@ -30,6 +30,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
       symlink marks a repository boundary; junk directories and symlinks are
       never descended into)
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
+  - `POST /api/fs/exec` runs each command with the project's opted-in shell environment overlaid for the resolved `cwd` (`../projects/shell-env.js`), after the augmented PATH. Resolution is cached and bounded; a failure leaves the augmented-path environment in place.
   - Enforces workspace boundary checks with active project + worktree fallback support.
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`

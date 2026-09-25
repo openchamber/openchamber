@@ -27,8 +27,25 @@ Open **Settings → Projects** to give a project a custom name, color, or icon. 
 
 > In VS Code, OpenChamber always uses the folder you have open as the only project, so there's nothing to add or switch. The Projects settings page is hidden there.
 
+## Development shell environment
+
+If your project has a development environment — devenv, direnv, a Nix shell, a `.envrc` — you can have OpenChamber use it automatically for Git, the terminal, and Project Actions, instead of wrapping every command yourself.
+
+Open **Settings → Projects → Shell environment** and:
+
+1. turn on **Enable for this project**;
+2. set **Environment command**, for example `devenv print-dev-env --json` (also supported: `direnv export json`, or `export NAME=value` lines);
+3. optionally add extra `NAME=value` variables, and choose whether the project's `PATH` is prepended to the system `PATH` or replaces it.
+
+Once enabled, the command runs from the project root and its result is applied whenever OpenChamber spawns Git, a terminal, or a Project Action for that project, so tools like `gofmt` or `golangci-lint` resolve for everyone who works there.
+
+The command runs on your machine, so it is deliberately kept in **your own settings**, never in the repository's `.openchamber/project.json`, and nothing runs until you enable it here. Sharing a command with a team would mean running it on every checkout; that is why it is a local decision. If the command fails, times out, or prints something OpenChamber cannot read, the tools simply fall back to the normal environment — Git and the terminal keep working.
+
+Worktrees of the project use the same settings: the command runs inside the worktree, so its own checkout is what devenv or direnv sees. In VS Code, OpenChamber does not offer this setting.
+
 ## Related
 
 - [Project Notes, Todos & Plans](/notes-todos-plans/) — keep working notes per project
 - [Project Actions](/project-actions/) — save commands you run often
+- [Repository config](/repository-config/) — team-shared actions and setup commands
 - [Context](/context/) — see how much of the model's memory a session is using
