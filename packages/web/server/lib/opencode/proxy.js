@@ -652,7 +652,8 @@ export const registerOpenCodeProxy = (app, deps) => {
 
       // The events of isolated spaces ride the global stream too, one block each, written
       // only between the upstream's own blocks so a block of the host's is never cut.
-      const isGlobalStream = !new URL(requestUrl, 'http://localhost').searchParams.get('directory');
+      // A directory in the query or in the header scopes the stream to the host's one directory.
+      const isGlobalStream = !new URL(requestUrl, 'http://localhost').searchParams.get('directory') && !req.get('x-opencode-directory');
       const pendingSpaceBlocks = [];
       const flushSpaceBlocks = async () => {
         while (pendingSpaceBlocks.length > 0 && sseBoundary.isAtBoundary() && !abortController.signal.aborted) {
@@ -796,7 +797,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       // The first page of the global list carries every space's sessions after the host's; a
       // later page, and a list scoped to one directory, are the host's alone.
       const listQuery = new URL(upstreamPath, 'http://localhost').searchParams;
-      const wantsSpaces = typeof mergeSpaceSessionList === 'function' && !listQuery.get('cursor') && !listQuery.get('directory');
+      const scopedToDirectory = Boolean(listQuery.get('directory') || req.get('x-opencode-directory'));
+      const wantsSpaces = typeof mergeSpaceSessionList === 'function' && !listQuery.get('cursor') && !scopedToDirectory;
       res.json(wantsSpaces ? await mergeSpaceSessionList(hostList) : hostList);
     } catch (error) {
       if (isAbortError(error)) {

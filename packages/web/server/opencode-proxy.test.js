@@ -680,6 +680,8 @@ describe('OpenCode proxy SSE forwarding', () => {
     const scoped = await (await fetch(`${base}/api/session?limit=50&directory=${encodeURIComponent('/repo')}`)).json();
     expect(scoped.data.map((item) => item.id)).toEqual(['h1']);
     expect(scoped.spaces).toBeUndefined();
+    const scopedByHeader = await (await fetch(`${base}/api/session?limit=50`, { headers: { 'x-opencode-directory': '/repo' } })).json();
+    expect(scopedByHeader.spaces).toBeUndefined();
     expect(merges).toHaveLength(1);
   });
 
@@ -714,6 +716,14 @@ describe('OpenCode proxy SSE forwarding', () => {
     });
     proxyServer = await listen(app);
     const base = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    // A stream scoped by the directory header is the host's alone: no subscription for it.
+    const scopedController = new AbortController();
+    const scoped = await fetch(`${base}/api/event`, { headers: { Accept: 'text/event-stream', 'x-opencode-directory': '/repo' }, signal: scopedController.signal });
+    expect(scoped.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(subscribers.size).toBe(0);
+    scopedController.abort();
 
     const controller = new AbortController();
     const response = await fetch(`${base}/api/global/event`, { headers: { Accept: 'text/event-stream' }, signal: controller.signal });
