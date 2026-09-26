@@ -2096,6 +2096,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'Texte brut',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Rendre le texte utilisateur avec des espaces et des liens préservés.',
   'chat.message.userText.collapseAria': 'Réduire le message utilisateur',
+  'chat.message.userText.expandAria': 'Développer le message utilisateur',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': 'Trié',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': 'Restituez les messages de l\'assistant terminés sans diffusion en direct.',
   'settings.openchamber.visual.option.chatRenderMode.live.label': 'En direct',

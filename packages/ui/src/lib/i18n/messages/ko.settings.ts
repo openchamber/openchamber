@@ -2191,6 +2191,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'Plain text',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': '공백과 링크를 보존해 사용자 텍스트를 렌더링합니다.',
   'chat.message.userText.collapseAria': '사용자 메시지 접기',
+  'chat.message.userText.expandAria': '사용자 메시지 펼치기',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': '정렬됨',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': '완료된 assistant 메시지를 live streaming 없이 렌더링합니다.',
   'settings.openchamber.visual.option.chatRenderMode.live.label': 'Live',

@@ -138,6 +138,15 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         }
     }, [collapsibleUserMessages]);
 
+    const handleExpand = React.useCallback(() => {
+        setIsTruncated(true);
+        if (isControlled) {
+            onExpandMessage?.();
+        } else {
+            setIsExpanded(true);
+        }
+    }, [isControlled, onExpandMessage]);
+
     const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement | null;
         const skillLink = target?.closest<HTMLElement>('[data-skill-name]');
@@ -163,14 +172,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         // the text is clipped right now is what decides if expanding does
         // anything, and the flag can still be catching up on a fresh message.
         if (collapsibleUserMessages && !effectiveExpanded && element.scrollHeight > element.clientHeight) {
-            setIsTruncated(true);
-            if (isControlled) {
-                onExpandMessage?.();
-            } else {
-                setIsExpanded(true);
-            }
+            handleExpand();
         }
-    }, [collapsibleUserMessages, effectiveExpanded, hasActiveSelectionInElement, isControlled, onExpandMessage, openSkill]);
+    }, [collapsibleUserMessages, effectiveExpanded, handleExpand, hasActiveSelectionInElement, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -269,6 +273,19 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     aria-label={t('chat.message.userText.collapseAria')}
                 >
                     <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+                </button>
+            )}
+            {collapsibleUserMessages && !effectiveExpanded && isTruncated && (
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        handleExpand();
+                    }}
+                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-surface-elevated p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover transition-colors"
+                    aria-label={t('chat.message.userText.expandAria')}
+                >
+                    <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
                 </button>
             )}
             <div

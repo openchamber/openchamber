@@ -2218,6 +2218,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'Plain text',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Render user text with preserved whitespace and links.',
   'chat.message.userText.collapseAria': 'Collapse user message',
+  'chat.message.userText.expandAria': 'Expand user message',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': 'Sorted',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': 'Render completed assistant messages without live streaming.',
   'settings.openchamber.visual.option.chatRenderMode.live.label': 'Live',

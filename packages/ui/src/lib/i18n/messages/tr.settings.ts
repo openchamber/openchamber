@@ -2140,6 +2140,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'Düz metin',
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Kullanıcı metnini boşlukları ve bağlantıları korunmuş şekilde render eder.',
   'chat.message.userText.collapseAria': 'Kullanıcı mesajını daralt',
+  'chat.message.userText.expandAria': 'Kullanıcı mesajını genişlet',
   'settings.openchamber.visual.option.chatRenderMode.sorted.label': 'Sıralı',
   'settings.openchamber.visual.option.chatRenderMode.sorted.description': 'Tamamlanmış asistan mesajlarını canlı akış olmadan render eder.',
   'settings.openchamber.visual.option.chatRenderMode.live.label': 'Canlı',

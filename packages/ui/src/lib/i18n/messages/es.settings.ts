@@ -2191,6 +2191,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.userMessageRendering.plain.label": "Texto plano",
   "settings.openchamber.visual.option.userMessageRendering.plain.description": "Renderiza el texto del usuario con espacios en blanco y enlaces preservados.",
   "chat.message.userText.collapseAria": "Contraer mensaje del usuario",
+  "chat.message.userText.expandAria": "Expandir mensaje del usuario",
   "settings.openchamber.visual.option.chatRenderMode.sorted.label": "Ordenado",
   "settings.openchamber.visual.option.chatRenderMode.sorted.description": "Renderiza mensajes completados del asistente sin transmisión en vivo.",
   "settings.openchamber.visual.option.chatRenderMode.live.label": "En vivo",
