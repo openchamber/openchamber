@@ -690,6 +690,12 @@ const ensureSanitizeHook = (): void => {
   if (typeof window === 'undefined' || !DOMPurify.isSupported) return;
   sanitizeHookInstalled = true;
   DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+    // Event-handler attributes are never legitimate in generated markdown HTML
+    // (Shiki, KaTeX, and mermaid emit none). Reject them explicitly so a
+    // loosened attribute allowlist cannot silently re-enable script execution.
+    if (/^on/i.test(data.attrName)) data.keepAttr = false;
+  });
+  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
     if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
     // DOMPurify's default URI policy strips custom application schemes
     // (obsidian://, vscode://, ...). Keep them for anchors; dangerous schemes
@@ -708,6 +714,9 @@ const sanitize = (html: string): string => {
   ensureSanitizeHook();
   return DOMPurify.sanitize(html, SANITIZE_CONFIG) as unknown as string;
 };
+
+/** Test-only: run the real DOMPurify pipeline, for XSS vector suites. */
+export const __sanitizeForTests = (html: string): string => sanitize(html);
 
 
 // ---------------------------------------------------------------------------
