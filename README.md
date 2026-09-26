@@ -115,6 +115,28 @@ openchamber update
 
 OpenChamber binds to localhost by default. Use `--lan` only on a trusted network and protect browser access with `--ui-password`.
 
+### Docker — self-host from GHCR
+
+Official images are published to [ghcr.io/openchamber/openchamber](https://github.com/openchamber/openchamber/pkgs/container/openchamber) for `linux/amd64` and `linux/arm64` on every release:
+
+```bash
+docker run -d --name openchamber -p 3000:3000 \
+  -e OPENCHAMBER_UI_PASSWORD='choose-a-strong-password' \
+  -v openchamber-config:/home/openchamber/.config \
+  -v openchamber-workspaces:/home/openchamber/workspaces \
+  ghcr.io/openchamber/openchamber
+```
+
+Then open `http://localhost:3000`. Tagged releases are published as `latest`, `<version>` (e.g. `1.18.1`), `<major>.<minor>`, and `<major>`.
+
+Or use the bundled [docker-compose.yml](docker-compose.yml), which wires up persistent data volumes, SSH keys, and tunnel configuration:
+
+```bash
+OPENCHAMBER_UI_PASSWORD="$(openssl rand -base64 24)" docker compose up -d
+```
+
+The image binds to `0.0.0.0` by default so port mapping works — always set `OPENCHAMBER_UI_PASSWORD` when exposing it beyond localhost.
+
 ## Guides
 
 Go deeper with the OpenChamber guides:
