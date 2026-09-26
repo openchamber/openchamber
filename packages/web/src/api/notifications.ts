@@ -11,6 +11,59 @@ const isClientFocused = (): boolean => {
   return document.visibilityState === 'visible' && document.hasFocus();
 };
 
+const buildSessionTargetUrl = (sessionId?: string): string | null => {
+  if (typeof sessionId !== 'string') return null;
+  const trimmed = sessionId.trim();
+  if (!trimmed) return null;
+  return `/?session=${encodeURIComponent(trimmed)}`;
+};
+
+type NotificationTarget = {
+  url: string;
+  sessionId: string;
+};
+
+const getNotificationTarget = (payload?: NotificationPayload): NotificationTarget | undefined => {
+  const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
+  if (!sessionId) return undefined;
+  const url = buildSessionTargetUrl(sessionId);
+  if (!url) return undefined;
+  return { url, sessionId };
+};
+
+type NotificationOptionsWithTarget = NotificationOptions & {
+  data?: NotificationTarget;
+};
+
+const withNotificationTarget = (
+  payload: NotificationPayload | undefined,
+  target: NotificationTarget | undefined,
+): NotificationOptionsWithTarget => {
+  const options: NotificationOptionsWithTarget = {
+    body: payload?.body,
+    tag: payload?.tag,
+  };
+  if (target) {
+    options.data = target;
+  }
+  return options;
+};
+
+const focusOrOpenNotificationTarget = (target?: NotificationTarget): void => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (typeof window.focus === 'function') {
+      window.focus();
+    }
+    if (!target) return;
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current === target.url) return;
+    window.location.assign(target.url);
+  } catch {
+    // Navigation is best-effort; the notification was already shown.
+  }
+};
+
 const getNotificationClaimKey = (payload?: NotificationPayload): string => {
   const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
   if (tag) return tag;
@@ -103,10 +156,11 @@ const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<b
   }
 
   try {
-    await registration.showNotification(payload?.title ?? 'OpenChamber', {
-      body: payload?.body,
-      tag: payload?.tag,
-    });
+    const target = getNotificationTarget(payload);
+    await registration.showNotification(
+      payload?.title ?? 'OpenChamber',
+      withNotificationTarget(payload, target),
+    );
     return true;
   } catch (error) {
     console.warn('Failed to send notification via service worker', error);
@@ -168,10 +222,16 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
       return true;
     }
 
-    new Notification(payload?.title ?? 'OpenChamber', {
-      body: payload?.body,
-      tag: payload?.tag,
-    });
+    const target = getNotificationTarget(payload);
+    const notification = new Notification(
+      payload?.title ?? 'OpenChamber',
+      withNotificationTarget(payload, target),
+    );
+    notification.onclick = (event) => {
+      event.preventDefault();
+      focusOrOpenNotificationTarget(target);
+      notification.close();
+    };
     return true;
   } catch (error) {
     console.warn('Failed to send notification', error);
