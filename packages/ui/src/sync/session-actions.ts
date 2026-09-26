@@ -5,6 +5,7 @@
 
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelRef, Part, Session, TextPart, UserMessage } from "@/lib/opencode/model"
 import { partIds } from "@/lib/opencode/model"
+import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -484,6 +485,17 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
   return page.items.map(({ info }) => info)
 }
 
+/**
+ * From when descendants are reverted along with a cut at `target`. A subagent
+ * run's report lands after its child already worked, so reverting the run
+ * reverts the child from its start; any other target cuts at its own time.
+ */
+function descendantRevertCutoff(state: { session: readonly Session[] }, target: Message): number {
+  const run = readSubagentRun(target)
+  const child = run ? state.session.find((session) => session.id === run.childSessionID) : undefined
+  return child ? Math.min(child.time.created, target.time.created) : target.time.created
+}
+
 async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
   for (const { session, directory } of getDescendantSessions(rootId)) {
     try {
@@ -651,6 +663,8 @@ function contextCarriersForMessage(messages: readonly Message[], messageID: stri
  */
 function transcriptCutForMessage(messages: readonly Message[], messageID: string): string {
   const index = messages.findIndex((message) => message.id === messageID)
+  // Only a prompt has carriers; any other target (a subagent run report) is cut at itself.
+  if (messages[index]?.role !== "user") return messageID
   let first = index
   while (first > 0 && messages[first - 1].role === "synthetic") first -= 1
   return first >= 0 ? messages[first].id : messageID
@@ -2328,14 +2342,18 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Restore file/image attachments from the target message.
   // Clear existing attachments first — previous revert's attachments
   // must not carry over, even when the current message has no files.
-  restoreFilePartsToInput(submittedFileParts)
-  if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
+  // Only a prompt goes back to the composer: reverting a subagent run report
+  // leaves whatever the user is typing alone.
+  if (targetMsg?.role === "user") {
+    restoreFilePartsToInput(submittedFileParts)
+    if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
+  }
 
   // Call SDK and merge authoritative result into store
   try {
     // Descendants go first because OpenCode also restores file snapshots during
     // revert. All sessions share a directory, so the parent's snapshot must win.
-    await cascadeRevertToDescendants(sessionId, targetMessage.time.created)
+    await cascadeRevertToDescendants(sessionId, descendantRevertCutoff(state, targetMessage))
     // Stage only: the messages disappear behind the revert marker while the
     // dock offers Commit (finalize) or Clear (bring them back).
     await opencodeClient.stageRevert(sessionId, revertMessageID, { directory })

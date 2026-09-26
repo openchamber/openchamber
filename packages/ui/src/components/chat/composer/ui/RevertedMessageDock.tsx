@@ -68,7 +68,9 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
         if (!revertMessageID) return [];
         return revertedState.records.map((record) => ({
             id: record.message.id,
-            text: getRevertedPreview(record.parts, noTextContent),
+            text: record.message.role === 'synthetic'
+                ? (record.message.description?.trim() || noTextContent)
+                : getRevertedPreview(record.parts, noTextContent),
         }));
     }, [noTextContent, revertMessageID, revertedState]);
     const firstRevertedMessageId = items[0]?.id;

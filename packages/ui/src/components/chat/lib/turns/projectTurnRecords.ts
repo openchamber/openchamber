@@ -1,4 +1,5 @@
 import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
+import { isSubagentRunEntry } from '../timelineRoles';
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
 import { projectTurnChangedFiles, projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
@@ -196,7 +197,8 @@ export const projectTurnRecords = (
 
     // v2 assistant messages carry no parent id: a reply belongs to the last
     // user message before it, so one ordered pass does the grouping. An
-    // assistant message with no user message ahead of it stays ungrouped.
+    // assistant message with no user message ahead of it stays ungrouped. A
+    // background subagent run opens a turn too: the parent reacts to its result.
     let currentTurn: TurnRecord | undefined;
 
     messages.forEach((message, index) => {
@@ -212,7 +214,7 @@ export const projectTurnRecords = (
             groupedMessageIds.add(message.info.id);
             return;
         }
-        if (role !== 'user') {
+        if (role !== 'user' && !isSubagentRunEntry(message.info)) {
             return;
         }
 

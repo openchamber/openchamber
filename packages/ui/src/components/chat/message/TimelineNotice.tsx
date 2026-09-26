@@ -5,16 +5,23 @@
  * compaction, a shell command, injected context — to message roles of their
  * own. Only `user` and `assistant` carry parts, so the roles that have
  * something to show render here as small, self-contained rows instead of
- * going through `ChatMessage`.
+ * going through `ChatMessage`. So does a background subagent run, which v2
+ * reports as a synthetic message (see `@/lib/opencode/subagent-run`).
  */
 
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 import ToolPart from './parts/ToolPart';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
+import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSession } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
@@ -119,12 +126,130 @@ const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }> }> = 
     );
 };
 
+type SyntheticMessage = Extract<Message, { role: 'synthetic' }>;
+
+/**
+ * A background subagent run is shown as the subagent tool call it stands in
+ * for, so it reads like one and opens its child session the same way.
+ */
+const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, startedAt: number): ToolPartType => {
+    const input = { agent: run.agent ?? 'subagent', description: run.description ?? '' };
+    const metadata = { sessionID: run.childSessionID };
+    const end = message.time.created;
+    const base = {
+        id: `${message.id}:subagent`,
+        sessionID: message.sessionID,
+        messageID: message.id,
+        type: 'tool' as const,
+        callID: run.childSessionID,
+        tool: OPENCODE_TOOLS.subagent,
+    };
+    switch (run.state) {
+        case 'running':
+            return { ...base, state: { status: 'running', input, metadata, time: { start: startedAt } } };
+        case 'completed':
+            return { ...base, state: { status: 'completed', input, metadata, output: run.output, time: { start: startedAt, end } } };
+        case 'error':
+        case 'cancelled':
+            return { ...base, state: { status: 'error', input, metadata, error: run.output, time: { start: startedAt, end } } };
+    }
+};
+
+const NOTICE_ACTION_BUTTON_CLASS = 'h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring';
+
+/**
+ * Revert and fork, cut at this run the way the user message actions cut at a
+ * prompt. A run still in progress has no message to cut at yet.
+ */
+const SubagentRunActions: React.FC<{ message: SyntheticMessage; canFork: boolean; alwaysVisible: boolean }> = ({ message, canFork, alwaysVisible }) => {
+    const { t } = useI18n();
+    const handleRevert = React.useCallback(() => {
+        void useSessionUIStore.getState().revertToMessage(message.sessionID, message.id);
+    }, [message.id, message.sessionID]);
+    const handleFork = React.useCallback(() => {
+        void useSessionUIStore.getState().forkFromMessage(message.sessionID, message.id);
+    }, [message.id, message.sessionID]);
+
+    return (
+        <div
+            className={cn(
+                'flex items-center justify-end gap-1.5',
+                alwaysVisible
+                    ? 'opacity-100'
+                    : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/subagent-run:pointer-events-auto group-hover/subagent-run:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100',
+            )}
+        >
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={NOTICE_ACTION_BUTTON_CLASS}
+                        aria-label={t('chat.messageBody.actions.revertAria')}
+                        onClick={handleRevert}
+                    >
+                        <Icon name="arrow-go-back" className="h-3 w-3" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
+            </Tooltip>
+            {canFork ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={NOTICE_ACTION_BUTTON_CLASS}
+                            aria-label={t('chat.messageBody.actions.forkAria')}
+                            onClick={handleFork}
+                        >
+                            <Icon name="git-branch" className="h-3 w-3" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.fork')}</TooltipContent>
+                </Tooltip>
+            ) : null}
+        </div>
+    );
+};
+
+const SubagentRunNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun }> = ({ message, run }) => {
+    const isMobile = useUIStore((state) => state.isMobile);
+    const chatSurfaceMode = useChatSurfaceMode();
+    const [expanded, setExpanded] = React.useState(false);
+    const child = useSession(run.childSessionID);
+    // The child session starts when the run does; the report lands when it ends.
+    const startedAt = child?.time.created ?? message.time.created;
+    const part = React.useMemo(() => toSubagentToolPart(message, run, startedAt), [message, run, startedAt]);
+    const toggle = React.useCallback(() => setExpanded((value) => !value), []);
+    // Same rules as the prompt's own actions: none in peek, no fork in mini chat.
+    const canCut = !isRunningSubagentRunMessage(message.id) && chatSurfaceMode !== 'peek';
+
+    return (
+        <NoticeRow>
+            <div className="group/subagent-run">
+                <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
+                {canCut ? <SubagentRunActions message={message} canFork={chatSurfaceMode !== 'mini-chat'} alwaysVisible={isMobile} /> : null}
+            </div>
+        </NoticeRow>
+    );
+};
+
+const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
+    const run = React.useMemo(() => readSubagentRun(message), [message]);
+    return run ? <SubagentRunNotice message={message} run={run} /> : null;
+};
+
 /**
  * The timeline row for a message, or `null` when the caller should render the
  * message itself.
  */
 export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
     switch (message.role) {
+        case 'synthetic':
+            return <SubagentNotice message={message} />;
         case 'compaction':
             return <CompactionNotice message={message} />;
         case 'shell':
