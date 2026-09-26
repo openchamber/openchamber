@@ -31,7 +31,7 @@ export function reportHostViewerState(next: HostViewerState): void {
 
 export function isSurfaceAttended(): boolean {
   if (hostViewerState) return hostViewerState.windowFocused && hostViewerState.surfaceVisible
-  return document.hasFocus()
+  return globalThis.document?.hasFocus() ?? false
 }
 
 /**

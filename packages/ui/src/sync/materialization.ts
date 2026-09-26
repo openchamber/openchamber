@@ -71,6 +71,23 @@ export function isSessionMaterializationStillNeeded(
     return getStaleRunningToolMessageID(state, sessionID) === request.messageID
   }
 
+  if (request.reason === "settled-unanswered-turn") {
+    const messages = state.message[sessionID] ?? []
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined
+    return lastMessage?.role === "user"
+  }
+
+  if (request.reason === "settled-error") {
+    const messages = state.message[sessionID] ?? []
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined
+    if (!lastMessage || lastMessage.role === "user") return true
+    if (lastMessage.role === "assistant") {
+      const hasError = Boolean((lastMessage as { error?: unknown }).error)
+      return !hasError
+    }
+    return true
+  }
+
   return true
 }
 

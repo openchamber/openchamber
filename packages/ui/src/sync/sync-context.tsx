@@ -385,8 +385,13 @@ function enqueueSessionMaterialization(
   const k = getSessionMaterializationRequestKey(runtimeKey, directory, sessionID)
   const existing = pendingSessionMaterializations.get(k)
   if (existing && Date.now() - existing.enqueuedAt < SESSION_MATERIALIZATION_COOLDOWN_MS) {
-    const settlementMustFollowEarlierRecovery = request.reason === "settled-running-tool"
-      && existing.request.reason !== "settled-running-tool"
+    const isSettlement = request.reason === "settled-running-tool"
+      || request.reason === "settled-error"
+      || request.reason === "settled-unanswered-turn"
+    const existingIsSettlement = existing.request.reason === "settled-running-tool"
+      || existing.request.reason === "settled-error"
+      || existing.request.reason === "settled-unanswered-turn"
+    const settlementMustFollowEarlierRecovery = isSettlement && !existingIsSettlement
     if (!settlementMustFollowEarlierRecovery) return
   }
 
@@ -1732,7 +1737,11 @@ export function handleEvent(
   // Turn-complete and error notifications are recorded before the directory
   // store lookup. Unopened directories are never bootstrapped and have no
   // store, yet their collapsed sidebar rows still need the unread dot.
-  if ((payload.type === "session.idle" || payload.type === "session.error") && directory && directory !== "global") {
+  if (
+    (payload.type === "session.idle" || payload.type === "session.error")
+    && directory
+    && directory !== "global"
+  ) {
     recordTurnOutcomeNotification(payload, directory, childStores, batch)
   }
 
@@ -2068,6 +2077,18 @@ export function handleEvent(
         reason: "settled-running-tool",
         messageID,
       })
+    } else if (sessionID && (payload.type === "session.error")) {
+      enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
+        reason: "settled-error",
+      })
+    } else if (sessionID && payload.type === "session.idle") {
+      const messages = state.message[sessionID] ?? []
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined
+      if (lastMessage?.role === "user") {
+        enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
+          reason: "settled-unanswered-turn",
+        })
+      }
     }
     // The reducer already wrote the idle/error status into `draft`; finalize
     // the interrupted message and orphaned tools through the same batch.
