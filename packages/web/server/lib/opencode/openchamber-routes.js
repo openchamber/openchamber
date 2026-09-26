@@ -211,7 +211,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
       const pmDetails = detectPackageManagerDetails();
       const pm = pmDetails.packageManager;
-      const updateCmd = getUpdateCommand(pm);
+      const updateCmd = getUpdateCommand(pm, { targetVersion: updateInfo.version });
       const isContainer =
         fs.existsSync('/.dockerenv') ||
         Boolean(process.env.CONTAINER) ||

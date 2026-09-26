@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 
 // Mock child_process to prevent real spawnSync calls that would hang in tests
 vi.mock('node:child_process', () => ({
@@ -11,6 +12,7 @@ const {
   detectPackageManager,
   executeUpdate,
   getCurrentVersion,
+  getUpdateCommand,
 } = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
@@ -322,6 +324,80 @@ describe('getCurrentVersion', () => {
   it('is exported for the CLI update command', () => {
     expect(typeof getCurrentVersion).toBe('function');
     expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
+  });
+});
+
+describe('getUpdateCommand', () => {
+  it('pins the exact target version instead of re-resolving the latest dist-tag', () => {
+    expect(getUpdateCommand('npm', { targetVersion: '1.24.1' })).toBe('npm install -g @openchamber/web@1.24.1');
+    expect(getUpdateCommand('pnpm', { targetVersion: 'v1.24.1' })).toBe('pnpm add -g @openchamber/web@1.24.1');
+    expect(getUpdateCommand('yarn', { targetVersion: '1.24.1' })).toBe('yarn global add @openchamber/web@1.24.1');
+    expect(getUpdateCommand('bun', { targetVersion: '1.25.0-beta.1' })).toContain('add -g @openchamber/web@1.25.0-beta.1');
+  });
+
+  it('falls back to the latest dist-tag when no target version is given', () => {
+    expect(getUpdateCommand('npm')).toBe('npm install -g @openchamber/web@latest');
+  });
+
+  it('rejects a target version that is not a concrete version', () => {
+    expect(() => getUpdateCommand('npm', { targetVersion: 'latest; rm -rf /' })).toThrow(/Invalid target version/);
+  });
+});
+
+describe('executeUpdate', () => {
+  function stubSpawnSync({ installStatus = 0, listingStdout = '', listingStatus = 0 } = {}) {
+    spawnSync.mockImplementation((command, args) => {
+      if (!Array.isArray(args)) {
+        return { status: installStatus, stdout: '', stderr: '' };
+      }
+      if (args.includes('--version')) {
+        return { status: 0, stdout: '10.0.0', stderr: '' };
+      }
+      if (args[0] === 'list' || args[0] === 'pm' || args[0] === 'global') {
+        return { status: listingStatus, stdout: listingStdout, stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+  }
+
+  afterEach(() => {
+    spawnSync.mockReset();
+  });
+
+  it('reports success when the installed version matches the target', () => {
+    stubSpawnSync({ listingStdout: '└── @openchamber/web@1.24.1' });
+    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
+    expect(result.success).toBe(true);
+    expect(result.installedVersion).toBe('1.24.1');
+  });
+
+  it('fails when the package manager exits non-zero', () => {
+    stubSpawnSync({ installStatus: 1 });
+    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('exited with code 1');
+  });
+
+  it('fails when the package manager exits successfully but installed the wrong version', () => {
+    stubSpawnSync({ listingStdout: '└── @openchamber/web@1.19.0' });
+    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('1.19.0');
+    expect(result.error).toContain('1.24.1');
+  });
+
+  it('fails loudly when the installed version cannot be verified', () => {
+    stubSpawnSync({ listingStdout: '', listingStatus: 1 });
+    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Could not determine');
+  });
+
+  it('keeps the previous behavior when no target version is given', () => {
+    stubSpawnSync();
+    const result = executeUpdate('npm');
+    expect(result.success).toBe(true);
+    expect(result.installedVersion).toBeNull();
   });
 });
 
