@@ -140,6 +140,11 @@ citation, and sends it through the same attachment pipeline as a manually
 picked `.txt` file. Ask-toast actions read live composer/attachment state so
 typing or other attaches between paste and choice stay consistent. Short text,
 images, and URL wraps keep their existing paths.
+On mobile, choosing either ask-toast action restores editor focus, expanding
+the collapsed pill if needed. Hosted mobile focuses inside the tap; Capacitor
+uses the shell's existing next-frame keyboard timing when the pill expands.
+Dismissing the toast still inserts inline without taking focus from another
+control.
 
 ## The prompt language
 

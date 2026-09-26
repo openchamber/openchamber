@@ -68,6 +68,7 @@ import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
+import { isCapacitorApp } from '@/lib/platform';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -943,6 +944,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
     const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
+    // The paste-toast tap may need to reopen the collapsed mobile composer.
+    const mobileShell = useMobileComposerShell({
+        isMobile,
+        editorRef: composerRef,
+        formRef: composerFormRef,
+        setExpandedInput,
+        // Without a soft keyboard, keep the full composer up.
+        alwaysExpanded: hasHardwareKeyboard || isTabletLayout,
+        holders: {
+            controlsPanelOpen: Boolean(mobileControlsPanel),
+            attachMenuOpen: mobileAttachMenuOpen,
+            draftPickerOpen: mobileDraftPicker !== null,
+            issuePickerOpen,
+            prPickerOpen,
+            linearPickerOpen,
+            isDragging,
+        },
+    });
+    const mobileComposerExpanded = mobileShell.expanded;
+    const mobileTextareaFocused = mobileShell.focused;
     const [linkedIssue, setLinkedIssue] = React.useState<{
         number: number;
         title: string;
@@ -2806,10 +2827,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 largeTextPasteToastIdRef.current = null;
             }
 
-            const resolveLargePaste = (action: 'attach' | 'inline') => {
+            const resolveLargePaste = (action: 'attach' | 'inline', explicitlyChosen: boolean) => {
                 const resolution = resolveLargeTextPasteOffer(
                     largeTextPasteOfferIdRef.current,
                     offerId,
+                    { isMobile, explicitlyChosen },
                 );
                 largeTextPasteOfferIdRef.current = resolution.nextOfferId;
                 if (!resolution.accepted) {
@@ -2818,9 +2840,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 largeTextPasteToastIdRef.current = null;
                 if (action === 'attach') {
                     void attachAsFile();
-                    return;
+                } else {
+                    pasteInline();
                 }
-                pasteInline();
+                // Keep this in the toast tap's gesture: iOS won't raise the
+                // keyboard when focus is restored after the attachment awaits.
+                if (resolution.restoreFocus) {
+                    if (composerRef.current) {
+                        composerRef.current.focus({ preventScroll: isCapacitorApp() });
+                    } else {
+                        // The toast captures the paste-time shell state, but
+                        // the editor may have collapsed since then. The
+                        // insertion above appends to its draft; expand mounts
+                        // and focuses the editor with the platform's keyboard timing.
+                        mobileShell.expand();
+                    }
+                }
             };
 
             largeTextPasteToastIdRef.current = toast.info(
@@ -2830,16 +2865,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     className: LARGE_TEXT_PASTE_TOAST_CLASSNAME,
                     action: {
                         label: t('chat.chatInput.toast.largeTextPaste.attach'),
-                        onClick: () => resolveLargePaste('attach'),
+                        onClick: () => resolveLargePaste('attach', true),
                     },
                     cancel: {
                         label: t('chat.chatInput.toast.largeTextPaste.inline'),
-                        onClick: () => resolveLargePaste('inline'),
+                        onClick: () => resolveLargePaste('inline', true),
                     },
                     onDismiss: () => {
                         // Dismissing without a choice keeps the paste — insert inline
                         // so clipboard content is not lost.
-                        resolveLargePaste('inline');
+                        resolveLargePaste('inline', false);
                     },
                 },
             );
@@ -2855,7 +2890,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, isMobile, largeTextPasteBehavior, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -3412,30 +3447,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         });
     }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
-
-    // Mobile pill composer: the collapse/expand state machine and the
-    // platform corrections that keep it from fighting the soft keyboard.
-    const mobileShell = useMobileComposerShell({
-        isMobile,
-        editorRef: composerRef,
-        formRef: composerFormRef,
-        setExpandedInput,
-        // The pill exists to buy screen back from the soft keyboard. A tablet
-        // has the room regardless, and with a hardware keyboard there is no
-        // soft keyboard to buy it back from — keep the real composer up.
-        alwaysExpanded: hasHardwareKeyboard || isTabletLayout,
-        holders: {
-            controlsPanelOpen: Boolean(mobileControlsPanel),
-            attachMenuOpen: mobileAttachMenuOpen,
-            draftPickerOpen: mobileDraftPicker !== null,
-            issuePickerOpen,
-            prPickerOpen,
-            linearPickerOpen,
-            isDragging,
-        },
-    });
-    const mobileComposerExpanded = mobileShell.expanded;
-    const mobileTextareaFocused = mobileShell.focused;
 
     // Mobile comment mode: subscription, scope ownership and the attach/cancel
     // transitions live in the hook; ChatInput only renders from it.
