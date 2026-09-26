@@ -15,6 +15,10 @@ const DEFAULT_LOCAL_BIND_HOST = '127.0.0.1';
 // prefix inside the user's home instead.
 const REMOTE_USER_PREFIX = '$HOME/.openchamber/npm-global';
 const REMOTE_BUN_CANDIDATE = '"${BUN_INSTALL:-$HOME/.bun}/bin/bun"';
+// nvm puts node on PATH only from an interactive ~/.bashrc, which the SSH
+// login shell never runs. Use its newest installed node; with no nvm the path
+// does not exist and every probe skips it.
+const REMOTE_NVM_BIN = '${NVM_DIR:-$HOME/.nvm}/versions/node/v$(ls -1 "${NVM_DIR:-$HOME/.nvm}/versions/node" 2>/dev/null | sed "s/^v//" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)/bin';
 // The opencode CLI usually installs into the user's home, which an SSH login
 // shell does not have on PATH. The remote server only looks at OPENCODE_BINARY
 // and PATH, so resolve the CLI here and hand it over explicitly.
@@ -24,11 +28,8 @@ const REMOTE_OPENCODE_CANDIDATES = [
   '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/opencode"',
   '"$HOME/.local/bin/opencode"',
   '"$HOME/.openchamber/npm-global/bin/opencode"',
+  `"${REMOTE_NVM_BIN}/opencode"`,
 ];
-// nvm puts node on PATH only from an interactive ~/.bashrc, which the SSH
-// login shell never runs. Use its newest installed node; with no nvm the path
-// does not exist and every probe skips it.
-const REMOTE_NVM_BIN = '${NVM_DIR:-$HOME/.nvm}/versions/node/v$(ls -1 "${NVM_DIR:-$HOME/.nvm}/versions/node" 2>/dev/null | sed "s/^v//" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)/bin';
 const REMOTE_PATH_PREFIX = `$HOME/.opencode/bin:\${BUN_INSTALL:-$HOME/.bun}/bin:\${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin:$HOME/.local/bin:$HOME/.openchamber/npm-global/bin:${REMOTE_NVM_BIN}`;
 const REMOTE_BIN_CANDIDATES = [
   '"$HOME/.openchamber/npm-global/bin/openchamber"',

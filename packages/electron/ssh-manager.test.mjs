@@ -372,6 +372,41 @@ printf '4321\\n'`);
     }
   });
 
+  test.skipIf(process.platform === 'win32')('starts the managed server with an nvm-installed opencode that the SSH login shell does not have on PATH', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-nvm-opencode-'));
+    tempDirs.push(home);
+    const executable = (file, script) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    };
+    // opencode only under nvm's node, and no nvm entry on PATH: exactly what a
+    // non-interactive SSH login shell sees after `npm install -g` with nvm.
+    const nvmBin = path.join(home, '.nvm', 'versions', 'node', 'v24.18.0', 'bin');
+    executable(path.join(nvmBin, 'opencode'), 'exit 0');
+    executable(path.join(home, '.openchamber', 'npm-global', 'bin', 'openchamber'), `
+if [ "$1" = "--version" ]; then printf '1.2.3\\n'; exit 0; fi
+printf '%s' "$OPENCODE_BINARY" > "$HOME/launch-opencode"
+printf '4321\\n'`);
+    const env = { HOME: home, PATH: '/usr/bin:/bin' };
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(home, 'settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async (_parsed, _controlPath, script) =>
+      execFileSync('/bin/sh', ['-c', script], { env, encoding: 'utf8', timeout: 5000 });
+    manager.remoteServerRunning = async () => true;
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-nvm-opencode', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      { destination: 'user@example.test', args: [] },
+      '/unused.sock',
+    );
+
+    expect(result.remotePort).toBe(4321);
+    expect(fs.readFileSync(path.join(home, 'launch-opencode'), 'utf8')).toBe(path.join(nvmBin, 'opencode'));
+  });
+
   test('installs OpenChamber into a home-owned npm prefix instead of the root-owned global one', async () => {
     const commands = [];
     const manager = new ElectronSshManager({
