@@ -6,7 +6,7 @@ import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, readAuthFile } from './opencodeAuth';
 import { fetchExeDevUsage } from './exeDevQuota';
-import { fetchOllamaUsage } from './ollamaQuota';
+import { fetchOllamaUsage, fetchOllamaUsageApi } from './ollamaQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -751,12 +751,13 @@ export const listConfiguredQuotaProviders = () => {
   try {
     auth = readAuthFile();
   } catch {
-    // Managed credentials remain enumerable; unreadable auth cannot establish xAI configuration.
+    // Managed credentials remain enumerable; unreadable auth cannot establish
+    // auth.json-backed provider configuration.
   }
   const configured = new Set<string>();
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
-  if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
+  if (getOllamaApiKey(auth) || readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
 
@@ -1849,13 +1850,60 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
+const OLLAMA_CLOUD_ALIASES = ['ollama-cloud', 'ollamacloud'];
+
+const getOllamaApiKey = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, OLLAMA_CLOUD_ALIASES));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+// An unreadable auth file means "no API key", not a request failure.
+const readOllamaApiKey = (): string | undefined => {
+  try {
+    return getOllamaApiKey(readAuthFile()) ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const fetchOllamaCloudQuota = async ({
+  readApiKey = readOllamaApiKey,
   readCookie = () => readCredential('ollama-cloud')?.cookie,
   fetchImpl = fetch,
 }: {
+  readApiKey?: () => string | undefined;
   readCookie?: () => string | undefined;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
 } = {}): Promise<ProviderResult> => {
+  const apiKey = readApiKey();
+
+  // Strict source priority: an API key that exists is the only source used; a
+  // failure here must not silently fall back to the cookie.
+  if (apiKey) {
+    try {
+      const parsed = await fetchOllamaUsageApi(apiKey, fetchImpl);
+      const windows = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [
+        key, toUsageWindow({ ...value, windowSeconds: null, resetAt: null }),
+      ]));
+
+      return buildResult({
+        providerId: 'ollama-cloud',
+        providerName: 'Ollama Cloud',
+        ok: true,
+        configured: true,
+        usage: { windows },
+      });
+    } catch (error) {
+      return buildResult({
+        providerId: 'ollama-cloud',
+        providerName: 'Ollama Cloud',
+        ok: false,
+        configured: true,
+        error: error instanceof Error ? error.message : 'Request failed',
+      });
+    }
+  }
+
   const cookie = readCookie();
 
   if (!cookie) {

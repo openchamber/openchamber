@@ -32,7 +32,8 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
+import { fetchOllamaUsageApi, parseOllamaUsageJson } from './ollamaQuota';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -998,7 +999,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
         return new Response(html);
       };
       await validateCredential('ollama-cloud', credential, fetchImpl);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      const result = await fetchOllamaCloudQuota({ readApiKey: () => undefined, readCookie, fetchImpl });
       assert.equal(requests, 2);
       assert.equal(result.ok, true);
       assert.ok(result.usage);
@@ -1018,7 +1019,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
     test(`rejects unparseable HTML ${JSON.stringify(html)} in both consumers`, async () => {
       const fetchImpl = async () => new Response(html);
       await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /usage data could not be parsed/);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      const result = await fetchOllamaCloudQuota({ readApiKey: () => undefined, readCookie, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.configured, true);
       assert.equal(result.usage, null);
@@ -1030,7 +1031,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
     test(`rejects HTTP ${status} in both consumers`, async () => {
       const fetchImpl = async () => new Response('Monthly usage $25 of $100', { status });
       await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /authentication failed/);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      const result = await fetchOllamaCloudQuota({ readApiKey: () => undefined, readCookie, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.usage, null);
       assert.equal(result.error, 'Ollama Cloud authentication failed');
@@ -1041,7 +1042,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
     test(`reports ${failure.message} in both consumers`, async () => {
       const fetchImpl = async () => { throw failure; };
       await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), failure);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      const result = await fetchOllamaCloudQuota({ readApiKey: () => undefined, readCookie, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.usage, null);
       assert.equal(result.error, failure.message);
@@ -1049,7 +1050,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
   }
 
   test('does not request usage without a cookie', async () => {
-    const result = await fetchOllamaCloudQuota({ readCookie: () => undefined, fetchImpl: async () => { assert.fail('Unexpected request'); } });
+    const result = await fetchOllamaCloudQuota({ readApiKey: () => undefined, readCookie: () => undefined, fetchImpl: async () => { assert.fail('Unexpected request'); } });
     assert.equal(result.configured, false);
     assert.equal(result.ok, false);
   });
@@ -1063,12 +1064,262 @@ describe('Ollama Cloud quota validation and refresh', () => {
     }));
 
     await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), failure);
-    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    const result = await fetchOllamaCloudQuota({ readApiKey: () => undefined, readCookie, fetchImpl });
     assert.equal(result.ok, false);
     assert.equal(result.configured, true);
     assert.equal(result.usage, null);
     assert.equal(result.error, failure.message);
     assert.deepEqual(credential, { cookie: 'test-ollama-cookie' });
+  });
+});
+
+describe('Ollama Cloud API-key usage (VS Code parity)', () => {
+  const API_USAGE_URL = 'https://ollama.com/api/usage';
+  const SETTINGS_URL = 'https://ollama.com/settings';
+  const usagePayload = { limits: { session: { usage: 0.5 } } };
+
+  const recordRequests = (handler: (url: string, init: RequestInit) => Promise<Response>) => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = async (url: string, init: RequestInit) => {
+      requests.push({ url, init });
+      return handler(url, init);
+    };
+    return { requests, fetchImpl };
+  };
+
+  test('requests the undocumented usage endpoint without cookies', async () => {
+    const { requests, fetchImpl } = recordRequests(async () => Response.json({
+      limits: { session: { usage: 0.5 } },
+    }));
+
+    const windows = await fetchOllamaUsageApi('test-api-key', fetchImpl);
+
+    const [request] = requests;
+    assert.ok(request);
+    assert.equal(request.url, API_USAGE_URL);
+    assert.equal(request.init.method, 'GET');
+    const headers = new Headers(request.init.headers);
+    assert.equal(headers.get('Accept'), 'application/json');
+    assert.equal(headers.get('Authorization'), 'Bearer test-api-key');
+    assert.equal(headers.get('User-Agent'), 'OpenChamber quota provider');
+    assert.equal(headers.get('Cookie'), null);
+    assert.equal(request.init.redirect, 'manual');
+    assert.ok(request.init.signal instanceof AbortSignal);
+    assert.equal(windows.session?.usedPercent, 50);
+  });
+
+  for (const { usage, expected } of [
+    { usage: 0, expected: 0 },
+    { usage: '0', expected: 0 },
+    { usage: 1, expected: 100 },
+    { usage: '1', expected: 100 },
+    { usage: 1.5, expected: 100 },
+    { usage: 12, expected: 100 },
+    { usage: -0.25, expected: 0 },
+    { usage: '0.25', expected: 25 },
+    { usage: '0.5', expected: 50 },
+  ]) {
+    test(`maps usage ${JSON.stringify(usage)} to ${expected} percent with clamping`, async () => {
+      const windows = await fetchOllamaUsageApi('test-api-key', async () => Response.json({
+        limits: { session: { usage } },
+      }));
+      assert.equal(windows.session?.usedPercent, expected);
+    });
+  }
+
+  test('parses both usage fractions and ignores activity and model breakdowns', async () => {
+    const windows = await fetchOllamaUsageApi('test-api-key', async () => Response.json({
+      activity: { cost: 9.99, models: [{ name: 'gpt-oss:120b' }] },
+      limits: {
+        session: { usage: 0.5, models: [{ name: 'gpt-oss:120b' }] },
+        weekly: { usage: 0.25, models: [{ name: 'gpt-oss:120b' }] },
+      },
+    }));
+
+    assert.equal(windows.session?.usedPercent, 50);
+    assert.equal(windows.weekly?.usedPercent, 25);
+    assert.deepEqual(Object.keys(windows), ['session', 'weekly']);
+  });
+
+  test('keeps raw fractional percentages without rounding', async () => {
+    const windows = await fetchOllamaUsageApi('test-api-key', async () => Response.json({
+      limits: { session: { usage: 0.123456 } },
+    }));
+    const usedPercent = windows.session?.usedPercent ?? 0;
+    assert.ok(Math.abs(usedPercent - 12.3456) < 1e-9);
+  });
+
+  test('omits missing or non-finite usage instead of rendering zero', () => {
+    const emptyPayloads: Array<Parameters<typeof parseOllamaUsageJson>[0]> = [
+      null,
+      {},
+      { limits: null },
+      { limits: {} },
+      { limits: { session: { usage: null } } },
+      { limits: { session: {} } },
+      { limits: { session: { usage: Number.NaN } } },
+      { limits: { session: { usage: Infinity } } },
+      { limits: { session: { usage: true } } },
+      { limits: { session: { usage: '' } } },
+      { limits: { session: { usage: '  ' } } },
+      { limits: { session: { usage: '0.5x' } } },
+    ];
+    for (const payload of emptyPayloads) {
+      assert.deepEqual(parseOllamaUsageJson(payload), {});
+    }
+  });
+
+  for (const usage of [[], {}, [0.5]]) {
+    test(`reports container usage ${JSON.stringify(usage)} as an absent fraction`, async () => {
+      await assert.rejects(
+        fetchOllamaUsageApi('test-api-key', async () => Response.json({ limits: { session: { usage } } })),
+        /Ollama Cloud usage API returned no usage limits for this plan/,
+      );
+    });
+  }
+
+  for (const status of [302, 307, 401, 403]) {
+    test(`rejects HTTP ${status} as an authentication failure`, async () => {
+      await assert.rejects(
+        fetchOllamaUsageApi('test-api-key', async () => new Response('', { status })),
+        /Ollama Cloud authentication failed/,
+      );
+    });
+  }
+
+  for (const status of [429, 500]) {
+    test(`reports HTTP ${status} with the usage API error`, async () => {
+      await assert.rejects(
+        fetchOllamaUsageApi('test-api-key', async () => new Response('', { status })),
+        new RegExp(`Ollama Cloud usage API returned HTTP ${status}`),
+      );
+    });
+  }
+
+  test('reports invalid JSON as a parse failure', async () => {
+    await assert.rejects(
+      fetchOllamaUsageApi('test-api-key', async () => new Response('{')),
+      /Ollama Cloud usage data could not be parsed/,
+    );
+  });
+
+  test('reports an empty body as a parse failure', async () => {
+    await assert.rejects(
+      fetchOllamaUsageApi('test-api-key', async () => new Response('')),
+      /Ollama Cloud usage data could not be parsed/,
+    );
+  });
+
+  for (const payload of [null, ['limits'], 'not-an-object']) {
+    test(`reports non-object payload ${JSON.stringify(payload)} as a parse failure`, async () => {
+      await assert.rejects(
+        fetchOllamaUsageApi('test-api-key', async () => Response.json(payload)),
+        /Ollama Cloud usage data could not be parsed/,
+      );
+    });
+  }
+
+  test('reports an activity-only payload as a plan without usage limits', async () => {
+    await assert.rejects(
+      fetchOllamaUsageApi('test-api-key', async () => Response.json({ activity: { cost: 1 } })),
+      /Ollama Cloud usage API returned no usage limits for this plan/,
+    );
+  });
+
+  test('uses only the usage API when both an API key and a cookie exist', async () => {
+    const { requests, fetchImpl } = recordRequests(async () => Response.json(usagePayload));
+    const result = await fetchOllamaCloudQuota({
+      readApiKey: () => 'test-api-key',
+      readCookie: () => 'test-ollama-cookie',
+      fetchImpl,
+    });
+
+    assert.deepEqual(requests.map((request) => request.url), [API_USAGE_URL]);
+    assert.equal(result.ok, true);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage?.windows.session?.usedPercent, 50);
+    assert.equal(JSON.stringify(result).includes('test-api-key'), false);
+    assert.equal(JSON.stringify(result).includes('test-ollama-cookie'), false);
+  });
+
+  test('uses the cookie scrape only when no API key exists', async () => {
+    const { requests, fetchImpl } = recordRequests(async () => new Response('Session usage 12% Weekly usage 34%'));
+    const result = await fetchOllamaCloudQuota({
+      readApiKey: () => undefined,
+      readCookie: () => 'test-ollama-cookie',
+      fetchImpl,
+    });
+
+    assert.deepEqual(requests.map((request) => request.url), [SETTINGS_URL]);
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows.session?.usedPercent, 12);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 34);
+  });
+
+  test('does not request anything when neither source is configured', async () => {
+    const { requests, fetchImpl } = recordRequests(async () => Response.json(usagePayload));
+    const result = await fetchOllamaCloudQuota({
+      readApiKey: () => undefined,
+      readCookie: () => undefined,
+      fetchImpl,
+    });
+
+    assert.deepEqual(requests, []);
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, false);
+    assert.equal(result.error, 'Not configured');
+  });
+
+  test('does not fall back to the cookie when the API request fails', async () => {
+    const { requests, fetchImpl } = recordRequests(async () => new Response('', { status: 500 }));
+    const result = await fetchOllamaCloudQuota({
+      readApiKey: () => 'test-api-key',
+      readCookie: () => 'test-ollama-cookie',
+      fetchImpl,
+    });
+
+    assert.deepEqual(requests.map((request) => request.url), [API_USAGE_URL]);
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud usage API returned HTTP 500');
+  });
+
+  test('treats an unreadable auth file as no API key and falls back to the cookie', async () => {
+    const originalExistsSync = fs.existsSync;
+    const originalReadFileSync = fs.readFileSync;
+    const originalConsoleError = console.error;
+    Object.assign(fs, {
+      existsSync: () => true,
+      readFileSync: () => { throw new Error('corrupt auth file'); },
+    });
+    console.error = () => {};
+    try {
+      const { requests, fetchImpl } = recordRequests(async () => new Response('Session usage 12%'));
+      const result = await fetchOllamaCloudQuota({
+        readCookie: () => 'test-ollama-cookie',
+        fetchImpl,
+      });
+
+      assert.deepEqual(requests.map((request) => request.url), [SETTINGS_URL]);
+      assert.equal(result.ok, true);
+    } finally {
+      Object.assign(fs, { existsSync: originalExistsSync, readFileSync: originalReadFileSync });
+      console.error = originalConsoleError;
+    }
+  });
+
+  test('lists ollama-cloud when auth.json has an API key', () => {
+    const originalExistsSync = fs.existsSync;
+    const originalReadFileSync = fs.readFileSync;
+    Object.assign(fs, {
+      existsSync: () => true,
+      readFileSync: () => JSON.stringify({ 'ollama-cloud': { key: 'test-api-key', type: 'api' } }),
+    });
+    try {
+      assert.ok(listConfiguredQuotaProviders().includes('ollama-cloud'));
+    } finally {
+      Object.assign(fs, { existsSync: originalExistsSync, readFileSync: originalReadFileSync });
+    }
   });
 });
 
