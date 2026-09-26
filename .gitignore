@@ -79,3 +79,7 @@ workspaces/
 .maintenance-clone
 test-results/
 artifacts/
+
+# PR evidence belongs in the contributor's Gist, not the source tree.
+/pr-evidence/
+/.github/pr-evidence/

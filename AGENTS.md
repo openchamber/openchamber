@@ -152,6 +152,9 @@ Before creating or updating a pull request, read `CONTRIBUTING.md` and
 current evidence for the final PR HEAD; do not make the reviewer reconstruct
 intent, affected surfaces, validation, visual behavior, or failure and
 rollback considerations from the diff alone.
+For screenshot evidence, follow the Visual Evidence section in `CONTRIBUTING.md`
+before adding image previews to the PR body; keep evidence files out of the
+source tree.
 
 A **product decision** belongs to the maintainer and is settled before the code,
 never inside the diff. A product decision is anything where two reasonable people

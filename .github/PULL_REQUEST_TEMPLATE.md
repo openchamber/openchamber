@@ -63,9 +63,11 @@ and evidence images, so a small change with many locale files stays small.
 ## Visual evidence
 
 <!-- User-visible change: current before/after screenshots or recordings for the
-     affected desktop/mobile, narrow/wide, theme, and interaction states.
-     No visible change: one concrete sentence on why the diff cannot affect
-     rendered behavior. -->
+      affected desktop/mobile, narrow/wide, theme, and interaction states.
+      Upload screenshots to your own unlisted Gist, then embed verified raw PNG
+      URLs here. See CONTRIBUTING.md, Visual Evidence. Keep evidence out of the PR diff.
+      No visible change: one concrete sentence on why the diff cannot affect
+      rendered behavior. -->
 
 ## Risks
 

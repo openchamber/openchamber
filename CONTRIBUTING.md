@@ -277,6 +277,18 @@ state why it remains valid. If there is genuinely no user-visible change, say
 so and provide a concrete reason; deleting the evidence section is not an
 exemption.
 
+Keep PR screenshots and recordings out of the repository. For screenshots,
+create an unlisted Gist under your own GitHub account with `gh api`, then push
+the original PNG files to that Gist through its authenticated Git remote. A
+Gist URL is accessible to anyone who has the link, so remove secrets and
+personal data before uploading. If Git over HTTPS does not reuse your `gh`
+credentials, use a one-command credential helper; do not print or store the
+token. Resolve each image's `raw_url` with `gh api` and check that it returns
+`200 OK` and `Content-Type: image/png` before editing the PR body. In the
+template's Visual evidence section, put related states in a Before/After table
+and embed each image as `![descriptive alt](raw URL)`. Use only links a reviewer
+can open; local paths and a link to the Gist page are not image previews.
+
 ### Review enforcement
 
 The automated reviewer performs one unified review of correctness, repository
@@ -316,9 +328,9 @@ conversation remains chronological. Previous review comments are not rewritten.
 ### Size label and parking
 
 Every PR gets a `size:XS` to `size:XXL` label from its changed lines. Tests,
-lockfiles, translation catalogs (`packages/ui/src/lib/i18n/messages`) and PR
-evidence images don't count, so a one-line settings change that touches twelve
-locale files is still `size:XS`.
+lockfiles, translation catalogs (`packages/ui/src/lib/i18n/messages`) and
+existing `.github/pr-evidence/` images don't count, so a one-line settings
+change that touches twelve locale files is still `size:XS`.
 
 A `size:XL` or larger PR with no Ideas discussion linked in its body also gets
 `needs-discussion` and a comment. Link the discussion (or shrink the PR) and
