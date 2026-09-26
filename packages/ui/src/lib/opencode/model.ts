@@ -77,14 +77,28 @@ export type { JsonValue, ModelRef, PermissionRuleset, TokenUsageInfo }
  * that pickers, favorites, and session model refs store; `modelID` is the name
  * sent to the provider API and defaults to `id`. They differ for derived
  * entries such as `gpt-6-luna-fast`, whose `modelID` is `gpt-6-luna`, so an
- * exact `id` match wins and `modelID` only answers ids nothing is keyed by.
+ * exact `id` match wins. Within one provider, legacy qualified references
+ * are supported and `modelID` aliases resolve only when unambiguous.
  */
-export function findCatalogModel<T extends { id: string; modelID: string }>(
+export function findCatalogModel<T extends { id: string; modelID: string; providerID?: string }>(
   models: readonly T[] | undefined,
   id: string,
 ): T | undefined {
   if (!models || !id) return undefined
-  return models.find((model) => model.id === id) ?? models.find((model) => model.modelID === id)
+
+  const exact = models.find((model) => model.id === id)
+  if (exact) return exact
+
+  // Earlier catalogs/persisted preferences also used provider-qualified ids.
+  const qualified = models.find((model) => model.providerID && `${model.providerID}/${model.id}` === id)
+  if (qualified) return qualified
+
+  // Older saved references may use a bare id when the catalog id is qualified.
+  const base = models.find((model) => model.providerID && model.id === `${model.providerID}/${id}`)
+  if (base) return base
+
+  const aliases = models.filter((model) => model.modelID === id)
+  return aliases.length === 1 ? aliases[0] : undefined
 }
 
 /** Free-form JSON attached to sessions, messages, and prompts. */

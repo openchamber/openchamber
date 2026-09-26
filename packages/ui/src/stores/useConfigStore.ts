@@ -3827,7 +3827,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     const { modelsMetadata, providers } = get();
                     const cached = modelsMetadata.get(key);
-                    const model = findCatalogModel(providers.find((p) => p.id === providerId)?.models, modelId);
+                    const model = findProviderModel(providers, providerId, modelId);
 
                     // The running OpenCode's limits win over the models.dev
                     // catalog: providers adjust them per auth (ChatGPT sign-in

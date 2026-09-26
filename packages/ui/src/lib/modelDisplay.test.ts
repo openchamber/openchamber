@@ -29,6 +29,26 @@ describe('modelDisplay', () => {
     expect(getProviderModelDisplayName(provider, 'very-long-model-id', { maxLength: 9 })).toBe('Very L...');
   });
 
+  test('shows the exact base model even when a Fast alias is listed first', () => {
+    const provider = { models: [
+      { id: 'gpt-6-luna-fast', modelID: 'gpt-6-luna', name: 'GPT-6 Luna Fast' },
+      { id: 'gpt-6-luna', modelID: 'gpt-6-luna', name: 'GPT-6 Luna' },
+    ] };
+    expect(getProviderModelDisplayName(provider, 'gpt-6-luna')).toBe('GPT-6 Luna');
+    expect(getProviderModelDisplayName(provider, 'gpt-6-luna-fast')).toBe('GPT-6 Luna Fast');
+  });
+
+  test('resolves qualified display records without choosing an ambiguous Fast alias', () => {
+    const models = [
+      { id: 'openai/gpt-6-luna-fast', modelID: 'gpt-6-luna', providerID: 'openai', name: 'Luna Fast' },
+      { id: 'openai/gpt-6-luna', modelID: 'gpt-6-luna', providerID: 'openai', name: 'Luna' },
+    ];
+    expect(getProviderModelDisplayName({ models }, 'gpt-6-luna')).toBe('Luna');
+    expect(getProviderModelDisplayName({ models }, 'gpt-6-luna-fast')).toBe('Luna Fast');
+    const ambiguous = models.map((model) => ({ ...model, id: `alias-${model.id}` }));
+    expect(getProviderModelDisplayName({ models: ambiguous }, 'gpt-6-luna')).toBe('GPT-6 Luna');
+  });
+
   test('humanizes provider-prefixed model ids using common model catalog patterns', () => {
     expect(humanizeModelId('anthropic/claude-opus-4-7-fast')).toBe('Claude Opus 4.7 Fast');
     expect(humanizeModelId('google/gemini-3.1-flash-lite-preview')).toBe('Gemini 3.1 Flash Lite Preview');

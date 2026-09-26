@@ -4,7 +4,7 @@ import { focusChatInput } from './composer/editor/dom';
 import { MobileModelButton } from './MobileModelButton';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
-import type { Agent, PermissionRuleset } from '@/lib/opencode/model';
+import { findCatalogModel, type Agent, type PermissionRuleset } from '@/lib/opencode/model';
 import type { PermissionEffect } from '@opencode/client';
 import {
     DropdownMenu,
@@ -54,7 +54,7 @@ import {
 } from '@/lib/messages/userModelChoice';
 import { getSyncParts } from '@/sync/sync-refs';
 import type { BtwSelection } from '@/stores/useBtwStore';
-import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { listModelVariantIds } from '@/lib/modelVariants';
 
 type IconComponent = IconName;
 
@@ -435,7 +435,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
-    const { favoriteModelsList, recentModelsList } = useModelLists();
+    const { favoriteModelsList, recentModelsList, getFavoriteModelKey, getFavoriteModelAliases } = useModelLists();
     // Auto routing: the server resolves `openchamber/auto` into a real model per
     // send. Offered only while the server says it can honour it, in the main
     // composer and in controlled selections (BTW) alike.
@@ -613,7 +613,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     );
 
     const currentModelForMetadata = currentModelId
-        ? models.find((model: ProviderModel) => model.id === currentModelId)
+        ? findCatalogModel(models, currentModelId)
         : undefined;
     const currentMetadata = currentProviderId && currentModelId && currentModelForMetadata
         ? mergeModelMetadataWithLiveModel(currentProviderId, currentModelForMetadata, getModelMetadata(currentProviderId, currentModelId))
@@ -652,7 +652,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // inherited effort over the user's pick — the picker flickered. Keyed on
     // the content so identity only changes when the variants do.
     const rawAvailableVariants = selection
-        ? listModelVariantIds(currentProvider?.models.find((model) => model.id === currentModelId)?.variants)
+        ? listModelVariantIds(findCatalogModel(currentProvider?.models, currentModelId)?.variants)
         : getCurrentModelVariants();
     const availableVariantsKey = rawAvailableVariants.join('\u0000');
     const availableVariants = React.useMemo(
@@ -731,7 +731,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
 
             const providerModels = Array.isArray(provider?.models) ? provider.models : [];
-            const modelExists = isAuto || providerModels.find((m: ProviderModel) => m.id === modelId);
+            const modelExists = isAuto || findCatalogModel(providerModels, modelId);
             if (!modelExists) {
                 return 'model-missing';
             }
@@ -759,9 +759,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const getModelVariantOptions = React.useCallback((providerId: string, modelId: string) => {
         const provider = providers.find((entry) => entry.id === providerId);
-        // SAFETY: the catalog model's `variants` is v2's `{ id, settings }[]`
-        // (or the v1 keyed object on an older record); only the ids are read.
-        const model = provider?.models.find((entry) => entry.id === modelId) as { variants?: ModelVariantSource } | undefined;
+        const model = findCatalogModel(provider?.models, modelId);
         return listModelVariantIds(model?.variants);
     }, [providers]);
 
@@ -1426,7 +1424,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getCurrentModelDisplayName = () => {
         if (!currentModelId) return t('chat.modelControls.selectModel');
         if (isAutoSelected) return t('chat.modelControls.autoModel');
-        const currentModel = models.find((m: ProviderModel) => m.id === currentModelId);
+        const currentModel = findCatalogModel(models, currentModelId);
         return getModelDisplayName(currentModel, currentModelId) || t('chat.modelControls.selectModel');
     };
 
@@ -1779,6 +1777,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             showProviderLogo: boolean;
         }) => {
             const rowKey = buildModelRefKey(providerId, modelId);
+            const favoriteModelID = getFavoriteModelKey(providerId, modelId);
             const isSelected = providerId === currentProviderId && modelId === currentModelId;
             const metadata = mergeModelMetadataWithLiveModel(providerId, model, getModelMetadata(providerId, modelId));
             const variantOptions = getModelVariantOptions(providerId, modelId);
@@ -1877,20 +1876,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onClick={(event) => {
                                     event.preventDefault();
                                     event.stopPropagation();
-                                    toggleFavoriteModel(providerId, modelId);
+                                    toggleFavoriteModel(providerId, modelId, getFavoriteModelAliases(providerId, modelId));
                                 }}
                                 className={cn(
                                     'model-favorite-button flex size-5 items-center justify-center hover:text-primary/80 flex-shrink-0',
-                                    isFavoriteModel(providerId, modelId) ? 'text-primary' : 'text-muted-foreground'
+                                    isFavoriteModel(providerId, favoriteModelID) ? 'text-primary' : 'text-muted-foreground'
                                 )}
-                                aria-label={isFavoriteModel(providerId, modelId)
+                                aria-label={isFavoriteModel(providerId, favoriteModelID)
                                     ? t('chat.modelControls.unfavoriteAria')
                                     : t('chat.modelControls.favoriteAria')}
-                                title={isFavoriteModel(providerId, modelId)
+                                title={isFavoriteModel(providerId, favoriteModelID)
                                     ? t('chat.modelControls.removeFromFavorites')
                                     : t('chat.modelControls.addToFavorites')}
                             >
-                                {isFavoriteModel(providerId, modelId) ? (
+                                {isFavoriteModel(providerId, favoriteModelID) ? (
                                     <Icon name="star-fill" className="size-4" />
                                 ) : (
                                     <Icon name="star" className="size-4" />
@@ -2328,7 +2327,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             const { providerID, modelID } = selectedItem;
             const canonicalProvider = useConfigStore.getState().providers.find((provider) => provider.id === providerID);
-            const canonicalModel = canonicalProvider?.models.find((model) => model.id === modelID) as { variants?: ModelVariantSource } | undefined;
+            const canonicalModel = findCatalogModel(canonicalProvider?.models, modelID);
             const variantKeys = canonicalModel?.variants ? listModelVariantIds(canonicalModel.variants) : getModelVariantOptions(providerID, modelID);
             if (variantKeys.length === 0) return false;
 
@@ -2532,15 +2531,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onActiveKeyDown={handleModelPickerKeyDown}
                                 onActiveEntryChange={(entry) => { activeModelPickerEntryRef.current = entry; }}
                                 onVariantKey={handleThinkingVariantKey}
-                                isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
-                                onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+                                isFavorite={(entry) => isFavoriteModel(entry.providerID, getFavoriteModelKey(entry.providerID, entry.modelID))}
+                                onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID, getFavoriteModelAliases(entry.providerID, entry.modelID))}
                                 renderRowEnd={renderThinkingSlot}
                                 renderVersion={modelPickerRenderVersion}
                                 onReorderFavorite={(active, over) => reorderFavoriteModel(
                                     active.providerID,
-                                    active.modelID,
+                                    getFavoriteModelKey(active.providerID, active.modelID),
                                     over.providerID,
-                                    over.modelID,
+                                    getFavoriteModelKey(over.providerID, over.modelID),
+                                    getFavoriteModelAliases(active.providerID, active.modelID),
                                 )}
                                 reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
                                 reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
