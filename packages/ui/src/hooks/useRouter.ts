@@ -1,12 +1,22 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
-import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
+import { parseRoute, updateBrowserURL, hasRouteParams, RECENT_SESSION_TOKEN } from '@/lib/router';
 import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
+import { resolveRecentSession, shouldApplyResolvedRecentSession } from '@/lib/recentSession';
+import { getLastActiveSessionClearGeneration } from '@/sync/last-session-cache';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+
+// How long the ?session=recent restore overlay may hold the shell before it
+// falls through to the boot draft. Mirrors MobileApp.tsx's safety valve: the
+// overlay must never strand the user on the splash if the snapshot hangs
+// (server down, hung fetch), and a newer route that wins while a stale
+// resolution is still polling must not stay covered. The resolution itself
+// keeps its long snapshot wait; only the blocking overlay is bounded.
+const RECENT_SESSION_OVERLAY_VALVE_MS = 6_000;
 
 /**
  * Check if running in VS Code webview context.
@@ -47,6 +57,7 @@ export function useRouter(): void {
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
+  const routeGenerationRef = React.useRef(0);
 
   // Get store actions (stable references)
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -58,16 +69,61 @@ export function useRouter(): void {
    */
   const applyRoute = React.useCallback(
     async (route: RouteState) => {
-      if (isApplyingRouteRef.current) {
-        return;
-      }
-
+      const generation = ++routeGenerationRef.current;
       isApplyingRouteRef.current = true;
 
       try {
         // 1. Apply session first (may trigger async operations)
         if (route.sessionId) {
-          await openSessionFromRoute(route.sessionId);
+          if (route.sessionId === RECENT_SESSION_TOKEN) {
+            const sessionIdBeforeResolution = useSessionUIStore.getState().currentSessionId;
+            const clearGenerationBeforeResolution = getLastActiveSessionClearGeneration();
+            // Hold the startup overlay for the whole resolution so the boot
+            // draft is never painted while the restore is still deciding
+            // (mirrors the native mobile cold-launch overlay).
+            useSessionUIStore.getState().setRecentSessionRestorePending(true);
+            // Safety valve, same as MobileApp.tsx: release the overlay on a
+            // bounded timer so a hanging snapshot or a newer route that wins
+            // while this resolution still polls can never strand the user on
+            // the splash. The resolution keeps running (it may still apply);
+            // only the blocking overlay is capped.
+            const overlayValveTimeoutId = window.setTimeout(
+              () => useSessionUIStore.getState().setRecentSessionRestorePending(false),
+              RECENT_SESSION_OVERLAY_VALVE_MS,
+            );
+            try {
+              const resolved = await resolveRecentSession();
+              if (generation !== routeGenerationRef.current) {
+                return;
+              }
+              // A user selection made while resolving the persisted pointer wins
+              // over the deep link instead of being overwritten on completion.
+              const userClearedPointerDuringResolution =
+                getLastActiveSessionClearGeneration() !== clearGenerationBeforeResolution;
+              if (
+                userClearedPointerDuringResolution
+                || !shouldApplyResolvedRecentSession(
+                  sessionIdBeforeResolution,
+                  useSessionUIStore.getState().currentSessionId,
+                )
+              ) {
+                return;
+              }
+              if (resolved) {
+                await openSessionFromRoute(resolved.sessionId);
+              }
+            } finally {
+              window.clearTimeout(overlayValveTimeoutId);
+              useSessionUIStore.getState().setRecentSessionRestorePending(false);
+            }
+          } else {
+            await openSessionFromRoute(route.sessionId);
+          }
+        }
+
+        // A newer route may have won while the session lookup was pending.
+        if (generation !== routeGenerationRef.current) {
+          return;
         }
 
         // 2. Handle settings first because it is a full-screen overlay.
@@ -100,7 +156,9 @@ export function useRouter(): void {
           navigateToDiff(route.diffFile);
         }
       } finally {
-        isApplyingRouteRef.current = false;
+        if (generation === routeGenerationRef.current) {
+          isApplyingRouteRef.current = false;
+        }
       }
     },
     [setSettingsDialogOpen, setSettingsPage, navigateToDiff]
@@ -153,6 +211,11 @@ export function useRouter(): void {
     // Apply the initial route
     const initializeRoute = async () => {
       await applyRoute(route);
+
+      // Do not normalize the initial URL after a newer popstate route wins.
+      if (routeGenerationRef.current !== 1) {
+        return;
+      }
 
       // After applying, update URL to normalized form (use replaceState).
       // Use the parsed route values instead of an immediate store snapshot so

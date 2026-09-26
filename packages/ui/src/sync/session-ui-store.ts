@@ -458,6 +458,12 @@ export type SessionUIState = {
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
+  // While true, the web shell keeps the startup overlay up so the auto-opened
+  // boot draft is never painted before a `?session=recent` restore decides.
+  // Mirrors the native mobile cold-launch overlay (MobileApp.tsx), applied to
+  // the `RECENT_SESSION_TOKEN` deep link on the web.
+  recentSessionRestorePending: boolean
+  setRecentSessionRestorePending: (value: boolean) => void
   clearError: () => void
   markSessionAsOpenChamberCreated: (sessionId: string) => void
   isOpenChamberCreatedSession: (sessionId: string) => boolean
@@ -1143,6 +1149,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
+  recentSessionRestorePending: false,
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -1619,6 +1626,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  setRecentSessionRestorePending: (value) => set({ recentSessionRestorePending: value }),
 
   markSessionAsOpenChamberCreated: (sessionId) =>
     set((s) => {

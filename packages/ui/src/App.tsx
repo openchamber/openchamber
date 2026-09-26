@@ -283,6 +283,7 @@ function App({ apis }: AppProps) {
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const error = useSessionUIStore((s) => s.error);
+  const recentSessionRestorePending = useSessionUIStore((s) => s.recentSessionRestorePending);
   const clearError = useSessionUIStore((s) => s.clearError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
@@ -987,7 +988,9 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <ProjectConfigErrorToast />
                   <MainLayout />
-                  <AppStartupOverlay ready={isInitialized && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))} />
+                  <AppStartupOverlay
+                    ready={isInitialized && !recentSessionRestorePending && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))}
+                  />
                   <Toaster />
                   <AppLinkConfirmDialog />
                   <SharedTrustConfirmDialog />
