@@ -110,7 +110,7 @@ export class SessionEditorPanelProvider {
     );
   }
 
-  public createOrShowNewSession(): void {
+  public createOrShowNewSession(directory?: string): void {
     // Without an open workspace folder there is no directory to start the
     // session against; opening a draft would fall back to the last session's
     // directory in shared UI state (the bug this fixes). Mirror the sidebar
@@ -123,7 +123,7 @@ export class SessionEditorPanelProvider {
 
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this._createPanel(panelId, t('New Session'), null);
+    this._createPanel(panelId, t('New Session'), null, directory);
   }
 
   public createOrShow(sessionId: string, title?: string): void {
@@ -143,7 +143,7 @@ export class SessionEditorPanelProvider {
     this._createPanel(sessionId, sessionTitle, sessionId);
   }
 
-  private _createPanel(panelId: string, title: string, initialSessionId: string | null): void {
+  private _createPanel(panelId: string, title: string, initialSessionId: string | null, directory?: string): void {
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
     const panel = vscode.window.createWebviewPanel(
@@ -173,7 +173,7 @@ export class SessionEditorPanelProvider {
     this._panels.set(panelId, state);
     this._lastActivePanelId = panelId;
 
-    panel.webview.html = this._getHtmlForWebview(panel.webview, initialSessionId);
+    panel.webview.html = this._getHtmlForWebview(panel.webview, initialSessionId, directory);
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedStateToPanel(state);
@@ -670,9 +670,9 @@ export class SessionEditorPanelProvider {
     return { id, type, success: true, data: { stopped: true } };
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null) {
+  private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null, directory?: string) {
     const workspaceFolder = normalizeWindowsDriveLetter(
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
+      directory ?? (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '')
     );
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const initialStatus = this._cachedStatus;

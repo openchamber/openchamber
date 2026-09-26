@@ -87,6 +87,21 @@ describe('SessionEditorPanelProvider.createOrShowNewSession', () => {
     expect(panel.webview.html).toContain('workspaceFolders: [{"name":"alpha","path":"/work/alpha"}]');
   });
 
+  it('embeds the selected directory for a new editor session', () => {
+    workspaceFolders = [
+      { name: 'alpha', uri: { fsPath: '/work/alpha' } },
+      { name: 'beta', uri: { fsPath: '/work/beta' } },
+    ];
+
+    const provider = createProvider();
+    provider.createOrShowNewSession('/work/beta');
+
+    expect(panel.webview.html).toContain('workspaceFolder: "/work/beta"');
+    expect(panel.webview.html).toContain(
+      'workspaceFolders: [{"name":"alpha","path":"/work/alpha"},{"name":"beta","path":"/work/beta"}]'
+    );
+  });
+
   it('does not open a panel or post a newSession command when no workspace folder is open', () => {
     workspaceFolders = [];
     createWebviewPanel.mockClear();
