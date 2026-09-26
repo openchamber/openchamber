@@ -818,6 +818,9 @@ within a ten-minute overall deadline.
     - Foreground servers running under a systemd user unit queue installation in
       a separate transient unit and restart the configured service afterwards.
       `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.
+    - Foreground servers running under a macOS launchd User LaunchAgent update the
+      package and trigger a `launchctl kickstart` (with unload/load fallback) against
+      `~/Library/LaunchAgents/dev.openchamber.web.plist`.
     - On Windows the install-and-restart script is written to
       `<data dir>/update-install.cmd` before the response and run with
       `cmd.exe /c <file>`. A newline ends a `cmd.exe /c` command line, so the

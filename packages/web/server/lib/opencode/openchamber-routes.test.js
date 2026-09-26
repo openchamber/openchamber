@@ -18,11 +18,23 @@ const childProcess = await import('child_process');
 const packageManager = await import('../package-manager.js');
 const { registerOpenChamberRoutes } = await import('./openchamber-routes.js');
 
-const createApp = ({ environment = {}, storedOptions = {}, desktopUpdater, platform = 'linux', execPath = '/usr/bin/node' } = {}) => {
+const createApp = ({
+  environment = {},
+  storedOptions = {},
+  desktopUpdater,
+  platform = 'linux',
+  execPath = '/usr/bin/node',
+  plistExists = false,
+} = {}) => {
   const app = express();
   const dependencies = {
     fs: {
-      existsSync: vi.fn(() => false),
+      existsSync: vi.fn((targetPath) => {
+        if (typeof targetPath === 'string' && targetPath.endsWith('dev.openchamber.web.plist')) {
+          return plistExists;
+        }
+        return false;
+      }),
       mkdirSync: vi.fn(),
       writeFileSync: vi.fn(),
       openSync: vi.fn(() => 7),
@@ -34,6 +46,9 @@ const createApp = ({ environment = {}, storedOptions = {}, desktopUpdater, platf
           ...storedOptions,
         })),
       },
+    },
+    os: {
+      homedir: () => '/home/test',
     },
     path,
     process: {
@@ -221,6 +236,16 @@ describe('OpenChamber foreground update route', () => {
     }
   });
 
+  it('leaves the update installable for a macOS launchd foreground server', async () => {
+    const launchd = createApp({
+      platform: 'darwin',
+      storedOptions: { launchMode: 'foreground' },
+      plistExists: true,
+    });
+    const response = await request(launchd.app).get('/api/openchamber/update-check?appType=web').expect(200);
+    expect(response.body.installBlocked).toBeUndefined();
+  });
+
   it('rejects a foreground update when the server is not owned by systemd', async () => {
     const { app } = createApp();
 
@@ -288,6 +313,128 @@ describe('OpenChamber foreground update route', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
     });
+  });
+
+  it('rejects foreground update on macOS when launchd plist does not exist', async () => {
+    const { app } = createApp({
+      platform: 'darwin',
+      storedOptions: { launchMode: 'foreground' },
+      plistExists: false,
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(409, {
+        error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+      });
+
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+  });
+
+  it('allows foreground update on macOS when launchd plist exists and invokes launchd restart command', async () => {
+    const { app } = createApp({
+      platform: 'darwin',
+      storedOptions: { launchMode: 'foreground' },
+      plistExists: true,
+    });
+    childProcess.spawn.mockReturnValue({ unref: vi.fn() });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Update starting, server will restart shortly',
+        version: '1.17.1',
+        packageManager: 'npm',
+        autoRestart: true,
+        restartManager: 'service',
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'sh',
+      [
+        '-c',
+        expect.stringContaining(
+          "launchctl kickstart -k gui/$(id -u)/dev.openchamber.web || (launchctl unload '/home/test/Library/LaunchAgents/dev.openchamber.web.plist' && launchctl load '/home/test/Library/LaunchAgents/dev.openchamber.web.plist')"
+        ),
+      ],
+      expect.objectContaining({
+        detached: true,
+      })
+    );
+  });
+
+  it('allows daemon update on macOS without launchd plist and invokes CLI restart command', async () => {
+    const { app } = createApp({
+      platform: 'darwin',
+      storedOptions: { launchMode: 'daemon', port: 7897 },
+      plistExists: false,
+    });
+    childProcess.spawn.mockReturnValue({ unref: vi.fn() });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Update starting, server will restart shortly',
+        version: '1.17.1',
+        packageManager: 'npm',
+        autoRestart: true,
+        restartManager: 'cli',
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'sh',
+      [
+        '-c',
+        expect.stringContaining(
+          "('/usr/bin/node' '/opt/openchamber/bin/cli.js' serve --port 7897) || (openchamber serve --port 7897)"
+        ),
+      ],
+      expect.objectContaining({
+        detached: true,
+      })
+    );
+  });
+
+  it('allows daemon update on macOS with launchd plist present and still invokes CLI restart command', async () => {
+    const { app } = createApp({
+      platform: 'darwin',
+      storedOptions: { launchMode: 'daemon', port: 7897 },
+      plistExists: true,
+    });
+    childProcess.spawn.mockReturnValue({ unref: vi.fn() });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Update starting, server will restart shortly',
+        version: '1.17.1',
+        packageManager: 'npm',
+        autoRestart: true,
+        restartManager: 'cli',
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'sh',
+      [
+        '-c',
+        expect.stringContaining(
+          "('/usr/bin/node' '/opt/openchamber/bin/cli.js' serve --port 7897) || (openchamber serve --port 7897)"
+        ),
+      ],
+      expect.objectContaining({
+        detached: true,
+      })
+    );
   });
 });
 
