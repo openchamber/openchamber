@@ -163,7 +163,9 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('sessions and events of a real space: dock
     expect(ids).toContain(hostSession.id);
     expect(ids).toContain(session.id);
     expect(merged.data.find((entry) => entry.id === session.id).location.directory).toBe(repo);
-    expect(merged.spaces).toEqual([{ id: spec.id, state: 'complete', sessions: expect.any(Number) }]);
+    // Since 4c each space entry carries its name and the project it was made for; this space's
+    // project is not one the host registered, so both of those are null here.
+    expect(merged.spaces).toEqual([{ id: spec.id, name: spec.name, projectDirectory: null, directory: null, state: 'complete', sessions: expect.any(Number) }]);
 
     expect(await until(() => received.some((event) => event.spaceId === spec.id && event.payload.type === 'session.created' && event.payload.data?.sessionID === session.id), 30_000)).toBe(true);
     expect(await until(() => text.includes(session.id), 30_000)).toBe(true);
@@ -177,7 +179,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('sessions and events of a real space: dock
     await sleep(2_100);
     const merged = await (await fetch(url('/api/session'))).json();
     expect(merged.data.map((entry) => entry.id)).toContain(hostSession.id);
-    expect(merged.spaces).toEqual([{ id: spec.id, state: 'stale', sessions: expect.any(Number) }]);
+    expect(merged.spaces).toEqual([{ id: spec.id, name: spec.name, projectDirectory: null, directory: null, state: 'stale', sessions: expect.any(Number) }]);
     expect(merged.spaces[0].sessions).toBeGreaterThan(0);
     const socket = await new Promise((resolve) => {
       const attempt = new WebSocket(wsUrl(`/api/spaces/${spec.id}/terminal/ws`), { headers: { origin: 'http://app.test' } });
