@@ -14,7 +14,7 @@ import { existsSync } from 'node:fs';
 
 const POSIX_ENV_BINARIES = ['/usr/bin/env', '/bin/env'];
 /** Variables a PTY shell must never inherit from the OpenChamber host process. */
-const PTY_HOST_PRIVATE_VARIABLES = Object.freeze(['ARGV0', 'NODE_CHANNEL_FD']);
+const PTY_HOST_PRIVATE_VARIABLES = Object.freeze(['ARGV0', 'NODE_CHANNEL_FD', 'BUN_WATCH_PID']);
 
 /**
  * Remove AppImage `ARGV0` from a mutable env object (or `process.env`).
