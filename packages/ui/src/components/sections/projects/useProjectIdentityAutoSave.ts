@@ -42,7 +42,7 @@ export const useProjectIdentityAutoSave = (
       lastSavedRef.current = null;
       return;
     }
-    if (!name.trim() || isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
+    if (isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
       return;
     }
 

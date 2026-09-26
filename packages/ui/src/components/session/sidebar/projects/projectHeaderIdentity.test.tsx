@@ -1,0 +1,56 @@
+import { describe, expect, test } from 'bun:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
+import { getDefaultTheme } from '@/lib/theme/themes';
+
+import { I18nProvider } from '@/lib/i18n';
+import { SortableProjectItem } from './sortableItems';
+
+const defaultTheme = getDefaultTheme(false);
+const themeContext = {
+  currentTheme: defaultTheme,
+  availableThemes: [defaultTheme],
+  setTheme: () => {},
+  customThemesLoading: false,
+  customThemeIds: [],
+  importTheme: async () => defaultTheme,
+  deleteImportedTheme: async () => {},
+  reloadCustomThemes: async () => {},
+  isSystemPreference: false,
+  setSystemPreference: () => {},
+  themeMode: 'system',
+  setThemeMode: () => {},
+  lightThemeId: 'mock',
+  darkThemeId: 'mock',
+  setLightThemePreference: () => {},
+  setDarkThemePreference: () => {},
+} satisfies ThemeContextValue;
+
+const renderProjectHeader = (label: string) => renderToStaticMarkup(
+  <ThemeSystemContext.Provider value={themeContext}>
+    <I18nProvider>
+      <SortableProjectItem id="project-1" projectLabel={label} projectIcon="folder"
+        projectDescription="/repo" isCollapsed={false} isRepo={false}
+        hideDirectoryControls={true} mobileVariant={false} alwaysShowActions={false}
+        onToggle={() => {}} onNewSession={() => {}} onRenameStart={() => {}} onClose={() => {}}
+        openSidebarMenuKey={null} setOpenSidebarMenuKey={() => {}} />
+    </I18nProvider>
+  </ThemeSystemContext.Provider>,
+);
+
+describe('ProjectHeaderIdentity project label casing', () => {
+  test('preserves a user-defined mixed-case project label', () => {
+    const markup = renderProjectHeader('MyProject');
+
+    expect(markup).toContain('>MyProject</span>');
+    expect(markup).not.toContain('lowercase');
+    expect(markup).toContain('typography-ui-label');
+    expect(markup).not.toContain('text-[14px]');
+  });
+
+  test('preserves a directory-derived project label exactly', () => {
+    expect(renderProjectHeader('my-project')).toContain('>my-project</span>');
+  });
+});

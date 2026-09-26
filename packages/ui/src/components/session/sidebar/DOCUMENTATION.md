@@ -8,6 +8,10 @@ kept at this root in `types.ts` and `utils.tsx`.
   layout-owned synchronization, authoritative cleanup, and nearby-session prefetch.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project
   view state, repository state, and worktree presentation.
+- Project labels preserve their source text. The exact directory basename is
+  shown by default, while a non-empty custom label takes precedence unchanged.
+  Clearing the project-name field, or setting it back to the basename, removes
+  the override and restores the directory-derived default.
 - `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the notification store.
 - `recent/` owns Recent and managed Chats activity projections.
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.

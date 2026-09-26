@@ -11,6 +11,37 @@ const project = (id: string, label: string, extra: Partial<ProjectEntry> = {}): 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('useProjectIdentityForm', () => {
+  test('restores the basename and accepts later external changes after the save echo', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    type Capture = { form?: ReturnType<typeof useProjectIdentityForm> };
+    const capture: Capture = {};
+    const Harness = ({ entry }: { entry: ProjectEntry }) => {
+      capture.form = useProjectIdentityForm(entry);
+      return null;
+    };
+    const render = (entry: ProjectEntry) => act(async () => root.render(
+      React.createElement(I18nProvider, null, React.createElement(Harness, { entry })),
+    ));
+    try {
+      await render(project('my-app', 'Custom'));
+      await act(async () => capture.form?.setName(''));
+      expect(capture.form?.hasChanges).toBe(true);
+      expect((await capture.form?.prepareSaveData({ silent: true }))?.label).toBeNull();
+      await render({ id: 'my-app', path: '/repo/my-app' });
+      expect(capture.form?.hasChanges).toBe(false);
+      await render(project('my-app', 'External'));
+      expect(capture.form?.name).toBe('External');
+      await act(async () => capture.form?.setName('my-app'));
+      expect((await capture.form?.prepareSaveData({ silent: true }))?.label).toBeNull();
+      await render({ id: 'my-app', path: '/repo/my-app' });
+      expect(capture.form?.name).toBe('my-app');
+      expect(capture.form?.hasChanges).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
   test('keeps the name being typed when the same project arrives as a new object, and follows the store when clean', async () => {
     const dom = installHookTestDom();
     const root = createRoot(dom.container);
@@ -75,7 +106,7 @@ describe('useProjectIdentityAutoSave', () => {
         saves.push(data);
         // A caller that persists the label but never the variant, as the
         // sidebar dialog did: the store echoes a project the form cannot equal.
-        setEntry((current) => ({ ...current, label: data.label }));
+        setEntry((current) => ({ ...current, label: data.label ?? undefined }));
       }, []);
       useProjectIdentityAutoSave(capture.form, onSave);
       return null;
