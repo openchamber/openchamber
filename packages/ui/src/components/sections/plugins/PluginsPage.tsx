@@ -5,6 +5,19 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { AddPluginDialog } from './AddPluginDialog';
+import { PluginsGrid, type PluginDeleteTarget } from './PluginsGrid';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import {
   useAutosave,
@@ -116,6 +129,24 @@ export const PluginsPage: React.FC = () => {
   const updateEntry = usePluginsStore((s) => s.updateEntry);
   const updateFile = usePluginsStore((s) => s.updateFile);
   const readFile = usePluginsStore((s) => s.readFile);
+  const setSelected = usePluginsStore((s) => s.setSelected);
+  const deleteEntry = usePluginsStore((s) => s.deleteEntry);
+  const deleteFile = usePluginsStore((s) => s.deleteFile);
+  const [isAddOpen, setIsAddOpen] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<PluginDeleteTarget | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
+  React.useEffect(() => {
+    const handleOpenAdd = () => setIsAddOpen(true);
+    window.addEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
+    return () => window.removeEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
+  }, []);
+
+  // The page opens on the plugin grid; leaving it drops the selection so the
+  // next visit starts there again.
+  React.useEffect(() => () => {
+    usePluginsStore.getState().setSelected(null);
+  }, []);
 
   const selectedEntry = React.useMemo(
     () => (selectedId ? entries.find((e) => e.id === selectedId) ?? null : null),
@@ -234,27 +265,73 @@ export const PluginsPage: React.FC = () => {
 
   const autosave = useAutosave(save);
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    const result = deleteTarget.kind === 'entry' ? await deleteEntry(deleteTarget.id) : await deleteFile(deleteTarget.id);
+    if (result.ok) {
+      toast.success(result.message || t('settings.plugins.sidebar.toast.deleted', { name: deleteTarget.label }));
+    } else {
+      toast.error(t('settings.plugins.sidebar.toast.deleteFailed'));
+    }
+    setDeleteTarget(null);
+    setIsDeleting(false);
+  };
+
+  const dialogs = (
+    <>
+      <AddPluginDialog open={isAddOpen} onOpenChange={setIsAddOpen} />
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !isDeleting) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('settings.plugins.sidebar.deleteDialog.title')}</DialogTitle>
+            <DialogDescription>
+              {t('settings.plugins.sidebar.deleteDialog.description', { name: deleteTarget?.label ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
+              {t('settings.common.actions.cancel')}
+            </Button>
+            <Button size="sm" variant="destructive" onClick={() => void handleDelete()} disabled={isDeleting}>
+              {isDeleting ? t('settings.plugins.sidebar.actions.deleting') : t('settings.common.actions.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+
   if (!selectedId) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <Icon name="plug" className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">{t('settings.plugins.page.empty.select')}</p>
-          <p className="typography-meta mt-1 opacity-75">
-            {t('settings.plugins.page.empty.add')}
-          </p>
-        </div>
-      </div>
+      <>
+        <PluginsGrid onAdd={() => setIsAddOpen(true)} onDelete={setDeleteTarget} />
+        {dialogs}
+      </>
     );
   }
+
+  const backButton = <SettingsBackButton label={t('settings.plugins.page.back')} onClick={() => setSelected(null)} />;
+  const deleteButton = (
+    <Button variant="ghost" size="xs" className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]" onClick={() => {
+      if (selectedEntry) setDeleteTarget({ kind: 'entry', id: selectedEntry.id, label: selectedEntry.spec });
+      else if (selectedFile) setDeleteTarget({ kind: 'file', id: selectedFile.id, label: selectedFile.fileName });
+    }}>
+      <Icon name="delete-bin" className="size-3.5" />
+      {t('settings.common.actions.delete')}
+    </Button>
+  );
 
   if (selectedEntry && draft && draft.mode === 'entry') {
     const optionsResult = parseOptionsJson(draft.optionsJson);
     const optionsValid = optionsResult.ok;
 
     return (
+      <>
       <SettingsPageLayout
         title={t('settings.plugins.page.header.entry')}
+        titleLeading={backButton}
+        headerEnd={deleteButton}
         titleAccessory={(
           <ScopeBadge
             scope={selectedEntry.scope}
@@ -313,13 +390,18 @@ export const PluginsPage: React.FC = () => {
           )}
         </SettingsSection>
       </SettingsPageLayout>
+      {dialogs}
+      </>
     );
   }
 
   if (selectedFile && draft && draft.mode === 'file') {
     return (
+      <>
       <SettingsPageLayout
         title={t('settings.plugins.page.header.file')}
+        titleLeading={backButton}
+        headerEnd={deleteButton}
         titleAccessory={(
           <>
             <ScopeBadge
@@ -371,6 +453,8 @@ export const PluginsPage: React.FC = () => {
           />
         </SettingsSection>
       </SettingsPageLayout>
+      {dialogs}
+      </>
     );
   }
 

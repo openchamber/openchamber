@@ -26,6 +26,8 @@ import { MCP_DRAFT_OAUTH_UNSET, readCarriedOAuth, type McpOAuthCarried } from '.
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
+import { McpGrid } from './McpGrid';
 import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsLegacyFormatNote';
 import {
   useAutosave,
@@ -567,6 +569,16 @@ export const McpPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
+
+  // The page opens on the server grid. A selection made before it mounts (the
+  // settings search, the mobile "add server" shortcut) still opens that server;
+  // leaving the page drops it so the next visit starts at the grid again.
+  React.useEffect(() => () => {
+    const store = useMcpConfigStore.getState();
+    store.setSelectedMcp(null);
+    store.setMcpDraft(null);
+  }, []);
+
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory));
   const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory));
   const refreshStatus = useMcpStore((state) => state.refresh);
@@ -1106,17 +1118,9 @@ export const McpPage: React.FC = () => {
     }
   }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
 
-  // ── Empty state ──
+  // ── Browse ──
   if (!selectedMcpName) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <Icon name="plug" className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">{t('settings.mcp.page.empty.selectServer')}</p>
-          <p className="typography-meta mt-1 opacity-75">{t('settings.mcp.page.empty.addNewOne')}</p>
-        </div>
-      </div>
-    );
+    return <McpGrid />;
   }
 
   const runtimeStatus = mcpStatus[selectedMcpName];
@@ -1145,6 +1149,15 @@ export const McpPage: React.FC = () => {
     <>
       <SettingsPageLayout
         title={isNewServer ? t('settings.mcp.page.header.newServer') : selectedMcpName}
+        titleLeading={(
+          <SettingsBackButton
+            label={t('settings.mcp.page.back')}
+            onClick={() => {
+              setMcpDraft(null);
+              setSelectedMcp(null);
+            }}
+          />
+        )}
         titleAccessory={!isNewServer ? (
           <StatusBadge
             status={effectiveStatusName}

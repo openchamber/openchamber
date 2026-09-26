@@ -46,6 +46,17 @@ Placement rules:
 - Feature pages (Appearance, Chat, Sessions…) keep only settings about that feature. If a setting reads awkwardly on its page, move it to General rather than inventing a new page.
 - New pages need metadata, `pageOrder`, nav icon, `settings.page.<slug>.title/description` in every locale, and mobile whitelist (`MOBILE_SETTINGS_PAGES` in `MobileApp.tsx`) when relevant.
 
+## Browse Pages: Card Grid vs List
+
+A page that browses things with a glanceable state (Providers, MCP, Plugins)
+opens on a card grid from `shared/SettingsCards.tsx`: a dashed add card leads
+the grid, each card opens a detail screen with `SettingsBackButton`, and the
+page kind is `single`. The shown item is page-local or cleared on unmount, so
+every visit starts at the grid. Pages that edit long text (Agents, Commands,
+Skills, Snippets, Magic Prompts) keep the `split` list-plus-editor layout; a list
+that can grow long filters with `SettingsSidebarSearch`. Card chrome lives only in the shared
+card components; section content inside a detail screen stays flat.
+
 ## Responsiveness: Container Queries
 
 The settings pane is far narrower than the viewport (3-pane dialog). All

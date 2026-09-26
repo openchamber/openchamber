@@ -22,7 +22,7 @@ chrome, section headers, field rows, checkbox rows, or info tooltips with raw
 divs — use the primitives, and extend them (in the shared file) when a new
 shape is genuinely missing.
 
-- Flat hierarchy through spacing and typography; no cards, boxed backgrounds, or row chrome.
+- Flat hierarchy through spacing and typography; no boxed backgrounds or row chrome. Card grids are the one exception, for browse pages (see `references/layout.md`).
 - Secondary helper text is hidden behind an info icon (`info` prop) by default; the default view stays quiet.
 - Controls have one standard size (`h-9` / select `size="settings"`) and capped widths — no full-bleed inputs.
 - Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
