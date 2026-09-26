@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': '在終端機中執行此命令，然後在下方貼上權杖。該權杖只能讀取 LLM 點數用量，並將在 30 天後到期。',
   'settings.providers.page.quotaCredentials.refreshToken': '重新整理權杖',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '貼上權杖',
+  'settings.providers.page.quotaCredentials.platformApiKey': '平台 API 金鑰',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': '查看用量需要 ZenMux 主控台中的平台 API 金鑰。OpenCode 用於聊天的金鑰是另一把，這裡不會使用。',
   'settings.providers.page.openCodeGo.saveFailed': '無法驗證 OpenCode Go 憑證。',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go 憑證有效。',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go 憑證無效或已過期。',

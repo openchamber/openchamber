@@ -840,6 +840,14 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('hyper');
   }
 
+  if (asNonEmptyString(readCredential('zenmux')?.platformApiKey)) {
+    configured.add('zenmux');
+  }
+
+  if (getKiloApiKey(auth)) {
+    configured.add('kilo');
+  }
+
   let xaiAuth: XaiAuthEntry | null = null;
   try {
     xaiAuth = resolveXaiAuth();
@@ -2965,6 +2973,254 @@ export const fetchHyperQuota = async ({ readAuth = readAuthFile, fetchImpl = fet
   }
 };
 
+const ZENMUX_BALANCE_URL = 'https://zenmux.ai/api/v1/management/payg/balance';
+
+type ZenmuxManagedCredential = {
+  platformApiKey: string;
+};
+
+type ZenmuxQuotaDependencies = {
+  readCredential?: () => ZenmuxManagedCredential | null;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+const readZenmuxManagedCredential = (): ZenmuxManagedCredential | null => {
+  const platformApiKey = asNonEmptyString(readCredential('zenmux')?.platformApiKey);
+  return platformApiKey ? { platformApiKey } : null;
+};
+
+export const fetchZenmuxQuota = async ({
+  readCredential: readManaged = readZenmuxManagedCredential,
+  fetchImpl = fetch,
+}: ZenmuxQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = asNonEmptyString(readManaged()?.platformApiKey);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'zenmux',
+      providerName: 'ZenMux',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetchImpl(ZENMUX_BALANCE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'zenmux',
+        providerName: 'ZenMux',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Invalid ZenMux Platform API key'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = asObject(await response.json());
+    const data = asObject(payload?.data);
+    const rawCredits = data?.total_credits;
+    const totalCredits = toNumber(asNonEmptyString(rawCredits)
+      ?? (Number.isFinite(rawCredits) ? rawCredits : null));
+
+    if (totalCredits === null) {
+      return buildResult({
+        providerId: 'zenmux',
+        providerName: 'ZenMux',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const windows = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(totalCredits)}`,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'zenmux',
+      providerName: 'ZenMux',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'zenmux',
+      providerName: 'ZenMux',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
+const KILO_BALANCE_URL = 'https://api.kilo.ai/api/profile/balance';
+const KILO_AUTH_ALIASES = ['kilo', 'kilocode', 'kilo-code'];
+
+const getKiloAuthEntry = (auth: AuthFile) => normalizeAuthEntry(getAuthEntry(auth, KILO_AUTH_ALIASES));
+
+const getKiloApiKey = (auth: AuthFile) => {
+  const entry = getKiloAuthEntry(auth);
+  return asNonEmptyString(entry?.key)
+    ?? asNonEmptyString(entry?.token)
+    ?? asNonEmptyString(entry?.access);
+};
+
+const readKiloOrganizationIdFromUserConfig = (): string | null => {
+  try {
+    const configPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
+    if (!fs.existsSync(configPath)) return null;
+    const parsed = asObject(JSON.parse(fs.readFileSync(configPath, 'utf8')));
+    const provider = asObject(parsed?.provider);
+    const kilo = asObject(provider?.kilo) ?? asObject(provider?.kilocode);
+    const options = asObject(kilo?.options);
+    return asNonEmptyString(options?.kilocodeOrganizationId)
+      ?? asNonEmptyString(options?.organizationId);
+  } catch {
+    return null;
+  }
+};
+
+type KiloQuotaDependencies = {
+  readAuth?: () => AuthFile;
+  readOrganizationId?: () => string | null;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchKiloQuota = async ({
+  readAuth = readAuthFile,
+  readOrganizationId = readKiloOrganizationIdFromUserConfig,
+  fetchImpl = fetch,
+}: KiloQuotaDependencies = {}): Promise<ProviderResult> => {
+  const auth = readAuth();
+  const entry = getKiloAuthEntry(auth);
+  const apiKey = getKiloApiKey(auth);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'kilo',
+      providerName: 'Kilo Code',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const organizationId = asNonEmptyString(entry?.kilocodeOrganizationId)
+    ?? asNonEmptyString(entry?.organizationId)
+    ?? asNonEmptyString(entry?.accountId)
+    ?? readOrganizationId();
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const headers = organizationId
+      ? {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Accept-Encoding': 'identity',
+          'x-kilocode-organizationid': organizationId,
+        }
+      : {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Accept-Encoding': 'identity',
+        };
+
+    const response = await fetchImpl(KILO_BALANCE_URL, {
+      method: 'GET',
+      headers,
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'kilo',
+        providerName: 'Kilo Code',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with Kilo Code'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = asObject(await response.json());
+    const rawBalance = payload?.balance;
+    const balance = toNumber(asNonEmptyString(rawBalance)
+      ?? (Number.isFinite(rawBalance) ? rawBalance : null));
+
+    if (balance === null) {
+      return buildResult({
+        providerId: 'kilo',
+        providerName: 'Kilo Code',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const windows = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance)}`,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'kilo',
+      providerName: 'Kilo Code',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'kilo',
+      providerName: 'Kilo Code',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 const fetchXaiQuota = async (): Promise<ProviderResult> => {
   try {
     const entry = resolveXaiAuth();
@@ -3090,6 +3346,10 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchHyperQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
+    case 'kilo':
+      return fetchKiloQuota();
+    case 'zenmux':
+      return fetchZenmuxQuota();
     case 'xai':
       return fetchXaiQuota();
     default:

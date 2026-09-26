@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Uruchom to polecenie w terminalu, a następnie wklej token poniżej. Może on tylko odczytywać użycie środków LLM i wygasa po 30 dniach.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Token odświeżania',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Wklej token',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'Klucz API platformy',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Użycie wymaga klucza API platformy z konsoli ZenMux. Klucz, którego OpenCode używa do czatu, jest osobny i nie jest tutaj używany.',
   'settings.providers.page.openCodeGo.saveFailed': 'Nie udało się sprawdzić danych OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'Dane OpenCode Go są prawidłowe.',
   'settings.providers.page.openCodeGo.invalid': 'Dane OpenCode Go są nieprawidłowe lub wygasły.',

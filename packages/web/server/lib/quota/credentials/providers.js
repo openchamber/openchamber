@@ -16,6 +16,10 @@ export const normalizers = {
     const refreshToken = clean(value?.refreshToken);
     return accessToken || refreshToken ? { accessToken, refreshToken } : null;
   },
+  zenmux: (value) => {
+    const platformApiKey = clean(value?.platformApiKey);
+    return platformApiKey ? { platformApiKey } : null;
+  },
 };
 
 export const readManagedCredential = (providerId) => {

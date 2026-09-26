@@ -3,11 +3,16 @@ import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readM
 import { fetchOllamaCloudUsage } from './providers/ollama-cloud.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
+import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
 
 const validators = {
   'exe-dev': fetchExeDevUsage,
   'ollama-cloud': fetchOllamaCloudUsage,
   cursor: validateCursorCredential,
+  zenmux: async (credential) => {
+    const result = await fetchZenmuxQuota({ readCredential: () => credential });
+    if (!result.ok) throw new Error(result.error ?? 'Credential validation failed');
+  },
 };
 
 const getProvider = (req, res) => {

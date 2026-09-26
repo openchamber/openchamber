@@ -47,6 +47,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'このコマンドをターミナルで実行し、下にトークンを貼り付けてください。LLM クレジット使用量の読み取りのみが可能で、30 日後に期限切れになります。',
   'settings.providers.page.quotaCredentials.refreshToken': '更新トークン',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'トークンを貼り付け',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'プラットフォーム API キー',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': '使用量には ZenMux コンソールのプラットフォーム API キーが必要です。OpenCode がチャットに使うキーは別物で、ここでは使いません。',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go の認証情報を検証できませんでした。',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go の認証情報は有効です。',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go の認証情報が無効または期限切れです。',

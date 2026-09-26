@@ -16,6 +16,7 @@ import type { UsageProviderGroup, UsageLimitRow } from '@/components/usage/usage
  *
  * `claude-code` is the provider the opencode-claude integration registers, and
  * it bills against the same Claude subscription the `claude` quota reports.
+ * `kilocode` / `kilo-code` are the same Kilo Gateway account as `kilo`.
  */
 const QUOTA_PROVIDER_ALIASES = new Map<string, string>([
   ['openai', 'codex'],
@@ -23,6 +24,8 @@ const QUOTA_PROVIDER_ALIASES = new Map<string, string>([
   ['anthropic', 'claude'],
   ['claude-code', 'claude'],
   ['gemini', 'google'],
+  ['kilocode', 'kilo'],
+  ['kilo-code', 'kilo'],
 ]);
 
 const normalize = (value: string | null | undefined): string => (value ?? '').trim().toLowerCase();

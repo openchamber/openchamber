@@ -2243,6 +2243,8 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Führen Sie diesen Befehl im Terminal aus und fügen Sie dann das Token unten ein. Es kann nur die LLM-Guthabennutzung lesen und läuft nach 30 Tagen ab.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Aktualisierungstoken',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Token einfügen',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'Plattform-API-Schlüssel',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Für die Nutzung brauchen Sie einen Plattform-API-Schlüssel aus der ZenMux-Konsole. Der Schlüssel, den OpenCode für den Chat verwendet, ist ein anderer und wird hier nicht benutzt.',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'Arbeitsbereich',
   'settings.view.nav.group.opencode': 'OpenCode',

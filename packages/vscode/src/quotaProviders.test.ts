@@ -32,7 +32,7 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchZenmuxQuota } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -1197,4 +1197,184 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
       assert.equal(result.usage, null);
     });
   }
+});
+
+describe('ZenMux quota provider (VS Code parity)', () => {
+  const readCredential = () => ({ platformApiKey: 'test-token' });
+  const documentedPayload = {
+    success: true,
+    data: { currency: 'usd', total_credits: 482.74, top_up_credits: 35.0, bonus_credits: 447.74 },
+  };
+
+  test('builds credits_balance from the documented PAYG payload', async () => {
+    let requests = 0;
+    const result = await fetchZenmuxQuota({
+      readCredential,
+      fetchImpl: async (url, options) => {
+        requests += 1;
+        assert.equal(url, 'https://zenmux.ai/api/v1/management/payg/balance');
+        assert.equal(options.method, 'GET');
+        assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer test-token');
+        assert.ok(options.signal instanceof AbortSignal);
+        return Response.json(documentedPayload);
+      },
+    });
+    assert.equal(requests, 1);
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'zenmux');
+    assert.equal(result.configured, true);
+    assert.ok(result.usage);
+    assert.equal(result.usage.windows.credits_balance?.valueLabel, '$482.74');
+    assert.equal(result.usage.windows.credits_balance?.usedPercent, null);
+    assert.equal(JSON.stringify(result).includes('test-token'), false);
+  });
+
+  for (const { totalCredits, label } of [
+    { totalCredits: 0, label: '$0.00' },
+    { totalCredits: '0', label: '$0.00' },
+    { totalCredits: 12.5, label: '$12.50' },
+  ]) {
+    test(`accepts finite total_credits ${JSON.stringify(totalCredits)}`, async () => {
+      const result = await fetchZenmuxQuota({
+        readCredential,
+        fetchImpl: async () => Response.json({ success: true, data: { currency: 'usd', total_credits: totalCredits } }),
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows.credits_balance?.valueLabel, label);
+    });
+  }
+
+  for (const payload of [
+    {}, null, [], { success: true }, { success: true, data: null },
+    { success: true, data: {} }, { success: true, data: { total_credits: '' } },
+    { success: true, data: { total_credits: 'NaN' } }, { success: true, data: { total_credits: null } },
+  ]) {
+    test(`rejects invalid payload ${JSON.stringify(payload)} instead of showing zero`, async () => {
+      const result = await fetchZenmuxQuota({ readCredential, fetchImpl: async () => Response.json(payload) });
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, 'No quota data in response');
+      assert.equal(result.usage, null);
+    });
+  }
+
+  test('does not request usage without a Platform API key', async () => {
+    const result = await fetchZenmuxQuota({
+      readCredential: () => null,
+      fetchImpl: async () => { assert.fail('Unexpected request'); },
+    });
+    assert.equal(result.configured, false);
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Not configured');
+  });
+
+  test('reports HTTP 401 as an invalid Platform API key', async () => {
+    const result = await fetchZenmuxQuota({ readCredential, fetchImpl: async () => new Response(null, { status: 401 }) });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Invalid ZenMux Platform API key');
+  });
+
+  test('reports invalid JSON as a parse failure', async () => {
+    const result = await fetchZenmuxQuota({ readCredential, fetchImpl: async () => new Response('{') });
+    assert.equal(result.error, 'Invalid response from provider');
+    assert.equal(result.ok, false);
+    assert.equal(result.usage, null);
+  });
+});
+
+describe('Kilo Code quota provider (VS Code parity)', () => {
+  const readAuth = () => ({ kilo: { key: 'test-token' } });
+  const readOrganizationId = () => null;
+
+  test('builds credits_balance from the documented balance payload', async () => {
+    let requests = 0;
+    const result = await fetchKiloQuota({
+      readAuth,
+      readOrganizationId,
+      fetchImpl: async (url, options) => {
+        requests += 1;
+        assert.equal(url, 'https://api.kilo.ai/api/profile/balance');
+        assert.equal(options.method, 'GET');
+        const headers = new Headers(options.headers);
+        assert.equal(headers.get('Authorization'), 'Bearer test-token');
+        assert.equal(headers.get('Content-Type'), 'application/json');
+        assert.equal(headers.get('x-kilocode-organizationid'), null);
+        assert.ok(options.signal instanceof AbortSignal);
+        return Response.json({ balance: 12.5 });
+      },
+    });
+    assert.equal(requests, 1);
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'kilo');
+    assert.equal(result.configured, true);
+    assert.ok(result.usage);
+    assert.equal(result.usage.windows.credits_balance?.valueLabel, '$12.50');
+    assert.equal(JSON.stringify(result).includes('test-token'), false);
+  });
+
+  test('sends the organization header from the auth entry', async () => {
+    const result = await fetchKiloQuota({
+      readAuth: () => ({ kilo: { key: 'test-token', organizationId: 'org-123' } }),
+      readOrganizationId,
+      fetchImpl: async (_url, options) => {
+        assert.equal(new Headers(options.headers).get('x-kilocode-organizationid'), 'org-123');
+        return Response.json({ balance: 4 });
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(JSON.stringify(result).includes('org-123'), false);
+  });
+
+  test('falls back to OpenCode provider options when auth has no organization', async () => {
+    const result = await fetchKiloQuota({
+      readAuth,
+      readOrganizationId: () => 'config-org',
+      fetchImpl: async (_url, options) => {
+        assert.equal(new Headers(options.headers).get('x-kilocode-organizationid'), 'config-org');
+        return Response.json({ balance: 4 });
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+
+  test('accepts a literal zero balance', async () => {
+    const result = await fetchKiloQuota({
+      readAuth,
+      readOrganizationId,
+      fetchImpl: async () => Response.json({ balance: 0 }),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows.credits_balance?.valueLabel, '$0.00');
+  });
+
+  test('rejects a missing balance instead of showing zero', async () => {
+    const result = await fetchKiloQuota({
+      readAuth,
+      readOrganizationId,
+      fetchImpl: async () => Response.json({}),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'No quota data in response');
+    assert.equal(result.usage, null);
+  });
+
+  test('does not request usage without a valid credential', async () => {
+    const result = await fetchKiloQuota({
+      readAuth: () => ({}),
+      readOrganizationId,
+      fetchImpl: async () => { assert.fail('Unexpected request'); },
+    });
+    assert.equal(result.configured, false);
+    assert.equal(result.ok, false);
+  });
+
+  test('reports HTTP 401 as session expired', async () => {
+    const result = await fetchKiloQuota({
+      readAuth,
+      readOrganizationId,
+      fetchImpl: async () => new Response(null, { status: 401 }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Session expired — please re-authenticate with Kilo Code');
+  });
 });
