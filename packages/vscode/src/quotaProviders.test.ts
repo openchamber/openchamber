@@ -24,6 +24,7 @@ const AUTH = JSON.stringify({
   'opencode-go': { key: 'test-token' },
   openrouter: { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
+  'zhipuai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
   hyper: { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
@@ -627,6 +628,102 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
     assert.equal(windows.weekly!.resetAt, 1787844668997);
     assert.equal(windows.weekly!.valueLabel, '65 / 60k credits');
+  });
+});
+
+describe('Zhipu AI Coding Plan quota provider (VS Code parity)', () => {
+  test('maps CREDIT_LIMIT entries to 5-hour and weekly windows with credit labels and plan level', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      msg: '操作成功',
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 900, remaining: 1100, percentage: 45, nextResetTime: 1797930060000 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 10000, currentValue: 6000, remaining: 4000, percentage: 60, nextResetTime: 1798425600000 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 5, nextResetTime: 1798425600000 },
+        ],
+        level: 'lite',
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(result.planLabel, 'lite');
+    assert.equal(windows['5h']!.usedPercent, 45);
+    assert.equal(windows['5h']!.windowSeconds, 5 * 60 * 60);
+    assert.equal(windows['5h']!.resetAt, 1797930060000);
+    assert.equal(windows['5h']!.valueLabel, '900 / 2k credits');
+    assert.equal(windows.weekly!.usedPercent, 60);
+    assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
+    assert.equal(windows.weekly!.resetAt, 1798425600000);
+    assert.equal(windows.weekly!.valueLabel, '6k / 10k credits');
+    assert.equal(windows['MCP Tools']!.usedPercent, 5);
+    assert.equal(windows['MCP Tools']!.windowSeconds, 30 * 24 * 60 * 60);
+  });
+
+  test('still maps legacy TOKENS_LIMIT entries without credit labels', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 30 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 30);
+    assert.equal(result.usage!.windows['5h']!.windowSeconds, 5 * 60 * 60);
+    assert.equal(result.usage!.windows['5h']!.valueLabel, undefined);
+  });
+
+  test('derives the used percent from currentValue/usage when percentage is missing', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 900 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 45);
+    assert.equal(result.usage!.windows['5h']!.valueLabel, '900 / 2k credits');
+  });
+
+  test('surfaces business failures reported inside HTTP 200 bodies', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 401,
+      msg: '令牌已过期或验证不正确',
+      success: false,
+    })));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, '令牌已过期或验证不正确');
+    assert.equal(result.usage, null);
+  });
+
+  test('falls back to the code when the envelope carries no message', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 1001,
+      success: false,
+    })));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'API error: 1001');
   });
 });
 

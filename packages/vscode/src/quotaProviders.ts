@@ -102,16 +102,8 @@ type ZaiPayload = {
   };
 };
 
-type ZhipuaiTokensLimit = {
-  type: 'TOKENS_LIMIT';
-  unit?: number;
-  number?: number;
-  nextResetTime?: number;
-  percentage?: number;
-};
-
-type ZhipuaiMcpTimeLimit = {
-  type: 'TIME_LIMIT';
+type ZhipuaiLimit = {
+  type?: string;
   unit?: number;
   number?: number;
   usage?: number;
@@ -119,16 +111,54 @@ type ZhipuaiMcpTimeLimit = {
   remaining?: number;
   percentage?: number;
   nextResetTime?: number;
-  usageDetails?: Array<{
-    modelCode?: string;
-    usage?: number;
-  }>;
 };
 
 type ZhipuaiPayload = {
+  code?: number;
+  msg?: string;
+  success?: boolean;
   data?: {
-    limits?: Array<ZhipuaiTokensLimit | ZhipuaiMcpTimeLimit>;
+    limits?: ZhipuaiLimit[];
+    level?: string;
   };
+};
+
+// Mirrors the Z.ai credit label (same monitor API family): `usage` is the
+// total, `currentValue` the consumed amount.
+const formatZhipuaiCreditAmount = (value: number): string => {
+  if (value < 1000) return value.toLocaleString('en-US');
+  return `${Math.round(value / 100) / 10}k`;
+};
+
+const formatZhipuaiCreditValueLabel = (limit: ZhipuaiLimit): string | null => {
+  const used = toNumber(limit.currentValue);
+  const total = toNumber(limit.usage);
+  if (used === null || total === null) return null;
+  return `${formatZhipuaiCreditAmount(used)} / ${formatZhipuaiCreditAmount(total)} credits`;
+};
+
+// `percentage` is the used percent; when the API omits it, derive it from
+// currentValue/usage (observed percentages are integers).
+const resolveZhipuaiUsedPercent = (limit: ZhipuaiLimit): number | null => {
+  const percentage = toNumber(limit.percentage);
+  if (percentage !== null) {
+    return percentage;
+  }
+  const used = toNumber(limit.currentValue);
+  const total = toNumber(limit.usage);
+  if (used === null || total === null || total <= 0) return null;
+  return Math.round((used / total) * 100);
+};
+
+// bigmodel.cn reports business failures inside HTTP 200 bodies
+// (`{code, msg, success: false}`); a missing envelope is treated as legacy success.
+const zhipuaiEnvelopeError = (payload: ZhipuaiPayload): string | null => {
+  const code = payload?.code;
+  if (payload?.success !== false && !(code !== undefined && code !== 200)) {
+    return null;
+  }
+  const msg = payload?.msg?.trim();
+  return msg ? msg : `API error: ${code ?? 'unknown'}`;
 };
 
 type WaferPayload = {
@@ -2226,27 +2256,40 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as ZhipuaiPayload;
-    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
-    const tokensLimit = limits.find((limit): limit is ZhipuaiTokensLimit => limit?.type === 'TOKENS_LIMIT');
-    const mcpToolsTimeLimit = limits.find((limit): limit is ZhipuaiMcpTimeLimit => limit?.type === 'TIME_LIMIT');
+    const failure = zhipuaiEnvelopeError(payload);
+    if (failure) {
+      return buildResult({
+        providerId: 'zhipuai-coding-plan',
+        providerName: 'Zhipu AI Coding Plan',
+        ok: false,
+        configured: true,
+        error: failure,
+      });
+    }
+
+    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
     const windows: Record<string, UsageWindow> = {};
 
-    // Handle TOKENS_LIMIT (5-hour window for token usage)
-    if (tokensLimit) {
-      const windowSeconds = resolveWindowSeconds(tokensLimit);
-      const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-      const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
+    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the
+    // same, so both limit types map to the same windows. Unit 3 marks hourly
+    // blocks (5h), unit 6 weekly.
+    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
+      const windowLabel = resolveWindowLabel(windowSeconds);
+      const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
 
-      windows['Tokens'] = toUsageWindow({
-        usedPercent,
+      windows[windowLabel] = toUsageWindow({
+        usedPercent: resolveZhipuaiUsedPercent(limit),
         windowSeconds,
         resetAt,
+        valueLabel: formatZhipuaiCreditValueLabel(limit),
       });
     }
 
     // Handle TIME_LIMIT (MCP tools monthly window)
+    const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
       // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
@@ -2266,6 +2309,7 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
       ok: true,
       configured: true,
       usage: { windows },
+      planLabel: payload?.data?.level || null,
     });
   } catch (error) {
     return buildResult({
