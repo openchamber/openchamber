@@ -40,3 +40,20 @@ export const parseFilesystemErrorReason = (value: unknown): FilesystemErrorReaso
       return 'unknown';
   }
 };
+
+export const isFileMissingError = (error: unknown): boolean => {
+  if (isFilesystemError(error) && error.reason === 'not-found') {
+    return true;
+  }
+  const message = error instanceof Error
+    ? error.message
+    : (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : String(error ?? ''));
+  const normalized = message.toLowerCase();
+  return normalized.includes('file not found')
+    || normalized.includes('enoent')
+    || normalized.includes('no such file')
+    || normalized.includes('does not exist');
+};
+

@@ -88,6 +88,7 @@ import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
+import { isFileMissingError } from '@/lib/api/files-errors';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
 import { isEditableEventTarget } from '@/hooks/keyboard-shortcut-dom';
@@ -315,15 +316,6 @@ const isDirectoryReadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? '');
   const normalized = message.toLowerCase();
   return normalized.includes('is a directory') || normalized.includes('eisdir');
-};
-
-const isFileMissingError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  const normalized = message.toLowerCase();
-  return normalized.includes('file not found')
-    || normalized.includes('enoent')
-    || normalized.includes('no such file')
-    || normalized.includes('does not exist');
 };
 
 const MAX_CONTENT_POLL_BYTES = 200_000;
