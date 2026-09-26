@@ -46,7 +46,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const error = useSessionUIStore((state) => state.error);
   const clearError = useSessionUIStore((state) => state.clearError);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const chatMessageWidthMode = useUIStore((state) => state.chatMessageWidthMode);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const panelType = typeof window !== 'undefined'
@@ -74,11 +74,12 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   }), []);
 
   React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
+    document.documentElement.classList.toggle('chat-message-width-wide', chatMessageWidthMode === 'wide');
+    document.documentElement.classList.toggle('chat-message-width-fluid', chatMessageWidthMode === 'fluid');
     return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
+      document.documentElement.classList.remove('chat-message-width-wide', 'chat-message-width-fluid');
     };
-  }, [wideChatLayoutEnabled]);
+  }, [chatMessageWidthMode]);
 
   React.useEffect(() => {
     void refreshGitHubAuthStatus(apis.github, { force: true });

@@ -145,6 +145,35 @@ describe('settings registry', () => {
     expect(useUIStore.getState().terminalShell).toBe('fish');
   });
 
+  test('loads legacy chat widths and round-trips canonical modes through the registry', () => {
+    const initial = useUIStore.getState().chatMessageWidthMode;
+    try {
+      for (const enabled of [true, false]) {
+        const legacy = parseSettingsDocument({ wideChatLayoutEnabled: enabled });
+        if (!legacy) throw new Error('Expected valid settings');
+        applySettingsToStores(legacy);
+        expect(useUIStore.getState().chatMessageWidthMode).toBe(enabled ? 'wide' : 'narrow');
+      }
+      for (const mode of ['narrow', 'wide', 'fluid']) {
+        const parsed = parseSettingsDocument({ chatMessageWidthMode: mode, wideChatLayoutEnabled: true });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().chatMessageWidthMode).toBe(mode);
+        const snapshot = readAutoSaveSnapshot();
+        expect(snapshot.chatMessageWidthMode).toBe(mode);
+        expect(Object.keys(snapshot)).not.toContain('wideChatLayoutEnabled');
+        expect(parseSettingsDocument(JSON.parse(JSON.stringify(snapshot)))?.chatMessageWidthMode).toBe(mode);
+      }
+      expect(parseSettingsDocument({ chatMessageWidthMode: 'readable' })).toEqual({});
+      applySettingsToStores({});
+      expect(useUIStore.getState().chatMessageWidthMode).toBe('fluid');
+      expect(MIRRORED_KEYS).toContain('chatMessageWidthMode');
+      expect(SETTINGS_REGISTRY.chatMessageWidthMode.perSurface).toBe(true);
+    } finally {
+      useUIStore.getState().setChatMessageWidthMode(initial);
+    }
+  });
+
   test('persists archived-only retention as an opt-in boolean and enforces its delete action', () => {
     expect(useUIStore.getInitialState().sessionRetentionOnlyArchived).toBe(false);
     expect(parseSettingsDocument({ sessionRetentionOnlyArchived: true })).toEqual({ sessionRetentionOnlyArchived: true });

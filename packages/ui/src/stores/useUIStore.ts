@@ -32,6 +32,7 @@ const persistedPanelWidthsSchema = z.object({
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
+export type ChatMessageWidthMode = 'narrow' | 'wide' | 'fluid';
 export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
@@ -1010,7 +1011,7 @@ interface UIStore {
   largeTextPasteBehavior: LargeTextPasteBehavior;
   enterToSend: boolean;
   enterToSendConfigured: boolean;
-  wideChatLayoutEnabled: boolean;
+  chatMessageWidthMode: ChatMessageWidthMode;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
@@ -1212,7 +1213,7 @@ interface UIStore {
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
   setEnterToSend: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
-  setWideChatLayoutEnabled: (value: boolean) => void;
+  setChatMessageWidthMode: (value: ChatMessageWidthMode) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
@@ -1397,7 +1398,7 @@ export const useUIStore = create<UIStore>()(
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
         enterToSend: false,
         enterToSendConfigured: false,
-        wideChatLayoutEnabled: false,
+        chatMessageWidthMode: 'narrow',
         codeBlockLineWrap: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
@@ -2788,8 +2789,8 @@ export const useUIStore = create<UIStore>()(
         setEnterToSendConfigured: (value) => {
           set({ enterToSendConfigured: value });
         },
-        setWideChatLayoutEnabled: (value) => {
-          set({ wideChatLayoutEnabled: value });
+        setChatMessageWidthMode: (value) => {
+          set({ chatMessageWidthMode: value });
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
@@ -2886,7 +2887,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 21,
+        version: 22,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2976,6 +2977,14 @@ export const useUIStore = create<UIStore>()(
                 }
               }
             }
+          }
+
+          // v21 -> v22: replace the old boolean wide layout toggle with a width mode.
+          if (version < 22) {
+            if (state.chatMessageWidthMode !== 'narrow' && state.chatMessageWidthMode !== 'wide' && state.chatMessageWidthMode !== 'fluid') {
+              state.chatMessageWidthMode = state.wideChatLayoutEnabled === true ? 'wide' : 'narrow';
+            }
+            delete state.wideChatLayoutEnabled;
           }
 
           // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
@@ -3235,7 +3244,7 @@ export const useUIStore = create<UIStore>()(
           largeTextPasteBehavior: state.largeTextPasteBehavior,
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
-          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          chatMessageWidthMode: state.chatMessageWidthMode,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
