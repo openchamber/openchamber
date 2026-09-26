@@ -115,4 +115,30 @@ describe('session row menu state', () => {
       await mounted.cleanup();
     }
   });
+
+  test('context menu closes when the window loses focus', async () => {
+    const mounted = await mountHook();
+    try {
+      await act(async () => mounted.capture.menu!.handleContextMenuOpenChange(true));
+      expect(mounted.capture.menu!.isContextMenuOpen).toBe(true);
+
+      await act(async () => window.dispatchEvent(new Event('blur')));
+      expect(mounted.capture.menu!.isContextMenuOpen).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  test('overflow menu closes when the window loses focus', async () => {
+    const mounted = await mountHook();
+    try {
+      await act(async () => mounted.capture.menu!.handleMenuOpenChange(true));
+      expect(mounted.capture.menu!.isMenuOpen).toBe(true);
+
+      await act(async () => window.dispatchEvent(new Event('blur')));
+      expect(mounted.capture.menu!.isMenuOpen).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 });
