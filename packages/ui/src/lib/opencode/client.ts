@@ -40,6 +40,7 @@ import { markStartupTrace } from "@/lib/startupTrace"
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
 import { normalizePath } from "@/lib/pathNormalization"
 import { isAutoModel } from "@/lib/routing/autoModel"
+import { assertPrimarySessionAdmission } from "./session-admission"
 import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status"
 import {
   compact,
@@ -813,6 +814,7 @@ class OpencodeService {
     directory?: string | null,
   ): Promise<Session> {
     const requestDirectory = this.resolveDirectory(directory)
+    assertPrimarySessionAdmission(requestDirectory, params?.agent)
     const info = await call("session.create", () =>
       this.clientFor(directory).session.create({
         id: params?.id,
