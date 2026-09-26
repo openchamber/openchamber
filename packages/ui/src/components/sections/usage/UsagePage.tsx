@@ -221,7 +221,7 @@ export const UsagePage: React.FC = () => {
         <SettingsSection settingsItem="usage.model-quotas">
           <div className="divide-y divide-[var(--surface-subtle)]">
             {Object.entries(usage.windows).map(([label, window]) => (
-              <UsageCard key={label} title={label} window={window} />
+              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} />
             ))}
           </div>
         </SettingsSection>

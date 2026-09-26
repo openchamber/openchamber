@@ -32,7 +32,7 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -86,8 +86,9 @@ afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
 });
 
-const stubFetchReturning = (resolver: () => Promise<unknown>): void => {
-  globalThis.fetch = (async () => resolver()) as typeof fetch;
+const stubFetchReturning = (resolver: (url: string, init?: RequestInit) => Promise<unknown>): void => {
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) =>
+    resolver(String(input), init)) as typeof fetch;
 };
 
 const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit): void => {
@@ -627,6 +628,203 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
     assert.equal(windows.weekly!.resetAt, 1787844668997);
     assert.equal(windows.weekly!.valueLabel, '65 / 60k credits');
+  });
+
+  test('attaches the nearest available gift reset to the matching windows', async () => {
+    const responses = [
+      mockResponse({
+        data: {
+          limits: [
+            { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+            { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 100, nextResetTime: 1785659659993 },
+            { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 0, nextResetTime: 1787128459979 },
+          ],
+        },
+      }),
+      mockResponse({
+        code: 200,
+        success: true,
+        data: {
+          targetType: 'PERSONAL',
+          fiveHourResets: [
+            { recordId: 387233, expireTime: '2099-06-15 12:30:00', available: false },
+            { recordId: 111111, expireTime: '2020-01-01 00:00:00', available: true },
+            { recordId: 666002, expireTime: 'not-a-date', available: true },
+            { recordId: 462029, expireTime: '2099-09-11 06:01:35', available: true },
+            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true },
+          ],
+          weekResets: [
+            { recordId: 777003, expireTime: '2099-03-01 08:00:00', available: true },
+          ],
+        },
+      }),
+    ];
+    let requestCount = 0;
+    stubFetchReturning(async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    });
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(windows['5h']!.giftReset, {
+      recordId: 555501,
+      expireAt: Date.parse('2099-06-15T12:30:00+08:00'),
+    });
+    assert.deepEqual(windows.weekly!.giftReset, {
+      recordId: 777003,
+      expireAt: Date.parse('2099-03-01T08:00:00+08:00'),
+    });
+    assert.equal(windows['MCP Tools']!.giftReset, undefined);
+  });
+
+  test('keeps the quota result ok when the gift reset list request fails', async () => {
+    const responses = [
+      mockResponse({
+        data: {
+          limits: [
+            { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 42 },
+          ],
+        },
+      }),
+      mockResponse({}, { ok: false, status: 500 }),
+    ];
+    let requestCount = 0;
+    stubFetchReturning(async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    });
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.usedPercent, 42);
+    assert.equal(windows['5h']!.giftReset, undefined);
+  });
+
+  test('attaches no gift reset while only expired resets remain', async () => {
+    const responses = [
+      mockResponse({
+        data: {
+          limits: [
+            { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 42 },
+            { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 10 },
+          ],
+        },
+      }),
+      mockResponse({
+        code: 200,
+        success: true,
+        data: {
+          fiveHourResets: [
+            { recordId: 111111, expireTime: '2020-01-01 00:00:00', available: true },
+            { recordId: 999999, expireTime: '2099-01-01 00:00:00', available: false },
+            { recordId: 222222, expireTime: '2026-01-01 00:00:00', available: true },
+          ],
+          weekResets: [],
+        },
+      }),
+    ];
+    let requestCount = 0;
+    stubFetchReturning(async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    });
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.giftReset, undefined);
+    assert.equal(windows.weekly!.giftReset, undefined);
+  });
+
+  test('attaches no gift reset for an expired unavailable record', async () => {
+    const responses = [
+      mockResponse({
+        data: {
+          limits: [
+            { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 42 },
+          ],
+        },
+      }),
+      mockResponse({
+        code: 200,
+        success: true,
+        data: {
+          // z.ai flips `available` to false once a record expires.
+          fiveHourResets: [
+            { recordId: 387233, expireTime: '2026-09-04 22:25:19', available: false },
+          ],
+          weekResets: [],
+        },
+      }),
+    ];
+    let requestCount = 0;
+    stubFetchReturning(async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    });
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.giftReset, undefined);
+  });
+});
+
+describe('Z.ai gift reset activation (VS Code parity)', () => {
+  test('rejects providers without gift reset support', async () => {
+    await assert.rejects(
+      activateQuotaGiftReset('ollama-cloud', { recordId: 1, resetType: 'FIVE_HOUR' }),
+      /Unsupported provider/,
+    );
+  });
+
+  test('posts the activation request with a fresh requestId', async () => {
+    const fetchCalls: Array<[string, RequestInit | undefined]> = [];
+    stubFetchReturning(async (url: string, init?: RequestInit) => {
+      fetchCalls.push([url, init]);
+      return mockResponse({ code: 200, msg: 'success', data: 462029, success: true });
+    });
+
+    await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'FIVE_HOUR' });
+
+    assert.equal(fetchCalls.length, 1);
+    const [url, init] = fetchCalls[0]!;
+    assert.equal(url, 'https://api.z.ai/api/biz/customer-package-reset/use');
+    assert.equal(init?.method, 'POST');
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('Authorization'), 'Bearer test-token');
+    // SAFETY: body is the JSON stringified by activateQuotaGiftReset itself;
+    // only the documented activation fields are read back.
+    const body = JSON.parse(String(init?.body)) as {
+      targetType?: unknown;
+      resetType?: unknown;
+      recordId?: unknown;
+      requestId?: unknown;
+    };
+    assert.equal(body.targetType, 'PERSONAL');
+    assert.equal(body.resetType, 'FIVE_HOUR');
+    assert.equal(body.recordId, 462029);
+    assert.match(String(body.requestId), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  test('throws the API message when activation is rejected', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ code: 400, msg: 'reset already used', success: false })));
+
+    await assert.rejects(
+      activateQuotaGiftReset('zai-coding-plan', { recordId: 1, resetType: 'WEEK' }),
+      /reset already used/,
+    );
   });
 });
 
