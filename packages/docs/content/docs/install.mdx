@@ -28,6 +28,22 @@ Open the URL the CLI prints (usually `http://localhost:3000`). You should see th
 
 Download the latest desktop build from the GitHub releases page or the OpenChamber download page. Open it and sign into your usual OpenCode workflow.
 
+### Fedora, RHEL, and CentOS (RPM)
+
+On RPM-based distributions, install OpenChamber with your native package manager instead of the AppImage:
+
+```bash
+sudo dnf install ./OpenChamber-<version>-linux-<arch>.rpm
+```
+
+Releases include x86_64 and aarch64 (ARM64) RPMs. To uninstall:
+
+```bash
+sudo dnf remove OpenChamber
+```
+
+RPM installs update manually: download the new `.rpm` from the GitHub releases page and run `sudo dnf install ./OpenChamber-<version>-linux-<arch>.rpm` again. The in-app updater is skipped for RPM installs.
+
 ## VS Code
 
 Install from the VS Code Marketplace and sign into your usual OpenCode workflow. The OpenChamber view then opens in the sidebar.
