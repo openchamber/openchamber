@@ -1093,7 +1093,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '上一個工作階段',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '下一個工作階段',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': '重新命名目前的工作階段',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '切換權限自動核准',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '切換權限模式',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': '關閉工作階段分頁',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': '新增 worktree 草稿',
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': '新建 Mini Chat 視窗',

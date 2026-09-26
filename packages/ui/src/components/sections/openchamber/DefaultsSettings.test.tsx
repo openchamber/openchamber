@@ -104,6 +104,10 @@ mock.module('@/components/sections/commands/AgentSelector', () => ({
 mock.module('@/components/sections/shared/SettingsInfoHint', () => ({
   SettingsInfoHint: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
+// The permission row reads the routing and UI stores; it has no bearing on the defaults under test.
+mock.module('@/components/sections/openchamber/PermissionDefaultModeField', () => ({
+  PermissionDefaultModeField: () => null,
+}));
 mock.module('@/components/sections/shared/SettingsSection', () => ({
   SettingsSection: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
   SettingsFieldRow: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -116,6 +120,7 @@ mock.module('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_SELECT_ROW_TRIGGER_CLASS: '',
   SETTINGS_SELECT_SIZE: 'sm',
   SETTINGS_OPTION_STACK_CLASS: '',
+  SETTINGS_FIELDS_STACK_CLASS: '',
 }));
 mock.module('@/components/ui/select', () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

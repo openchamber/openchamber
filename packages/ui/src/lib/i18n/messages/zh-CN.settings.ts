@@ -1188,7 +1188,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '上一个会话',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '下一个会话',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': '重命名当前会话',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '切换权限自动批准',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '切换权限模式',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': '关闭会话标签页',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': '新建工作树草稿',
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': '新建 Mini Chat 窗口',

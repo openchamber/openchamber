@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { useRoutingStore, selectAutoReady } from './useRoutingStore';
+import { useRoutingStore, selectAutoReady, selectSafetyNetAvailable } from './useRoutingStore';
 import { ROUTING_UNAVAILABLE } from '@/lib/routing/routingApi';
 
 describe('useRoutingStore', () => {
@@ -13,6 +13,14 @@ describe('useRoutingStore', () => {
     expect(selectAutoReady(useRoutingStore.getState())).toBe(true);
     useRoutingStore.getState().applyState({ ...ROUTING_UNAVAILABLE, available: true, autoReady: false, tokenPresent: true });
     expect(selectAutoReady(useRoutingStore.getState())).toBe(false);
+  });
+
+  test('offers the safety net only while a classification provider answers', () => {
+    expect(selectSafetyNetAvailable(useRoutingStore.getState())).toBe(false);
+    useRoutingStore.getState().applyState({ ...ROUTING_UNAVAILABLE, available: true, jevAvailable: true });
+    expect(selectSafetyNetAvailable(useRoutingStore.getState())).toBe(true);
+    useRoutingStore.getState().applyState({ ...ROUTING_UNAVAILABLE, available: true, jevAvailable: false });
+    expect(selectSafetyNetAvailable(useRoutingStore.getState())).toBe(false);
   });
 
   test('keeps held permissions until they are released', () => {
@@ -30,7 +38,7 @@ describe('useRoutingStore', () => {
     const store = useRoutingStore.getState();
     store.applyState({ ...ROUTING_UNAVAILABLE, available: true, autoReady: true, tokenPresent: true, heldPermissions: [{ permissionId: 'p2', score: 0.7, kind: null }] });
     expect(Object.keys(useRoutingStore.getState().held)).toEqual(['p2']);
-    useRoutingStore.getState().applyAvailability({ available: false, autoReady: false, tokenPresent: false, jevSource: 'zen-free' });
+    useRoutingStore.getState().applyAvailability({ available: false, autoReady: false, jevAvailable: false, tokenPresent: false, jevSource: 'zen-free' });
     expect(Object.keys(useRoutingStore.getState().held)).toEqual(['p2']);
     expect(useRoutingStore.getState().autoReady).toBe(false);
   });

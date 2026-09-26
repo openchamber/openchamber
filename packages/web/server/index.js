@@ -985,10 +985,13 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   broadcastGlobalUiEvent,
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
+  resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
 });
 permissionAutoAcceptRuntime.start();
+// A request the safety net held still needs the user, so only one that was
+// actually answered automatically skips the notification.
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
-  (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
+  (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
 );
 
 // Queued follow-up messages are delivered by the server so a closed tab or a

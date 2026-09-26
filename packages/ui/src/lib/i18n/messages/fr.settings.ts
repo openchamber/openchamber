@@ -1106,7 +1106,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Session précédente',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Session suivante',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': 'Renommer la session actuelle',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': 'Basculer l’approbation automatique',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': 'Changer de mode de permissions',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': 'Fermer l’onglet de session',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': 'Nouvelle ébauche d\'worktree',
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': 'Nouvelle fenêtre de mini-chat',

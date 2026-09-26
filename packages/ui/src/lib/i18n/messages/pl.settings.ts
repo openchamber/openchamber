@@ -852,7 +852,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Poprzednia sesja',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Następna sesja',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': 'Zmień nazwę bieżącej sesji',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': 'Przełącz automatyczne zatwierdzanie',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': 'Przełącz tryb uprawnień',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': 'Zamknij kartę sesji',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': 'Nowy szkic obszaru roboczego',
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': 'Nowe okno Mini Chat',

@@ -16,6 +16,7 @@ import {
 import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
+import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
 import type { AssistantMessage, Part } from '@openchamber/ui/lib/opencode/model';
 import { syncEventSessionID, type SyncEvent } from '@openchamber/ui/lib/opencode/events';
@@ -2074,15 +2075,11 @@ onCommand('settingsSynced', () => {
   });
 });
 
+// The extension host keeps an on/off policy; on reads as `auto`.
 onCommand('permissionAutoAcceptSynced', (payload) => {
-  if (!payload || typeof payload !== 'object') return;
-  const snapshot = payload as { sessions?: unknown; revision?: unknown };
-  const sessions = snapshot.sessions;
-  if (!sessions || typeof sessions !== 'object') return;
-  usePermissionStore.getState().applySnapshot({
-    sessions: sessions as Record<string, boolean>,
-    revision: typeof snapshot.revision === 'number' ? snapshot.revision : undefined,
-  });
+  const snapshot = permissionPolicyWireSchema.safeParse(payload);
+  if (!snapshot.success) return;
+  usePermissionStore.getState().applySnapshot(policySnapshotFromWire(snapshot.data));
 });
 
 // Listen for active editor file changes from the extension

@@ -114,6 +114,14 @@
     "permissionAutoAccept": {
       "scope": "instance"
     },
+    "permissionDefaultMode": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },

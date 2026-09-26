@@ -1221,7 +1221,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '前のセッション',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '次のセッション',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': '現在のセッション名を変更',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '権限の自動承認を切り替え',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '権限モードを切り替え',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': 'セッションタブを閉じる',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': '新しい Worktree 下書き',
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': '新しいミニチャットウィンドウ',

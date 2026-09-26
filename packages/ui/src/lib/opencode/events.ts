@@ -140,7 +140,8 @@ export type SyncEvent =
   | { type: "location.shutdown"; properties: Record<never, never> }
   // OpenChamber's own server frames that ride the same stream.
   | { type: "openchamber.notification"; properties: OpenchamberNotification }
-  | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; revision?: number } }
+  // `modes` is the policy; `sessions` is its on/off view for clients from before the modes.
+  | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; modes?: Record<string, "ask" | "safety" | "auto">; revision?: number } }
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {

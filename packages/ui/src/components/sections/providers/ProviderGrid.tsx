@@ -18,6 +18,33 @@ import {
   type SettingsCardTone,
 } from '@/components/sections/shared/SettingsCards';
 import { getProviderCardStatus, readProviderApiKeySetting, type ProviderCardStatus } from './providerAuth';
+import { useRoutingStore } from '@/stores/useRoutingStore';
+
+/**
+ * Classification providers answer OpenChamber's own Jev decisions (safety
+ * net, Auto), not OpenCode, so they get one card of their own that opens a
+ * dedicated page. Absent where there is no OpenChamber server (VS Code).
+ */
+const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
+  const { t } = useI18n();
+  const available = useRoutingStore((state) => state.available);
+  const jevAvailable = useRoutingStore((state) => state.jevAvailable);
+  if (!available) return null;
+  return (
+    <SettingsCard
+      icon={<ProviderLogo providerId="typesafe" className="size-5" />}
+      title={t('settings.classification.page.title')}
+      subtitle="jev"
+      badges={(
+        <SettingsCardPill tone={jevAvailable ? 'success' : 'warning'}>
+          {jevAvailable ? t('settings.classification.card.ready') : t('settings.classification.card.notSetUp')}
+        </SettingsCardPill>
+      )}
+      footer={<span className="min-w-0 truncate">{t('settings.classification.card.usedFor')}</span>}
+      onOpen={onOpen}
+    />
+  );
+};
 
 type GridProvider = Provider & { models: Model[] };
 
@@ -28,6 +55,7 @@ interface ProviderGridProps {
   directory: string | null;
   onSelect: (providerId: string) => void;
   onConnect: () => void;
+  onOpenClassification: () => void;
 }
 
 /**
@@ -85,7 +113,7 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
 };
 
 /** Browse view of the Providers page: one card per provider OpenCode reports. */
-export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect }) => {
+export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
@@ -117,6 +145,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             onClick={onConnect}
           />
         )}
+        {hasQuery ? null : <ClassificationCard onOpen={onOpenClassification} />}
         {filtered.map((provider) => {
           const status = getProviderCardStatus({
             integrations,

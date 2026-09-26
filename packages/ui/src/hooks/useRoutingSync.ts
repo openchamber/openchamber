@@ -1,8 +1,9 @@
 /**
  * Keeps the routing store current: one read of `/api/routing` per runtime, then
- * the control-stream events. Also the one place the safety net talks to the
- * user outside a permission card — when Jev could not be reached, auto-accept
- * went ahead as it always has, and a toast says so with the actual error.
+ * the control-stream events. Also where the safety net talks to the user
+ * outside a permission card: a held request raises the toast an `ask`
+ * session's would have, and when Jev could not be reached the request waits
+ * too and a toast says so with the actual error.
  */
 import React from 'react';
 
@@ -12,6 +13,7 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { notifyHeldPermission } from '@/sync/sync-context';
 
 export const useRoutingSync = (): void => {
   const available = useUIStore((state) => state.routingFeatureAvailable);
@@ -39,8 +41,10 @@ export const useRoutingSync = (): void => {
         store.recordDecision(event.decision);
       } else if (event.type === 'routing-permission-held') {
         store.holdPermission({ permissionId: event.permissionId, score: event.score, kind: event.kind });
+        notifyHeldPermission(event.permissionId, event.sessionId, event.directory);
       } else if (event.type === 'routing-safety-skipped') {
         toast.warning(tRef.current('routing.toast.safetySkipped'), { description: event.error });
+        notifyHeldPermission(event.permissionId, event.sessionId, event.directory);
       }
     });
   }, [available]);

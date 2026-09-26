@@ -1188,7 +1188,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.switch_session_previous.label": "Попередня сесія",
   "settings.openchamber.keyboardShortcuts.action.switch_session_next.label": "Наступна сесія",
   "settings.openchamber.keyboardShortcuts.action.rename_current_session.label": "Перейменувати поточну сесію",
-  "settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label": "Перемкнути авто-дозволи",
+  "settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label": "Перемкнути режим дозволів",
   "settings.openchamber.keyboardShortcuts.action.close_session_tab.label": "Закрити вкладку сесії",
   "settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label": "Нова чернетка worktree",
   "settings.openchamber.keyboardShortcuts.action.new_mini_chat.label": "Нове вікно Mini Chat",

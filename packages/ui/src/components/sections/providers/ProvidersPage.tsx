@@ -42,6 +42,7 @@ import {
   type CredentialConnection,
 } from './providerAuth';
 import { ProviderGrid } from './ProviderGrid';
+import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
 import { CustomProviderForm } from './CustomProviderForm';
@@ -80,6 +81,8 @@ const formatTokens = (value?: number | null) => {
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
+/** Not an OpenCode provider id: the page for OpenChamber's own classification providers (Jev). */
+const CLASSIFICATION_PAGE_ID = '__classification__';
 
 interface ProviderOption {
   id: string;
@@ -158,12 +161,21 @@ export const ProvidersPage: React.FC = () => {
   // Settings open on the chat's provider and marked the chat selection manual.
   const connectRequested = useUIStore((state) => state.settingsProvidersConnectRequested);
   const setConnectRequested = useUIStore((state) => state.setSettingsProvidersConnectRequested);
-  const [selectedProviderId, setSelectedProvider] = React.useState(() => (connectRequested ? ADD_PROVIDER_ID : ''));
+  const classificationRequested = useUIStore((state) => state.settingsProvidersClassificationRequested);
+  const setClassificationRequested = useUIStore((state) => state.setSettingsProvidersClassificationRequested);
+  const [selectedProviderId, setSelectedProvider] = React.useState(() => (
+    connectRequested ? ADD_PROVIDER_ID : classificationRequested ? CLASSIFICATION_PAGE_ID : ''
+  ));
   React.useEffect(() => {
     if (!connectRequested) return;
     setSelectedProvider(ADD_PROVIDER_ID);
     setConnectRequested(false);
   }, [connectRequested, setConnectRequested]);
+  React.useEffect(() => {
+    if (!classificationRequested) return;
+    setSelectedProvider(CLASSIFICATION_PAGE_ID);
+    setClassificationRequested(false);
+  }, [classificationRequested, setClassificationRequested]);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
@@ -349,7 +361,7 @@ export const ProvidersPage: React.FC = () => {
   // Unauthenticated providers (OAuth-only plugins before login) should open the
   // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
   React.useEffect(() => {
-    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
       return;
     }
     const sources = providerSources[selectedProviderId];
@@ -377,7 +389,7 @@ export const ProvidersPage: React.FC = () => {
   }, [selectedProviderId, providerSources, providers, integrations, authPanelDismissedForId]);
 
   React.useEffect(() => {
-    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
       return;
     }
 
@@ -643,6 +655,10 @@ export const ProvidersPage: React.FC = () => {
   const backButton = <SettingsBackButton label={t('settings.providers.page.back')} onClick={backToGrid} />;
 
 
+  if (selectedProviderId === CLASSIFICATION_PAGE_ID) {
+    return <ClassificationProvidersPage titleLeading={backButton} />;
+  }
+
   if (isAddMode) {
     return (
       <SettingsPageLayout
@@ -860,6 +876,7 @@ export const ProvidersPage: React.FC = () => {
         directory={settingsDirectory}
         onSelect={setSelectedProvider}
         onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
+        onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
       />
     );
   }

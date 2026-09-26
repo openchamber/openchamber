@@ -10,6 +10,7 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus, TerminalShell } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
+import type { PermissionMode } from './utils/permissionAutoAccept';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -875,6 +876,13 @@ interface UIStore {
    * which provider the page shows is otherwise its own local state.
    */
   settingsProvidersConnectRequested: boolean;
+  /** Set by links elsewhere in Settings; the Providers page opens Classification providers once and clears it. */
+  settingsProvidersClassificationRequested: boolean;
+  /**
+   * A link inside Settings asking to open another page and, optionally, scroll
+   * to one of its items the way a search result does. SettingsView consumes it.
+   */
+  settingsJumpRequest: { page: string; itemId: string | null } | null;
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
@@ -987,6 +995,8 @@ interface UIStore {
   agentNotifyToolEnabled: boolean;
   /** The isolated-spaces switch as saved; the server applies it at its next start. */
   isolatedSpacesEnabled: boolean;
+  /** The permission mode the server writes onto each new top-level session. */
+  permissionDefaultMode: PermissionMode;
   /**
    * Whether this build has agent memory at all. Server-owned and not
    * persisted: an unreleased feature must not come back from a stale cache.
@@ -1104,6 +1114,9 @@ interface UIStore {
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsProjectPath: (path: string | null) => void;
   setSettingsProvidersConnectRequested: (requested: boolean) => void;
+  setSettingsProvidersClassificationRequested: (requested: boolean) => void;
+  requestSettingsJump: (page: string, itemId?: string | null) => void;
+  clearSettingsJumpRequest: () => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
@@ -1203,6 +1216,7 @@ interface UIStore {
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentNotifyToolEnabled: (value: boolean) => void;
   setIsolatedSpacesEnabled: (value: boolean) => void;
+  setPermissionDefaultMode: (value: PermissionMode) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
   markAgentMemoryViewed: (key: string, viewedAt: number) => void;
@@ -1298,6 +1312,8 @@ export const useUIStore = create<UIStore>()(
         settingsProjectsSelectedId: null,
         settingsProjectPath: null,
         settingsProvidersConnectRequested: false,
+        settingsProvidersClassificationRequested: false,
+        settingsJumpRequest: null,
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
@@ -1388,6 +1404,7 @@ export const useUIStore = create<UIStore>()(
         agentMemoryToolEnabled: false,
         agentNotifyToolEnabled: false,
         isolatedSpacesEnabled: false,
+        permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
         routingFeatureAvailable: false,
         agentMemoryViewedAt: {},
@@ -2119,6 +2136,15 @@ export const useUIStore = create<UIStore>()(
           set({ settingsPage: slug });
         },
 
+        setSettingsProvidersClassificationRequested: (requested) => {
+          set({ settingsProvidersClassificationRequested: requested });
+        },
+        requestSettingsJump: (page, itemId = null) => {
+          set({ settingsJumpRequest: { page, itemId } });
+        },
+        clearSettingsJumpRequest: () => {
+          set({ settingsJumpRequest: null });
+        },
         setSettingsProvidersConnectRequested: (requested) => {
           set({ settingsProvidersConnectRequested: requested });
         },
@@ -2752,6 +2778,9 @@ export const useUIStore = create<UIStore>()(
         setIsolatedSpacesEnabled: (value) => {
           set({ isolatedSpacesEnabled: value });
         },
+        setPermissionDefaultMode: (value) => {
+          set({ permissionDefaultMode: value });
+        },
         setAgentNotifyToolEnabled: (value) => {
           set({ agentNotifyToolEnabled: value });
         },
@@ -3229,6 +3258,7 @@ export const useUIStore = create<UIStore>()(
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentNotifyToolEnabled: state.agentNotifyToolEnabled,
           isolatedSpacesEnabled: state.isolatedSpacesEnabled,
+          permissionDefaultMode: state.permissionDefaultMode,
           agentMemoryViewedAt: state.agentMemoryViewedAt,
           projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,

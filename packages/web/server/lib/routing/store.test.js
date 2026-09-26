@@ -93,4 +93,14 @@ describe('routing store', () => {
     await store.clearToken();
     expect(await store.readToken()).toBeNull();
   });
+
+  it('round-trips the classifier pick and reads a broken file as no pick', async () => {
+    const dir = await tempDir();
+    const store = createRoutingStore({ dataDir: dir });
+    expect(await store.readClassifierSource()).toBeNull();
+    await store.writeClassifierSource('zen-key');
+    expect(await store.readClassifierSource()).toBe('zen-key');
+    await fs.writeFile(path.join(dir, 'classification.json'), '{"version":1,"source":"vercel"}');
+    expect(await store.readClassifierSource()).toBeNull();
+  });
 });

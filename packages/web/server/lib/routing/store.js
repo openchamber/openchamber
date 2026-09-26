@@ -5,6 +5,8 @@
  * disabled built-in category, a user category, the fallback model, thresholds.
  * `routing-auth.json` holds the Jev API key alone, mode 0600, so the config
  * file can be read, shown and exported without carrying a secret.
+ * `classification.json` holds which classification provider answers Jev
+ * requests (see `classifier.js`).
  *
  * Reads never throw on a missing file (a fresh install is the defaults); a
  * malformed file is an error, not an empty config, so a bad write cannot
@@ -20,6 +22,7 @@ import {
   THINKING_LEVELS,
   isAutoModel,
 } from './defaults.js';
+import { CLASSIFIER_SOURCES } from './classifier.js';
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -87,8 +90,11 @@ const effectiveConfigSchema = z.object({
 
 const authSchema = z.object({ token: z.string().min(1).max(4000) }).strict();
 
+const classifierSchema = z.object({ version: z.literal(FILE_VERSION), source: z.enum(CLASSIFIER_SOURCES) }).strict();
+
 const routingConfigPath = (dataDir) => path.join(dataDir, 'routing.json');
 const routingAuthPath = (dataDir) => path.join(dataDir, 'routing-auth.json');
+const classifierPath = (dataDir) => path.join(dataDir, 'classification.json');
 
 const readJsonFile = async (file, schema) => {
   let raw;
@@ -219,6 +225,7 @@ export const parseEffectiveConfig = (input) => {
 export const createRoutingStore = ({ dataDir }) => {
   const configFile = routingConfigPath(dataDir);
   const authFile = routingAuthPath(dataDir);
+  const classifierFile = classifierPath(dataDir);
   let writeChain = Promise.resolve();
   const serialize = (run) => {
     const next = writeChain.catch(() => undefined).then(run);
@@ -245,5 +252,19 @@ export const createRoutingStore = ({ dataDir }) => {
     clearToken: () => serialize(async () => {
       await fs.rm(authFile, { force: true });
     }),
+    /**
+     * The classification provider the user picked, or null before any pick.
+     * An unreadable file is treated as no pick: the default source still
+     * serves, and the next pick rewrites it.
+     */
+    readClassifierSource: async () => {
+      try {
+        return (await readJsonFile(classifierFile, classifierSchema))?.source ?? null;
+      } catch (error) {
+        console.warn('[routing] classification.json is unreadable:', error?.message ?? error);
+        return null;
+      }
+    },
+    writeClassifierSource: (source) => serialize(() => writeJsonFile(classifierFile, { version: FILE_VERSION, source })),
   };
 };

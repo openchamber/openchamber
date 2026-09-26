@@ -68,6 +68,8 @@ import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/set
 const SETTINGS_NAV_WIDTH = 256;
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
 const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
+/** How long (in frames, ~0.5 s) a search result or a link waits for its item to render. */
+const PENDING_ITEM_MAX_FRAMES = 30;
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
 type SettingsDetailHistoryEntry = {
@@ -463,6 +465,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useUIStore.getState().setSettingsProvidersConnectRequested(true);
     }
 
+    if (result.id === 'providers.classification') {
+      useUIStore.getState().setSettingsProvidersClassificationRequested(true);
+    }
+
     if (result.id === 'plugins.create') {
       return 'plugins.spec';
     }
@@ -559,14 +565,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
   }, [openSearchResult, settingsSearchQuery, settingsSearchResults]);
 
+  // Links inside Settings (e.g. from a setting's explanation) travel the same
+  // road as a search result: open the page, then reveal the item.
+  const settingsJumpRequest = useUIStore((state) => state.settingsJumpRequest);
+  React.useEffect(() => {
+    if (!settingsJumpRequest) {
+      return;
+    }
+    useUIStore.getState().clearSettingsJumpRequest();
+    setPendingSearchItemId(settingsJumpRequest.itemId);
+    openPage(resolveSettingsSlug(settingsJumpRequest.page));
+    if (isMobile) {
+      setMobileStage('page-content');
+    }
+  }, [isMobile, openPage, settingsJumpRequest]);
+
   React.useEffect(() => {
     const targetId = pendingSearchItemId;
     if (!targetId) {
       return;
     }
 
+    // A page that loads its content (an agent's details, a provider's page)
+    // renders the item a few frames late, so look for it for a short while.
     let cancelled = false;
-    const frame = window.requestAnimationFrame(() => {
+    let attempts = 0;
+    let frame = 0;
+    const reveal = () => {
       if (cancelled) {
         return;
       }
@@ -575,6 +600,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         : targetId.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
       const target = containerRef.current?.querySelector<HTMLElement>(`[data-settings-item="${escapedId}"]`);
       if (!target) {
+        attempts += 1;
+        if (attempts < PENDING_ITEM_MAX_FRAMES) frame = window.requestAnimationFrame(reveal);
         return;
       }
       setPendingSearchItemId(null);
@@ -583,7 +610,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       window.setTimeout(() => {
         target.removeAttribute('data-settings-search-highlight');
       }, 1600);
-    });
+    };
+    frame = window.requestAnimationFrame(reveal);
 
     return () => {
       cancelled = true;

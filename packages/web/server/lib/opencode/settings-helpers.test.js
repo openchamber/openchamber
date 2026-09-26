@@ -408,14 +408,21 @@ describe('settings helpers', () => {
 
     expect(helpers.sanitizeSettingsUpdate({
       permissionAutoAccept: {
-        sessions: { root: true, child: false, invalid: 'true' },
+        sessions: { root: true, child: false, guarded: 'safety', open: 'auto', manual: 'ask', invalid: 'true' },
       },
     })).toEqual({
       permissionAutoAccept: {
-        sessions: { root: true, child: false },
+        sessions: { root: true, child: false, guarded: 'safety', open: 'auto', manual: 'ask' },
         revision: 0,
       },
     });
+  });
+
+  it('accepts only a known default permission mode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'safety' })).toEqual({ permissionDefaultMode: 'safety' });
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'always' })).toEqual({});
   });
 
   it('accepts desktopUiPassword as a persisted shared setting', () => {
@@ -763,7 +770,7 @@ describe('settings registry gate', () => {
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
-    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 },
+    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety',
     agentControlToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentNotifyToolEnabled: true, isolatedSpacesEnabled: true, openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive', terminalShell: 'zsh', terminalLoginShells: ['zsh'],
     openInAppId: 'vscode', dictationEnabled: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en',

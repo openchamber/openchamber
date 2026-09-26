@@ -1,5 +1,7 @@
 /**
- * Toggles whether tool permissions are auto-accepted for this session.
+ * Cycles how this session answers tool permissions: ask, safety net, accept
+ * everything. The safety net is left out of the cycle while no classification
+ * provider can run it.
  *
  * The pointer guards keep a tap from dismissing the mobile keyboard: on
  * Android's resizes-content viewport the keyboard-close relayout moves this
@@ -9,18 +11,27 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
 
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
     isInteractive: boolean;
-    permissionAutoAcceptEnabled: boolean;
-    handlePermissionAutoAcceptToggle: () => void;
+    /** Already passed through `displayedPermissionMode`. */
+    permissionMode: PermissionMode;
+    handlePermissionModeCycle: () => void;
     withTooltip?: boolean;
 };
+
+const MODE_ICON = {
+    ask: { icon: 'shield-user', color: undefined },
+    safety: { icon: 'shield-star', color: 'var(--status-success)' },
+    auto: { icon: 'shield-check', color: 'var(--status-info)' },
+} satisfies Record<PermissionMode, { icon: IconName; color: string | undefined }>;
 
 export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButton(props: PermissionAutoAcceptButtonProps) {
     const { t } = useI18n();
@@ -28,22 +39,22 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
         footerIconButtonClass,
         iconSizeClass,
         isInteractive,
-        permissionAutoAcceptEnabled,
-        handlePermissionAutoAcceptToggle,
+        permissionMode,
+        handlePermissionModeCycle,
         withTooltip = false,
     } = props;
 
-    const ariaLabel = permissionAutoAcceptEnabled
-        ? t('chat.chatInput.permissionAutoAccept.disable')
-        : t('chat.chatInput.permissionAutoAccept.enable');
-    const tooltipLabel = permissionAutoAcceptEnabled
-        ? t('chat.chatInput.permissionAutoAccept.on')
-        : t('chat.chatInput.permissionAutoAccept.off');
+    const label = permissionMode === 'safety'
+        ? t('chat.chatInput.permissionMode.safety')
+        : permissionMode === 'auto'
+            ? t('chat.chatInput.permissionMode.auto')
+            : t('chat.chatInput.permissionMode.ask');
+    const { icon, color } = MODE_ICON[permissionMode];
 
     const button = (
         <button
             type="button"
-            onClick={handlePermissionAutoAcceptToggle}
+            onClick={handlePermissionModeCycle}
             className={cn(
                 footerIconButtonClass,
                 'rounded-md hover:bg-transparent',
@@ -58,15 +69,10 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
                     event.stopPropagation();
                 }
             }}
-            aria-pressed={permissionAutoAcceptEnabled}
-            aria-label={ariaLabel}
-            title={ariaLabel}
+            aria-label={label}
+            title={label}
         >
-            {permissionAutoAcceptEnabled ? (
-                <Icon name="shield-check" className={cn(iconSizeClass)} style={{ color: 'var(--status-info)' }} />
-            ) : (
-                <Icon name="shield-user" className={cn(iconSizeClass)} />
-            )}
+            <Icon name={icon} className={cn(iconSizeClass)} style={color ? { color } : undefined} />
         </button>
     );
 
@@ -80,7 +86,7 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
                 {button}
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
-                {tooltipLabel}
+                {label}
             </TooltipContent>
         </Tooltip>
     );

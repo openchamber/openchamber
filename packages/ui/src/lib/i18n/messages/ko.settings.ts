@@ -1188,7 +1188,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '이전 세션',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '다음 세션',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': '현재 세션 이름 바꾸기',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '권한 자동 승인 전환',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': '권한 모드 전환',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': '세션 탭 닫기',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': '새 worktree 초안',
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': '새 Mini Chat 창',

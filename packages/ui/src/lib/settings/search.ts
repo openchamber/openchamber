@@ -447,6 +447,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle'],
   },
   {
+    id: 'sessions.permission-default',
+    page: 'sessions',
+    titleKey: 'settings.sessions.permissions.defaultMode',
+    descriptionKey: 'settings.sessions.permissions.defaultModeInfo',
+    keywords: ['permissions', 'auto-accept', 'accept', 'safety net', 'ask', 'shield', 'approval', 'new session'],
+    // The server writes the default onto new sessions; VS Code has none.
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',
@@ -623,14 +632,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
-    id: 'routing.token',
-    page: 'routing',
-    titleKey: 'settings.routing.token.label',
-    descriptionKey: 'settings.routing.token.info',
-    keywords: ['jev', 'typesafe', 'api key', 'token', 'routing', 'zen', 'free'],
-    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
-  },
-  {
     id: 'routing.enabled',
     page: 'routing',
     titleKey: 'settings.routing.auto.enable',
@@ -644,14 +645,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.routing.auto.fallbackModel',
     descriptionKey: 'settings.routing.auto.fallbackModelInfo',
     keywords: ['fallback', 'default', 'model', 'routing'],
-    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
-  },
-  {
-    id: 'routing.safety-enabled',
-    page: 'routing',
-    titleKey: 'settings.routing.safety.enable',
-    descriptionKey: 'settings.routing.safety.enableInfo',
-    keywords: ['safety net', 'auto-accept', 'permissions', 'destructive', 'hold'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
@@ -977,6 +970,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.page.connect.title',
     keywords: ['add provider', 'connect provider', 'credentials'],
+  },
+  {
+    // Opens the Classification providers sub-page (SettingsView sets the request).
+    id: 'providers.classification',
+    page: 'providers',
+    titleKey: 'settings.classification.page.title',
+    descriptionKey: 'settings.classification.page.description',
+    keywords: ['jev', 'typesafe', 'zen', 'api key', 'token', 'safety net', 'auto', 'routing', 'classification', 'promotion'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
     id: 'providers.custom',

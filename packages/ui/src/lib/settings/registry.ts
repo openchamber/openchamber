@@ -237,12 +237,22 @@ export const SETTINGS_REGISTRY = {
   githubScopes: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   skillCatalogs: field<SkillCatalogConfig[]>({ scope: 'instance', parse: parseSkillCatalogs }),
   defaultGitIdentityId: field({ scope: 'instance', parse: parseTrimmedString }),
+  // Per-session permission modes; booleans are policies from before the modes,
+  // which the server converts on its first read.
   permissionAutoAccept: field({
     scope: 'instance',
     parse: fromSchema(z.object({
-      sessions: z.record(z.string().min(1), z.boolean()).catch({}),
+      sessions: z.record(z.string().min(1), z.union([z.boolean(), z.enum(['ask', 'safety', 'auto'])])).catch({}),
       revision: z.number().int().nonnegative().catch(0),
     })),
+  }),
+  // The mode the server writes onto each new top-level session. VS Code has no
+  // OpenChamber server to write it.
+  permissionDefaultMode: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.enum(['ask', 'safety', 'auto'])),
+    ui: uiStore('permissionDefaultMode', (v) => useUIStore.getState().setPermissionDefaultMode(v)),
   }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),

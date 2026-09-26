@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -18,6 +18,7 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermiss
     retryDelaysMs,
     evaluatePermission,
     onPermissionReplied,
+    resolveLegacyEnabledMode,
   });
   runtime.start();
   return {
@@ -39,15 +40,62 @@ const flush = async () => {
 };
 
 describe('permission auto-accept runtime', () => {
-  it('persists explicit session policies across runtime restarts', async () => {
+  it('persists explicit session modes across runtime restarts', async () => {
     const first = createRuntime();
-    await first.runtime.setSessionPolicy('root', true);
+    await first.runtime.setSessionPolicy('root', 'safety');
+    await first.runtime.setSessionPolicy('manual', 'ask');
 
     const second = createRuntime({ stored: first.getSettings() });
+    // `sessions` keeps the on/off shape older clients read.
     await expect(second.runtime.load()).resolves.toEqual({
-      sessions: { root: true },
-      revision: 1,
+      sessions: { root: true, manual: false },
+      modes: { root: 'safety', manual: 'ask' },
+      revision: 2,
     });
+  });
+
+  it('takes on/off from clients that predate the modes as auto and ask', async () => {
+    const { runtime } = createRuntime();
+    await runtime.setSessionPolicy('on', true);
+    await runtime.setSessionPolicy('off', false);
+    expect((await runtime.load()).modes).toEqual({ on: 'auto', off: 'ask' });
+    await expect(runtime.setSessionPolicy('bad', 'always')).rejects.toThrow(TypeError);
+  });
+
+  it('converts a pre-modes policy once, as safety when the old safety net was on', async () => {
+    const resolveLegacyEnabledMode = vi.fn(async () => 'safety');
+    const { runtime, getSettings } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: true, child: false }, revision: 3 } },
+      resolveLegacyEnabledMode,
+    });
+    expect((await runtime.load()).modes).toEqual({ root: 'safety', child: 'ask' });
+    expect(getSettings().permissionAutoAccept).toEqual({ sessions: { root: 'safety', child: 'ask' }, revision: 3 });
+
+    const restarted = createRuntime({ stored: getSettings(), resolveLegacyEnabledMode });
+    await restarted.runtime.load();
+    expect(resolveLegacyEnabledMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes the default mode onto a new top-level session only', async () => {
+    const { runtime, emit, getSettings } = createRuntime();
+    await runtime.load();
+    getSettings().permissionDefaultMode = 'safety';
+    emit({ type: 'session.created', properties: { info: { id: 'root' } } });
+    emit({ type: 'session.created', properties: { info: { id: 'child', parentID: 'root' } } });
+    await flush();
+    await expect(runtime.resolveSessionMode('root', '/project')).resolves.toBe('safety');
+    expect((await runtime.load()).modes).toEqual({ root: 'safety' });
+    // The subagent inherits instead.
+    await expect(runtime.resolveSessionMode('child', '/project')).resolves.toBe('safety');
+  });
+
+  it('keeps a mode the creating flow already set over the default', async () => {
+    const { runtime, emit, getSettings } = createRuntime();
+    await runtime.setSessionPolicy('root', 'ask');
+    getSettings().permissionDefaultMode = 'auto';
+    emit({ type: 'session.created', properties: { info: { id: 'root' } } });
+    await flush();
+    await expect(runtime.resolveSessionMode('root', '/project')).resolves.toBe('ask');
   });
 
   it('increments the authoritative policy revision', async () => {
@@ -164,7 +212,7 @@ describe('permission auto-accept runtime', () => {
     expect(replyPaths).toEqual(['/api/session/root/permission/root-pending/reply']);
     // OpenCode 2.x scopes the pending list by header, not by query.
     expect(fetchImpl.mock.calls.some(([, init]) => directoryHeader(init) === '/project')).toBe(true);
-    expect(await runtime.load()).toEqual({ sessions: { root: true }, revision: 1 });
+    expect(await runtime.load()).toEqual({ sessions: { root: true }, modes: { root: 'auto' }, revision: 1 });
   });
 
   it('leaves a request held by the safety net unanswered and forgets it once replied', async () => {
@@ -173,7 +221,7 @@ describe('permission auto-accept runtime', () => {
     const evaluatePermission = vi.fn(async (permission) => verdicts[permission.id]);
     const onPermissionReplied = vi.fn();
     const { runtime, emit } = createRuntime({
-      stored: { permissionAutoAccept: { sessions: { root: true } } },
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } },
       fetchImpl,
       evaluatePermission,
       onPermissionReplied,
@@ -189,8 +237,41 @@ describe('permission auto-accept runtime', () => {
     expect(directoryHeader(replies[0]?.[1])).toBe('/project');
     expect(evaluatePermission).toHaveBeenCalledTimes(2);
 
+    // Notifications skip only the request that was answered.
+    await expect(runtime.isPermissionAutoAnswered('root', '/project', 'safe')).resolves.toBe(true);
+    await expect(runtime.isPermissionAutoAnswered('root', '/project', 'held')).resolves.toBe(false);
+
     emit({ type: 'permission.replied', properties: { sessionID: 'root', requestID: 'held', reply: 'once' } });
     expect(onPermissionReplied).toHaveBeenCalledWith('held');
+  });
+
+  it('never consults the safety net in an auto session', async () => {
+    const fetchImpl = vi.fn(async () => new Response('[]'));
+    const evaluatePermission = vi.fn(async () => ({ action: 'hold' }));
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'auto' } } },
+      fetchImpl,
+      evaluatePermission,
+    });
+    await runtime.load();
+    emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'root', permission: 'bash', metadata: {} } });
+    await flush();
+    expect(evaluatePermission).not.toHaveBeenCalled();
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).endsWith('/permission/p/reply'))).toBe(true);
+    await expect(runtime.isPermissionAutoAnswered('root', '/project', 'p')).resolves.toBe(true);
+  });
+
+  it('leaves a safety request for the user when the safety net gives no verdict', async () => {
+    const fetchImpl = vi.fn(async () => new Response('[]'));
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } },
+      fetchImpl,
+      evaluatePermission: async () => ({ action: 'hold', skipped: 'Jev timed out' }),
+    });
+    await runtime.load();
+    emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'root', permission: 'bash', metadata: {} } });
+    await flush();
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/reply'))).toBe(false);
   });
 
   it('does not consult the safety net for sessions that are not auto-accepting', async () => {

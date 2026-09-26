@@ -2255,7 +2255,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Önceki session',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Sonraki session',
   'settings.openchamber.keyboardShortcuts.action.rename_current_session.label': 'Geçerli session\'ı yeniden adlandır',
-  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': 'İzin otomatik onayını aç/kapat',
+  'settings.openchamber.keyboardShortcuts.action.toggle_permission_auto_accept.label': 'İzin modunu değiştir',
   'settings.openchamber.keyboardShortcuts.action.close_session_tab.label': 'Session sekmesini kapat',
   'settings.openchamber.keyboardShortcuts.warning.contextualPrefix': 'Bu dizilim {action} ile bağlamsal bir önek paylaşıyor. O eylem, bağlamı etkinken öncelik alır.',
   'settings.openchamber.keyboardShortcuts.category.session': 'Session Denetimleri',
