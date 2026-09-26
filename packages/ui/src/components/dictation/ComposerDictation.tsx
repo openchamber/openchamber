@@ -6,8 +6,10 @@
  * reuses the footer icon-button styling — so toggling dictation causes no
  * vertical shift.
  *
- * No text appears while recording. The server transcribes the audio once the
- * user stops, so the overlay shows the recording state and then Transcribing.
+ * No text appears while recording. With the local or server STT provider the
+ * server transcribes the audio once the user stops, so the overlay shows the
+ * recording state and then Transcribing; with the browser provider the Web
+ * Speech API transcribes live and confirm returns the accumulated result.
  * The only transcript rendered here is the salvage text of a failed dictation.
  */
 
@@ -19,6 +21,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
+import { useBrowserDictation, isBrowserDictationSupported } from '@/hooks/useBrowserDictation';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -123,11 +126,19 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const sttProvider = useConfigStore((state) => state.sttProvider);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
     // The dictation server (WebSocket + STT worker) lives in the OpenChamber
-    // web server; the VS Code bridge has no server process for it.
-    const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
+    // web server; the VS Code bridge has no server process for it. Browser
+    // STT runs entirely in the client, so it needs the Web Speech API instead
+    // of the capture stack. A stored 'web-speech' choice resolves per client:
+    // capable browsers use recognition, every other runtime falls back to the
+    // server engine, so one client's choice never removes another's microphone.
+    const [captureSupported] = React.useState(() => isDictationCaptureSupported());
+    const [browserRecognitionSupported] = React.useState(isBrowserDictationSupported);
+    const browserStt = sttProvider === 'web-speech' && browserRecognitionSupported;
+    const supported = !isVSCodeRuntime() && (browserStt ? browserRecognitionSupported : captureSupported);
 
     const pendingActionRef = React.useRef<'insert' | 'send' | null>(null);
     const onInsertRef = React.useRef(onInsert);
@@ -137,8 +148,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         onInsertAndSendRef.current = onInsertAndSend;
     }, [onInsert, onInsertAndSend]);
 
-    const dictation = useDictation({
-        onTranscript: (text) => {
+    const onTranscript = React.useCallback((text: string) => {
             const action = pendingActionRef.current;
             pendingActionRef.current = null;
             if (action === 'send') {
@@ -146,8 +156,20 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             } else {
                 onInsertRef.current(text);
             }
-        },
+    }, []);
+    const canStart = () => supported && dictationEnabled && !disabled;
+    const serverDictation = useDictation({ onTranscript, canStart });
+    const browserDictation = useBrowserDictation({
+        onTranscript, canStart,
     });
+    const dictation = browserStt ? browserDictation : serverDictation;
+    const cancelServer = serverDictation.cancelDictation;
+    const cancelBrowser = browserDictation.cancelDictation;
+    React.useEffect(() => () => {
+        pendingActionRef.current = null;
+        void cancelServer();
+        void cancelBrowser();
+    }, [sttProvider, dictationEnabled, cancelServer, cancelBrowser]);
 
     const {
         status,
@@ -547,7 +569,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                     >
                                         <Icon name="close" className={iconSizeClass} />
                                     </button>
-                                    <button
+                                    {!browserStt && <button
                                         type="button"
                                         {...keepKeyboardFocusProps}
                                         className={footerIconButtonClass}
@@ -556,7 +578,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                         aria-label={t('chat.dictation.retry')}
                                     >
                                         <Icon name="refresh" className={iconSizeClass} />
-                                    </button>
+                                    </button>}
                                     {partialTranscript.trim() ? (
                                         <button
                                             type="button"
