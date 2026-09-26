@@ -168,6 +168,25 @@ describe('findBranchPrCandidates', () => {
     expect(listMock.mock.calls.some((entry) => entry[0]?.state === 'all')).toBe(true);
     expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst + 1);
   });
+
+  test('invalidating with a mixed-case repo name clears the shared open list cache', async () => {
+    // GitHub Enterprise repos routinely carry mixed case (e.g. octocat/Hello-World).
+    // Cache keys are lowercased by repoCacheKey, so an invalidation search must
+    // lowercase too — otherwise a just-created PR stays hidden for the TTL.
+    listMock.mockImplementation(async () => ({ data: [] }));
+
+    await call({ target: { repo: { owner: 'octocat', repo: 'Hello-World' }, remoteName: 'origin' } });
+    const callsAfterFirst = listMock.mock.calls.length;
+
+    await call({ force: false, target: { repo: { owner: 'octocat', repo: 'Hello-World' }, remoteName: 'origin' } });
+    expect(listMock.mock.calls.length).toBe(callsAfterFirst);
+
+    invalidateRepoPullsCache('octocat', 'Hello-World');
+    await call({ force: false, target: { repo: { owner: 'octocat', repo: 'Hello-World' }, remoteName: 'origin' } });
+    // The cache was actually dropped, so the shared open list is re-fetched.
+    expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+    expect(listMock.mock.calls.slice(callsAfterFirst).some((entry) => entry[0]?.state === 'open')).toBe(true);
+  });
 });
 
 describe('isHistoricalPrOfCheckout', () => {

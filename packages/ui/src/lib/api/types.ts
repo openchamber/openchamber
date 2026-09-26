@@ -1384,7 +1384,7 @@ export interface GitHubAPI {
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
-  repoBranches(owner: string, repo: string): Promise<string[]>;
+  repoBranches(owner: string, repo: string, directory?: string): Promise<string[]>;
 }
 
 export interface RemoteClientRecord {
