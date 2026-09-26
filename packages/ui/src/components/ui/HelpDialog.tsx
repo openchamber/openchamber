@@ -55,6 +55,10 @@ export const HelpDialog: React.FC = () => {
           icon: "command",
           keys: '',
         },
+        { id: 'navigate_session_back', icon: 'arrow-left', keys: '' },
+        { id: 'navigate_session_forward', icon: 'arrow-right', keys: '' },
+        { id: 'cycle_favorite_model_backward', icon: 'ai-generate-2', keys: '' },
+        { id: 'cycle_favorite_model_forward', icon: 'ai-generate-2', keys: '' },
         {
           id: 'open_help',
           descriptionKey: "helpDialog.item.showKeyboardShortcuts",
@@ -238,8 +242,14 @@ export const HelpDialog: React.FC = () => {
                       if (!descriptionKey) return null;
                       // This dialog lists what the keyboard can do right now;
                       // an action without a binding belongs to the command
-                      // palette and Settings, not here.
-                      if (shortcut.id && !getEffectiveShortcutCombo(shortcut.id, shortcutOverrides)) {
+                      // palette and Settings, not here. History and model
+                      // cycling stay visible so a suppressed default or an
+                      // intentional unassignment is discoverable.
+                      const showUnassigned = shortcut.id === 'navigate_session_back'
+                        || shortcut.id === 'navigate_session_forward'
+                        || shortcut.id === 'cycle_favorite_model_backward'
+                        || shortcut.id === 'cycle_favorite_model_forward';
+                      if (shortcut.id && !showUnassigned && !getEffectiveShortcutCombo(shortcut.id, shortcutOverrides)) {
                         return null;
                       }
                       const displayKeys = shortcut.id

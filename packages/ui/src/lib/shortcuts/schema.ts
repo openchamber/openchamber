@@ -8,6 +8,7 @@ import {
   type ShortcutConflict,
 } from './bindings';
 import { SHORTCUT_SCHEMA } from './config';
+import { isMacOS } from '@/lib/utils';
 
 export { SHORTCUT_SCHEMA } from './config';
 
@@ -33,23 +34,62 @@ export function getCustomizableShortcutActions(): ReadonlyArray<CustomizableShor
   );
 }
 
+export type ShortcutPlatform = 'macos' | 'other';
+const currentPlatform = (): ShortcutPlatform => isMacOS() ? 'macos' : 'other';
+const physicalCombo = (combo: ShortcutCombo, platform: ShortcutPlatform): ShortcutCombo =>
+  platform === 'macos' ? normalizeCombo(combo)
+    : normalizeCombo(combo.split(' ').map((chord) =>
+      chord.split('+').map((part) => part === 'mod' ? 'ctrl' : part).join('+'),
+    ).join(' '));
+
+export function getPlatformShortcutConflict(
+  left: ShortcutCombo, right: ShortcutCombo, platform: ShortcutPlatform = currentPlatform(),
+): ShortcutConflict | undefined {
+  return getShortcutConflict(physicalCombo(left, platform), physicalCombo(right, platform));
+}
+
+const explicitBinding = (actionId: string, overrides?: Record<string, ShortcutCombo>): string | undefined => {
+  const value = overrides?.[actionId];
+  if (value === undefined) return undefined;
+  const normalized = normalizeCombo(value);
+  if (normalized === UNASSIGNED_SHORTCUT) return '';
+  return isValidShortcutCombo(normalized) ? normalized : undefined;
+};
+const defaultBinding = (action: ShortcutAction, platform: ShortcutPlatform): ShortcutCombo => {
+  const binding = platform === 'other' && 'defaultBindingOther' in action
+    ? action.defaultBindingOther : action.defaultBinding;
+  return binding === UNASSIGNED_SHORTCUT ? '' : binding;
+};
+
+export function getShortcutDefaultConflict(
+  actionId: string,
+  overrides?: Record<string, ShortcutCombo>,
+  platform: ShortcutPlatform = currentPlatform(),
+): CustomizableShortcutAction | undefined {
+  const action = getShortcutAction(actionId);
+  if (!action || !('preferExplicitOverrides' in action)
+    || !action.preferExplicitOverrides || explicitBinding(actionId, overrides) !== undefined) return undefined;
+  const proposed = defaultBinding(action, platform);
+  return getCustomizableShortcutActions().find((other) => {
+    if (other.id === actionId) return false;
+    const binding = explicitBinding(other.id, overrides);
+    return Boolean(binding && getPlatformShortcutConflict(proposed, binding, platform));
+  });
+}
+
 export function getEffectiveShortcutCombo(
   actionId: string,
   overrides?: Record<string, ShortcutCombo>,
+  platform: ShortcutPlatform = currentPlatform(),
 ): ShortcutCombo {
   const action = getShortcutAction(actionId);
   if (!action) return '';
-  const defaultBinding = action.defaultBinding === UNASSIGNED_SHORTCUT ? '' : action.defaultBinding;
-  if (!action.customizable) return defaultBinding;
-
-  const override = overrides?.[actionId];
-  if (typeof override === 'string') {
-    const normalized = normalizeCombo(override);
-    if (normalized === UNASSIGNED_SHORTCUT) return '';
-    if (isValidShortcutCombo(normalized)) return normalized;
+  if (action.customizable) {
+    const explicit = explicitBinding(actionId, overrides);
+    if (explicit !== undefined) return explicit;
+    if (getShortcutDefaultConflict(actionId, overrides, platform)) return '';
   }
-
-  return defaultBinding;
+  return defaultBinding(action, platform);
 }
 
 export function getEffectiveShortcutPrefix(
@@ -84,7 +124,7 @@ export function getShortcutBindingConflicts(
     const candidateCombo = ('prefixStyle' in candidate && candidate.prefixStyle)
       ? getEffectiveShortcutPrefix(candidate.id, overrides)
       : getEffectiveShortcutCombo(candidate.id, overrides);
-    const kind = getShortcutConflict(combo, candidateCombo);
+    const kind = getPlatformShortcutConflict(combo, candidateCombo);
     if (!kind) continue;
     conflicts.push({ action: candidate, kind });
   }

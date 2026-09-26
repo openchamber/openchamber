@@ -8,6 +8,7 @@ import {
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
+  getShortcutDefaultConflict,
   UNASSIGNED_SHORTCUT,
   type ShortcutActionId,
   type ShortcutCategory,
@@ -64,6 +65,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     return `${formatted}${suffix}`;
   };
 
+  const conflictDescription = (actionId: ShortcutActionId): React.ReactNode => {
+    const conflict = getShortcutDefaultConflict(actionId, shortcutOverrides);
+    return conflict ? t('sessionHistory.defaultConflict', { action: t(conflict.settingsLabelKey) }) : undefined;
+  };
+
   return (
     <>
       {CATEGORIES.map((category, categoryIndex) => {
@@ -87,7 +93,13 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           >
             <div className="space-y-2">
               {categoryActions.map((action) => (
-                <SettingsFieldRow key={action.id} label={t(action.settingsLabelKey)}>
+                <SettingsFieldRow
+                  key={action.id}
+                  label={t(action.settingsLabelKey)}
+                  description={conflictDescription(action.id)}
+                  settingsItem={action.id === 'navigate_session_back' ? 'shortcuts.history-back'
+                    : action.id === 'navigate_session_forward' ? 'shortcuts.history-forward' : undefined}
+                >
                   <kbd
                     className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta font-mono text-foreground"
                   >

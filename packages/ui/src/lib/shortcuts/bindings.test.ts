@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
 
 import {
   eventMatchesShortcut,
@@ -13,6 +14,15 @@ import {
   resolveShortcutEventDigit,
   UNASSIGNED_SHORTCUT,
 } from './index';
+
+const previousKeyboardEvent = Object.getOwnPropertyDescriptor(globalThis, 'KeyboardEvent');
+Object.defineProperty(globalThis, 'KeyboardEvent', {
+  value: new Window().KeyboardEvent, configurable: true, writable: true,
+});
+afterAll(() => {
+  if (previousKeyboardEvent) Object.defineProperty(globalThis, 'KeyboardEvent', previousKeyboardEvent);
+  else Reflect.deleteProperty(globalThis, 'KeyboardEvent');
+});
 
 describe('getEffectiveShortcutPrefix', () => {
   test('falls back to the action default (bare mod+alt) when unset', () => {
@@ -127,6 +137,14 @@ describe('platform shortcut labels', () => {
     );
     expect(formatShortcutForDisplay('alt', 'Unassigned', 'other')).toBe('Alt');
   });
+});
+
+test('strict Mac history never consumes the Ctrl model chord', () => {
+  const ctrl = new KeyboardEvent('keydown', { key: '[', code: 'BracketLeft', ctrlKey: true });
+  const cmd = new KeyboardEvent('keydown', { key: '[', code: 'BracketLeft', metaKey: true });
+  expect(eventMatchesShortcut(ctrl, 'mod+[', { strictMod: true, platform: 'macos' })).toBe(false);
+  expect(eventMatchesShortcut(cmd, 'mod+[', { strictMod: true, platform: 'macos' })).toBe(true);
+  expect(eventMatchesShortcut(ctrl, 'mod+[', { strictMod: true, platform: 'other' })).toBe(true);
 });
 
 describe('layout-independent key matching', () => {

@@ -24,18 +24,16 @@ describe("useProjectsStore settings synchronization", () => {
     }
   })
 
-  test("directory navigation preserves roots and does not create history duplicates for Windows spelling variants", () => {
+  test("directory navigation normalizes Windows spelling variants and preserves roots", () => {
     const previous = useDirectoryStore.getState()
     const sdkDirectory = opencodeClient.getDirectory()
     try {
-      useDirectoryStore.setState({ homeDirectory: "/home", currentDirectory: "/home", directoryHistory: ["/home"], historyIndex: 0 })
-      useDirectoryStore.getState().setDirectory("c:\\Project")
-      useDirectoryStore.getState().setDirectory("C:/Project/")
-      expect(useDirectoryStore.getState().directoryHistory).toEqual(["/home", "C:/Project"])
-      useDirectoryStore.setState({ directoryHistory: ["/home", "C:/Project", "C:/Other"], historyIndex: 1 })
-      useDirectoryStore.getState().setDirectory("c:\\Project\\")
-      expect(useDirectoryStore.getState().historyIndex).toBe(1)
-      expect(useDirectoryStore.getState().directoryHistory).toEqual(["/home", "C:/Project", "C:/Other"])
+      useDirectoryStore.setState({ homeDirectory: "/home", currentDirectory: "/home" })
+      for (const path of ["c:\\Project", "C:/Project/", "c:\\Project\\"]) {
+        useDirectoryStore.getState().setDirectory(path)
+        expect(useDirectoryStore.getState().currentDirectory).toBe("C:/Project")
+        expect(opencodeClient.getDirectory()).toBe("C:/Project")
+      }
       useDirectoryStore.getState().goToParent()
       expect(useDirectoryStore.getState().currentDirectory).toBe("C:/")
       expect(opencodeClient.getDirectory()).toBe("C:/")

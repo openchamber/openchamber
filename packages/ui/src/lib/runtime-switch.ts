@@ -57,7 +57,9 @@ const normalizeRuntimeUrlKey = (value: string): string => {
 // Per-instance client state (e.g. the scoped theme entry) must not be read
 // from or written under them.
 export const MOBILE_DISCONNECTED_RUNTIME_KEY = 'mobile-disconnected';
-const UNINITIALIZED_RUNTIME_KEY = 'url:default';
+/** No endpoint was configured anywhere; a browser client then talks to the
+    origin that served it, which is its own server identity. */
+export const UNINITIALIZED_RUNTIME_KEY = 'url:default';
 
 export const isTransientRuntimeKey = (runtimeKey: string): boolean =>
   runtimeKey === '' || runtimeKey === UNINITIALIZED_RUNTIME_KEY || runtimeKey === MOBILE_DISCONNECTED_RUNTIME_KEY;

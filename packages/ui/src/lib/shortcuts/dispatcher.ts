@@ -6,7 +6,7 @@ import {
   type ShortcutCombo,
 } from './bindings';
 import { type ShortcutHandler, ShortcutRegistry } from './registry';
-import type { ShortcutActionId } from './schema';
+import { getShortcutAction, type ShortcutActionId } from './schema';
 import { isIMECompositionEvent } from '../ime';
 
 const SEQUENCE_TIMEOUT_MS = 3000;
@@ -22,6 +22,7 @@ export interface ShortcutDispatcherOptions {
 interface BindingMatch {
   chords: string[];
   handler: ShortcutHandler;
+  strictMod: boolean;
 }
 
 /** Stateless with respect to the DOM; callers decide whether a consumed event is prevented. */
@@ -44,6 +45,10 @@ export class ShortcutDispatcher {
   }
 
   dispatch(event: KeyboardEvent): boolean {
+    if (event.getModifierState('AltGraph')) {
+      this.clear();
+      return false;
+    }
     if (event.repeat || isIMECompositionEvent(event) || MODIFIER_KEYS.has(event.key.toLowerCase())) {
       return false;
     }
@@ -63,14 +68,18 @@ export class ShortcutDispatcher {
     }
 
     const singles = matches.filter((match) => (
-      match.chords.length === 1 && eventMatchesShortcut(event, match.chords[0])
+      match.chords.length === 1
+      && (!match.strictMod || !event.defaultPrevented)
+      && eventMatchesShortcut(event, match.chords[0], { strictMod: match.strictMod })
     ));
     if (singles.length > 0 && this.invoke(singles, event)) {
       return true;
     }
 
     const leader = matches.find((match) => (
-      match.chords.length === 2 && eventMatchesShortcut(event, match.chords[0])
+      match.chords.length === 2
+      && (!match.strictMod || !event.defaultPrevented)
+      && eventMatchesShortcut(event, match.chords[0], { strictMod: match.strictMod })
     ));
     if (leader) {
       this.prefix = leader.chords[0];
@@ -117,11 +126,15 @@ export class ShortcutDispatcher {
 
   dispatchActivePrefix(event: KeyboardEvent): boolean {
     this.capturedPrefixEvents.add(event);
+    if (event.getModifierState('AltGraph')) {
+      this.clear();
+      return false;
+    }
     if (isIMECompositionEvent(event)) {
       if (event.repeat || MODIFIER_KEYS.has(event.key.toLowerCase()) || !this.hasActivePrefix()) {
         return false;
       }
-      const pending = this.getPrefixMatches(this.getMatches(), event);
+      const pending = this.getPrefixMatches(this.getMatches(), event).filter((match) => !match.strictMod);
       this.clear();
       return pending.length > 0 ? this.invoke(pending, event) : false;
     }
@@ -147,7 +160,8 @@ export class ShortcutDispatcher {
     return matches.filter((match) => (
       match.chords.length === 2
       && match.chords[0] === this.prefix
-      && eventMatchesShortcut(event, match.chords[1])
+      && (!match.strictMod || !event.defaultPrevented)
+      && eventMatchesShortcut(event, match.chords[1], { strictMod: match.strictMod })
     ));
   }
 
@@ -163,7 +177,9 @@ export class ShortcutDispatcher {
         continue;
       }
 
-      matches.push({ chords: binding.split(' '), handler });
+      const action = getShortcutAction(actionId);
+      const strictMod = Boolean(action && 'strictPlatformModifiers' in action && action.strictPlatformModifiers);
+      matches.push({ chords: binding.split(' '), handler, strictMod });
     }
     return matches;
   }

@@ -11,6 +11,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
+import { shortcutRegistry } from '@/lib/shortcuts';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -295,11 +296,11 @@ export const useMenuActions = (
           break;
 
         case 'go-back':
-          useDirectoryStore.getState().goBack();
+          shortcutRegistry.invoke('navigate_session_back');
           break;
 
         case 'go-forward':
-          useDirectoryStore.getState().goForward();
+          shortcutRegistry.invoke('navigate_session_forward');
           break;
 
         case 'previous-session':

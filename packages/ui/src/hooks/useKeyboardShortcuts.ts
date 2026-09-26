@@ -3,7 +3,7 @@ import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
-import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
+import { navigateSessionHistory, sessionHistory, startSessionHistoryTracking } from '@/lib/sessionNavigationHistory';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -47,6 +47,8 @@ import {
 } from '@/lib/addSelectionToChat';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { canUseDigitShortcut, hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
+import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 
 const dropdownTargetSelector = [
   '[data-slot="dropdown-menu-content"]', '[data-slot="select-content"]', '[role="combobox"]',
@@ -63,6 +65,7 @@ export const useKeyboardShortcuts = () => {
   const effectiveDirectory = useEffectiveDirectory();
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
+  const { t } = useI18n();
   const { phase: sessionPhase } = useCurrentSessionActivity();
   const abortPrimedUntilRef = React.useRef<number | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +99,19 @@ export const useKeyboardShortcuts = () => {
   const selectionToolbarDispatcher = selectionToolbarDispatcherRef.current;
 
   React.useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
+
+  React.useEffect(() => {
+    const stopTracking = startSessionHistoryTracking();
+    let lastError = sessionHistory.getSnapshot().errorRevision;
+    const stopErrors = sessionHistory.subscribe(() => {
+      const revision = sessionHistory.getSnapshot().errorRevision;
+      if (revision !== lastError) {
+        lastError = revision;
+        toast.error(t('sessionHistory.lookupFailed'));
+      }
+    });
+    return () => { stopErrors(); stopTracking(); };
+  }, [t]);
 
   const resetAbortPriming = React.useCallback(() => {
     if (abortPrimedTimeoutRef.current) {
@@ -182,6 +198,14 @@ export const useKeyboardShortcuts = () => {
     switch_session_next: () => {
       if (!isVSCodeRuntime() && useUIStore.getState().sessionTabsEnabled && activateAdjacentSessionTab(1)) return;
       return navigateSessionHistory(1) ? undefined : false;
+    },
+    navigate_session_back: (event) => {
+      if (event.defaultPrevented) return false;
+      navigateSessionHistory(-1);
+    },
+    navigate_session_forward: (event) => {
+      if (event.defaultPrevented) return false;
+      navigateSessionHistory(1);
     },
     close_session_tab: () => {
       if (isVSCodeRuntime() || !useUIStore.getState().sessionTabsEnabled) return false;

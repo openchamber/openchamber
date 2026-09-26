@@ -35,6 +35,7 @@ import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
 import { syncDesktopSettings } from '@/lib/persistence';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { pauseSessionHistory, resumeSessionHistory } from '@/lib/sessionNavigationHistory';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
 // to the new transport WITHOUT tearing down connection/session state or remounting
@@ -45,12 +46,15 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 // session, and the whole view are preserved — no reconnecting screen, no flash,
 // no bounce back to the draft.
 export const reconnectAppForTransportSwitch = (): void => {
+  pauseSessionHistory();
   disposeTerminalInputTransport();
   opencodeClient.reconnectToRuntimeBaseUrl();
   resetStreamingState();
+  resumeSessionHistory();
 };
 
 export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
+  pauseSessionHistory();
   useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
   if (detail.previousRuntimeKey) {
     useAutoReviewStore.getState().stopRunningRunsForRuntime(detail.previousRuntimeKey);
@@ -116,6 +120,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
   useUIStore.getState().setOpenGuestPage(null);
+  resumeSessionHistory();
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };

@@ -1081,6 +1081,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['keyboard', 'hotkeys', 'bindings'],
   },
   {
+    id: 'shortcuts.history-back', page: 'shortcuts',
+    titleKey: 'settings.openchamber.keyboardShortcuts.action.navigate_session_back.label',
+    keywords: ['history', 'back', 'session', 'navigation'],
+  },
+  {
+    id: 'shortcuts.history-forward', page: 'shortcuts',
+    titleKey: 'settings.openchamber.keyboardShortcuts.action.navigate_session_forward.label',
+    keywords: ['history', 'forward', 'session', 'navigation'],
+  },
+  {
     id: 'voice.playback',
     page: 'voice',
     titleKey: 'settings.voice.page.section.playbackAndSummary',

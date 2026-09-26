@@ -136,7 +136,7 @@ fusion and legacy compatibility are owned by `lib/multirun/DOCUMENTATION.md`.
 
 `useProjectsStore.hasServerSnapshot` distinguishes a server-confirmed project list from persisted startup hints; `serverSnapshotFailed` records a failed settings sync without clearing the last confirmed list. Successful settings adoption clears that failure even for an unchanged list. Runtime switching clears both flags. Extension project subscriptions consume these flags and project records without changing active selection.
 
-Project parsing, project selection, directory navigation, mobile session paths, and the SDK adapter share `lib/pathNormalization.ts` for request paths. Tilde expansion happens before normalization. Windows drive roots retain their slash, and parent navigation stops at drive and UNC share roots. Selecting a spelling variant of the current directory preserves history and its forward entries. Bare drive-relative paths such as `C:` stay distinct from `C:/`; normalization does not guess their filesystem target.
+Project parsing, project selection, directory navigation, mobile session paths, and the SDK adapter share `lib/pathNormalization.ts` for request paths. Tilde expansion happens before normalization. Windows drive roots retain their slash, and parent navigation stops at drive and UNC share roots. Bare drive-relative paths such as `C:` stay distinct from `C:/`; normalization does not guess their filesystem target.
 
 Examples:
 
@@ -193,6 +193,14 @@ In the local (VS Code) mode the store keeps a queued message until its own send 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage. Its entity map and active root, parent/child, and directory indexes are maintained in the same transaction as the compatibility arrays and `sessionsByDirectory`. Full authoritative snapshots may rebuild those indexes once; direct create, update, move, archive, and delete mutations update only affected hierarchy and directory buckets. Metadata-only updates preserve the structure reference. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
 User-visible session ordering is also not owned by the global cache array order. `sync/session-ordering.ts` combines lifecycle rank with timestamp fallbacks, and session surfaces must use that shared comparator instead of independently sorting global sessions by `time.updated`.
+
+`useDirectoryStore` owns the active directory, home resolution, and last-directory persistence. It does not retain a directory visit stack: Back/Forward commands navigate session history. Parent and Home actions still change the active directory directly.
+
+Session visit history is owned by `lib/sessionNavigationHistoryState.ts`, with the runtime adapter in `lib/sessionNavigationHistory.ts`. It retains at most 100 identifier/directory visits per window and stable server scope. Normal selection records visits; history selection moves its cursor through `setCurrentSession`. Missing list metadata requires an SDK lookup and is not deletion. Confirmed unavailable destinations are skipped, uncertain failures remain retryable, and request generations reject stale completions. Endpoint resets pause recording before store teardown and resume after session restoration. Transient disconnection and same-device transport replacement preserve visits; a different stable server resets them. Unsent new-session drafts suspend navigation.
+
+Visits retain the resolved session directory, including the project worktree fallback, after navigation so later SDK lookups keep their directory scope.
+
+Skipped visits become eligible again when authoritative metadata restores them or the active VS Code workspace permits them. VS Code resolves project ownership through `lib/projectResolution.ts`, including nested directories and known worktrees outside the project root. The adapter rechecks only skipped IDs on metadata, workspace, or worktree discovery changes; it performs no lookup requests or global session scans. Resume and lookup completion also reconcile availability so restoration during suspension or an in-flight lookup is retained. VS Code uses its window-local extension bridge as the fallback scope when no endpoint key exists, including desktop `vscode-webview://` pages. Workspace changes affect destination eligibility rather than clearing the visit list.
 
 Global refresh rules:
 

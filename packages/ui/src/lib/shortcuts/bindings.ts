@@ -294,36 +294,29 @@ export function resolveShortcutEventDigit(
 export function eventMatchesShortcut(
   event: KeyboardEvent | React.KeyboardEvent,
   combo: ShortcutCombo,
+  options: { strictMod?: boolean; platform?: 'macos' | 'other' } = {},
 ): boolean {
   if (isUnassignedShortcut(combo)) return false;
   const parsed = parseShortcut(combo);
   if (!parsed || parsed.chords.length !== 1) return false;
   const chord = parsed.chords[0];
-
   const expectedMod = chord.modifiers.has('mod');
   const expectedShift = chord.modifiers.has('shift');
   const expectedAlt = chord.modifiers.has('alt');
   const expectedCtrl = chord.modifiers.has('ctrl');
-  const isDesktopMac = isMacOS() && isDesktopShell();
-  const isMac = isMacOS();
-  let modMatches = event.ctrlKey;
-  if (isDesktopMac) {
-    modMatches = event.metaKey;
-  } else if (isMac) {
-    modMatches = event.metaKey || event.ctrlKey;
-  }
-
+  const isMac = options.platform ? options.platform === 'macos' : isMacOS();
+  const exactMacMod = isMac && (options.strictMod || isDesktopShell());
+  const modMatches = exactMacMod ? event.metaKey
+    : isMac ? event.metaKey || event.ctrlKey : event.ctrlKey;
   if (expectedMod && !modMatches) return false;
   if (!expectedMod && event.metaKey) return false;
-  if (expectedShift !== event.shiftKey) return false;
-  if (expectedAlt !== event.altKey) return false;
+  if (expectedShift !== event.shiftKey || expectedAlt !== event.altKey) return false;
   if (expectedCtrl) {
     if (!event.ctrlKey) return false;
   } else {
-    const ctrlUsedAsMod = expectedMod && !isDesktopMac && event.ctrlKey;
+    const ctrlUsedAsMod = expectedMod && !exactMacMod && event.ctrlKey;
     if (event.ctrlKey && !ctrlUsedAsMod) return false;
   }
-
   return keyToShortcutToken(resolveShortcutEventKey(event)) === keyToShortcutToken(chord.key);
 }
 

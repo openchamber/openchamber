@@ -9,6 +9,7 @@ import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControl
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
+import { SessionHistoryControls } from '@/components/layout/SessionHistoryControls';
 
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-interactive-hover transition-colors';
@@ -157,6 +158,7 @@ export const TitlebarLeftControls: React.FC = () => {
             </TooltipContent>
           </Tooltip>
         )}
+        <SessionHistoryControls />
       </div>
     </div>
   );

@@ -18,10 +18,12 @@ export { shortcutRegistry } from './registry';
 export type { ShortcutHandler } from './registry';
 export {
   getCustomizableShortcutActions,
+  getPlatformShortcutConflict,
   getShortcutBindingConflicts,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
   getShortcutAction,
+  getShortcutDefaultConflict,
   SHORTCUT_SCHEMA,
 } from './schema';
 export type {

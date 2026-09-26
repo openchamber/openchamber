@@ -5,6 +5,14 @@ type ShortcutCategory = 'session' | 'models' | 'panels' | 'navigation' | 'applic
 type ShortcutConfig = {
   id: string;
   defaultBinding: ShortcutCombo;
+  /** Binding used on Windows/Linux when it differs from the macOS default. */
+  defaultBindingOther?: ShortcutCombo;
+  /** Match only the platform's real primary modifier (⌘ on macOS, Ctrl
+      elsewhere), so a macOS Ctrl chord keeps its own command. */
+  strictPlatformModifiers?: true;
+  /** A default that yields to an explicit assignment already holding the same
+      physical chord instead of competing with it. */
+  preferExplicitOverrides?: true;
   /** The binding is a bare-modifier chord prefix (completed by another key);
       conflict resolution compares its prefix rather than a full combo. */
   prefixStyle?: true;
@@ -151,6 +159,8 @@ const SHORTCUT_GROUPS = {
     {
       id: 'cycle_favorite_model_forward',
       defaultBinding: 'ctrl+]',
+      defaultBindingOther: 'ctrl+alt+]',
+      preferExplicitOverrides: true,
       customizable: true,
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label',
@@ -158,6 +168,8 @@ const SHORTCUT_GROUPS = {
     {
       id: 'cycle_favorite_model_backward',
       defaultBinding: 'ctrl+[',
+      defaultBindingOther: 'ctrl+alt+[',
+      preferExplicitOverrides: true,
       customizable: true,
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label',
@@ -217,6 +229,24 @@ const SHORTCUT_GROUPS = {
     },
   ],
   navigation: [
+    {
+      id: 'navigate_session_back',
+      defaultBinding: 'mod+[',
+      strictPlatformModifiers: true,
+      preferExplicitOverrides: true,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.navigate_session_back.label',
+    },
+    {
+      id: 'navigate_session_forward',
+      defaultBinding: 'mod+]',
+      strictPlatformModifiers: true,
+      preferExplicitOverrides: true,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.navigate_session_forward.label',
+    },
     { id: 'save_file', defaultBinding: 'mod+s', customizable: false },
     { id: 'find_in_file', defaultBinding: 'mod+f', customizable: false },
     {

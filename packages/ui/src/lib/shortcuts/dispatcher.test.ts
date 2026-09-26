@@ -1,19 +1,39 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import { ShortcutDispatcher } from './dispatcher';
 import { ShortcutRegistry } from './registry';
+import { getEffectiveShortcutCombo, UNASSIGNED_SHORTCUT } from './index';
 
-function key(key: string, options: Partial<KeyboardEvent> = {}): KeyboardEvent {
-  return {
-    key,
-    code: `Key${key.toUpperCase()}`,
-    altKey: false,
-    ctrlKey: false,
-    metaKey: false,
-    shiftKey: false,
-    repeat: false,
-    isComposing: false,
-    ...options,
-  } as KeyboardEvent;
+const previousKeyboardEvent = Object.getOwnPropertyDescriptor(globalThis, 'KeyboardEvent');
+Object.defineProperty(globalThis, 'KeyboardEvent', {
+  value: new Window().KeyboardEvent, configurable: true, writable: true,
+});
+afterAll(() => {
+  if (previousKeyboardEvent) Object.defineProperty(globalThis, 'KeyboardEvent', previousKeyboardEvent);
+  else Reflect.deleteProperty(globalThis, 'KeyboardEvent');
+});
+
+const MAC_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+
+const withUserAgent = <T,>(userAgent: string, run: () => T): T => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { userAgent }, configurable: true, writable: true,
+  });
+  try {
+    return run();
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'navigator', previous);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+  }
+};
+
+function key(key: string, options: KeyboardEventInit & { keyCode?: number } = {}): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', {
+    key, code: `Key${key.toUpperCase()}`, cancelable: true, ...options,
+  });
+  Object.defineProperty(event, 'keyCode', { value: options.keyCode ?? 0 });
+  return event;
 }
 
 describe('ShortcutDispatcher', () => {
@@ -203,5 +223,104 @@ describe('ShortcutDispatcher', () => {
 
     expect(dispatcher.dispatch(key('x'))).toBe(true);
     expect(calls).toEqual(['declined', 'first']);
+  });
+
+  test('history is consumed at a boundary but leaves prevented, composed and AltGraph input alone', () => {
+    const registry = new ShortcutRegistry();
+    let calls = 0;
+    registry.register('navigate_session_back', () => { calls += 1; });
+    const dispatcher = new ShortcutDispatcher({ registry, getBinding: () => 'ctrl+[' });
+    const event = (extra: KeyboardEventInit = {}) => new KeyboardEvent('keydown', {
+      key: '[', code: 'BracketLeft', ctrlKey: true, cancelable: true, ...extra,
+    });
+    expect(dispatcher.dispatch(event())).toBe(true);
+    expect(calls).toBe(1);
+    const consumed = event();
+    consumed.preventDefault();
+    expect(dispatcher.dispatch(consumed)).toBe(false);
+    expect(dispatcher.dispatch(event({ isComposing: true }))).toBe(false);
+    class AltGraphEvent extends KeyboardEvent {
+      override getModifierState(key: string): boolean {
+        return key === 'AltGraph' || super.getModifierState(key);
+      }
+    }
+    registry.register('cycle_favorite_model_backward', () => { calls += 1; });
+    const modelDispatcher = new ShortcutDispatcher({ registry, getBinding: () => 'ctrl+alt+[' });
+    const altGraph = new AltGraphEvent('keydown', { key: '[', code: 'BracketLeft', ctrlKey: true, altKey: true });
+    expect(modelDispatcher.dispatch(altGraph)).toBe(false);
+    const resume = registry.suspend();
+    expect(dispatcher.dispatch(event())).toBe(false);
+    resume();
+    expect(calls).toBe(1);
+  });
+
+  test('real platform defaults and a saved assignment dispatch at most one command', () => {
+    type Row = {
+      name: string;
+      overrides: Record<string, string>;
+      platform: 'macos' | 'other';
+      event: KeyboardEventInit;
+      expected: string[];
+      altGraph?: boolean;
+      prevented?: boolean;
+    };
+    const actions = ['navigate_session_back', 'navigate_session_forward',
+      'cycle_favorite_model_backward', 'cycle_favorite_model_forward'] as const;
+    const rows: Row[] = [
+      { name: 'other default back', overrides: {}, platform: 'other',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true }, expected: ['navigate_session_back'] },
+      { name: 'other default forward', overrides: {}, platform: 'other',
+        event: { key: ']', code: 'BracketRight', ctrlKey: true }, expected: ['navigate_session_forward'] },
+      { name: 'other model cycle', overrides: {}, platform: 'other',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true, altKey: true }, expected: ['cycle_favorite_model_backward'] },
+      { name: 'other saved model keeps its chord', overrides: { cycle_favorite_model_backward: 'mod+[' }, platform: 'other',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true }, expected: ['cycle_favorite_model_backward'] },
+      { name: 'other saved model leaves forward default', overrides: { cycle_favorite_model_backward: 'mod+[' }, platform: 'other',
+        event: { key: ']', code: 'BracketRight', ctrlKey: true }, expected: ['navigate_session_forward'] },
+      { name: 'unassigned history is inert', overrides: { navigate_session_back: UNASSIGNED_SHORTCUT }, platform: 'other',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true }, expected: [] },
+      { name: 'other altgr never cycles models', overrides: {}, platform: 'other',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true, altKey: true }, expected: [], altGraph: true },
+      { name: 'an editor-consumed chord is not stolen', overrides: {}, platform: 'other',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true }, expected: [], prevented: true },
+      { name: 'mac default back uses cmd', overrides: {}, platform: 'macos',
+        event: { key: '[', code: 'BracketLeft', metaKey: true }, expected: ['navigate_session_back'] },
+      { name: 'mac ctrl chord stays with models', overrides: {}, platform: 'macos',
+        event: { key: '[', code: 'BracketLeft', ctrlKey: true }, expected: ['cycle_favorite_model_backward'] },
+      { name: 'mac saved model suppresses the history default', overrides: { cycle_favorite_model_backward: 'mod+[' }, platform: 'macos',
+        event: { key: '[', code: 'BracketLeft', metaKey: true }, expected: ['cycle_favorite_model_backward'] },
+    ];
+
+    const dispatchRow = (row: Row) => {
+      const registry = new ShortcutRegistry();
+      const invoked: string[] = [];
+      for (const id of actions) registry.register(id, () => { invoked.push(id); });
+      const dispatcher = new ShortcutDispatcher({
+        registry,
+        getBinding: (actionId) => getEffectiveShortcutCombo(actionId, row.overrides, row.platform),
+      });
+      // happy-dom reports AltGraph for every altKey event; a real browser reports
+      // it only for AltGr, so the row states the modifier explicitly.
+      class RowEvent extends KeyboardEvent {
+        override getModifierState(key: string): boolean {
+          return key === 'AltGraph' ? row.altGraph === true : super.getModifierState(key);
+        }
+      }
+      const event = new RowEvent('keydown', { cancelable: true, ...row.event });
+      if (row.prevented) event.preventDefault();
+      const consumed = dispatcher.dispatch(event);
+      return { invoked, consumed };
+    };
+
+    for (const platform of ['other', 'macos'] as const) {
+      withUserAgent(platform === 'macos' ? MAC_USER_AGENT : 'Bun/1.3.10', () => {
+        for (const row of rows.filter((entry) => entry.platform === platform)) {
+          const outcome = dispatchRow(row);
+          expect({ name: row.name, invoked: outcome.invoked })
+            .toEqual({ name: row.name, invoked: row.expected });
+          expect(outcome.invoked.length).toBeLessThanOrEqual(1);
+        }
+      });
+    }
   });
 });

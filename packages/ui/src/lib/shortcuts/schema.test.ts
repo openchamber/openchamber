@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
+  getPlatformShortcutConflict,
   getShortcutBindingConflicts,
   getShortcutAction,
+  getShortcutDefaultConflict,
   parseShortcut,
   SHORTCUT_SCHEMA,
+  UNASSIGNED_SHORTCUT,
   type ShortcutCategory,
 } from './index';
 
@@ -141,4 +144,35 @@ describe('shortcut defaults', () => {
         // Unknown ids stay inert rather than throwing.
         expect(getEffectiveShortcutCombo('close_session_tab', { ghost_action: 'mod+z', close_session_tab: 'alt+q' } as Record<string, string>)).toBe('alt+q');
     });
+});
+
+test('platform history and model defaults are distinct', () => {
+  expect(getEffectiveShortcutCombo('navigate_session_back', {}, 'macos')).toBe('mod+[');
+  expect(getEffectiveShortcutCombo('navigate_session_forward', {}, 'other')).toBe('mod+]');
+  expect(getEffectiveShortcutCombo('cycle_favorite_model_backward', {}, 'macos')).toBe('ctrl+[');
+  expect(getEffectiveShortcutCombo('cycle_favorite_model_backward', {}, 'other')).toBe('ctrl+alt+[');
+  expect(getEffectiveShortcutCombo('cycle_favorite_model_forward', {}, 'other')).toBe('ctrl+alt+]');
+});
+
+test('saved physical conflicts suppress new defaults without changing saved values', () => {
+  const overrides = { cycle_favorite_model_backward: 'ctrl+[' };
+  expect(getEffectiveShortcutCombo('navigate_session_back', overrides, 'other')).toBe('');
+  expect(getShortcutDefaultConflict('navigate_session_back', overrides, 'other')?.id)
+    .toBe('cycle_favorite_model_backward');
+  expect(getEffectiveShortcutCombo('cycle_favorite_model_backward', overrides, 'other')).toBe('ctrl+[');
+  expect(getEffectiveShortcutCombo('navigate_session_back', overrides, 'macos')).toBe('mod+[');
+  expect(overrides).toEqual({ cycle_favorite_model_backward: 'ctrl+[' });
+  expect(getEffectiveShortcutCombo('navigate_session_back', {
+    navigate_session_back: UNASSIGNED_SHORTCUT,
+  }, 'other')).toBe('');
+  expect(getEffectiveShortcutCombo('cycle_favorite_model_forward', {
+    open_help: 'ctrl+alt+]',
+  }, 'other')).toBe('');
+});
+
+test('physical conflicts include sequence leaders and ignore invalid overrides', () => {
+  expect(getPlatformShortcutConflict('mod+[', 'ctrl+[ x', 'other')).toBe('prefix');
+  expect(getShortcutDefaultConflict('navigate_session_back', { open_help: 'ctrl+[ x' }, 'other')?.id)
+    .toBe('open_help');
+  expect(getEffectiveShortcutCombo('navigate_session_back', { open_help: '' }, 'other')).toBe('mod+[');
 });

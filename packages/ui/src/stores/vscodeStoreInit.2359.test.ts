@@ -114,7 +114,6 @@ describe('VS Code store init before RuntimeAPIs (#2359)', () => {
 
     expect(state.currentDirectory).toBe(WORKSPACE);
     expect(state.homeDirectory).toBe(WORKSPACE);
-    expect(state.directoryHistory).toEqual([WORKSPACE]);
     expect(state.currentDirectory).not.toBe(STALE);
   });
 });

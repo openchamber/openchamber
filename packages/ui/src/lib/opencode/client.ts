@@ -829,8 +829,8 @@ class OpencodeService {
     return projectSession(info)
   }
 
-  async getSession(id: string, directory?: string | null): Promise<Session> {
-    const info = await call("session.get", () => this.clientFor(directory).session.get({ sessionID: id }))
+  async getSession(id: string, directory?: string | null, signal?: AbortSignal): Promise<Session> {
+    const info = await call("session.get", () => this.clientFor(directory).session.get({ sessionID: id }, { signal }))
     return projectSession(info)
   }
 

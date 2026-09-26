@@ -10,6 +10,7 @@ import { useSession } from '@/sync/sync-context';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+import { SessionHistoryControls } from '@/components/layout/SessionHistoryControls';
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
@@ -90,6 +91,8 @@ export const MobileHeader: React.FC<{
           >
             <Icon name="list-unordered" className="size-5" />
           </button>
+
+          <SessionHistoryControls touch />
 
           {/* Session title doubles as the recent-sessions switcher trigger. */}
           <button
