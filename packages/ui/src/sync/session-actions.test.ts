@@ -41,7 +41,7 @@ let unarchiveBatchResponse: MockRouteResponse = {
   body: { error: 'not found' },
 }
 let activeStatusSnapshot: Record<string, SessionStatus> | null = {}
-let readActiveStatusSnapshot = async () => activeStatusSnapshot
+let readActiveStatusSnapshot: (directory?: string | null) => Promise<Record<string, SessionStatus> | null> = async () => activeStatusSnapshot
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 const globalArchivedSessions: Session[] = []
@@ -54,7 +54,7 @@ mock.module("@/lib/opencode/client", () => ({
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getDirectory: () => "/test/project",
-    getActiveSessionStatuses: mock(() => readActiveStatusSnapshot()),
+    getActiveSessionStatuses: mock((directory?: string | null) => readActiveStatusSnapshot(directory)),
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
       const record = sessionRecords.get(sessionId)
@@ -1049,6 +1049,26 @@ describe("session restore (unarchive)", () => {
     expect(source.getState().session_status["session-a"]).toBeUndefined()
     expect(source.getState().sessionStatusInvalidated?.["session-a"]).toBe(true)
     expect(await unarchiveSession("session-a")).toBe(true)
+    expect(source.getState().session_status["session-a"]).toEqual({ type: "busy" })
+    expect(source.getState().sessionStatusInvalidated?.["session-a"]).toBeUndefined()
+  })
+
+  test("reads the owning space's status before settling a restored session", async () => {
+    const spaceDirectory = "/spaces/a1b2c3d4e5f6/app"
+    unarchiveBatchResponse = { status: 200, body: { restored: [restored("session-a", spaceDirectory)], failedIds: [] } }
+    const source = createStore({}, { sessionStatusReady: true, sessionStatusInvalidated: { "session-a": true } })
+    const statusReadDirectories: Array<string | null | undefined> = []
+    readActiveStatusSnapshot = async (directory): Promise<Record<string, SessionStatus>> => {
+      expect(source.getState().sessionStatusInvalidated?.["session-a"]).toBe(true)
+      expect(source.getState().session_status["session-a"]).toBeUndefined()
+      statusReadDirectories.push(directory)
+      return directory === spaceDirectory ? { "session-a": { type: "busy" } } : {}
+    }
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[spaceDirectory, source]]), () => "/test/project")
+
+    expect(await unarchiveSession("session-a")).toBe(true)
+    expect(statusReadDirectories).toEqual([spaceDirectory])
     expect(source.getState().session_status["session-a"]).toEqual({ type: "busy" })
     expect(source.getState().sessionStatusInvalidated?.["session-a"]).toBeUndefined()
   })
