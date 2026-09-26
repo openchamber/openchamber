@@ -2884,6 +2884,7 @@ export const dict = {
   'updateDialog.actions.downloadUpdate': 'Télécharger la mise à jour',
   'updateDialog.status.downloading': 'Téléchargement...',
   'updateDialog.actions.restartToUpdate': 'Redémarrer pour mettre à jour',
+  'updateDialog.status.restarting': 'Redémarrage...',
   'updateDialog.actions.updateNow': 'Mettre à jour maintenant',
   'updateDialog.actions.openMobileUpdate': 'Ouvrir la mise à jour',
   'updateDialog.changelog.title': 'Nouveautés',

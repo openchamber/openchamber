@@ -188,6 +188,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     info: s.info,
     downloading: s.downloading,
     downloaded: s.downloaded,
+    installing: s.installing,
     progress: s.progress,
     error: s.error,
     downloadUpdate: s.downloadUpdate,
@@ -729,6 +730,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         info={updateStore.info}
         downloading={updateStore.downloading}
         downloaded={updateStore.downloaded}
+        installing={updateStore.installing}
         progress={updateStore.progress}
         error={updateStore.error}
         onDownload={updateStore.downloadUpdate}
