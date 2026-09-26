@@ -2513,6 +2513,33 @@ export async function isAncestorOfHead(directory, sha) {
   return result.success;
 }
 
+const PATCH_EQUIVALENCE_TIMEOUT_MS = 5_000;
+
+// Whether a commit has an equivalent patch reachable from the checked-out HEAD.
+// Missing objects and ambiguous prefixes cannot prove it.
+export async function isPatchEquivalentOfHead(directory, sha) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  const normalizedSha = String(sha ?? '').trim();
+  if (!normalizedDirectory || !/^[0-9a-f]{7,64}$/i.test(normalizedSha)) {
+    return false;
+  }
+
+  const cherry = await runGitCommand(
+    normalizedDirectory,
+    ['cherry', 'HEAD', normalizedSha, `${normalizedSha}^`],
+    { timeoutMs: PATCH_EQUIVALENCE_TIMEOUT_MS },
+  );
+  if (!cherry.success) {
+    return false;
+  }
+
+  const expectedPrefix = normalizedSha.toLowerCase();
+  return cherry.stdout.split(/\r?\n/).some((line) => {
+    const match = line.match(/^-\s+([0-9a-f]{40,64})$/i);
+    return Boolean(match?.[1]) && match[1].toLowerCase().startsWith(expectedPrefix);
+  });
+}
+
 async function readStatus(normalizedDirectory, lightMode) {
   try {
     // Prefer an explicit non-repo check before simple-git status so a missing

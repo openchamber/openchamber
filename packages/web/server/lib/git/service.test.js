@@ -25,6 +25,7 @@ import {
   getTrackingBranch,
   getWorktrees,
   isGitRepository,
+  isPatchEquivalentOfHead,
   observeWorktreeTopology,
   populateWorktreeWithLockRecovery,
   removeWorktree,
@@ -919,6 +920,56 @@ describe('worktree root resolution', () => {
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
     await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: fs.realpathSync(repo) });
+  });
+});
+
+describe.runIf(canRunGit())('isPatchEquivalentOfHead', () => {
+  it('finds a rebased commit patch in HEAD history', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'file.txt'), 'base\n');
+    runGit(repo, ['add', 'file.txt']);
+    runGit(repo, ['commit', '-m', 'base']);
+    const root = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    runGit(repo, ['checkout', '-b', 'feature']);
+    fs.appendFileSync(path.join(repo, 'file.txt'), 'feature\n');
+    runGit(repo, ['commit', '-am', 'feature change']);
+    const original = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    runGit(repo, ['tag', 'before-rebase', original]);
+    runGit(repo, ['checkout', 'main']);
+    fs.writeFileSync(path.join(repo, 'main.txt'), 'main\n');
+    runGit(repo, ['add', 'main.txt']);
+    runGit(repo, ['commit', '-m', 'main change']);
+    runGit(repo, ['checkout', 'feature']);
+    runGit(repo, ['rebase', 'main']);
+
+    await expect(isPatchEquivalentOfHead(repo, original)).resolves.toBe(true);
+    await expect(isPatchEquivalentOfHead(repo, root)).resolves.toBe(false);
+  });
+
+  it('rejects an unrelated commit with a different patch', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'base']);
+    runGit(repo, ['checkout', '-b', 'old-feature']);
+    fs.writeFileSync(path.join(repo, 'old.txt'), 'old\n');
+    runGit(repo, ['add', 'old.txt']);
+    runGit(repo, ['commit', '-m', 'old change']);
+    const oldCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    runGit(repo, ['commit', '--allow-empty', '-m', 'empty change']);
+    const emptyCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    runGit(repo, ['checkout', 'main']);
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'new\n');
+    runGit(repo, ['add', 'new.txt']);
+    runGit(repo, ['commit', '-m', 'new change']);
+
+    await expect(isPatchEquivalentOfHead(repo, oldCommit)).resolves.toBe(false);
+    await expect(isPatchEquivalentOfHead(repo, emptyCommit)).resolves.toBe(false);
+    await expect(isPatchEquivalentOfHead(repo, 'missing')).resolves.toBe(false);
   });
 });
 
