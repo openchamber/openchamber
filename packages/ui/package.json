@@ -44,7 +44,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@legendapp/list": "3.3.10",
+    "@legendapp/list": "3.4.0",
     "@lezer/highlight": "^1.2.3",
     "@opencode/client": "2.0.18",
     "@opencode/schema": "2.0.18",
