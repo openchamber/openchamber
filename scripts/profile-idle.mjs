@@ -29,7 +29,7 @@ import process from "node:process"
 import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
-import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { expandProjects, expandSessionLists, seedContextPanel } from "./perf/scenario.mjs"
 import { growthPerSecond, metricMap, round } from "./perf/metrics.mjs"
 
 const HELP = `Usage: bun run profile:idle -- [options]
@@ -128,82 +128,6 @@ const parseArgs = (argv) => {
   if (options.tab) target.searchParams.set("tab", options.tab)
   options.url = target.toString()
   return options
-}
-
-/**
- * Mirrors `useUIStore`'s context-panel tab identity rules so a seeded tab is
- * indistinguishable from one the user opened. Only `file` and `preview` key
- * their identity by target path; every other surface allows one tab per mode.
- */
-const buildPanelTab = (descriptor, touchedAt) => {
-  const { mode, targetPath } = descriptor
-  const dedupeKey = (mode === "file" || mode === "preview") ? (targetPath || mode) : mode
-  return {
-    id: dedupeKey === mode ? mode : `${mode}:${dedupeKey}`,
-    mode,
-    targetPath: targetPath || null,
-    dedupeKey,
-    label: null,
-    sessionTitleFallback: null,
-    readOnly: false,
-    stagedDiff: false,
-    diffScope: "working",
-    touchedAt,
-  }
-}
-
-const parsePanelDescriptor = (value) => {
-  const separator = value.indexOf("=")
-  if (separator === -1) return { mode: value.trim(), targetPath: null }
-  return { mode: value.slice(0, separator).trim(), targetPath: value.slice(separator + 1).trim() || null }
-}
-
-/**
- * Opens the context panel by seeding the persisted store the app reads on
- * boot, then reloading. Driving persisted state rather than synthesising
- * clicks keeps the scenario deterministic and keeps the recorded window free
- * of input-driven work that a real idle session would not perform.
- */
-const seedContextPanel = async (client, panels, sessionId) => {
-  const descriptors = panels.map(parsePanelDescriptor)
-  const tabs = descriptors.map((descriptor, index) => buildPanelTab(
-    descriptor.mode === "chat" && !descriptor.targetPath ? { ...descriptor, targetPath: sessionId } : descriptor,
-    Date.now() + index,
-  ))
-
-  const stored = await evaluateValue(client, `JSON.stringify({
-    lastDirectory: localStorage.getItem("lastDirectory"),
-    uiStore: localStorage.getItem("ui-store"),
-  })`)
-  const { lastDirectory, uiStore } = JSON.parse(stored ?? "{}")
-  if (!lastDirectory) throw new Error("Could not open the context panel: no lastDirectory in browser storage")
-  if (!uiStore) throw new Error("Could not open the context panel: no ui-store in browser storage")
-
-  // `lastDirectory` is persisted as a JSON string by some writers and as a raw
-  // path by others; accept both rather than guessing.
-  let directory = lastDirectory
-  try {
-    const decoded = JSON.parse(lastDirectory)
-    if (typeof decoded === "string") directory = decoded
-  } catch {
-    // Already a raw path.
-  }
-  const normalized = directory.replace(/\\/g, "/").replace(/\/+$/g, "") || "/"
-
-  const parsed = JSON.parse(uiStore)
-  parsed.state = parsed.state ?? {}
-  parsed.state.contextPanelByDirectory = parsed.state.contextPanelByDirectory ?? {}
-  parsed.state.contextPanelByDirectory[normalized] = {
-    isOpen: true,
-    expanded: false,
-    tabs,
-    activeTabId: tabs[0]?.id ?? null,
-    widthByMode: {},
-    touchedAt: Date.now(),
-  }
-
-  await evaluateValue(client, `localStorage.setItem("ui-store", ${JSON.stringify(JSON.stringify(parsed))})`)
-  console.log(`Context panel seeded for ${normalized}: ${tabs.map((tab) => tab.id).join(", ")}`)
 }
 
 const REPORTED_METRICS = [

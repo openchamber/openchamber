@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -443,6 +443,39 @@ describe('useGitStore', () => {
 
     expect(useGitStore.getState().getDiff('/repo', 'src/first.ts')).toBe(null);
     expect(useGitStore.getState().getDiff('/repo', 'src/second.ts')?.modified).toBe('d');
+  });
+
+  test('measures eviction from stored byte sizes instead of re-encoding cached diffs', () => {
+    setDirectoryStatus(createStatus());
+    const encode = spyOn(TextEncoder.prototype, 'encode');
+    try {
+      for (let index = 0; index < 30; index += 1) {
+        useGitStore.getState().setDiff('/repo', `src/file-${index}.ts`, {
+          original: 'a'.repeat(64),
+          modified: 'b'.repeat(64),
+          submodule: null,
+        });
+      }
+
+      const encodesBeforeLimitPush = encode.mock.calls.length;
+      useGitStore.getState().setDiff('/repo', 'src/file-30.ts', {
+        original: 'c'.repeat(64),
+        modified: 'd'.repeat(64),
+        submodule: null,
+      });
+
+      // Two encodes measure the inserted diff's original and modified sides;
+      // the eviction scans over the full cache must read the sizes stored at
+      // insertion instead of encoding every cached entry again.
+      expect(encode.mock.calls.length - encodesBeforeLimitPush).toBe(2);
+
+      const cache = useGitStore.getState().getDirectoryState('/repo')?.diffCache;
+      expect(cache?.size).toBe(30);
+      expect(cache?.has('src/file-0.ts')).toBe(false);
+      expect(cache?.has('src/file-30.ts')).toBe(true);
+    } finally {
+      encode.mockRestore();
+    }
   });
 
   test('keeps the newest branch request when completions are reversed', async () => {

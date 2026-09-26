@@ -234,3 +234,120 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   // It takes about a second on an idle machine, but the full suite runs four
   // test processes at once, and there it crossed the 5 second default on Windows.
 }, 30_000);
+
+// Revert All used to launch one POST /api/git/revert per changed path at once.
+// The server serializes reverts per repository, so the extra requests only hold
+// browser connections away from reads. This drives the real Changes surface and
+// counts transport calls in flight at the fetch boundary.
+test('bounds Revert All fan-out to two in-flight revert requests', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const files = Array.from({ length: 8 }, (_, index) => `src/file-${index}.ts`);
+  let revertCalls = 0;
+  let activeReverts = 0;
+  let peakReverts = 0;
+  let releaseReverts: () => void = () => {};
+  const revertGate = new Promise<void>((resolve) => { releaseReverts = () => resolve(); });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/remote-url': return Response.json({ url: null });
+      case '/api/git/branches': return Response.json({ all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } });
+      case '/api/git/status': return Response.json({ current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } });
+      case '/api/git/file-diff': return Response.json({ path: url.searchParams.get('path'), original: '', modified: '', isBinary: true });
+      case '/api/git/revert': {
+        revertCalls += 1;
+        activeReverts += 1;
+        peakReverts = Math.max(peakReverts, activeReverts);
+        await revertGate;
+        activeReverts -= 1;
+        return Response.json({ success: true });
+      }
+      default: throw new Error(`Unexpected request ${url.pathname}`);
+    }
+  }, originalFetch);
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const { useGitHubAuthStore } = await import('@/stores/useGitHubAuthStore');
+  useGitHubAuthStore.setState({ hasChecked: true, status: { connected: true } });
+  const { MobileChangesPane } = await import('./MobileChangesSurface');
+  const apis = createWebAPIs();
+  const dirtyStatus: GitStatus = {
+    current: 'feature', tracking: null, ahead: 0, behind: 0, isClean: false,
+    files: files.map((path) => ({ path, index: ' ', working_dir: 'M' })),
+    diffStats: { staged: {}, working: {} },
+  };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const previous = useGitStore.getState().getDirectoryState('/repo');
+  if (!previous) throw new Error('Missing repository state');
+  const now = Date.now();
+  const directories = new Map(useGitStore.getState().directories);
+  directories.set('/repo', {
+    ...previous, status: dirtyStatus, isGitRepo: true,
+    branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
+    log: { all: [], latest: null, total: 0 }, identity: { userName: 'Test Author', userEmail: 'test@example.com', sshCommand: null },
+    lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+  });
+  useGitStore.setState({ directories });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const settle = async (done: () => boolean) => {
+    for (let tick = 0; tick < 20 && !done(); tick += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    }
+  };
+  try {
+    await act(async () => {
+      root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}>
+        <MobileChangesPane rootDirectory="/repo"
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null }}
+          visible />
+      </RuntimeAPIContext.Provider></I18nProvider>);
+    });
+    const revertAll = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Revert all');
+    if (!revertAll) throw new Error('Missing Revert all');
+    await act(async () => { revertAll.click(); });
+    const confirm = [...document.querySelectorAll<HTMLElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === 'Revert all');
+    if (!confirm) throw new Error('Missing Revert all confirmation');
+    await act(async () => { confirm.click(); });
+    // Two paths hold the only in-flight slots; the other six wait for one.
+    await settle(() => revertCalls >= 2);
+    expect(revertCalls).toBe(2);
+    expect(peakReverts).toBeLessThanOrEqual(2);
+    releaseReverts();
+    await settle(() => revertCalls >= files.length);
+    expect(revertCalls).toBe(files.length);
+    expect(peakReverts).toBeLessThanOrEqual(2);
+    // Let the post-revert refresh finish so the surface does not update after unmount.
+    await settle(() => !container.textContent?.includes('Revert all'));
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+}, 30_000);

@@ -28,6 +28,7 @@ import { useGitComparison, type GitComparisonFile, type GitComparisonSource } fr
 import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
+import { mapWithConcurrency } from '@/lib/concurrency';
 import type { FileDiffMetadata } from '@pierre/diffs';
 import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
 import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
@@ -73,6 +74,10 @@ type ComparisonDiff =
   | { status: 'error'; message: string };
 const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
 const LIST_ROUTE: ChangesRoute = { type: 'list' };
+
+// The server already serializes reverts per repository, so anything beyond a
+// couple of in-flight POSTs only holds browser connections away from reads.
+const REVERT_PATHS_CONCURRENCY = 2;
 
 const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
 
@@ -512,7 +517,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setIsRevertingAll(true);
     setRevertingPaths(new Set(uniquePaths));
     try {
-      await Promise.all(uniquePaths.map((filePath) => git.revertGitFile(currentDirectory, filePath)));
+      await mapWithConcurrency(uniquePaths, REVERT_PATHS_CONCURRENCY, (filePath) =>
+        git.revertGitFile(currentDirectory, filePath));
       await refreshStatusAndBranches(false);
       toast.success(uniquePaths.length === 1
         ? t('gitView.toast.revertedFilesSingle', { count: uniquePaths.length })

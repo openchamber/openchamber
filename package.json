@@ -94,6 +94,7 @@
     "profile:session": "node scripts/profile-session.mjs",
     "profile:animation": "node scripts/profile-animation.mjs",
     "profile:switch": "node scripts/profile-switch.mjs",
+    "profile:git": "node scripts/profile-git.mjs",
     "profile:startup": "node scripts/profile-startup.mjs"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 
 import * as gitHttp from './gitApiHttp';
+import { mapWithConcurrency } from './concurrency';
 import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
 import { requestSmallModel } from './smallModelRequest';
@@ -217,10 +218,14 @@ export async function deleteRemoteBranch(directory: string, payload: import('./a
 
 const COMMIT_DIFF_FILE_LIMIT = 30;
 const COMMIT_DIFF_TOTAL_CHAR_LIMIT = 120_000;
+// Each in-flight file issues a staged + unstaged pair, so the peak request
+// count here is twice this value. Two matches the store's diff-prefetch
+// concurrency and keeps the browser connection pool able to serve the UI.
+const COMMIT_DIFF_CONCURRENCY = 2;
 
 const collectSelectedFileDiffs = async (directory: string, files: string[]): Promise<string> => {
   const limited = files.slice(0, COMMIT_DIFF_FILE_LIMIT);
-  const chunks = await Promise.all(limited.map(async (path) => {
+  const chunks = await mapWithConcurrency(limited, COMMIT_DIFF_CONCURRENCY, async (path) => {
     try {
       const [staged, unstaged] = await Promise.all([
         gitHttp.getGitDiff(directory, { path, staged: true }).catch(() => null),
@@ -233,7 +238,7 @@ const collectSelectedFileDiffs = async (directory: string, files: string[]): Pro
     } catch {
       return `--- ${path} (diff unavailable)`;
     }
-  }));
+  });
 
   let total = '';
   for (const chunk of chunks) {

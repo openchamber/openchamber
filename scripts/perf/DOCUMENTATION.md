@@ -13,6 +13,7 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:session` | What receiving and rendering a live assistant response costs. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. |
 | `bun run profile:switch` | How long switching sessions from the sidebar takes, cold and warm. |
+| `bun run profile:git` | How the Git panel behaves with many tracked files: the diff-request burst Generate fires, the revert fan-out, and the long tasks they cause. |
 | `bun run profile:startup` | How long a packaged Desktop build takes from process spawn to a visible window and a mounted interface. |
 | `bun run profile:browser` | A manually driven capture, for interactions that cannot be scripted. |
 
@@ -45,7 +46,10 @@ cd <a project directory> && node <repo>/packages/web/bin/cli.js serve --port 459
 ```
 
 `profile:idle` and `profile:session` need a running server; `profile:animation`
-serves its own fixture and needs nothing.
+serves its own fixture and needs nothing; `profile:git` starts its own server
+and git fixture and needs a Chrome/Chromium binary plus a pre-built UI
+(`packages/web/dist`, from `bun run build:ui && bun run build:web`); a
+development server is not measured.
 
 ## profile:idle
 
@@ -247,6 +251,74 @@ the sidebar, so pass explicit ids to compare runs across days. The row must be
 present in the sidebar; the command fails rather than measuring a click on
 nothing.
 
+## profile:git
+
+Builds a disposable git repository, starts its own OpenChamber server against
+it, opens the Git panel on that fixture, and measures the actions that strain
+the panel when many files are tracked. The fixture is the only repository the
+command mutates and it is deleted at the end unless `--keep`.
+
+The fixture commits `--files` tracked files, modifies `--modified` of them,
+stages the first `--staged`, then modifies those staged files again so both the
+index and the working tree carry a diff for them. Generate needs the staged
+group. `--actions` runs in the order given (default `generate,revert-all`).
+`revert-all` and `stage-commit` mutate the fixture and each consumes the
+modified files the other needs, so they must run as separate captures; the
+command refuses the combination.
+
+```bash
+bun run profile:git -- --files 200 --modified 40 --staged 30 --chrome <chrome path>
+# Compare a fix against a baseline and gate the fan-out it changed. The budgets
+# gate the client peak; Revert All's to-complete peak can read one higher.
+bun run profile:git -- --baseline artifacts/git-panel-before --budget-diff-inflight 4 --budget-revert-inflight 2
+```
+
+Generate collects the diffs of the first 30 staged files at two requests each
+(staged and unstaged), so with `--staged 30` the capture expects 60
+`/api/git/diff` requests. The model step after that burst may have no provider
+configured: the app's intentional `/api/small-model/generate` 404 fallback is
+then reported among the non-primary `failed:` counts and recorded as
+`modelOutcome`. It never gates a capture; the diff burst is the measurement.
+The action window closes after that model wait, so `generate`'s busy and
+long-task figures include the model step;
+the primary endpoint's request metrics are unaffected. Revert All is expected to
+fire one `/api/git/revert` per changed path. Both the request count and the two
+peak figures below are reported per endpoint, and failed requests are counted
+per endpoint in the report. A run whose expected requests never fired, or whose
+primary endpoint had a failed request, fails instead of reporting a clean zero.
+
+### Two peaks, because a client slot is not a transfer
+
+- **Client peak in-flight** — request start (`Network.requestWillBeSent`) to
+  response headers (`Network.responseReceived`). This is the figure a
+  concurrency limit bounds: `fetch()` resolves at the headers, and
+  `mapWithConcurrency` starts the next request from that moment.
+- **Peak in-flight to complete** — request start to `Network.loadingFinished`
+  or failure. This is the transfer and pool-occupancy view; `maxDurationMs` is
+  measured over this interval.
+
+Revert All is where the two can differ on a correct build. `revertGitFile`
+resolves on the response headers and never reads the success body, while the
+server awaits `revertFile` before writing that body. When the next request in
+the mapper starts before Chrome reports the previous body finished, the
+to-complete peak overstates the client's concurrency: with
+`REVERT_PATHS_CONCURRENCY = 2`, the client peak reads 2 while the to-complete
+peak can read 3. That overlap is a timing coincidence, which is exactly why the
+budget must not depend on it. `--budget-diff-inflight` and
+`--budget-revert-inflight` gate the client peak; the to-complete figure is
+diagnostic, not a budget failure.
+
+The HTTP cache is disabled for the run — a diff the browser served from cache
+would hide a request the app issued, and the app's own diff prefetch could
+otherwise pre-fill the URLs Generate reads. The summary records
+`httpCacheDisabled` for both sides of a comparison.
+
+Per action the report gives the request counts and both peak figures per
+endpoint, the long-task distribution, main-thread busy time, and the timeline
+breakdown, over a window delimited by user-timing marks. Process CPU is sampled
+like the other commands; headless Chrome has no GPU, so quote it only from
+`--headed`.
+
 ## profile:startup
 
 Launches a packaged Desktop build and reports, per launch, milliseconds since
@@ -306,11 +378,16 @@ compared later without re-running:
 
 - `profile:idle` → `idle-summary.json`, `cpu-profile.cpuprofile`
 - `profile:session` → `session-summary.json`, `cpu-profile.cpuprofile`
+- `profile:git` → `git-panel-summary.json`, `cpu-profile.cpuprofile` (plus `trace.json` with `--save-trace`)
 - `profile:startup` → `startup-summary.json`
 
 `--baseline <directory>` prints a per-metric delta table against a previous run
-of the same command. `--budget-*` options make the command exit non-zero, so the
-same invocation works as an investigation tool and as a regression gate.
+of the same command; `profile:git` warns when the baseline's fixture scale or
+actions differ from the current run, because the methodology requires an
+identical scenario. The delta table belongs to the text report, so
+`profile:git --json` ignores `--baseline` and warns instead of reading it.
+`--budget-*` options make the command exit non-zero, so the same invocation
+works as an investigation tool and as a regression gate.
 
 Artifacts can reveal project paths and endpoint names. They are gitignored; do
 not publish them without review.
@@ -336,6 +413,18 @@ of these failure modes once produced a confident, wrong "everything is fast":
   leaves the session idle within seconds with the user message rendered, which
   passes the check above. The run asks the session for an assistant message and
   says so when there is none.
+- **A Git panel that is not showing the fixture.** The panel renders whichever
+  directory the app has active. `profile:git` verifies the app's persisted
+  directory, a changed-file row, and that the app's own `/api/git/status`
+  request names the fixture before measuring anything; a panel on another
+  directory would report a perfectly quiet zero.
+- **An action that fired no requests, or whose requests failed.** `profile:git`
+  knows how many requests each action must produce (the diff burst, one revert
+  per changed path), fails when fewer arrive, and fails when the action's
+  primary endpoint had a failed request — a transport failure or an HTTP
+  4xx/5xx response — because a count alone would let a burst of error responses
+  pass. A swallowed click or an unconfigured model cannot read as a clean
+  result.
 - **A launch that never became the app.** `profile:startup` fails a run whose
   application document never mounted React within the timeout, rather than
   reporting the milestones it did reach as a fast launch.
@@ -375,5 +464,6 @@ be a measurement, never a disabled instrument.
 | `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
 | `cpu-profile.mjs` | Aggregates `Profiler.stop()` output into self time per function. |
 | `idle-probe.mjs` | Page-side instrumentation installed before application code runs; attributes scheduled work to the call site that scheduled it. Must never change observable behaviour. |
-| `scenario.mjs` | Shared scenario setup, currently sidebar expansion. Setup always runs before the measured window. |
+| `scenario.mjs` | Shared scenario setup: sidebar expansion and seeding a context-panel surface through the persisted store. Setup always runs before the measured window. |
+| `git-panel.mjs` | Fixture file plan, action validity and request-burst maths for `profile:git`; pure and unit-tested. |
 | `animation-fixture.html` | Isolated animation variants for `profile:animation`. |

@@ -72,6 +72,7 @@ import { cn } from '@/lib/utils';
 import { generateCommitMessage as generateSessionCommitMessage, getGitWorktreeBootstrapStatus } from '@/lib/gitApi';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -99,6 +100,10 @@ type GitmojiEntry = {
 
 const GIT_DIFF_PRIORITY_PREFETCH_LIMIT = 40;
 const GIT_DIFF_PRIORITY_BASELINE_LIMIT = 20;
+
+// The server already serializes reverts per repository, so anything beyond a
+// couple of in-flight POSTs only holds browser connections away from reads.
+const REVERT_PATHS_CONCURRENCY = 2;
 
 const KEYWORD_MAP: Record<string, string> = {
   'feat': ':sparkles:',
@@ -1792,7 +1797,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       const failed: Array<{ path: string; message: string }> = [];
 
       try {
-        await Promise.all(uniquePaths.map(async (filePath) => {
+        await mapWithConcurrency(uniquePaths, REVERT_PATHS_CONCURRENCY, async (filePath) => {
           try {
             await git.revertGitFile(gitDirectory, filePath, { scope });
           } catch (err) {
@@ -1801,7 +1806,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               message: err instanceof Error ? err.message : t('gitView.toast.revertFailed'),
             });
           }
-        }));
+        });
 
         if (touchesStagedIndex && failed.length < uniquePaths.length) {
           bumpIndexRevision(gitDirectory);
