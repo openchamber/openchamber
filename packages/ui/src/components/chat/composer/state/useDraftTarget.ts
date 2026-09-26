@@ -246,9 +246,12 @@ export function useDraftTarget(enabled: boolean) {
             newSessionDraft?.preserveDirectoryOverride
             ||
             newSessionDraft?.pendingWorktreeRequestId
+            // Git lists a created worktree only once its background attach
+            // finishes, so a refresh inside that window omits it.
+            || selectedDraftDirectoryBootstrapPending
             || (pendingDirectory && pendingDirectory === selectedDraftDirectory)
         );
-    }, [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory]);
+    }, [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftDirectoryBootstrapPending]);
 
     const draftBranchItems = React.useMemo(() => {
         const baseItems: Array<{ value: string; label: string }> = [];
