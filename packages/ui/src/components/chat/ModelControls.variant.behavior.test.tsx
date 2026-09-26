@@ -256,7 +256,11 @@ mock.module('@/components/model-picker/ModelPickerList', () => ({
   ),
 }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useIsVSCodeRuntime: () => false }));
-mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({ favoriteModelsList: [], recentModelsList: [] }) }));
+mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({
+  favoriteModelsList: [], recentModelsList: [],
+  getFavoriteModelKey: (_providerID: string, modelID: string) => modelID,
+  getFavoriteModelAliases: () => [],
+}) }));
 mock.module('@/hooks/useIsTextTruncated', () => ({ useIsTextTruncated: () => false }));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }));
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));

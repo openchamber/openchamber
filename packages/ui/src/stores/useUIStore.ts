@@ -1139,12 +1139,13 @@ interface UIStore {
   setMobileKeyboardMode: (mode: MobileKeyboardMode) => void;
   applyTypography: () => void;
   applyPadding: () => void;
-  toggleFavoriteModel: (providerID: string, modelID: string) => void;
+  toggleFavoriteModel: (providerID: string, modelID: string, aliases?: readonly string[]) => void;
   reorderFavoriteModel: (
     activeProviderID: string,
     activeModelID: string,
     overProviderID: string,
     overModelID: string,
+    activeAliases?: readonly string[],
   ) => void;
   setProviderOrder: (orderedProviderIDs: string[]) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
@@ -2422,17 +2423,18 @@ export const useUIStore = create<UIStore>()(
           set((state) => state.mobileKeyboardMode === mode ? state : { mobileKeyboardMode: mode });
         },
 
-        toggleFavoriteModel: (providerID, modelID) => {
+        toggleFavoriteModel: (providerID, modelID, aliases) => {
           set((state) => {
+            const savedKeys = new Set([modelID, ...(aliases ?? [])]);
             const exists = state.favoriteModels.some(
-              (fav) => fav.providerID === providerID && fav.modelID === modelID
+              (fav) => fav.providerID === providerID && savedKeys.has(fav.modelID)
             );
             
             if (exists) {
               // Remove from favorites
               return {
                 favoriteModels: state.favoriteModels.filter(
-                  (fav) => !(fav.providerID === providerID && fav.modelID === modelID)
+                  (fav) => !(fav.providerID === providerID && savedKeys.has(fav.modelID))
                 ),
               };
             } else {
@@ -2444,7 +2446,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        reorderFavoriteModel: (activeProviderID, activeModelID, overProviderID, overModelID) => {
+        reorderFavoriteModel: (activeProviderID, activeModelID, overProviderID, overModelID, activeAliases) => {
           set((state) => {
             const oldIndex = state.favoriteModels.findIndex(
               (fav) => fav.providerID === activeProviderID && fav.modelID === activeModelID
@@ -2457,12 +2459,18 @@ export const useUIStore = create<UIStore>()(
               return state;
             }
 
-            const nextFavorites = state.favoriteModels.slice();
-            const [moved] = nextFavorites.splice(oldIndex, 1);
-            if (!moved) {
-              return state;
-            }
-            nextFavorites.splice(newIndex, 0, moved);
+            // Multiple saved aliases render as one row. Move them together so
+            // a duplicate cannot keep the visible row at its previous position.
+            const savedKeys = new Set([activeModelID, ...(activeAliases ?? [])]);
+            const isActive = (fav: { providerID: string; modelID: string }) =>
+              fav.providerID === activeProviderID && savedKeys.has(fav.modelID);
+            const moved = state.favoriteModels.filter(isActive);
+            const nextFavorites = state.favoriteModels.filter((fav) => !isActive(fav));
+            const targetIndex = nextFavorites.findIndex(
+              (fav) => fav.providerID === overProviderID && fav.modelID === overModelID
+            );
+            if (targetIndex === -1) return state;
+            nextFavorites.splice(targetIndex + (oldIndex < newIndex ? 1 : 0), 0, ...moved);
             return { favoriteModels: nextFavorites };
           });
         },

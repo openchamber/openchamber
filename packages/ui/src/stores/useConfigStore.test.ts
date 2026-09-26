@@ -2344,6 +2344,51 @@ describe('stale Auto selection', () => {
 });
 
 describe('getModelMetadata limits', () => {
+  test('resolves Fast capabilities and limits by catalog id without crossing providers', () => {
+    const base = { ...model('openai', 'gpt-6-luna', ['low']), id: 'gpt-6-luna', limit: { context: 400_000, output: 128_000 } };
+    const fast = { ...base, id: 'gpt-6-luna-fast', name: 'GPT-6 Luna Fast', variants: [{ id: 'high' }], limit: { context: 544_000, output: 128_000 } };
+    const copilot = { ...model('github-copilot', 'gpt-6-luna', ['medium']), id: 'gpt-6-luna', limit: { context: 1_000_000, output: 128_000 } };
+    useConfigStore.setState({
+      providers: [
+        { ...providerInfo('openai'), models: [fast, base] },
+        { ...providerInfo('github-copilot'), models: [copilot] },
+      ],
+      currentProviderId: 'openai', currentModelId: base.id,
+      modelsMetadata: new Map([['openai/gpt-6-luna', {
+        id: base.id, providerId: 'openai', limit: { context: 1_050_000, output: 128_000 },
+      }]]),
+    });
+    const state = useConfigStore.getState();
+    expect(state.getCurrentModel()).toBe(base);
+    expect(state.getCurrentModelVariants()).toEqual(['low']);
+    expect(state.getModelMetadata('openai', base.id)?.limit?.context).toBe(400_000);
+    expect(state.getModelMetadata('openai', fast.id)).toMatchObject({
+      name: fast.name, tool_call: true, reasoning: true, limit: fast.limit,
+    });
+    expect(state.getModelMetadata('github-copilot', copilot.id)?.limit?.context).toBe(1_000_000);
+    expect(state.getModelMetadata('github-copilot', fast.id)).toBeUndefined();
+    useConfigStore.setState({ currentModelId: fast.id });
+    expect(state.getCurrentModelVariants()).toEqual(['high']);
+  });
+
+  test('restores a pinned Fast model and its effort when switching agents', () => {
+    const base = { ...model('openai', 'gpt-6-luna', ['low']), id: 'gpt-6-luna' };
+    const fast = { ...base, id: 'gpt-6-luna-fast', variants: [{ id: 'high' }] };
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY, directoryScoped: {},
+      providers: [{ ...providerInfo('openai'), models: [fast, base] }],
+      agents: [testAgent('build'), testAgent('fast', { model: { providerID: 'openai', modelID: fast.id }, variant: 'high' })],
+      currentProviderId: 'openai', currentModelId: base.id, currentAgentName: 'build',
+      currentVariant: undefined, currentVariantSelection: { override: undefined, inherited: undefined },
+      selectionSource: 'auto', settingsDefaultModel: undefined, settingsDefaultVariant: undefined,
+    });
+    useConfigStore.getState().setAgent('fast');
+    expect(useConfigStore.getState().currentModelId).toBe(fast.id);
+    expect(useConfigStore.getState().currentVariant).toBe('high');
+    expect(useConfigStore.getState().getCurrentModel()).toBe(fast);
+  });
+
   test('the running OpenCode limits override the models.dev catalog', () => {
     const live = provider('openai', 'gpt-6-astra');
     live.models[0].limit = { context: 400_000, output: 128_000 };

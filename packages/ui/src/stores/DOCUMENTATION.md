@@ -75,6 +75,18 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 
 ### UI state stores
 
+Model selection and metadata lookups use `lib/modelIdentity.ts` within one
+provider's catalog. Exact catalog `id` wins over upstream `modelID`: a Fast
+entry can share `modelID` with its base model. Legacy qualified references and
+unambiguous aliases are supported; ambiguous aliases are not guessed. Live
+model limits continue to override the models.dev cache.
+
+`hooks/useModelLists.ts` resolves favorites and recents against the picker's
+directory catalog. Rows and new selections use catalog IDs; existing saved
+favorite keys stay intact. Duplicate aliases display once, unfavorite removes
+them together, and reorder moves them together. Callers pass the hook's saved
+keys/aliases to `useUIStore` actions. Missing catalogs never erase preferences.
+
 Sidebar visibility and its persisted width are independent. Opening or closing
 the sidebar never writes a width; only resizing changes the saved choice.
 The initial width is separate from the component's minimum resize width.
