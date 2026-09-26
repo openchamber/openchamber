@@ -350,8 +350,17 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       const before = ui.contextPanelByDirectory[panelKey];
       const wasShowing = Boolean(before?.isOpen && before.activeTabId === tabID);
       if (!wasShowing) ui.setActiveContextPanelTab(directory, tabID);
+      // Once the tab stops being what the panel shows, the user took the panel
+      // over. That sticks: capturePage() on the hidden webview may only finish
+      // after the user brings the tab back, and a restore then would undo that.
+      let userTookOver = false;
+      const stopWatching = useUIStore.subscribe((state) => {
+        const current = state.contextPanelByDirectory[panelKey];
+        if (!current?.isOpen || current.activeTabId !== tabID) userTookOver = true;
+      });
       const restorePanel = () => {
-        if (wasShowing || !before) return;
+        stopWatching();
+        if (wasShowing || userTookOver || !before) return;
         const now = useUIStore.getState();
         const current = now.contextPanelByDirectory[panelKey];
         // The user took over the panel meanwhile: their choice stands.
