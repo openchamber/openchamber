@@ -575,7 +575,9 @@ and its search entry are hidden on mobile without changing the desktop preferenc
 The expanded desktop composer always inserts a newline with Enter, including
 Shift+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send preference.
 
-Outside mobile and expanded mode, desktop Enter sends by default, and
-Shift-modified Enter does not send until the Chat setting is changed.
-An explicit choice controls Enter and Shift+Enter there;
-Ctrl/Cmd+Enter sends in either configured mode.
+Outside mobile and expanded mode, desktop sends on a bare Enter only
+(Ctrl/Cmd+Enter inserts a newline, #3614), and Shift-modified Enter does not
+send until the Chat setting is changed. An explicit choice controls Enter and
+Shift+Enter there: with Send-with-Enter only a bare Enter sends and
+Ctrl/Cmd+Enter inserts a newline, while with Send-with-Ctrl/Cmd+Enter,
+Ctrl/Cmd+Enter (or Shift+Enter) sends.

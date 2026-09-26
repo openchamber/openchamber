@@ -13,16 +13,18 @@ export const shouldSubmitEnter = (input: EnterKeyPolicyInput): boolean => {
     if (input.isMobile) return isCtrlEnter;
     if (input.isDesktopExpanded) return isCtrlEnter;
 
-    const enterSendsByDefault = !input.isMobile;
     if (!input.enterToSendConfigured) {
-        return !input.shiftKey && (enterSendsByDefault || isCtrlEnter);
+        // Unconfigured desktop sends on bare Enter only: Ctrl/Cmd+Enter
+        // inserts a newline (#3614). (Mobile returned above.)
+        return !input.shiftKey && !isCtrlEnter;
     }
-    const enterSends = input.enterToSend;
-    const sendsWithEnter = enterSends
-        ? !input.shiftKey
-        : input.shiftKey;
-
-    return isCtrlEnter || sendsWithEnter;
+    if (input.enterToSend) {
+        // "Send with Enter": only a bare Enter (no modifiers) sends;
+        // Ctrl/Cmd+Enter inserts a newline (#3614).
+        return !input.shiftKey && !isCtrlEnter;
+    }
+    // "Send with Ctrl/Cmd+Enter": Ctrl/Cmd+Enter (or Shift+Enter) sends.
+    return isCtrlEnter || input.shiftKey;
 };
 
 export interface EnterModifierState {
