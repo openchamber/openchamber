@@ -15,7 +15,8 @@ import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
+import { findCatalogModel } from '@/lib/modelIdentity';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -66,7 +67,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         : null), [autoReady, offerAuto, t]);
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
-    const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
+    const providers = useConfigStore((state) => directory === undefined
         ? state.providers : selectProvidersForDirectory(state, directory));
     const loadProviders = useConfigStore((state) => state.loadProviders);
     React.useEffect(() => {
@@ -78,7 +79,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const providerOrder = useUIStore((state) => state.providerOrder);
-    const { favoriteModelsList, recentModelsList } = useModelLists();
+    const { favoriteModelsList, recentModelsList, getFavoriteModelKey, getFavoriteModelAliases } = useModelLists(directory);
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const isActuallyMobile = isMobile || deviceIsMobile;
 
@@ -130,7 +131,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         }
         if (isAutoSelected) return t('chat.modelControls.autoModel');
         const provider = providers.find((entry) => entry.id === providerId);
-        const model = provider?.models?.find((entry) => entry.id === modelId);
+        const model = findCatalogModel(provider?.models, modelId);
         return (typeof model?.name === 'string' && model.name.trim()) || modelId;
     }, [isAutoSelected, modelId, placeholder, providerId, providers, t]);
 
@@ -153,8 +154,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             onSelectNone={handleSelectNone}
             onEscape={closePicker}
             tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
-            isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
-            onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+            isFavorite={(entry) => isFavoriteModel(entry.providerID, getFavoriteModelKey(entry.providerID, entry.modelID))}
+            onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID, getFavoriteModelAliases(entry.providerID, entry.modelID))}
         />
     );
 

@@ -105,7 +105,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
-  const { favoriteModelsList, recentModelsList } = useModelLists();
+  const { favoriteModelsList, recentModelsList, getFavoriteModelKey, getFavoriteModelAliases } = useModelLists();
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const providerOrder = useUIStore((state) => state.providerOrder);
   const [isOpen, setIsOpen] = React.useState(false);
@@ -274,8 +274,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 maxHeightStyle={{ maxHeight: availableHeight ? `${availableHeight}px` : '300px' }}
                 stickyHeaders
                 tooltipsEnabled={isOpen}
-                isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
-                onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+                isFavorite={(entry) => isFavoriteModel(entry.providerID, getFavoriteModelKey(entry.providerID, entry.modelID))}
+                onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID, getFavoriteModelAliases(entry.providerID, entry.modelID))}
                 onEscape={() => {
                   setIsOpen(false);
                   setSearchQuery('');
