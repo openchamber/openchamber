@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import type { GitWorktreeCreateResult } from '@/lib/api/types';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type WorktreeListEntry = {
@@ -112,6 +114,12 @@ mock.module('@/lib/gitApi', () => ({
     },
   },
 }));
+
+// The manager subscribes to runtime switches at import, which needs a window.
+const dom = new Window({ url: 'http://instance-a.test' });
+for (const [name, value] of Object.entries({ window: dom, CustomEvent: dom.CustomEvent })) {
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+}
 
 const {
   createWorktree,
@@ -235,6 +243,45 @@ describe('worktreeManager list invalidation', () => {
       '/repo-force-inflight',
       '/repo-force-inflight',
     ]);
+  });
+
+  test('an instance switch drops worktrees cached for the same path on the previous instance', async () => {
+    const project = { id: 'project-switch', path: '/repo-switch' };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      const firstListing = listProjectWorktrees(project);
+      await waitForListCallCount(1);
+      listResolvers[0]([{ path: '/repo-switch-a', branch: 'a', name: 'a' }]);
+      await firstListing;
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-b.test', runtimeKey: 'instance-b' });
+
+      const secondListing = listProjectWorktrees(project);
+      await waitForListCallCount(2);
+      listResolvers[1]([{ path: '/repo-switch-b', branch: 'b', name: 'b' }]);
+      expect((await secondListing).map((entry) => entry.path)).toEqual(['/repo-switch-b']);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  test('a list still in flight across an instance switch is read again from the new instance', async () => {
+    const project = { id: 'project-switch-inflight', path: '/repo-switch-inflight' };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      const listing = listProjectWorktrees(project);
+      await waitForListCallCount(1);
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-c.test', runtimeKey: 'instance-c' });
+
+      listResolvers[0]([{ path: '/repo-switch-old', branch: 'old', name: 'old' }]);
+      await waitForListCallCount(2);
+      listResolvers[1]([{ path: '/repo-switch-new', branch: 'new', name: 'new' }]);
+      expect((await listing).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+      expect((await listProjectWorktrees(project)).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   test('older completions do not replace a forced refresh result with stale topology', async () => {
