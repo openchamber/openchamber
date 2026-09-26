@@ -1,7 +1,7 @@
 import type { Message, Part } from "@/lib/opencode/model"
 import { mergeMessages } from "./optimistic"
 import type { SessionMaterializationReason } from "./event-reducer"
-import { sortMessagesChronologically } from "./message-ordering"
+import { compareMessagesChronologically, sortMessagesChronologically } from "./message-ordering"
 
 const STREAMING_PART_FIELDS = ["text", "output"] as const
 const ACTIVE_TOOL_STATUSES = new Set(["pending", "running"])
@@ -19,8 +19,20 @@ export type MaterializedState = {
 
 export type MaterializeSessionSnapshotsOptions = {
   skipPartTypes?: ReadonlySet<string>
-  mode?: "merge" | "prepend"
+  mode?: MaterializationMode
 }
+
+type MaterializationMode =
+  | { kind: "merge" }
+  | { kind: "prepend" }
+  | {
+      kind: "reconcile-tail"
+      baselineMessageIDs: ReadonlySet<string>
+      coverage:
+        | { kind: "complete" }
+        | { kind: "partial"; oldestMessage: Message }
+        | { kind: "empty-partial" }
+    }
 
 export type MaterializeSessionSnapshotsResult = {
   message: Record<string, Message[]>
@@ -311,6 +323,7 @@ export function materializeSessionSnapshots(
   const existingMessages = state.message[sessionID]
   const currentMessages = existingMessages ?? []
   const incomingByID = new Map(nextMessages.map((message) => [message.id, message] as const))
+  const mode: MaterializationMode = options.mode ?? { kind: "merge" }
   let reconciledCurrentMessages = currentMessages
   for (let index = 0; index < currentMessages.length; index += 1) {
     const existing = currentMessages[index]
@@ -327,12 +340,30 @@ export function materializeSessionSnapshots(
     if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
     reconciledCurrentMessages[index] = incoming
   }
-  const messages = mergeMessages(reconciledCurrentMessages, nextMessages)
+  let currentMessagesForMerge = reconciledCurrentMessages
+  if (mode.kind === "reconcile-tail") {
+    const shouldRemove = (message: Message): boolean => {
+      if (!mode.baselineMessageIDs.has(message.id) || incomingByID.has(message.id)) return false
+      if (mode.coverage.kind === "complete") return true
+      if (mode.coverage.kind === "partial") {
+        return compareMessagesChronologically(message, mode.coverage.oldestMessage) >= 0
+      }
+      return false
+    }
+    if (reconciledCurrentMessages.some(shouldRemove)) {
+      currentMessagesForMerge = reconciledCurrentMessages.filter((message) => !shouldRemove(message))
+    }
+  }
+  const messages = mergeMessages(currentMessagesForMerge, nextMessages)
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
+  const materializedMessageIDs = new Set(messages.map((message) => message.id))
+  const removedMessageIDs = currentMessages
+    .filter((message) => !materializedMessageIDs.has(message.id))
+    .map((message) => message.id)
 
   let partsChanged = false
   let nextPartState = state.part
-  const isPrepend = options.mode === "prepend"
+  const isPrepend = mode.kind === "prepend"
 
   for (const record of snapshots) {
     const messageID = record.info.id
@@ -366,6 +397,13 @@ export function materializeSessionSnapshots(
       // the ensure-renderable effects retry syncSession forever.
       nextPartState[messageID] = nextParts
     }
+    partsChanged = true
+  }
+
+  for (const messageID of removedMessageIDs) {
+    if (!Object.prototype.hasOwnProperty.call(nextPartState, messageID)) continue
+    if (nextPartState === state.part) nextPartState = { ...state.part }
+    delete nextPartState[messageID]
     partsChanged = true
   }
 

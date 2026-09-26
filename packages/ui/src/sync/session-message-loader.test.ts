@@ -294,11 +294,121 @@ describe("SessionMessageLoader", () => {
     expect(calls).toBe(2)
     expect(limits).toEqual([100, 80])
 
-    refresh.resolve(response([createRecord(target.sessionID, "msg_2")]))
+    refresh.resolve(response([
+      createRecord(target.sessionID, "msg_1"),
+      createRecord(target.sessionID, "msg_2", 2),
+    ]))
     await Promise.all([refreshing, duplicateRefresh])
 
     expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id))
       .toEqual(["msg_1", "msg_2"])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("removes baseline messages and their parts omitted by a complete tail refresh", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return calls === 1
+        ? response([
+            createRecord(sessionID, "msg_kept", 1),
+            createRecord(sessionID, "msg_stale", 2),
+          ])
+        : response([createRecord(sessionID, "msg_kept", 1)])
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    const store = childStores.getChild(target.directory)!
+    await loader.refreshTail(target, 20)
+
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id)).toEqual(["msg_kept"])
+    expect(store.getState().part.msg_stale).toBe(undefined)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("preserves a live message added after a tail refresh starts", async () => {
+    const refresh = deferred<ReturnType<typeof response>>()
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return calls === 1
+        ? response([createRecord(sessionID, "msg_baseline", 1)])
+        : refresh.promise
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    const refreshing = loader.refreshTail(target, 20)
+    const live = createRecord(target.sessionID, "msg_live", 2)
+    const store = childStores.getChild(target.directory)!
+    store.setState({
+      message: { ...store.getState().message, [target.sessionID]: [createRecord(target.sessionID, "msg_baseline", 1).info, live.info] },
+      part: { ...store.getState().part, [live.info.id]: live.parts },
+    })
+    refresh.resolve(response([]))
+    await refreshing
+
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id)).toEqual(["msg_live"])
+    expect(store.getState().part.msg_live).toEqual(live.parts)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("preserves older history but removes omitted baseline records inside an incomplete tail", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return calls === 1
+        ? response([
+            createRecord(sessionID, "msg_old", 1),
+            createRecord(sessionID, "msg_kept", 3),
+            createRecord(sessionID, "msg_stale_tail", 4),
+          ])
+        : response([
+            createRecord(sessionID, "msg_kept", 3),
+            createRecord(sessionID, "msg_latest", 5),
+          ], "older-cursor")
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    const store = childStores.getChild(target.directory)!
+    await loader.refreshTail(target, 20)
+
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_old", "msg_kept", "msg_latest"])
+    expect(store.getState().part.msg_stale_tail).toBe(undefined)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("uses message ID to reconcile an incomplete tail with equal creation times", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return calls === 1
+        ? response([
+            createRecord(sessionID, "msg_a", 3),
+            createRecord(sessionID, "msg_b", 3),
+            createRecord(sessionID, "msg_c", 3),
+          ])
+        : response([
+            createRecord(sessionID, "msg_b", 3),
+            createRecord(sessionID, "msg_d", 4),
+          ], "older-cursor")
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    const store = childStores.getChild(target.directory)!
+    await loader.refreshTail(target, 20)
+
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_a", "msg_b", "msg_d"])
+    expect(store.getState().part.msg_c).toBe(undefined)
     loader.dispose()
     childStores.disposeAll()
   })
@@ -321,6 +431,62 @@ describe("SessionMessageLoader", () => {
 
     expect(loader.getSnapshot(target).complete).toBe(true)
     expect(loader.getSnapshot(target).cursor).toBe(undefined)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("survives a complete tail refresh that does not yet include a pending optimistic message", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return calls === 1
+        ? response([createRecord(sessionID, "msg_baseline", 1)])
+        : response([createRecord(sessionID, "msg_baseline", 1)])
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    const optimistic = createRecord(target.sessionID, "msg_optimistic", 2)
+    loader.optimisticAdd({ ...target, message: optimistic.info, parts: optimistic.parts })
+
+    const store = childStores.getChild(target.directory)!
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_baseline", "msg_optimistic"])
+    expect(store.getState().part.msg_optimistic).toEqual(optimistic.parts)
+
+    await loader.refreshTail(target, 20)
+
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_baseline", "msg_optimistic"])
+    expect(store.getState().part.msg_optimistic).toEqual(optimistic.parts)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("preserves baseline messages and parts when a partial tail response has no authoritative start", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return calls === 1
+        ? response([
+            createRecord(sessionID, "msg_1", 1),
+            createRecord(sessionID, "msg_2", 2),
+          ])
+        : response([], "partial-cursor")
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    const store = childStores.getChild(target.directory)!
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_1", "msg_2"])
+
+    await loader.refreshTail(target, 20)
+
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_1", "msg_2"])
+    expect(store.getState().part.msg_1).toBeDefined()
+    expect(store.getState().part.msg_2).toBeDefined()
     loader.dispose()
     childStores.disposeAll()
   })

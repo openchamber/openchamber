@@ -4,7 +4,11 @@ import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { retry } from "./retry"
 import { mergeOptimisticPage, type OptimisticItem } from "./optimistic"
 import { findMessageIndex, insertMessageChronologically, sortMessagesChronologically } from "./message-ordering"
-import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import {
+  getSessionMaterializationStatus,
+  materializeSessionSnapshots,
+  type MaterializeSessionSnapshotsOptions,
+} from "./materialization"
 import {
   clearDirectorySessionPrefetch,
   clearRuntimeSessionPrefetch,
@@ -373,7 +377,7 @@ export class SessionMessageLoader {
       }
       // Commit the whole batch atomically. A failed follow-up read keeps the
       // previous visible history and its retry cursor intact.
-      const committed = this.commitPage(normalized, entry, store, page, "prepend", isCurrent)
+      const committed = this.commitPage(normalized, entry, store, page, { kind: "prepend" }, isCurrent)
       if (!committed || !isCurrent()) return
       this.patchEntry(entry, {
         status: "ready",
@@ -449,6 +453,9 @@ export class SessionMessageLoader {
       return queuedRefresh
     }
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
+    const baselineMessageIDs = new Set(
+      (store.getState().message[normalized.sessionID] ?? []).map((message) => message.id),
+    )
     this.bumpGeneration(entry)
     return this.startLoad(normalized, entry, store, "refresh", async (isCurrent, performance) => {
       const previousCoverage = entry.snapshot.resolved
@@ -456,7 +463,20 @@ export class SessionMessageLoader {
         : null
       const page = await this.fetchPage(normalized, Math.max(1, limit), undefined, "refresh", performance)
       if (!isCurrent()) return
-      const committed = this.commitPage(normalized, entry, store, page, "merge", isCurrent)
+      const oldestMessage = page.session[0]
+      let tailCoverage
+      if (page.complete) {
+        tailCoverage = { kind: "complete" as const }
+      } else if (oldestMessage) {
+        tailCoverage = { kind: "partial" as const, oldestMessage }
+      } else {
+        tailCoverage = { kind: "empty-partial" as const }
+      }
+      const committed = this.commitPage(normalized, entry, store, page, {
+        kind: "reconcile-tail",
+        baselineMessageIDs,
+        coverage: tailCoverage,
+      }, isCurrent)
       if (!committed || !isCurrent()) return
       const coverage = previousCoverage ?? page
       this.patchEntry(entry, {
@@ -714,7 +734,7 @@ export class SessionMessageLoader {
     }
 
     // Publish the chosen window once.
-    const committed = this.commitPage(target, entry, store, acceptedPage, "merge", isCurrent)
+    const committed = this.commitPage(target, entry, store, acceptedPage, { kind: "merge" }, isCurrent)
     if (!committed || !isCurrent()) return
     entry.evicted = false
     this.patchEntry(entry, {
@@ -779,7 +799,7 @@ export class SessionMessageLoader {
     entry: LoaderEntry,
     store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
     page: FetchedPage,
-    mode: "merge" | "prepend",
+    mode: MaterializeSessionSnapshotsOptions["mode"],
     isCurrent: () => boolean,
   ): { messages: Message[] } | null {
     if (!isCurrent()) return null
