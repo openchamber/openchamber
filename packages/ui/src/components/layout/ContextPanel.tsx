@@ -29,7 +29,13 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { clampContextEditorTreeWidth, useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
+import {
+  clampContextEditorTreeWidth,
+  normalizeContextPanelDirectoryKey,
+  useUIStore,
+  type ContextPanelMode,
+  type PendingDiffScope,
+} from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
@@ -110,25 +116,6 @@ type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
 
-
-const normalizeDirectoryKey = (value: string): string => {
-  if (!value) return '';
-
-  const raw = value.replace(/\\/g, '/');
-  const hadUncPrefix = raw.startsWith('//');
-  let normalized = raw.replace(/\/+$/g, '');
-  normalized = normalized.replace(/\/+/g, '/');
-
-  if (hadUncPrefix && !normalized.startsWith('//')) {
-    normalized = `/${normalized}`;
-  }
-
-  if (normalized === '') {
-    return raw.startsWith('/') ? '/' : '';
-  }
-
-  return normalized;
-};
 
 const clampWidth = (width: number, maxWidth: number): number => {
   if (!Number.isFinite(width)) {
@@ -518,7 +505,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
-  const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+  const directoryKey = React.useMemo(() => normalizeContextPanelDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
