@@ -50,6 +50,7 @@ import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
 import { getSessionGoal } from "@/lib/sessionGoalMetadata"
 import { fetchGoalObjectiveContent, writeGoalObjectiveFile } from "@/lib/goalObjectiveFiles"
+import { assertPrimarySessionAdmission } from "@/lib/opencode/session-admission"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -940,6 +941,7 @@ export async function createSession(
     // opencodeClient.getDirectory() value and group the session under the
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
+    assertPrimarySessionAdmission(effectiveDirectory, selection?.agent)
     const session = await opencodeClient.createSession(
       { title, metadata, model: selection?.model, agent: selection?.agent },
       effectiveDirectory,

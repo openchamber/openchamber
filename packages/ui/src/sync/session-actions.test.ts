@@ -47,6 +47,7 @@ const movedSessionDirectories: Array<{ sessionID: string; directory: string }> =
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
 const AMBIGUOUS_TRANSPORT_FAILURE = Symbol("ambiguous-transport-failure")
+const sdkClient = {}
 
 const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError`), { status: 404 })
 
@@ -54,6 +55,7 @@ mock.module("@/lib/opencode/client", () => ({
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getDirectory: () => "/test/project",
+    getSdkClient: () => sdkClient,
     getActiveSessionStatuses: mock(() => readActiveStatusSnapshot()),
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
@@ -179,6 +181,7 @@ mock.module("./session-ui-store", () => ({
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
+      markSessionAsOpenChamberCreated: () => {},
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
@@ -293,6 +296,7 @@ mock.module("./session-message-loader", () => ({
     ensure: async () => {},
     refreshTail: async () => {},
     getSnapshot: () => ({ status: "ready" as const }),
+    initializeCreatedSession: () => {},
   }),
 }))
 
@@ -422,6 +426,66 @@ function createChildStores(entries: Array<[string, TestStoreApi<DirectoryStore>]
     getChild: (dir: string) => new Map(entries).get(dir),
   } as unknown as import("./child-store").ChildStoreManager
 }
+
+describe("primary session admission", () => {
+  const kinnectRepository = "/Users/hugolloyd/Dev/Github/kinnectApp"
+
+  beforeEach(() => {
+    replyCalls.length = 0
+  })
+
+  for (const [label, agent] of [
+    ["omitted agent", undefined],
+    ["built-in build agent", "build"],
+    ["named non-coordinator agent", "explore"],
+  ] as const) {
+    test(`rejects ${label} before the action reaches the client`, async () => {
+      const { createSession } = await import("./session-actions")
+      const result = await createSession(
+        undefined,
+        kinnectRepository,
+        undefined,
+        undefined,
+        agent === undefined ? undefined : { agent },
+      )
+      expect(result).toBeNull()
+      expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(0)
+    })
+  }
+
+  test("allows an explicit coordinator to reach the client", async () => {
+    const { createSession } = await import("./session-actions")
+    const result = await createSession(undefined, kinnectRepository, undefined, undefined, { agent: "coordinator" })
+    expect(result).toMatchObject({ id: "created" })
+    expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(1)
+  })
+
+  test("rejects a dot-segment path resolving into a participating repository", async () => {
+    const { createSession } = await import("./session-actions")
+    const result = await createSession(
+      undefined,
+      "/Users/hugolloyd/Dev/Github/other/../kinnectApp",
+      undefined,
+      undefined,
+      { agent: "explore" },
+    )
+    expect(result).toBeNull()
+    expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(0)
+  })
+
+  test("admits a dot-segment path resolving outside participating repositories", async () => {
+    const { createSession } = await import("./session-actions")
+    const result = await createSession(
+      undefined,
+      "/Users/hugolloyd/Dev/Github/kinnectApp/../unrelated-repository",
+      undefined,
+      undefined,
+      { agent: "explore" },
+    )
+    expect(result).toMatchObject({ id: "created" })
+    expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(1)
+  })
+})
 
 describe("moveSessionToDirectory", () => {
   beforeEach(() => {

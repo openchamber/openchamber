@@ -180,6 +180,56 @@ test('a drive-root system-info fallback stays absolute', async () => {
   })
 })
 
+describe("primary session admission", () => {
+  const kinnectRepository = "/Users/hugolloyd/Dev/Github/kinnectApp"
+
+  for (const [label, agent] of [
+    ["omitted agent", undefined],
+    ["built-in build agent", "build"],
+    ["named non-coordinator agent", "explore"],
+  ] as const) {
+    test(`rejects ${label} before the OpenCode create request`, async () => {
+      try {
+        await opencodeClient.createSession(agent === undefined ? undefined : { agent }, kinnectRepository)
+        throw new Error("expected primary session admission to reject")
+      } catch (error) {
+        if (!(error instanceof Error)) throw new Error("expected an admission error")
+        expect(error.message).toContain("require explicit agent: coordinator")
+      }
+      expect(requests).toHaveLength(0)
+    })
+  }
+
+  test("allows an explicit coordinator before the OpenCode create request", async () => {
+    responses.push(json({ data: sessionInfo }))
+    const session = await opencodeClient.createSession({ agent: "coordinator" }, kinnectRepository)
+    expect(session).toMatchObject({ id: "ses_1" })
+    expect(requests).toHaveLength(1)
+    expect(requests[0].body).toMatchObject({ agent: "coordinator" })
+  })
+
+  test("rejects a dot-segment path resolving into a participating repository", async () => {
+    try {
+      await opencodeClient.createSession({ agent: "explore" }, "/Users/hugolloyd/Dev/Github/other/../kinnectApp")
+      throw new Error("expected canonicalized admission to reject")
+    } catch (error) {
+      if (!(error instanceof Error)) throw new Error("expected an admission error")
+      expect(error.message).toContain("require explicit agent: coordinator")
+    }
+    expect(requests).toHaveLength(0)
+  })
+
+  test("admits a dot-segment path resolving outside participating repositories", async () => {
+    responses.push(json({ data: sessionInfo }))
+    const session = await opencodeClient.createSession(
+      { agent: "explore" },
+      "/Users/hugolloyd/Dev/Github/kinnectApp/../unrelated-repository",
+    )
+    expect(session).toMatchObject({ id: "ses_1" })
+    expect(requests).toHaveLength(1)
+  })
+})
+
 describe("error normalisation", () => {
   test("an invalid project config keeps its path and message reachable", async () => {
     const body = {
