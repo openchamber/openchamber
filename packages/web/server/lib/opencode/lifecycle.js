@@ -52,6 +52,11 @@ const classifyOpenCodeVersion = (version) => {
 // tails are unlikely to be the user's first click and just add background work.
 const WARMUP_DIRECTORY_LIMIT = 4;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
+// MCP connects happen per directory's lazy state and can take a minute on
+// projects with remote servers (e.g. LeroyMerlin's three remotes): give the
+// MCP pass a much longer ceiling than the directory pass so the connect
+// finishes before the timeout aborts it.
+const MCP_WARMUP_REQUEST_TIMEOUT_MS = 120000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
 
@@ -1201,6 +1206,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     );
     if (!bootstrapError) {
       void warmOpenCodeDirectories();
+      void warmOpenCodeMcpServers();
     }
   };
 
@@ -1244,6 +1250,53 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         if (timeout) clearTimeout(timeout);
       }
     }
+  };
+
+  // MCP servers are connected lazily too: a directory's first MCP-scoped
+  // request initialises all of its configured servers, and on projects with
+  // remote servers that connect takes tens of seconds (LeroyMerlin observed
+  // at 60–74s). Without warming, the user's first session open in that
+  // project pays it interactively (SessionTools.resolve await mcp.tools()).
+  // Warm the MCP state of every known project after readiness. This pass must
+  // cover every project, not just the MRU handful the directory pass warms:
+  // a project with slow repos (LeroyMerlin) may be opened days after Perso.
+  // Runs in parallel (a slow remote on one project must not delay the others),
+  // best-effort, same guards: a restart invalidates the pass via the
+  // port/readiness checks.
+  const warmOpenCodeMcpServers = async () => {
+    let directories = [];
+    try {
+      directories = await getWarmupDirectories();
+    } catch {
+      return;
+    }
+    if (!Array.isArray(directories) || directories.length === 0) return;
+
+    const warmedPort = state.openCodePort;
+    await Promise.allSettled(
+      directories.map(async (directory) => {
+        if (typeof directory !== 'string' || !directory) return;
+        if (!state.isOpenCodeReady || state.openCodePort !== warmedPort) return;
+        let timeout = null;
+        try {
+          const controller = new AbortController();
+          timeout = setTimeout(() => controller.abort(), MCP_WARMUP_REQUEST_TIMEOUT_MS);
+          // Any MCP-scoped read initialises the directory's servers; `/mcp` is
+          // the cheapest one and the same endpoint the Settings → MCP page uses.
+          const url = `${buildOpenCodeUrl('/mcp', '')}?directory=${encodeURIComponent(directory)}`;
+          await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+            signal: controller.signal,
+          });
+        } catch {
+          // Best-effort — the directory's MCP stays lazy and the UI's own
+          // request initialises it when the user actually opens that project.
+        } finally {
+          if (timeout) clearTimeout(timeout);
+        }
+      }),
+    );
   };
 
   /**
