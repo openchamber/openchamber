@@ -24,7 +24,12 @@ import { setRuntimeBearerToken, setRuntimeExtraHeaders } from '@openchamber/ui/l
 import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@openchamber/ui/lib/runtime-switch';
 import { restoreDesktopRelayRuntime } from '@openchamber/ui/lib/desktopRelayRestore';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
-import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
+import {
+  createConfiguredWebAPIs,
+  DESKTOP_RUNTIME_BOOTSTRAP_READY_EVENT,
+  readRuntimeBootstrapConfig,
+  waitForDesktopRuntimeBootstrap,
+} from './runtimeConfig';
 
 const originalWindow = globalThis.window;
 
@@ -39,6 +44,7 @@ const makeWindow = (search = ''): Record<string, unknown> => {
   const value: Record<string, unknown> = {
     location: { origin: 'openchamber-ui://app', search },
     setTimeout: vi.fn(() => 1),
+    clearTimeout: vi.fn(),
   };
   value.parent = value;
   return value;
@@ -92,6 +98,48 @@ describe('readRuntimeBootstrapConfig', () => {
     });
   });
 
+});
+
+describe('waitForDesktopRuntimeBootstrap', () => {
+  test('does not wait outside Electron', async () => {
+    await expect(waitForDesktopRuntimeBootstrap()).resolves.toBeUndefined();
+  });
+
+  test('waits for the main-process bootstrap event in Electron', async () => {
+    const eventTarget = new EventTarget();
+    const current = makeWindow();
+    current.__OPENCHAMBER_ELECTRON__ = { runtime: 'electron' };
+    current.addEventListener = eventTarget.addEventListener.bind(eventTarget);
+    current.removeEventListener = eventTarget.removeEventListener.bind(eventTarget);
+    installWindow(current);
+
+    const ready = waitForDesktopRuntimeBootstrap();
+    eventTarget.dispatchEvent(new Event(DESKTOP_RUNTIME_BOOTSTRAP_READY_EVENT));
+
+    await expect(ready).resolves.toBeUndefined();
+    expect(current.clearTimeout).toHaveBeenCalled();
+  });
+
+  test('falls back when the main-process bootstrap event never arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const eventTarget = new EventTarget();
+      const current = makeWindow();
+      current.__OPENCHAMBER_ELECTRON__ = { runtime: 'electron' };
+      current.addEventListener = eventTarget.addEventListener.bind(eventTarget);
+      current.removeEventListener = eventTarget.removeEventListener.bind(eventTarget);
+      current.setTimeout = globalThis.setTimeout;
+      current.clearTimeout = globalThis.clearTimeout;
+      installWindow(current);
+
+      const ready = waitForDesktopRuntimeBootstrap();
+      await vi.runAllTimersAsync();
+
+      await expect(ready).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('createConfiguredWebAPIs', () => {
