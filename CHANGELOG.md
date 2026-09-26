@@ -639,6 +639,7 @@
 - Settings: the Cloudflare Tunnel download link works (thanks to @AyoubAchour).
 - Settings: Windows skill paths are classified correctly, so disabled and duplicate skills are hidden as intended (thanks to @Ttungx).
 - Settings/Providers: after you save an API key or sign in, the provider no longer shows "Credentials missing" with its models hidden until you switch away and back (thanks to @herjarsa).
+- Settings: MCP server detail card now shows a per-server scope badge (project vs user) so the origin is visible at a glance (thanks to @herjarsa).
 - Small model: requests send the provider's configured headers, such as an API-gateway subscription key (thanks to @dmitrii-galantsev).
 - Small model: a configured Anthropic endpoint is used without a doubled `/v1`, and Google models without reasoning no longer get a thinking option (thanks to @mpeter and @IngTian).
 - Git: the status panel refreshes from the real repository after checkout, branch, stash, merge, rebase, or reset, and remote branches that were never fetched appear in branch lists (thanks to @makeittech).
