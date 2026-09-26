@@ -23,7 +23,14 @@ const wire = {
   steps: 9,
   tokens: tokens(10),
   cost: 1.25,
-  tools: { mode: "none" },
+  tools: {
+    mode: "detail",
+    totals: { calls: 9, succeeded: 7, failed: 1, unfinished: 1 },
+    usage: [
+      { name: "read", calls: 5, succeeded: 4, failed: 1, unfinished: 0, durationP50: 340 },
+      { name: "bash", calls: 4, succeeded: 3, failed: 0, unfinished: 1 },
+    ],
+  },
   activeDays: 2,
   streak: 2,
   activity: [{ date: "2026-09-01", steps: 4 }],
@@ -31,7 +38,7 @@ const wire = {
 }
 
 describe("session.stats boundary", () => {
-  test("sends the range, project, zone and no tool breakdown, and projects the report", async () => {
+  test("sends the range, project, zone and the tool breakdown, and projects the report", async () => {
     let url: URL | null = null
     const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       url = new URL(input instanceof Request ? input.url : input.toString())
@@ -44,10 +51,17 @@ describe("session.stats boundary", () => {
         from: "1000",
         project: "prj_1",
         timezone: "Europe/Kyiv",
-        tools: "none",
+        tools: "detail",
       })
       expect(stats.tokens).toEqual({ input: 10, output: 2, reasoning: 1, cacheRead: 3, cacheWrite: 4, total: 20 })
-      expect("tools" in stats).toBe(false)
+      expect(stats.tools).toEqual({
+        mode: "detail",
+        totals: { calls: 9, succeeded: 7, failed: 1, unfinished: 1 },
+        usage: [
+          { name: "read", calls: 5, succeeded: 4, failed: 1, unfinished: 0, durationP50: 340 },
+          { name: "bash", calls: 4, succeeded: 3, failed: 0, unfinished: 1, durationP50: null },
+        ],
+      })
       expect(stats.models[0]).toMatchObject({ providerID: "anthropic", modelID: "claude", variant: "high", cost: 1.25 })
       expect(stats.range).toEqual({ from: 1_000, to: 2_000 })
     } finally {

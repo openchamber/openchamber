@@ -5,7 +5,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 // Words that are the correct translation and happen to match English.
-const SAME_AS_ENGLISH = new Set(['Sessions', 'Prompts', 'Tokens', 'Tokens: {tokens} · {cost}']);
+const SAME_AS_ENGLISH = new Set(['Sessions', 'Prompts', 'Tokens', 'Tokens: {tokens} · {cost}', '{value} · {share}']);
 
 describe('stats page translations', () => {
   test('provides every key in every supported locale, translated', () => {

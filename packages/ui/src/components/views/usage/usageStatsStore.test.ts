@@ -12,6 +12,7 @@ const report = (prompts: number): UsageStats => ({
   steps: prompts,
   tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   cost: 0,
+  tools: { mode: 'none' },
   activeDays: 1,
   streak: 1,
   activity: [],
