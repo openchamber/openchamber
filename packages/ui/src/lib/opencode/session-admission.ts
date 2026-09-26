@@ -10,12 +10,32 @@ const PARTICIPATING_REPOSITORY_ROOTS = [
   "/Users/hugolloyd/Dev/Github/kinnectApp-home-stacked",
 ] as const
 
+const canonicalizeDirectory = (directory: string | null | undefined): string | null => {
+  const normalized = normalizePath(directory)
+  if (normalized === null) return null
+
+  const isAbsolute = normalized.startsWith("/")
+  const segments = normalized.split("/")
+  const canonicalSegments: string[] = []
+  for (const segment of segments) {
+    if (!segment || segment === ".") continue
+    if (segment === ".." && canonicalSegments.at(-1) !== undefined && canonicalSegments.at(-1) !== "..") {
+      canonicalSegments.pop()
+      continue
+    }
+    if (segment !== ".." || !isAbsolute) canonicalSegments.push(segment)
+  }
+
+  const joined = canonicalSegments.join("/")
+  return isAbsolute ? `/${joined}` : joined
+}
+
 export const PRIMARY_SESSION_AGENT = "coordinator"
 export const PRIMARY_SESSION_ADMISSION_ERROR =
   "Primary sessions in participating Kinnect repositories require explicit agent: coordinator"
 
 const isParticipatingRepository = (directory: string | null | undefined): boolean => {
-  const normalized = normalizePath(directory)
+  const normalized = canonicalizeDirectory(directory)
   return normalized !== null && PARTICIPATING_REPOSITORY_ROOTS.some(
     (root) => normalized === root || normalized.startsWith(`${root}/`),
   )

@@ -459,6 +459,32 @@ describe("primary session admission", () => {
     expect(result).toMatchObject({ id: "created" })
     expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(1)
   })
+
+  test("rejects a dot-segment path resolving into a participating repository", async () => {
+    const { createSession } = await import("./session-actions")
+    const result = await createSession(
+      undefined,
+      "/Users/hugolloyd/Dev/Github/other/../kinnectApp",
+      undefined,
+      undefined,
+      { agent: "explore" },
+    )
+    expect(result).toBeNull()
+    expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(0)
+  })
+
+  test("admits a dot-segment path resolving outside participating repositories", async () => {
+    const { createSession } = await import("./session-actions")
+    const result = await createSession(
+      undefined,
+      "/Users/hugolloyd/Dev/Github/kinnectApp/../unrelated-repository",
+      undefined,
+      undefined,
+      { agent: "explore" },
+    )
+    expect(result).toMatchObject({ id: "created" })
+    expect(replyCalls.filter((call) => call.method === "session.create")).toHaveLength(1)
+  })
 })
 
 describe("moveSessionToDirectory", () => {

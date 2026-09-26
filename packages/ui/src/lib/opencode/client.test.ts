@@ -207,6 +207,27 @@ describe("primary session admission", () => {
     expect(requests).toHaveLength(1)
     expect(requests[0].body).toMatchObject({ agent: "coordinator" })
   })
+
+  test("rejects a dot-segment path resolving into a participating repository", async () => {
+    try {
+      await opencodeClient.createSession({ agent: "explore" }, "/Users/hugolloyd/Dev/Github/other/../kinnectApp")
+      throw new Error("expected canonicalized admission to reject")
+    } catch (error) {
+      if (!(error instanceof Error)) throw new Error("expected an admission error")
+      expect(error.message).toContain("require explicit agent: coordinator")
+    }
+    expect(requests).toHaveLength(0)
+  })
+
+  test("admits a dot-segment path resolving outside participating repositories", async () => {
+    responses.push(json({ data: sessionInfo }))
+    const session = await opencodeClient.createSession(
+      { agent: "explore" },
+      "/Users/hugolloyd/Dev/Github/kinnectApp/../unrelated-repository",
+    )
+    expect(session).toMatchObject({ id: "ses_1" })
+    expect(requests).toHaveLength(1)
+  })
 })
 
 describe("error normalisation", () => {
