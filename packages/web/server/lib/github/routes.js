@@ -1490,29 +1490,19 @@ export function registerGitHubRoutes(app) {
           const prRefs = items
             .map((item) => ({ number: item.number, repoRef: findRepoForSearchItem(item) }))
             .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
-          let prs;
-          if (prRefs.length === 0) {
-            prs = [];
-          } else {
-            const results = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
-              try {
-                const pr = await octokit.rest.pulls.get({
-                  owner: repoRef.owner,
-                  repo: repoRef.repo,
-                  pull_number: number,
-                });
-                return mapPrSummary(pr.data, repoRef);
-              } catch {
-                return null;
-              }
-            }));
-            prs = results.filter(Boolean);
-          }
+          const prs = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
+            const pr = await octokit.rest.pulls.get({
+              owner: repoRef.owner,
+              repo: repoRef.repo,
+              pull_number: number,
+            });
+            return mapPrSummary(pr.data, repoRef);
+          }));
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;
           return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
         } catch (error) {
-          console.error('Failed to search GitHub PRs:', error);
+          console.error('Failed to search or enrich GitHub PRs:', error);
           throw error;
         }
       }
