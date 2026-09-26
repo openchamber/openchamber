@@ -53,7 +53,9 @@ mock.module('@/lib/runtime-switch', () => ({
 
 const {
   DevTunnelUnavailableError,
+  isRemoteWebLoopbackUrl,
   resolveBrowsableUrl,
+  resolveIframeBrowserUrl,
   shouldTunnelLoopbackUrl,
   toDisplayUrl,
 } = await import('./devTunnel');
@@ -163,5 +165,31 @@ describe('loopback navigations against a remote instance', () => {
   test('nothing is tunneled outside the desktop shell', () => {
     asDesktop(false);
     expect(shouldTunnelLoopbackUrl('http://localhost:4322/docs/')).toBe(false);
+  });
+
+  test('a same-origin hosted web runtime refuses to load client loopback in an iframe', () => {
+    apiBaseUrl = '';
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { href: 'https://openchamber.example.test/', origin: 'https://openchamber.example.test' } },
+    });
+
+    expect(isRemoteWebLoopbackUrl('http://localhost:4322/docs/')).toBe(true);
+    expect(resolveIframeBrowserUrl('http://localhost:4322/docs/')).toBe('');
+  });
+
+  test('a local hosted web runtime can still open its own loopback pages', () => {
+    apiBaseUrl = '';
+    asDesktop(false);
+
+    expect(isRemoteWebLoopbackUrl('http://localhost:4322/docs/')).toBe(false);
+    expect(resolveIframeBrowserUrl('http://localhost:4322/docs/')).toBe('http://localhost:4322/docs/');
+  });
+
+  test('public pages are unaffected in a hosted web runtime', () => {
+    asDesktop(false);
+
+    expect(isRemoteWebLoopbackUrl('https://example.test/docs/')).toBe(false);
+    expect(resolveIframeBrowserUrl('https://example.test/docs/')).toBe('https://example.test/docs/');
   });
 });
