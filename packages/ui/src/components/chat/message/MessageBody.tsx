@@ -63,7 +63,7 @@ import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCrea
 import { cloneMessageImageExportSource } from './imageExport';
 
 
-const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
+const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
 

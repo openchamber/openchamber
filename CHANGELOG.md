@@ -611,6 +611,7 @@
 - Chat scrolling: with "Follow new content while streaming" off, sending from the middle of a conversation no longer jumps to the new message.
 - Chat scrolling: a middle-button pan or Shift+Space stops auto-follow the way the wheel does, and an upward wheel inside a tool output box scrolls that box instead of the chat (thanks to @pascalandr).
 - Chat scrolling: PageUp/PageDown in the prompt box no longer shifts the whole window up and hides the title bar.
+- Chat: scrolling up through history no longer auto-loads more messages in a runaway cascade; rendering also stops promoting messages to their own GPU layer (no more ghosting from `translateZ(0)`) (thanks to @herjarsa).
 - Chat: question prompts render Markdown (thanks to @pascalandr).
 - Chat: a bare link next to CJK or full-width punctuation no longer swallows it (thanks to @gaojunran).
 - Chat: inline code and chips are readable in every theme (thanks to @difagume).

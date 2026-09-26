@@ -684,6 +684,12 @@ export const useChatTimelineController = ({
         if (previousTop === null || container.scrollTop >= previousTop || historyInteractionRef.current) return;
         if (isPinnedRef.current) return;
         if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
+
+        // Prevent cascade re-triggering: if a loadEarlier interaction is active
+        // (settleHistoryInteraction 2s guard), skip until it settles. Without this,
+        // loading history while near the top can trigger another load immediately
+        // because the scroll compensation keeps scrollTop within threshold.
+        if (historyInteractionRef.current) return;
         if (!historySignalsRef.current.canLoadEarlier) return;
         if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
 
