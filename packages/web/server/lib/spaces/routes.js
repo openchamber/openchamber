@@ -30,6 +30,10 @@ const STATUS_BY_CODE = new Map([
   ['invalid_branch_name', 400],
   ['invalid_space_id', 400],
   ['invalid_request_body', 400],
+  ['invalid_grant_request', 400],
+  ['provider_not_supported', 400],
+  ['secret_source_missing', 409],
+  ['space_record_unreadable', 409],
   ['space_preparing', 409],
   ['space_creation_failed', 409],
   ['space_busy', 409],
@@ -172,7 +176,7 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
   }));
 
   app.get(SPACES_ROUTE, withJourney(async (journey, _req, res) => {
-    res.json({ spaces: await journey.listSpaces() });
+    res.json({ spaces: await journey.listSpaces({ access: true }) });
   }));
 
   // Answers as soon as the space has an id; the steps follow as `openchamber:space-progress` events.
@@ -190,6 +194,11 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
 
   app.delete(`${SPACES_ROUTE}/:id`, withJourney(async (journey, req, res) => {
     res.json(await journey.removeSpace(spaceIdOf(req)));
+  }));
+
+  // A grant for a running space; the key in the body goes to the gatekeeper and nowhere else.
+  app.post(`${SPACES_ROUTE}/:id/grants`, withJourney(async (journey, req, res) => {
+    res.json(await journey.grantAccess(spaceIdOf(req), requireBody(req)));
   }));
 
   app.get(`${SPACES_ROUTE}/:id/journal`, withJourney(async (journey, req, res) => {

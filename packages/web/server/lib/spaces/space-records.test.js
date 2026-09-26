@@ -26,7 +26,7 @@ describe('space records', () => {
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
 
     const written = records.write(ID, { network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project' });
-    expect(written).toEqual({ version: 1, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending' });
+    expect(written).toEqual({ version: 1, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [] });
     const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(path.dirname(file))).toEqual([`${ID}.json`]);
@@ -51,6 +51,46 @@ describe('space records', () => {
     expect(records.read(ID)).toEqual({ status: 'unreadable', record: null });
     expect(records.update(ID, { history: 'sent' })).toEqual({ status: 'unreadable', record: null });
     expect(fs.readFileSync(path.join(directory, `${ID}.json`), 'utf8')).toBe('not json');
+  });
+
+  it('remembers a grant without its value, and refuses one that carries a value under any name', () => {
+    const records = createSpaceRecords({ dataDir: temporary(), logger: quiet });
+    const model = { kind: 'model', id: 'anthropic', provider: 'anthropic', upstream: 'https://api.anthropic.com/v1', header: 'x-api-key', source: { kind: 'env', name: 'ANTHROPIC_API_KEY' } };
+    const typed = { ...model, id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', source: { kind: 'typed' } };
+    const domain = { kind: 'domain', id: 'open-0a1b2c3d4e5f', upstream: 'https://registry.example.com/npm/' };
+    const written = records.write(ID, { network: { mode: 'open' }, grants: [model, typed, domain] });
+    expect(written.grants).toEqual([model, typed, domain]);
+    expect(records.read(ID).record.grants).toEqual([model, typed, domain]);
+
+    for (const bad of [
+      { ...model, secret: 'sk-live-1' },
+      { ...model, value: 'sk-live-1' },
+      { ...model, source: { kind: 'typed', value: 'sk-live-1' } },
+      { ...model, source: { kind: 'env', name: 'ANTHROPIC_API_KEY', value: 'sk-live-1' } },
+      { ...domain, secret: 'sk-live-1' },
+      { ...domain, header: 'authorization' },
+      { ...model, upstream: 'file:///etc/passwd' },
+      { ...model, header: 'X-Api-Key' },
+      { ...model, id: '../x' },
+      { ...model, source: { kind: 'file', name: '/tmp/key' } },
+    ]) {
+      expect(() => records.write(ID, { network: { mode: 'open' }, grants: [bad] }), JSON.stringify(bad)).toThrow();
+    }
+    // A grant this host cannot read, from a later version, is left out; the rest of the record stays.
+    const later = temporary();
+    const withUnknown = createSpaceRecords({ dataDir: later, logger: quiet });
+    fs.mkdirSync(path.join(later, 'spaces', 'records'), { recursive: true });
+    fs.writeFileSync(path.join(later, 'spaces', 'records', `${ID}.json`), JSON.stringify({ version: 1, network: { mode: 'allowlist', domains: ['a.example.com'] }, repository: '/home/me/project', history: 'sent', grants: [{ kind: 'git', id: 'github' }, domain] }));
+    expect(withUnknown.read(ID)).toEqual({ status: 'ok', record: expect.objectContaining({ network: { mode: 'allowlist', domains: ['a.example.com'] }, repository: '/home/me/project', history: 'sent', grants: [domain] }) });
+    // A malformed upstream is refused, not thrown.
+    expect(() => records.write(ID, { network: { mode: 'open' }, grants: [{ ...domain, upstream: 'not a url' }] })).toThrow();
+
+    // A record written before grants existed reads back with none.
+    const dataDir = temporary();
+    const older = createSpaceRecords({ dataDir, logger: quiet });
+    fs.mkdirSync(path.join(dataDir, 'spaces', 'records'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'spaces', 'records', `${ID}.json`), JSON.stringify({ version: 1, network: { mode: 'open', domains: [] } }));
+    expect(older.read(ID)).toEqual({ status: 'ok', record: expect.objectContaining({ grants: [] }) });
   });
 
   it('refuses a record that is not one, and an id that is not a space id', () => {

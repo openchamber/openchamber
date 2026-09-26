@@ -27,6 +27,42 @@ export const networkSchema = z.object({
 
 const historySchema = z.enum(['pending', 'sent', 'already_complete', 'host_shallow', 'failed']);
 
+const GRANT_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+// zod runs the refinement even when `.url()` failed, so the parse of the URL must not throw here.
+const isHttpUrl = (value) => {
+  try {
+    return /^https?:$/.test(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};
+const upstreamSchema = z.string().url().refine(isHttpUrl, 'http or https');
+/** Where the host finds a secret again, never the secret: an environment variable of the host's by name, or the user typed it once. */
+export const secretSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('env'), name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,255}$/) }).strict(),
+  z.object({ kind: z.literal('typed') }).strict(),
+]);
+/**
+ * A grant as the host remembers it. Strict, so a value under any name is refused rather than
+ * written: a record holds where a secret comes from and never what it is (decision 5).
+ */
+export const grantSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('model'),
+    id: z.string().regex(GRANT_ID_PATTERN),
+    provider: z.string().regex(GRANT_ID_PATTERN),
+    upstream: upstreamSchema,
+    header: z.string().regex(/^[a-z0-9-]{1,64}$/),
+    source: secretSourceSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('domain'),
+    id: z.string().regex(GRANT_ID_PATTERN),
+    upstream: upstreamSchema,
+  }).strict(),
+]);
+const MAX_GRANTS = 100;
+
 const recordSchema = z.object({
   version: z.literal(1),
   network: networkSchema,
@@ -37,6 +73,8 @@ const recordSchema = z.object({
   /** The commit the snapshot was taken from, which the history is sent behind. */
   base: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable().default(null),
   history: historySchema.default('pending'),
+  /** The grants the user gave, said again to the gatekeeper after every start. */
+  grants: z.array(grantSchema).max(MAX_GRANTS).default([]),
 });
 
 /**
@@ -47,6 +85,20 @@ const recordSchema = z.object({
 export function createSpaceRecords({ dataDir, logger = console }) {
   const directory = path.join(dataDir, RECORDS_DIRECTORY);
   const fileOf = (spaceId) => path.join(directory, `${requireSpaceId(spaceId)}.json`);
+
+  /**
+   * One grant the host cannot read, from a later version that knows another kind among the
+   * reasons, is dropped with a warning and never takes the network, the repository and the
+   * history of the record with it: the space then shows that grant as missing, not as unknown.
+   */
+  const withReadableGrants = (spaceId, raw) => {
+    if (!(raw instanceof Object) || !Array.isArray(raw.grants)) return raw;
+    const grants = raw.grants.filter((grant) => grantSchema.safeParse(grant).success);
+    if (grants.length < raw.grants.length) {
+      logger.warn?.(`[spaces] the record of space ${spaceId} holds ${raw.grants.length - grants.length} grant(s) this host cannot read; they are left out`);
+    }
+    return { ...raw, grants };
+  };
 
   const read = (spaceId) => {
     const file = fileOf(spaceId);
@@ -59,7 +111,7 @@ export function createSpaceRecords({ dataDir, logger = console }) {
       return { status: 'unreadable', record: null };
     }
     try {
-      const parsed = recordSchema.safeParse(JSON.parse(text));
+      const parsed = recordSchema.safeParse(withReadableGrants(spaceId, JSON.parse(text)));
       if (parsed.success) return { status: 'ok', record: parsed.data };
     } catch {
       // Reported below.

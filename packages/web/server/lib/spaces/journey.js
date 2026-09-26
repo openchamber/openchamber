@@ -9,13 +9,20 @@
 // the sidebar can say what is happening now (DESIGN.md, journey step 2). A creation that fails
 // after the containers exist removes them again, and its failure stays listed until the user
 // dismisses it, so an error is never silent.
+//
+// Grants, since 5b: a model key the gatekeeper's window adds to the provider's requests, or an
+// opened domain the window forwards to with no credential. The host keeps the grant without its
+// value (decision 5) and says it again to the gatekeeper after every start; a value it cannot
+// find again leaves the space "needs access" until the user grants once more.
+
+import crypto from 'node:crypto';
 
 import { z } from 'zod';
 
 import { SpaceError } from './errors.js';
 import { createSpaceId, hashProjectDirectory } from './labels.js';
-import { spaceProjectPath } from './layout.js';
-import { networkSchema } from './space-records.js';
+import { spaceProjectPath, spaceWindowUrl } from './layout.js';
+import { grantSchema, networkSchema, secretSourceSchema } from './space-records.js';
 
 // The four choices of the create dialog, parsed at the boundary. Each field refuses with a code
 // of its own, so the dialog can point at the field.
@@ -31,6 +38,32 @@ const CREATE_REFUSALS = {
   start: ['invalid_snapshot_mode', 'A space starts from a clean commit or with the uncommitted changes.'],
   network: ['invalid_network', 'The network of a space is allowlist or open, with a list of domain names for the allowlist.'],
 };
+// The grant dialog's request, parsed at the boundary. A model grant names the provider as the
+// host's catalog does, the provider's API as the upstream, and where the key comes from: typed
+// once, or an environment variable of the host's by name. The value of a typed key is used now
+// and remembered nowhere. An opened domain has no key.
+const MAX_SECRET_LENGTH = 8192;
+const grantRequestSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('model'),
+    provider: grantSchema.options[0].shape.provider,
+    upstream: grantSchema.options[0].shape.upstream,
+    secret: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('typed'), value: z.string().min(1).max(MAX_SECRET_LENGTH) }).strict(),
+      secretSourceSchema.options[0],
+    ]),
+  }).strict(),
+  z.object({ kind: z.literal('domain'), upstream: grantSchema.options[1].shape.upstream }).strict(),
+]);
+// The header the window sets for a provider: what its API reads a key from. Only providers
+// named here are taken: one that reads its key another way or signs its requests, Azure,
+// Bedrock or Vertex, would take the grant and fail every turn with a 401 upstream.
+const HEADER_BY_PROVIDER = new Map([
+  ['anthropic', 'x-api-key'],
+  ['google', 'x-goog-api-key'],
+  ...['openai', 'openrouter', 'groq', 'mistral', 'deepseek', 'xai'].map((provider) => [provider, 'authorization']),
+]);
+
 const applyRequestSchema = z.discriminatedUnion('as', [
   z.object({ as: z.literal('branch'), branch: z.string(), removeAfterwards: z.boolean().default(false) }),
   z.object({ as: z.literal('changes'), removeAfterwards: z.boolean().default(false) }),
@@ -45,7 +78,9 @@ const failureOf = (error) => ({
 /**
  * `listProjectDirectories` answers the host's registered projects; a space is made for one of them
  * and its label carries the project's hash. `announce(spaceId, payload)` enters an event into the
- * host's hub, `onSpacesChanged()` tells the host to read its list again at once.
+ * host's hub, `onSpacesChanged()` tells the host to read its list again at once. `spaceOpenCode`
+ * writes OpenCode's files inside a space, and `readHostSecret(name)` is how a key named by an
+ * environment variable of the host's is found again: its value or undefined, never stored.
  */
 export function createSpaceJourney({
   manager,
@@ -54,7 +89,9 @@ export function createSpaceJourney({
   codeIn,
   codeOut,
   records,
+  spaceOpenCode,
   listProjectDirectories,
+  readHostSecret = () => undefined,
   announce = () => {},
   onSpacesChanged = () => {},
   logger = console,
@@ -205,6 +242,74 @@ export function createSpaceJourney({
     return describePending(entry);
   };
 
+  /** A grant as the list and the grant route show it: everything the record holds, which holds no value. */
+  const describeGrant = (grant) => ({ ...grant, url: spaceWindowUrl(grant.id) });
+
+  /**
+   * Says one grant of the record to the gatekeeper. Resolves whether it could: a typed key is
+   * not remembered and needs the user again, and so does an environment variable that is not set
+   * now; a gatekeeper that refuses or does not answer counts the same way and is logged, because
+   * the space runs either way and the list must say that its access is missing.
+   */
+  const deliverGrant = async (spaceId, grant) => {
+    let secret = null;
+    if (grant.kind === 'model') {
+      if (grant.source.kind === 'typed') return false;
+      secret = readHostSecret(grant.source.name);
+      if (typeof secret !== 'string' || secret === '') return false;
+    }
+    try {
+      await gatekeeper.addGrant(spaceId, { id: grant.id, upstream: grant.upstream, header: grant.kind === 'model' ? grant.header : null, secret });
+      return true;
+    } catch (error) {
+      logger.warn?.(`[spaces] the grant ${grant.id} of space ${spaceId} could not be said again: ${error?.code ?? error?.message ?? error}`);
+      return false;
+    }
+  };
+
+  /**
+   * OpenCode's configuration inside, written again from the record at a start: it survives a
+   * stop in the home volume, but a write that failed at the grant is repaired only here. It
+   * cooperates and enforces nothing, so a failure is logged and the start goes on.
+   */
+  const rewriteProviderConfig = async (spaceId, grants) => {
+    if (!grants.some((grant) => grant.kind === 'model')) return;
+    try {
+      await spaceOpenCode.writeProviderConfig(spaceId, grants);
+    } catch (error) {
+      logger.warn?.(`[spaces] the provider configuration of space ${spaceId} was not written again: ${error?.code ?? error?.message ?? error}`);
+    }
+  };
+
+  /** Every grant of the record said again after a start. Resolves the ids that went and the ids that need the user. */
+  const restoreGrants = async (spaceId, grants) => {
+    const restored = [];
+    const needsAccess = [];
+    for (const grant of grants) {
+      (await deliverGrant(spaceId, grant) ? restored : needsAccess).push(grant.id);
+    }
+    return { restored, needsAccess };
+  };
+
+  /**
+   * Which grants of the record a running gatekeeper holds now, read from the gatekeeper itself:
+   * after a machine restart it holds none, and the space "needs access" (DESIGN.md, Gatekeeper).
+   * A gatekeeper that cannot be asked leaves the answer unknown, never "granted".
+   */
+  const readAccess = async (space, grants) => {
+    // A start that is still saying the grants again, or a grant on its way, would read as
+    // "needs access" for a moment; while an action holds the space the answer is not given.
+    if (space.state !== 'running' || grants.length === 0 || busy.has(space.id)) return { access: null, needsAccess: [] };
+    try {
+      const held = new Set((await gatekeeper.readPolicy(space.id)).grants);
+      const needsAccess = grants.filter((grant) => !held.has(grant.id)).map((grant) => grant.id);
+      return { access: needsAccess.length === 0 ? 'granted' : 'needs_access', needsAccess };
+    } catch (error) {
+      logger.warn?.(`[spaces] the gatekeeper of space ${space.id} did not say what it holds: ${error?.code ?? error?.message ?? error}`);
+      return { access: 'unknown', needsAccess: [] };
+    }
+  };
+
   const describePending = (entry) => ({
     id: entry.id,
     name: entry.name,
@@ -217,6 +322,9 @@ export function createSpaceJourney({
     failure: entry.failure,
     network: entry.network,
     history: 'pending',
+    grants: [],
+    access: null,
+    needsAccess: [],
     damaged: false,
     missing: [],
     orphans: [],
@@ -225,13 +333,16 @@ export function createSpaceJourney({
   /**
    * Every space of this host: the place's list with what the host remembers about each, the
    * creations under way in their place, and the failed ones after it. A record the host cannot read leaves `network` null,
-   * which the UI must show as "unknown" and never as "open".
+   * which the UI must show as "unknown" and never as "open". With `access` each running space
+   * with grants is asked what its gatekeeper holds, one request per such space, so the list can
+   * say "needs access"; without it `access` stays null.
    */
-  const listSpaces = async () => {
+  const listSpaces = async ({ access = false } = {}) => {
     const [spaces, projects] = await Promise.all([manager.listSpaces({ placeId: place.id }), registeredProjects()]);
-    const listed = spaces.map((space) => {
+    const listed = await Promise.all(spaces.map(async (space) => {
       const projectDirectory = projects.get(space.project) ?? null;
       const { record } = records.read(space.id);
+      const grants = record?.grants ?? [];
       return {
         id: space.id,
         name: space.name,
@@ -244,11 +355,13 @@ export function createSpaceJourney({
         failure: null,
         network: record?.network ?? null,
         history: record?.history ?? 'unknown',
+        grants: grants.map(describeGrant),
+        ...(access ? await readAccess(space, grants) : { access: null, needsAccess: [] }),
         damaged: space.damaged,
         missing: space.missing,
         orphans: space.orphans,
       };
-    });
+    }));
     // A creation under way wins over the place's view of it: the containers run before the code is there.
     const waiting = new Map(Array.from(pending.values(), (entry) => [entry.id, describePending(entry)]));
     const merged = listed.map((space) => waiting.get(space.id) ?? space);
@@ -274,9 +387,12 @@ export function createSpaceJourney({
     await manager.startSpace({ placeId: place.id, spaceId });
     const { record } = records.read(spaceId);
     let networkRestored = false;
+    let grants = { restored: [], needsAccess: [] };
     if (record) {
       await gatekeeper.setNetwork(spaceId, record.network);
       networkRestored = true;
+      grants = await restoreGrants(spaceId, record.grants);
+      await rewriteProviderConfig(spaceId, record.grants);
       // A history that never arrived, or that failed, is sent again: a stop right after the
       // creation is the usual way it fails, and the space would otherwise stay shallow for good.
       if ((record.history === 'pending' || record.history === 'failed') && record.repository && record.spacePath && record.base) {
@@ -284,7 +400,50 @@ export function createSpaceJourney({
       }
     }
     onSpacesChanged();
-    return { ...(await requireListed(spaceId)), networkRestored };
+    return { ...(await requireListed(spaceId)), networkRestored, grantsRestored: grants.restored, needsAccess: grants.needsAccess };
+  });
+
+  /**
+   * Gives a running space a grant: the key goes to the gatekeeper, the grant without its value
+   * goes to the record, and for a model grant OpenCode inside is told to send that provider's
+   * calls through the window. A second grant for the same provider replaces the first, which is
+   * how a key is changed; a grant is never taken back (decision 4). The value of a typed key is
+   * in this request and in the gatekeeper's memory, and nowhere else afterwards.
+   */
+  const grantAccess = (spaceId, request) => exclusive(spaceId, async () => {
+    requireNotPending(spaceId);
+    const parsed = grantRequestSchema.safeParse(request ?? {});
+    if (!parsed.success) throw new SpaceError('invalid_grant_request', 'A grant is a model key for a provider, typed or named by a host environment variable, or an opened domain.');
+    const space = await requireListed(spaceId);
+    if (space.state !== 'running') throw new SpaceError('space_not_running', 'A grant goes to the gatekeeper of a running space. Start the space, then grant.');
+    const current = records.read(spaceId);
+    if (current.status !== 'ok') throw new SpaceError('space_record_unreadable', 'The host\'s record of this space cannot be read, so a grant could not be remembered. Remove the space and create it again.');
+
+    const asked = parsed.data;
+    if (asked.kind === 'model' && !HEADER_BY_PROVIDER.has(asked.provider)) {
+      throw new SpaceError('provider_not_supported', `A key for ${asked.provider} cannot be given through the gatekeeper yet: it reads its key in a way the gatekeeper does not know.`);
+    }
+    let grant;
+    let secret = null;
+    if (asked.kind === 'model') {
+      const source = asked.secret.kind === 'typed' ? { kind: 'typed' } : { kind: 'env', name: asked.secret.name };
+      secret = asked.secret.kind === 'typed' ? asked.secret.value : readHostSecret(asked.secret.name);
+      if (typeof secret !== 'string' || secret === '') {
+        throw new SpaceError('secret_source_missing', `The environment variable ${asked.secret.name} is not set for OpenChamber, so there is no key to give.`);
+      }
+      grant = { kind: 'model', id: asked.provider, provider: asked.provider, upstream: asked.upstream, header: HEADER_BY_PROVIDER.get(asked.provider), source };
+    } else {
+      grant = { kind: 'domain', id: `open-${crypto.randomBytes(6).toString('hex')}`, upstream: asked.upstream };
+    }
+    await gatekeeper.addGrant(spaceId, { id: grant.id, upstream: grant.upstream, header: grant.kind === 'model' ? grant.header : null, secret });
+    const grants = [...current.record.grants.filter((entry) => entry.id !== grant.id), grant];
+    if (records.update(spaceId, { grants }).status !== 'ok') {
+      throw new SpaceError('space_record_unreadable', 'The grant reached the gatekeeper and could not be remembered, so it is gone at the next start. Remove the space and create it again.');
+    }
+    // A failure here answers the grant with it; the key is in the gatekeeper and the record, and
+    // the next start writes the configuration again.
+    if (grant.kind === 'model') await spaceOpenCode.writeProviderConfig(spaceId, grants);
+    return { grant: describeGrant(grant) };
   });
 
   const stopSpace = (spaceId) => exclusive(spaceId, async () => {
@@ -389,5 +548,5 @@ export function createSpaceJourney({
     return { brought, applied, removal };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, removeSpace, stopAllSpaces, reopen, readJournal, previewApply, applySpace };
+  return { createSpace, listSpaces, startSpace, stopSpace, removeSpace, stopAllSpaces, reopen, grantAccess, readJournal, previewApply, applySpace };
 }

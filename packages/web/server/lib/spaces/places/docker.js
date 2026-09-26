@@ -1,3 +1,5 @@
+import net from 'node:net';
+
 import { SpaceError } from '../errors.js';
 import { createGatekeeperChannel } from '../gatekeeper-channel.js';
 import {
@@ -308,7 +310,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       await docker(['network', 'connect', outerNetwork, gatekeeperName], CHANGE_TIMEOUT_MS);
       await requireGatekeeperVerified(id, await inspectOwnContainer(id, gatekeeperName) ?? {});
       await docker(['start', gatekeeperName], CHANGE_TIMEOUT_MS);
-      await gatekeeper.writeProgram(id);
+      await gatekeeper.writeProgram(id, { bindAddress: await innerAddressOf(id) });
       await gatekeeper.waitUntilReady(id);
       // Create, verify, then start: a container that fails the check never runs.
       await docker(buildSpaceCreateArgs({
@@ -389,6 +391,20 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   // Starts that are under way in this process, by space id.
   const starting = new Map();
 
+  /**
+   * The gatekeeper's own address on the space's inner network, read from the runtime once the
+   * container runs: that is where its corridor and window listen, and nowhere else. An engine
+   * that reports none leaves the gatekeeper unstarted, which is the safe answer.
+   */
+  const innerAddressOf = async (spaceId) => {
+    const entry = await inspectOwnContainer(spaceId, spaceResourceName(spaceId, ROLE_GATEKEEPER));
+    const address = String(entry?.NetworkSettings?.Networks?.[spaceResourceName(spaceId, ROLE_NETWORK)]?.IPAddress ?? '');
+    if (net.isIP(address) === 0) {
+      throw new SpaceError('gatekeeper_address_unknown', `The runtime reports no address for the gatekeeper of space ${spaceId} on the space's network, so its listeners cannot be bound.`);
+    }
+    return address;
+  };
+
   /** The gatekeeper container of a space. It is never renamed, so there is no move to repair here. */
   const requireGatekeeperContainer = async (spaceId) => {
     const name = spaceResourceName(spaceId, ROLE_GATEKEEPER);
@@ -468,7 +484,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       await requireGatekeeperVerified(spaceId, container);
       await docker(['start', name], CHANGE_TIMEOUT_MS);
     }
-    await gatekeeper.writeProgram(spaceId);
+    await gatekeeper.writeProgram(spaceId, { bindAddress: await innerAddressOf(spaceId) });
     await gatekeeper.waitUntilReady(spaceId);
   };
 

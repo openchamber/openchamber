@@ -272,13 +272,21 @@ describe('docker place: create', () => {
       '--env', 'HOME=/tmp',
       SPACE_BASE_IMAGE,
       '/bin/sh', '-c',
-      'while [ ! -s /tmp/openchamber-gatekeeper/gatekeeper.cjs ]; do /bin/sleep 0.2; done; exec /usr/local/bin/node /tmp/openchamber-gatekeeper/gatekeeper.cjs 0.0.0.0 3128 8080 9099 300000 128 64 8',
+      // The bind host is the file the host writes after the start, holding the gatekeeper's own
+      // address on the space's network, never every interface: see "Known limits" of stage 2.
+      'while [ ! -s /tmp/openchamber-gatekeeper/gatekeeper.cjs ]; do /bin/sleep 0.2; done; exec /usr/local/bin/node /tmp/openchamber-gatekeeper/gatekeeper.cjs /tmp/openchamber-gatekeeper/bind 3128 8080 9099 300000 128 64 8',
     ]);
     expect(create).toContain('openchamber.space.role=gatekeeper');
     expect(create).not.toContain('--mount');
     // The program travels on stdin, so it is in no argument list, and no secret is in one either.
     const write = fake.calls.find((call) => isExec('gatekeeper.cjs.new')(call.args));
     expect(write.options.stdin).toBe(GATEKEEPER_PROGRAM);
+    // The address the fake engine gives the gatekeeper on the inner network, read after the start
+    // and written into the bind file before the program.
+    expect(write.args.slice(-2)).toEqual(['sh', '172.19.0.2']);
+    expect(write.args.join(' ')).toContain('> /tmp/openchamber-gatekeeper/bind.new && mv /tmp/openchamber-gatekeeper/bind.new /tmp/openchamber-gatekeeper/bind && cat > /tmp/openchamber-gatekeeper/gatekeeper.cjs.new');
+    const order = fake.calls.map((call) => describeCall(call.args));
+    expect(order.indexOf(`start ${GATEKEEPER}`)).toBeLessThan(order.indexOf('exec write program'));
     expect(write.args[4]).toBe(GATEKEEPER);
   });
 

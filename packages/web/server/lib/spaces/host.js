@@ -23,6 +23,7 @@ import { spaceProjectPath } from './layout.js';
 import { createSpaceManager } from './manager.js';
 import { createSpaceRecords } from './space-records.js';
 import { createSpaceEventSources } from './space-events.js';
+import { createSpaceOpenCode } from './space-opencode.js';
 import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js';
 import { createSpaceWebSocketForwarder } from './websocket.js';
 import { createDockerPlace } from './places/docker.js';
@@ -103,6 +104,7 @@ export function createSpacesHost({
   const codeIn = createCodeIn({ git, place: dockerPlace });
   const codeOut = createCodeOut({ git, place: dockerPlace });
   const records = createSpaceRecords({ dataDir, logger });
+  const spaceOpenCode = createSpaceOpenCode({ exec: dockerPlace.exec });
 
   const listSpaces = () => manager.listSpaces({ placeId: dockerPlace.id });
   const dispatcher = createSpaceDispatcher({
@@ -188,7 +190,11 @@ export function createSpacesHost({
     codeIn,
     codeOut,
     records,
+    spaceOpenCode,
     listProjectDirectories,
+    // A key named by an environment variable is read from the host's own environment, now, and
+    // its value is kept nowhere (decision 5).
+    readHostSecret: (name) => hostEnvironment[name],
     announce: (spaceId, payload) => { hub?.injectEvent({ payload, directory: 'global', spaceId }); },
     onSpacesChanged: () => { void refresh().catch(() => {}); },
     logger,

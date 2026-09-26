@@ -54,6 +54,7 @@ const journeyOf = (overrides = {}) => {
     startSpace: record('startSpace', { id: ID, state: 'running' }),
     stopSpace: record('stopSpace', { id: ID, state: 'exited' }),
     removeSpace: record('removeSpace', { id: ID, removed: true }),
+    grantAccess: record('grantAccess', { grant: { id: 'open-1' } }),
     readJournal: record('readJournal', { records: [], dropped: 0, since: 'now' }),
     previewApply: record('previewApply', { changedPaths: 2 }),
     applySpace: record('applySpace', { applied: { status: 'applied' } }),
@@ -65,7 +66,7 @@ const journeyOf = (overrides = {}) => {
 describe('space routes', () => {
   it('answers every journey route with 404 and isolated_spaces_off while the feature is off, and the switch still works', async () => {
     const { call, calls } = await serve({ journey: null, switchState: { enabled: false } });
-    for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`]]) {
+    for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['POST', `/${ID}/grants`], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`]]) {
       expect(await call(method, `${SPACES_ROUTE}${path}`, method === 'GET' || method === 'DELETE' ? undefined : {}), `${method} ${path}`).toEqual({ status: 404, body: { code: 'isolated_spaces_off', message: 'Isolated spaces are turned off.', details: null } });
     }
     expect(await call('GET', `${SPACES_ROUTE}/switch`)).toEqual({ status: 200, body: { enabled: false, spaces: [] } });
@@ -99,12 +100,13 @@ describe('space routes', () => {
     expect(await call('POST', SPACES_ROUTE, request)).toEqual({ status: 202, body: { id: ID, state: 'preparing' } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/start`)).toEqual({ status: 200, body: { id: ID, state: 'running' } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/stop`)).toEqual({ status: 200, body: { id: ID, state: 'exited' } });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/grants`, { kind: 'domain', upstream: 'https://registry.example.com/' })).toEqual({ status: 200, body: { grant: { id: 'open-1' } } });
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/journal`)).toEqual({ status: 200, body: { records: [], dropped: 0, since: 'now' } });
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/apply`)).toEqual({ status: 200, body: { changedPaths: 2 } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/apply`, { as: 'branch', branch: 'b' })).toEqual({ status: 200, body: { applied: { status: 'applied' } } });
     expect(await call('DELETE', `${SPACES_ROUTE}/${ID}`)).toEqual({ status: 200, body: { id: ID, removed: true } });
     expect(journey.calls).toEqual([
-      ['listSpaces'], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['removeSpace', ID],
+      ['listSpaces', { access: true }], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['removeSpace', ID],
     ]);
   });
 
@@ -123,7 +125,7 @@ describe('space routes', () => {
     const res = { status(code) { this.code = code; return this; }, json(body) { answers.push({ status: this.code, body }); } };
     const cases = [
       ['space_not_found', 404], ['isolated_spaces_off', 404], ['project_not_registered', 400], ['invalid_network', 400], ['space_preparing', 409], ['space_not_running', 409],
-      ['space_busy', 409], ['space_creation_failed', 409],
+      ['space_busy', 409], ['space_creation_failed', 409], ['invalid_grant_request', 400], ['secret_source_missing', 409], ['space_record_unreadable', 409],
       ['branch_exists', 409], ['changes_do_not_apply', 409], ['changes_route_closed', 409], ['nothing_to_apply', 409], ['place_cannot_restrict_network', 409],
       ['space_remove_incomplete', 502], ['docker_command_failed', 502], ['code_out_failed', 502],
     ];

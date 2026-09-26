@@ -96,7 +96,9 @@ export function hardenedContainerEntry({
       PortBindings: {},
     },
     Mounts: mountList.map(volumeMountEntry),
-    NetworkSettings: { Networks: { [network]: aliases.length > 0 ? { Aliases: aliases } : {} } },
+    // Like the real engine once the container runs: an address on its network. The fake gives it
+    // from the start, and the place's tests hold it to reading the address after the start.
+    NetworkSettings: { Networks: { [network]: { IPAddress: '172.19.0.2', ...(aliases.length > 0 ? { Aliases: aliases } : {}) } } },
   };
 }
 
