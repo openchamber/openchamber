@@ -190,32 +190,58 @@ export class SherpaSegmentTranscriptionSession extends EventEmitter {
     this.pcm16 = this.pcm16.length === 0 ? chunk : Buffer.concat([this.pcm16, chunk]);
   }
 
-  commit() {
+  /**
+   * Close the current segment and hand it back for decoding, WITHOUT decoding.
+   * The caller decodes later (e.g. on the next event-loop turn) so a long
+   * segment's quadratic decode never blocks the worker's IPC — see
+   * worker-process.js session.commit. Returns null when not connected or the
+   * segment holds no audio.
+   * @returns {{ segmentId: string, previousSegmentId: string|null, pcm16: Buffer } | null}
+   */
+  takePendingSegment() {
     if (!this.connected || !this.currentSegmentId) {
       this.emit('error', new Error('Sherpa transcription session not connected'));
-      return;
+      return null;
     }
-
     const segmentId = this.currentSegmentId;
     const previousSegmentId = this.previousSegmentId;
     const pcm16 = this.pcm16;
 
-    // Start the next segment before decoding: decoding blocks the worker for
-    // seconds on long segments, and audio for the next one keeps arriving.
+    // Start the next segment before decoding: decoding can take seconds on
+    // long segments, and audio for the next one keeps arriving meanwhile.
     this.previousSegmentId = segmentId;
     this.currentSegmentId = randomUUID();
     this.pcm16 = Buffer.alloc(0);
 
     this.emit('committed', { segmentId, previousSegmentId });
 
+    if (pcm16.length === 0) {
+      return null;
+    }
+    return { segmentId, previousSegmentId, pcm16 };
+  }
+
+  /**
+   * Decode a segment previously returned by takePendingSegment() and emit its
+   * final transcript.
+   * @param {{ segmentId: string, pcm16: Buffer }} pending
+   */
+  decodeSegment(pending) {
     let transcript;
     try {
-      transcript = this.engine.decodePcm16(pcm16);
+      transcript = this.engine.decodePcm16(pending.pcm16);
     } catch (err) {
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       return;
     }
-    this.emit('transcript', { segmentId, transcript, isFinal: true });
+    this.emit('transcript', { segmentId: pending.segmentId, transcript, isFinal: true });
+  }
+
+  commit() {
+    const pending = this.takePendingSegment();
+    if (pending) {
+      this.decodeSegment(pending);
+    }
   }
 
   clear() {

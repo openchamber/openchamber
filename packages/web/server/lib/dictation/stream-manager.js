@@ -23,13 +23,17 @@ import { Pcm16MonoResampler, parsePcmRateFromFormat, pcm16lePeakAbs } from './au
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
 // Parakeet is a full-attention conformer: decode cost and peak memory grow
-// quadratically with segment length (measured: 60s -> 2.1s/+90MB,
-// 300s -> 21.3s/+1.5GB). Segmenting keeps a long dictation off that curve and
-// lets committed segments decode while the user is still speaking, so only the
-// tail is left to transcribe on stop. Typical dictations are shorter than the
-// minimum and are decoded as a single segment.
-const DEFAULT_SEGMENT_MIN_SECONDS = 60;
-const DEFAULT_SEGMENT_MAX_SECONDS = 90;
+// quadratically with segment length (measured on an M1: 60s -> ~2s,
+// 120s -> 16s, 300s -> 115s). Segmenting keeps a long dictation off that curve
+// and lets committed segments decode while the user is still speaking, so only
+// the tail is left to transcribe on stop.
+//
+// The minimum is deliberately low: a 15s segment decodes in well under a
+// second, so live partials appear close to real time instead of after a long
+// silent wait. The hard cap stays small (25s) so even pauseless speech never
+// piles up a segment whose decode blocks the worker for seconds.
+const DEFAULT_SEGMENT_MIN_SECONDS = 15;
+const DEFAULT_SEGMENT_MAX_SECONDS = 25;
 const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;

@@ -75,16 +75,18 @@ openaiCompatible?: { baseUrl, model, apiKey } }`.
 ## Segmentation
 
 A dictation is one segment unless it runs long. Past `segmentMinSeconds`
-(60 s) the manager commits on the first silent chunk, so cuts land at a pause
-rather than mid-word; `segmentMaxSeconds` (90 s) is a hard cap for speech with
+(15 s) the manager commits on the first silent chunk, so cuts land at a pause
+rather than mid-word; `segmentMaxSeconds` (25 s) is a hard cap for speech with
 no pause in it. Client chunks are ~1 s, so "silent chunk" is roughly a second
 of silence.
 
 The bounds exist because Parakeet is a full-attention conformer: decode cost
 and peak memory grow quadratically with segment length. Measured on Parakeet
-v3 int8 with 2 threads: 60 s took 2.1 s and +90 MB, 180 s took 9.3 s and
-+490 MB, 300 s took 21.3 s and +1.5 GB. Committed segments decode while the
-user is still speaking, so only the tail is left to transcribe on stop.
+v3 int8 with 2 threads: 15 s ≈ 0.6 s, 60 s ≈ 2.9 s / 1.17 GB, 90 s ≈ 4.9 s /
+1.60 GB, and a single ~165 s+ segment aborts the worker (native `onnxruntime`
+`SIGTRAP` in `BFCArena::Extend`). Short segments keep a long dictation far from
+that cliff: 24 × 25 s stayed flat at ~1.17 GB. Committed segments decode while
+the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Invariants
 
