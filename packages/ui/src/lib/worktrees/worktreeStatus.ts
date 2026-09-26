@@ -1,16 +1,8 @@
 import { getGitStatus, resolveGitPrimaryRoot } from '@/lib/gitApi';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-const normalizePath = (value: string): string => {
-  if (!value) {
-    return '';
-  }
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.replace(/\/+$/, '');
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeMetadata['status']> {
   const normalizedPath = normalizePath(worktreePath);

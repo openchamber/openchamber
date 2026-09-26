@@ -1,4 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
@@ -58,13 +59,7 @@ const deriveCanonicalWorktreeFields = (
 
 export type ProjectRef = { id: string; path: string };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 /** The name the sidebar shows for a worktree, used in worktree-scoped toasts. */
 export const getWorktreeDisplayName = (worktree: WorktreeMetadata): string =>

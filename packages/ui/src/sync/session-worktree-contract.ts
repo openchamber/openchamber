@@ -1,5 +1,6 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionWorktreeAttachment } from '@/stores/types/sessionTypes';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 
 type ResolveSessionWorktreeStateInput = {
   sessionDirectory: string | null;
@@ -25,12 +26,7 @@ type SessionWorktreeCanonicalizationOptions = {
   worktreeSource?: SessionWorktreeAttachment['worktreeSource'];
 };
 
-const normalizePath = (value: string): string => {
-  if (!value) return '';
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') return '/';
-  return replaced.replace(/\/+$/, '') || replaced;
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 function isWithinWorktreeRoot(candidate: string | null, worktreeRoot: string | null): boolean {
   if (!candidate || !worktreeRoot) return false;
