@@ -2331,6 +2331,7 @@ export const dict = {
   'chat.btw.working': 'Working…',
   'chat.btw.collapseAria': 'Collapse the btw panel',
   'chat.btw.draftHint': 'Ask your question',
+  'chat.btw.toolbar.askAria': 'Ask a temporary question (/btw)',
   'chat.btw.cancelAria': 'Cancel this BTW question',
   'chat.btw.expandAria': 'Expand the btw panel',
   'chat.btw.promoteAria': 'Keep as a separate session',

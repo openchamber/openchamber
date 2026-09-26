@@ -2332,6 +2332,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': '작업 중…',
   'chat.btw.collapseAria': 'btw 패널 접기',
   'chat.btw.draftHint': '질문을 입력하세요',
+  'chat.btw.toolbar.askAria': '임시 질문하기(/btw)',
   'chat.btw.cancelAria': '이 BTW 질문 취소',
   'chat.btw.expandAria': 'btw 패널 펼치기',
   'chat.btw.promoteAria': '별도 세션으로 유지',

@@ -2296,6 +2296,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': '处理中…',
   'chat.btw.collapseAria': '收起 btw 面板',
   'chat.btw.draftHint': '提出你的问题',
+  'chat.btw.toolbar.askAria': '提出临时问题（/btw）',
   'chat.btw.cancelAria': '取消这次 BTW 提问',
   'chat.btw.expandAria': '展开 btw 面板',
   'chat.btw.promoteAria': '保留为独立会话',

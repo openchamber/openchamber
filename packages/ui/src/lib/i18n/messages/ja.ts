@@ -2326,6 +2326,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': '処理中…',
   'chat.btw.collapseAria': 'btwパネルを折りたたむ',
   'chat.btw.draftHint': '質問を入力してください',
+  'chat.btw.toolbar.askAria': '一時的な質問をする（/btw）',
   'chat.btw.cancelAria': 'このBTWの質問をキャンセル',
   'chat.btw.expandAria': 'btwパネルを展開する',
   'chat.btw.promoteAria': '独立したセッションとして保持',

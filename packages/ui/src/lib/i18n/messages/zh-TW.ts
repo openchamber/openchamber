@@ -2300,6 +2300,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.btw.working': '處理中…',
   'chat.btw.collapseAria': '收合 btw 面板',
   'chat.btw.draftHint': '提出你的問題',
+  'chat.btw.toolbar.askAria': '提出臨時問題（/btw）',
   'chat.btw.cancelAria': '取消這次 BTW 提問',
   'chat.btw.expandAria': '展開 btw 面板',
   'chat.btw.promoteAria': '保留為獨立工作階段',
