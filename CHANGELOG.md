@@ -2,6 +2,40 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.0.2] - 2026-09-26
+
+### Improvements
+
+- **Chat: compaction and shell commands read like the rest of the turn.** Compaction is one collapsible row with the summary inside, and shell runs look like any other tool row.
+- Sidebar: a project whose folder is missing is marked, so you can see why it won't open.
+- Settings: Claude Code can be the small model for titles and commit messages.
+- Models: the model picker stays fast with long provider lists.
+- Models: context limits in model details match what OpenCode really uses.
+- Chat: the retry countdown shows again while OpenCode waits to retry a request.
+- Chat: the session goal strip sits on glass over the conversation.
+
+### Fixes
+
+- Startup: the app opens even when the last project's folder was deleted or moved.
+- Chat: answers typed into a question form survive switching to another session and back.
+- Agents: agents added by plugins show up in the composer without a reload (thanks to @hiro-nikaitou).
+- Chat: reverting to a message or forking brings its attached context along (thanks to @hiro-nikaitou).
+- Settings: edits to AGENTS.md made in another editor show up, and saving no longer overwrites them.
+- Config: a global `opencode.jsonc` is picked up.
+- Worktrees: the provider and agent lists in a worktree session match that worktree's config.
+- Sessions: an archived session no longer shows up as still replying (thanks to @aiiibolo).
+- Models: a Fast model variant is picked correctly (thanks to @hiro-nikaitou).
+- Small model: background titles and commit messages keep working while plugins are still loading after startup.
+- Chat: long identifiers in Markdown tables stay on one line when there is room and wrap when there isn't (thanks to @aiiibolo).
+- Chat: a dollar sign in regular text no longer turns the rest of the line into math (thanks to @hiro-nikaitou).
+- Chat: context chip preview actions stay inside the chat area (thanks to @aiiibolo).
+- Chat: the actions for a reverted message stay visible on narrow screens.
+- Chat: the stray scrollbar next to the send button is gone.
+- Mobile: the trust dialog shows above the worktree sheet (thanks to @ChangeHow).
+- Mobile: browser control works over the private relay (thanks to @aiiibolo).
+- Mobile: sending over the private relay no longer fails on a slow connection.
+- SSH: managed remote hosts find npm installed through nvm.
+
 ## [2.0.1] - 2026-09-24
 
 ### New

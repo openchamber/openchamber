@@ -9,7 +9,8 @@ import { SETTINGS_OPTION_STACK_CLASS, SettingsCheckboxRow, SettingsSection } fro
  * The switch of the isolated-spaces feature. The server reads it once when it starts, so the
  * row says the change takes effect after a restart; turning it off live, with the stop of
  * running spaces, is a later stage. Never mounted in VS Code: the feature has no entry point
- * there on purpose (decision 16 of the design).
+ * there on purpose (decision 16 of the design), and nowhere until the feature is released,
+ * see `lib/spaces/release.ts`.
  */
 export const IsolatedSpacesSettings: React.FC = () => {
   const { t } = useI18n();

@@ -40,7 +40,7 @@ import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
-import { getComposerHeightLimit } from './heightLimit';
+import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 
 export interface ComposerSelection {
@@ -421,6 +421,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             // window while the rest of the surface sits empty.
             if (fillContainer) {
                 view.scrollDOM.style.maxHeight = '';
+                view.scrollDOM.style.overflowY = '';
                 return;
             }
 
@@ -456,12 +457,26 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 if (view.scrollDOM.style.maxHeight !== next) {
                     view.scrollDOM.style.maxHeight = next;
                 }
+                // Scroll only once the text is past the cap; below it, a
+                // sub-line overflow would draw a scrollbar with nothing to
+                // scroll (#4004).
+                const overflowY = isComposerContentCapped(
+                    view.contentDOM.getBoundingClientRect().height,
+                    cap,
+                    lineHeight,
+                ) ? 'auto' : 'hidden';
+                if (view.scrollDOM.style.overflowY !== overflowY) {
+                    view.scrollDOM.style.overflowY = overflowY;
+                }
             };
 
             applyLimit();
             if (typeof ResizeObserver === 'undefined') return;
             const observer = new ResizeObserver(applyLimit);
             observer.observe(host);
+            // Past the cap the host stops growing, so the content is what
+            // reports the text crossing it.
+            observer.observe(view.contentDOM);
             if (branch) observer.observe(branch);
             if (boundEl) observer.observe(boundEl);
             return () => observer.disconnect();

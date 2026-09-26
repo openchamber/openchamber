@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
@@ -290,6 +291,107 @@ const SortableProviderSection: React.FC<{
   );
 };
 
+// A provider section this long mounts only the rows near the viewport.
+// Aggregators (OpenRouter, Kilo) list hundreds of models, and with every row
+// mounted each highlight change restyles all of them (#4003). Shorter sections
+// keep plain rendering.
+const VIRTUAL_SECTION_MIN_ROWS = 40;
+// The row height at the default font size. The measured height is kept for
+// the next mount, so a section that opens again is laid out right at once and
+// a row revealed below it is not pushed away by estimated rows growing.
+let lastMeasuredRowHeight = 31;
+
+interface VirtualSectionHandle {
+  base: number;
+  count: number;
+  scrollToIndex: (index: number) => void;
+}
+
+const VirtualProviderRows: React.FC<{
+  sectionKey: string;
+  entries: ModelPickerEntry[];
+  base: number;
+  sections: Map<string, VirtualSectionHandle>;
+  renderRow: (entry: ModelPickerEntry, rowIndex: number) => React.ReactNode;
+}> = ({ sectionKey, entries, base, sections, renderRow }) => {
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = React.useState(0);
+  // Rows are single-line and share one height, which follows the UI font
+  // size. One mounted row is measured instead of observing every row: per-row
+  // observers re-measured the whole window on each frame of the menu's open
+  // animation and cost more than the rows they saved.
+  const [rowHeight, setRowHeight] = React.useState(lastMeasuredRowHeight);
+  // Found from the DOM: the overlay publishes its ref only after this
+  // section's first layout pass, and waiting for it would re-render the list.
+  const getScrollElement = React.useCallback(
+    () => listRef.current?.closest<HTMLElement>('.overlay-scrollbar-target') ?? null,
+    [],
+  );
+  const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
+    count: entries.length,
+    getScrollElement,
+    estimateSize: () => rowHeight,
+    overscan: 10,
+    scrollMargin,
+    getItemKey: (index) => `${entries[index]?.providerID}-${entries[index]?.modelID}`,
+  });
+
+  // The list's offset inside the scroller moves when sections above it
+  // collapse, filter or reorder: all of those resize the scroller's content or
+  // change this section's first index. Reading it on every render instead
+  // forces a layout per render while the menu opens.
+  React.useLayoutEffect(() => {
+    const list = listRef.current;
+    const scrollElement = getScrollElement();
+    const content = scrollElement?.firstElementChild;
+    if (!list || !scrollElement) return;
+    const measure = () => {
+      const next = list.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top + scrollElement.scrollTop;
+      setScrollMargin((previous) => (Math.abs(previous - next) < 0.5 ? previous : next));
+      const row = list.firstElementChild?.firstElementChild;
+      const height = row instanceof HTMLElement ? row.offsetHeight : 0;
+      if (height > 0) {
+        lastMeasuredRowHeight = height;
+        setRowHeight(height);
+      }
+    };
+    measure();
+    if (!content) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [base, getScrollElement]);
+
+  React.useLayoutEffect(() => {
+    sections.set(sectionKey, {
+      base,
+      count: entries.length,
+      scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: 'auto' }),
+    });
+    return () => { sections.delete(sectionKey); };
+  }, [base, entries.length, sectionKey, sections, virtualizer]);
+
+  React.useLayoutEffect(() => { virtualizer.measure(); }, [rowHeight, virtualizer]);
+
+  return (
+    <div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+      {virtualizer.getVirtualItems().map((item) => {
+        const entry = entries[item.index];
+        if (!entry) return null;
+        return (
+          <div
+            key={item.key}
+            className="absolute left-0 top-0 w-full"
+            style={{ height: item.size, transform: `translateY(${item.start - scrollMargin}px)` }}
+          >
+            {renderRow(entry, base + item.index)}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const STICKY_HEADER_OFFSET = 32;
 const STICKY_FADE_MAX_SIZE = 52;
 const STICKY_FADE_MIN_SIZE = 36;
@@ -434,6 +536,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const selectionStore = selectionStoreRef.current;
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const scrollRef = React.useRef<HTMLElement | null>(null);
+  const virtualSectionsRef = React.useRef<Map<string, VirtualSectionHandle>>(new Map());
   const stickyFadeSizeRef = React.useRef(0);
   const sectionHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [stuckSectionHeaders, setStuckSectionHeaders] = React.useState<Set<string>>(new Set());
@@ -608,13 +711,29 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     flatModelList.findIndex((entry) => entry.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID),
   );
 
+  // A row inside a virtualized section may not be mounted yet: scroll its
+  // section there first, then align it once it renders.
+  const revealIndex = React.useCallback((index: number) => {
+    const node = itemRefs.current[index];
+    if (node) {
+      scrollIntoView(scrollRef.current, node);
+      return;
+    }
+    for (const section of virtualSectionsRef.current.values()) {
+      if (index < section.base || index >= section.base + section.count) continue;
+      section.scrollToIndex(index - section.base);
+      requestAnimationFrame(() => scrollIntoView(scrollRef.current, itemRefs.current[index] ?? null));
+      return;
+    }
+  }, []);
+
   React.useLayoutEffect(() => {
     selectionStore.set(initialSelectionIndex);
     // Opening or scrolling the list must not let a stationary pointer replace the current model.
     keyboardOwnsSelectionRef.current = true;
     lastMousePositionRef.current = null;
-    scrollIntoView(scrollRef.current, itemRefs.current[initialSelectionIndex]);
-  }, [initialSelectionIndex, searchQuery, selectedModel?.providerID, selectedModel?.modelID, selectionStore]);
+    revealIndex(initialSelectionIndex);
+  }, [initialSelectionIndex, revealIndex, searchQuery, selectedModel?.providerID, selectedModel?.modelID, selectionStore]);
 
   const selectIndex = React.useCallback((index: number) => {
     selectionStore.set(index);
@@ -630,8 +749,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const nextIndex = (currentIndex + direction + total) % total;
     selectionStore.set(nextIndex);
     onActiveEntryChange?.(flatModelList[nextIndex]);
-    requestAnimationFrame(() => scrollIntoView(scrollRef.current, itemRefs.current[nextIndex]));
-  }, [flatModelList, onActiveEntryChange, selectionStore]);
+    requestAnimationFrame(() => revealIndex(nextIndex));
+  }, [flatModelList, onActiveEntryChange, revealIndex, selectionStore]);
 
   React.useEffect(() => {
     onActiveEntryChange?.(flatModelList[selectionStore.getSnapshot()]);
@@ -849,6 +968,25 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     );
   };
 
+  const renderProviderRows = (provider: (typeof filteredProviders)[number], sectionKey: string) => {
+    // SAFETY: filteredProviders keeps only models whose id is a non-empty string.
+    const entries = provider.models.map((model) => ({ model, providerID: provider.id, modelID: model.id as string }));
+    if (entries.length < VIRTUAL_SECTION_MIN_ROWS) {
+      return entries.map((entry) => renderRow(entry, 'provider', false, currentFlatIndex++));
+    }
+    const base = currentFlatIndex;
+    currentFlatIndex += entries.length;
+    return (
+      <VirtualProviderRows
+        sectionKey={sectionKey}
+        entries={entries}
+        base={base}
+        sections={virtualSectionsRef.current}
+        renderRow={(entry, rowIndex) => renderRow(entry, 'provider', false, rowIndex)}
+      />
+    );
+  };
+
   const renderProviderSection = (
     provider: (typeof filteredProviders)[number],
     providerIndex: number,
@@ -861,9 +999,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         <div className="relative">
           {renderSectionSentinel(sectionKey)}
           {renderSectionHeader(sectionKey, <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />, provider.name || provider.id, headerDragProps)}
-          {!isSectionCollapsed(sectionKey)
-            ? provider.models.map((model) => renderRow({ model, providerID: provider.id, modelID: model.id as string }, 'provider', false, currentFlatIndex++))
-            : null}
+          {!isSectionCollapsed(sectionKey) ? renderProviderRows(provider, sectionKey) : null}
         </div>
       </>
     );

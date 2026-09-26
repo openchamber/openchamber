@@ -1,3 +1,15 @@
+## [2.0.2] - 2026-09-26
+
+### Fixes
+
+- The extension connects to OpenCode running as a background service.
+- Chat: answers typed into a question form survive switching sessions.
+- Agents: agents added by plugins show up in the composer without a reload (thanks to @hiro-nikaitou).
+- Chat: the retry countdown shows again while OpenCode waits to retry.
+- Chat: a dollar sign in regular text no longer turns the rest of the line into math (thanks to @hiro-nikaitou).
+- Chat: long identifiers in Markdown tables wrap properly (thanks to @aiiibolo).
+- Small model: commit messages keep working while plugins are still loading.
+
 ## [2.0.1] - 2026-09-24
 
 ### New
