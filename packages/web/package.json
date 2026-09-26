@@ -31,6 +31,7 @@
     "@opencode/schema": "2.0.18",
     "@simplewebauthn/server": "13.3.3",
     "bun-pty": "^0.4.5",
+    "commander": "^15.0.0",
     "compression": "^1.8.1",
     "cron-parser": "^5.10.1",
     "express": "^5.1.0",
