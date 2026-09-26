@@ -19,6 +19,7 @@ export type QuotaProviderId =
   | 'opencode-go'
   | 'deepseek'
   | 'exe-dev'
+  | 'fireworks-ai'
   | 'hyper'
   | 'neuralwatt'
   | 'xai';
