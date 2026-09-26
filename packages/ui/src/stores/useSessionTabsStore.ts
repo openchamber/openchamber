@@ -24,7 +24,8 @@ interface SessionTabsStore {
   removeTabs: (sessionIds: readonly string[]) => void;
 }
 
-const MAX_SESSION_TABS = 10;
+/** Soft cap on the working set; past it the oldest tab is evicted. */
+const MAX_SESSION_TABS = 20;
 
 type PersistedSessionTabs = { tabIds: string[] };
 

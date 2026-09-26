@@ -12,7 +12,9 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 /**
  * Activate the nth (0-based) header session tab, counting only tabs whose
  * session is present in the loaded session list — the same rule the strip
- * uses for rendering, so the digit matches what the user sees.
+ * uses for rendering. The strip may show only a window of that order behind
+ * the overflow panel, so the index addresses the full working set rather
+ * than the tabs currently on screen.
  */
 export const activateSessionTabByIndex = (index: number): boolean => {
   const { tabIds } = useSessionTabsStore.getState();

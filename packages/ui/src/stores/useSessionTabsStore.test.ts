@@ -32,11 +32,11 @@ describe('useSessionTabsStore', () => {
     expect(useSessionTabsStore.getState().tabIds).toBe(before);
   });
 
-  test('caps the working set at 10, evicting the oldest tab', () => {
-    useSessionTabsStore.setState({ tabIds: Array.from({ length: 10 }, (_, i) => `s${i}`) });
+  test('caps the working set at 20, evicting the oldest tab', () => {
+    useSessionTabsStore.setState({ tabIds: Array.from({ length: 20 }, (_, i) => `s${i}`) });
     useSessionTabsStore.getState().ensureTab('s-new');
     const ids = useSessionTabsStore.getState().tabIds;
-    expect(ids).toHaveLength(10);
+    expect(ids).toHaveLength(20);
     expect(ids[0]).toBe('s1');
     expect(ids.at(-1)).toBe('s-new');
   });

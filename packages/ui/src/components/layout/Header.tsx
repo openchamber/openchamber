@@ -84,6 +84,92 @@ import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorkt
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 
+/**
+ * The right-cluster controls the header drops as the available width shrinks,
+ * first dropped first. The tab strip keeps a `min-w-[8.75rem]` floor (one
+ * floor-width tab + its gap + the overflow trigger, plus a small buffer so the
+ * `deriveLayout` title threshold — `trigger + gap + floor` — always stays
+ * below it), so the header must yield the secondary controls before the strip
+ * is squeezed into its `title` fallback. The window controls are OS chrome and
+ * the sidebar toggle lives in the persistent `TitlebarLeftControls` overlay,
+ * so neither is ever dropped.
+ *
+ * Widths are each control's rem-based footprint at a 16px root, rounded up from
+ * its Tailwind classes, so the thresholds track the UI font scale (the strip
+ * floor is rem-based too):
+ * - context usage: `px-2` (16) + `gap-1.5` (6) + the 18px percent icon + a
+ *   ~30px "100.0%" value ≈ 80px;
+ * - work-status toggle and mini-chat button: the `size-8` icon button (32) +
+ *   `mr-1` (4) + the cluster gap ≈ 40px each;
+ * - sidebar actions: project actions (~44) + open-in-app (~68) + services menu
+ *   (~40) + gaps ≈ 160px.
+ */
+const HEADER_HIDE_STEP_REM = {
+  contextUsage: 5,
+  workStatus: 2.5,
+  miniChat: 2.5,
+  sidebarActions: 10,
+};
+
+/**
+ * The strip floor, the collapsed-sidebar history button before it, and the
+ * header's always-present chrome (right padding plus the in-header window
+ * controls). Mixed px/rem because the strip floor scales with the font, while
+ * the OS window controls are a fixed physical size.
+ *
+ * The floor must exceed `deriveLayout`'s title threshold (overflow trigger
+ * 3.125rem + row gap 0.375rem + tab floor 4.75rem = 8.25rem) with a real
+ * margin: the trigger can measure wider than its estimate (sub-pixel rounding,
+ * a two-digit count, an extreme font scale), and `title` mode would then
+ * reappear. `8.75rem` keeps 0.5rem (8px) of headroom above that threshold.
+ * Must stay in sync with `min-w-[8.75rem]` on the strip root.
+ */
+const TAB_STRIP_FLOOR_REM = 8.75;
+const HEADER_HISTORY_BUTTON_PX = 34;
+const HEADER_RIGHT_PADDING_PX = 12;
+const HEADER_WINDOW_CONTROLS_PX = 136;
+
+const readRootFontSizePx = (): number => {
+  const size = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return Number.isFinite(size) && size > 0 ? size : 16;
+};
+
+/**
+ * Picks how many right-cluster controls the header must drop for the strip to
+ * keep its floor. `availableWidth` is the header width minus the two left
+ * spacer widths, so it already accounts for the sidebar (the spacers shrink and
+ * grow with it). It never changes when a control is hidden, which keeps the
+ * level stable: hiding a control removes width from the right cluster, not from
+ * the header, so the next measurement lands on the same level. Level 0 keeps
+ * everything; each higher level drops the next control in the order above.
+ *
+ * `stripVisible` is whether the session-tab strip is rendered at all; the strip
+ * floor is only reserved then, so a header without the strip (`activeSurface`,
+ * VS Code, or tabs disabled) does not drop its secondary controls early.
+ */
+const deriveHeaderHideLevel = (
+  availableWidth: number,
+  windowControlsVisible: boolean,
+  historyVisible: boolean,
+  stripVisible: boolean,
+): number => {
+  const rootFontSize = readRootFontSizePx();
+  const rem = (value: number) => value * rootFontSize;
+  const base = (stripVisible ? rem(TAB_STRIP_FLOOR_REM) : 0)
+    + (historyVisible ? HEADER_HISTORY_BUTTON_PX : 0)
+    + HEADER_RIGHT_PADDING_PX
+    + (windowControlsVisible ? HEADER_WINDOW_CONTROLS_PX : 0);
+  const sidebarActions = rem(HEADER_HIDE_STEP_REM.sidebarActions);
+  const miniChat = rem(HEADER_HIDE_STEP_REM.miniChat);
+  const workStatus = rem(HEADER_HIDE_STEP_REM.workStatus);
+  const contextUsage = rem(HEADER_HIDE_STEP_REM.contextUsage);
+  if (availableWidth >= base + sidebarActions + miniChat + workStatus + contextUsage) return 0;
+  if (availableWidth >= base + sidebarActions + miniChat + workStatus) return 1;
+  if (availableWidth >= base + sidebarActions + miniChat) return 2;
+  if (availableWidth >= base + sidebarActions) return 3;
+  return 4;
+};
+
 type HeaderIconActionButtonProps = {
   visible?: boolean;
   title: string;
@@ -329,6 +415,13 @@ export const Header: React.FC = () => {
   const { isMobile } = useDeviceInfo();
 
   const headerRef = React.useRef<HTMLElement | null>(null);
+  // The two left spacers reserve the persistent titlebar overlay's width. They
+  // are measured (they change with the sidebar), so the strip's available width
+  // is the header width minus their widths.
+  const headerInsetSpacerRef = React.useRef<HTMLDivElement | null>(null);
+  const headerControlsSpacerRef = React.useRef<HTMLDivElement | null>(null);
+  // How many secondary right-cluster controls are currently hidden (0 = all).
+  const [headerHideLevel, setHeaderHideLevel] = React.useState(0);
 
   const [isDesktopApp, setIsDesktopApp] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') {
@@ -1151,23 +1244,56 @@ export const Header: React.FC = () => {
     };
   }, [isDesktopApp, isVSCode, usesFramelessChrome, windowControlsSide]);
 
-  const updateHeaderHeight = React.useCallback(() => {
+  // Whether the session-tab strip is on the header at all. Same conditions the
+  // render below uses to choose the strip over the plain title surface.
+  const sessionTabsStripVisible = !activeSurfaceHeader && !isVSCode && sessionTabsEnabled;
+
+  // One measurement pass owns both the published header height and the
+  // right-cluster hide level: the header's width (minus the measured left
+  // spacers) is the strip's available width, and the level only changes when
+  // that width crosses a step. Raw widths stay in the layout; only the derived
+  // level is state, so a resize that does not change it causes no re-render.
+  const updateHeaderMetrics = React.useCallback(() => {
     if (typeof document === 'undefined') {
       return;
     }
 
-    const height = headerRef.current?.getBoundingClientRect().height;
-    if (height) {
-      document.documentElement.style.setProperty('--oc-header-height', `${height}px`);
+    const node = headerRef.current;
+    if (!node) {
+      return;
     }
-  }, []);
+
+    const rect = node.getBoundingClientRect();
+    if (rect.height) {
+      document.documentElement.style.setProperty('--oc-header-height', `${rect.height}px`);
+    }
+
+    // The right cluster is deliberately not subtracted: hiding a control shrinks
+    // the cluster, and if that fed back into this number the level could
+    // oscillate. The header width itself is set by the viewport/sidebar, so it
+    // stays put.
+    const leftSpacers = (headerInsetSpacerRef.current?.getBoundingClientRect().width ?? 0)
+      + (headerControlsSpacerRef.current?.getBoundingClientRect().width ?? 0);
+    const nextLevel = deriveHeaderHideLevel(
+      rect.width - leftSpacers,
+      usesFramelessChrome && windowControlsSide === 'right',
+      !isSidebarOpen,
+      sessionTabsStripVisible,
+    );
+    setHeaderHideLevel((current) => (current === nextLevel ? current : nextLevel));
+  }, [isSidebarOpen, sessionTabsStripVisible, usesFramelessChrome, windowControlsSide]);
+
+  // The first measurement runs before paint, so the first painted frame already
+  // has the right hide level instead of flashing the full cluster on a narrow
+  // header. Later width changes come from the observer below.
+  React.useLayoutEffect(() => {
+    updateHeaderMetrics();
+  }, [updateHeaderMetrics, isMobile, macosHeaderSizeClass]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
-
-    updateHeaderHeight();
 
     const node = headerRef.current;
     if (!node || typeof ResizeObserver === 'undefined') {
@@ -1179,13 +1305,15 @@ export const Header: React.FC = () => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
-        updateHeaderHeight();
+        updateHeaderMetrics();
       });
     };
 
     const observer = new ResizeObserver(scheduleUpdate);
 
     observer.observe(node);
+    if (headerInsetSpacerRef.current) observer.observe(headerInsetSpacerRef.current);
+    if (headerControlsSpacerRef.current) observer.observe(headerControlsSpacerRef.current);
     window.addEventListener('resize', scheduleUpdate);
     window.addEventListener('orientationchange', scheduleUpdate);
 
@@ -1195,11 +1323,7 @@ export const Header: React.FC = () => {
       window.removeEventListener('resize', scheduleUpdate);
       window.removeEventListener('orientationchange', scheduleUpdate);
     };
-  }, [updateHeaderHeight]);
-
-  useEffect(() => {
-    updateHeaderHeight();
-  }, [updateHeaderHeight, isMobile, macosHeaderSizeClass]);
+  }, [updateHeaderMetrics]);
 
   const handleDragStart = React.useCallback(async (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -1343,6 +1467,7 @@ export const Header: React.FC = () => {
       {/* Drag region for the window-controls inset (traffic lights) to the left
           of the overlay buttons — stays a window drag area. */}
       <div
+        ref={headerInsetSpacerRef}
         aria-hidden
         className="shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
         style={{ width: headerInsetSpacerWidth }}
@@ -1351,6 +1476,7 @@ export const Header: React.FC = () => {
           buttons stay clickable. Width animates with the sidebar so the session
           title slides in lockstep instead of snapping. */}
       <div
+        ref={headerControlsSpacerRef}
         aria-hidden
         className="app-region-no-drag shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
         style={{ width: headerControlsSpacerWidth }}
@@ -1596,7 +1722,10 @@ export const Header: React.FC = () => {
         {activeSurfaceHeader || isVSCode || !sessionTabsEnabled ? <div className="flex-1" /> : null}
 
         <div className="flex shrink-0 items-center gap-1">
-          {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
+          {/* Always visible: the window controls (OS chrome, far right) and the
+              sidebar toggle (in the persistent TitlebarLeftControls overlay).
+              The rest yields in HEADER_HIDE_STEP_REM order. */}
+          {headerHideLevel < 1 && showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
               reading={toContextUsageReading(stableDesktopContextUsage)}
               contextLimit={stableDesktopContextUsage.contextLimit}
@@ -1613,14 +1742,14 @@ export const Header: React.FC = () => {
           ) : null}
 
           <HeaderIconActionButton
-            visible={showMiniChatHeaderAction}
+            visible={headerHideLevel < 3 && showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
             className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
-          {!isVSCode ? (
+          {!isVSCode && headerHideLevel < 2 ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -1654,7 +1783,7 @@ export const Header: React.FC = () => {
             </Tooltip>
           ) : null}
 
-          {desktopSidebarActions}
+          {headerHideLevel < 4 ? desktopSidebarActions : null}
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>

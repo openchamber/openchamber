@@ -496,6 +496,8 @@ export const dict = {
   'header.sessionTabs.tabMenuAria': 'Aktionen für den Sitzungs-Tab',
   'header.sessionTabs.closeTab': 'Tab schließen',
   'header.sessionTabs.closeOtherTabs': 'Andere Tabs schließen',
+  'header.sessionTabs.moreTabsAria': 'Weitere geöffnete Tabs ({count})',
+  'header.sessionTabs.closeTabAria': '{label}-Tab schließen',
   'sessions.switcher.empty': 'Keine kürzlichen Sitzungen',
   'sessions.switcher.draftTitle': 'Neue Sitzung',
   'sessions.sidebar.updateCheck.errorTitle': 'Fehler beim Prüfen auf Aktualisierungen',

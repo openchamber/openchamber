@@ -1979,10 +1979,87 @@ html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
 }
 
 /* Header session tabs: thin separators between inactive neighbours, hidden
-   around the active or hovered tab (mirrors the titlebar tab language). */
+   around the active or hovered tab (mirrors the titlebar tab language). The
+   slot is also the query container for its own trailing controls. */
+
+/* A slot that enters the visible window — a new tab, or one revealed when the
+   strip grows — starts collapsed and grows to its flex size. With
+   `flex: 1 1 0` the used width is `clamp(share, min-width, max-width)`, so
+   animating the clamps expands this slot and reflows its siblings; the
+   transition on the static values animated nothing. The implicit 100% keyframe
+   uses the slot's own floor and ceiling, so these keyframes stay in sync with
+   the classes. Flex reflow itself is instant, and a removed tab is not kept
+   mounted, so it leaves without an exit animation. */
+@keyframes session-tab-enter {
+  from {
+    min-width: 0.1px;
+    max-width: 0.1px;
+  }
+}
+
 .session-tab-slot {
   position: relative;
+  container-type: inline-size;
+  container-name: session-tab;
+  animation: session-tab-enter 160ms ease-out;
 }
+
+/* The tab controls (`…` + close) are in-flow items at the tab's end, not an
+   overlay, so they reserve their own width instead of covering the title. An
+   active slot shows them at any width. An inactive slot keeps them hidden and
+   out of the tab order until the slot is hovered or focus enters the tab
+   (which makes them focusable from the tab body), or while the tab's menu is
+   open. `visibility`, not `opacity` alone, is what keeps a hidden control
+   unfocusable, so revealing them adds no dead stops to the tab order. */
+.session-tab-controls {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.session-tab-slot[data-active='true'] .session-tab-controls,
+.session-tab-slot:hover .session-tab-controls,
+.session-tab-slot:focus-within .session-tab-controls,
+.session-tab-slot[data-controls-open='true'] .session-tab-controls {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* The `…` trigger is the first control to go as a tab narrows. At a 16px root
+   the tab body pads `px-2` (16px), the two `size-5` buttons plus `gap-0.5`
+   take 42px, and the widest leading indicator (the animated spinner or the
+   AI-rename loader: `size-3` + `mr-1.5`) takes 18px. Keeping ~28px for the
+   title then needs 16 + 42 + 18 + 28 = 104px = 6.5rem, so below that only the
+   close stays. The active tab keeps its close at any width; an inactive tab is
+   already down to nothing below the 7.5rem gate. An open (or still closing)
+   menu keeps the trigger mounted too, so a resize mid-open or mid-close cannot
+   detach the popup from its anchor. */
+@container session-tab (max-width: 6.5rem) {
+  .session-tab-slot:not([data-controls-open='true']) .session-tab-menu {
+    display: none;
+  }
+}
+
+/* A floor-width inactive tab cannot show even the close without squeezing the
+   title, so below this gate it drops the controls entirely; right-click,
+   middle-click, and selection stay available. Scoped to non-active slots, so
+   the active tab keeps its close, and to slots whose menu is not open (or
+   still closing), so a resize that crosses the gate during the exit animation
+   cannot remove the anchor.
+   This rule is unlayered, so it wins over the layered Tailwind display
+   utilities without `!important`, and it is ordered after the reveal rules
+   above so it also beats their equal-specificity hover and focus matches. */
+@container session-tab (max-width: 7.5rem) {
+  .session-tab-slot:not([data-active='true']):not([data-controls-open='true']) .session-tab-controls {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-tab-slot {
+    animation: none;
+  }
+}
+
 .session-tab-slot:not(:first-child):not([data-active='true'])::before {
   content: '';
   position: absolute;
@@ -1999,23 +2076,10 @@ html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   display: none;
 }
 
-/* Header session tabs scroller: never show a scrollbar (it shifts the header
-   content vertically); overflow is communicated by the edge fades. */
-.session-tabs-scroll {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.session-tabs-scroll::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
 /* Session tab titles: fade out instead of "..." — the ellipsis reads as
-   clutter next to the tab's status dot and hover controls. Short titles
-   never reach the fade zone (the span spans the tab, not the text). The
-   fade follows the title's available width, including when hover controls
-   or an open menu reserve space at its end. */
+   clutter next to the close control at the tab's end. Short titles never reach
+   the fade zone (the span spans the tab, not the text). The fade follows the
+   title's available width, which already excludes the in-flow controls. */
 .session-tab-title {
   -webkit-mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
   mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);

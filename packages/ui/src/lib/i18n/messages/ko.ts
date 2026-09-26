@@ -563,6 +563,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.tabMenuAria': '세션 탭 작업',
   'header.sessionTabs.closeTab': '탭 닫기',
   'header.sessionTabs.closeOtherTabs': '다른 탭 닫기',
+  'header.sessionTabs.moreTabsAria': '더 많은 열린 탭 ({count})',
+  'header.sessionTabs.closeTabAria': '{label} 탭 닫기',
   'sessions.switcher.empty': '최근 세션 없음',
   'sessions.switcher.draftTitle': '새 세션',
   'sessions.sidebar.updateCheck.errorTitle': '업데이트 확인 실패',

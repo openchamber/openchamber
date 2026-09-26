@@ -45,6 +45,32 @@
   .v-width svg { animation: oc-width 1.5s linear infinite; }
 
   /*
+    The header session-tab strip's enter animation. Slots are equal-width flex
+    children whose used width is clamp(share, min-width, max-width), so
+    animating the clamps from collapsed expands a new tab and reflows its
+    siblings. Reproduces `.session-tab-slot` + `@keyframes session-tab-enter`;
+    the script restarts it on `animationend`, so a run measures the cost while
+    the animation is actually running (160ms per tab add).
+  */
+  @keyframes oc-session-tab-enter {
+    from { min-width: 0.1px; max-width: 0.1px; }
+  }
+  .v-session-tab-enter .session-tab-row {
+    display: flex;
+    gap: 6px;
+    width: 680px;
+    height: 28px;
+  }
+  .v-session-tab-enter .session-tab-cell {
+    flex: 1 1 0;
+    min-width: 4.75rem;
+    max-width: 11rem;
+    border-radius: 6px;
+    background: #345;
+    animation: oc-session-tab-enter 160ms ease-out;
+  }
+
+  /*
     Context variants. The same composited animation can stop being composited
     because of an ancestor, so these reproduce the surroundings a spinner
     actually lives in. Each keeps the identical transform animation and varies
@@ -169,9 +195,19 @@
   const usesActivity = variant === 'activity-static' || variant === 'activity-collapse';
   const usesBusyDots = variant.startsWith('busy-dots');
   const usesStatusLogo = variant.startsWith('status-logo-');
+  // The session-tab variant needs its cells in one constrained flex row rather
+  // than the wrapping grid, because the clamp only binds against a row width.
+  const usesSessionTab = variant === 'session-tab-enter';
+  let cellHost = grid;
+  if (usesSessionTab) {
+    const row = document.createElement('div');
+    row.className = 'session-tab-row';
+    grid.appendChild(row);
+    cellHost = row;
+  }
   for (let index = 0; index < count; index += 1) {
     const cell = document.createElement('div');
-    cell.className = 'cell';
+    cell.className = usesSessionTab ? 'session-tab-cell' : 'cell';
     const spinner = SPINNER.replace('<svg', '<svg class="spin"');
     if (usesActivity) {
       cell.innerHTML = Array.from({ length: 80 }, (_, row) =>
@@ -199,8 +235,25 @@
     }
     else if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
     else if (usesButton) cell.innerHTML = '<button>' + spinner + '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="#456"/></svg></button>';
+    else if (usesSessionTab) cell.innerHTML = '';
     else cell.innerHTML = SPINNER;
-    grid.appendChild(cell);
+    cellHost.appendChild(cell);
+  }
+
+  // Restart the enter animation as soon as it ends, so the measured window
+  // sees it continuously; otherwise a finite animation reports near zero.
+  // A fresh animation object each round avoids a forced synchronous layout in
+  // the harness, which would inflate the layout count.
+  if (usesSessionTab) {
+    for (const cell of grid.querySelectorAll('.session-tab-cell')) {
+      const restart = () => {
+        cell.animate(
+          [{ minWidth: '0.1px', maxWidth: '0.1px' }, { minWidth: '4.75rem', maxWidth: '11rem' }],
+          { duration: 160, easing: 'ease-out' },
+        ).addEventListener('finish', restart);
+      };
+      cell.addEventListener('animationend', restart, { once: true });
+    }
   }
 
   // Two content regions per turn at most: prior messages and non-text parts

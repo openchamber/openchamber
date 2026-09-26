@@ -563,6 +563,8 @@ export const dict: Record<I18nKey, string> = {
   "header.sessionTabs.tabMenuAria": "Acciones de la pestaña de sesión",
   "header.sessionTabs.closeTab": "Cerrar pestaña",
   "header.sessionTabs.closeOtherTabs": "Cerrar las demás pestañas",
+  "header.sessionTabs.moreTabsAria": "Más pestañas abiertas ({count})",
+  "header.sessionTabs.closeTabAria": "Cerrar pestaña {label}",
   "sessions.switcher.empty": "No hay sesiones recientes",
   "sessions.switcher.draftTitle": "Nueva sesión",
   "sessions.sidebar.updateCheck.errorTitle": "No se pudo comprobar actualizaciones",

@@ -563,6 +563,8 @@ export const dict: Record<I18nKey, string> = {
   "header.sessionTabs.tabMenuAria": "Дії вкладки сесії",
   "header.sessionTabs.closeTab": "Закрити вкладку",
   "header.sessionTabs.closeOtherTabs": "Закрити інші вкладки",
+  "header.sessionTabs.moreTabsAria": "Більше відкритих вкладок ({count})",
+  "header.sessionTabs.closeTabAria": "Закрити вкладку {label}",
   "sessions.switcher.empty": "Немає недавніх сесій",
   "sessions.switcher.draftTitle": "Нова сесія",
   "sessions.sidebar.updateCheck.errorTitle": "Не вдалося перейти на наявність оновлень",

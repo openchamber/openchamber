@@ -373,6 +373,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.tabMenuAria': 'Akcje karty sesji',
   'header.sessionTabs.closeTab': 'Zamknij kartę',
   'header.sessionTabs.closeOtherTabs': 'Zamknij pozostałe karty',
+  'header.sessionTabs.moreTabsAria': 'Więcej otwartych kart ({count})',
+  'header.sessionTabs.closeTabAria': 'Zamknij kartę {label}',
   'sessions.switcher.empty': 'Brak ostatnich sesji',
   'sessions.switcher.draftTitle': 'Nowa sesja',
   'sessions.sidebar.updateCheck.errorTitle': 'Nie udało się sprawdzić aktualizacji',
