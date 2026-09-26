@@ -63,6 +63,130 @@ describe('createSerialRefresh', () => {
     await expect(late).resolves.toBe(2);
   });
 
+  it('cancels one coalesced follower without aborting the shared source for its peers', async () => {
+    const refresh = createSerialRefresh();
+    const firstGate = createGate();
+    const followerGate = createGate();
+    const cancelled = new AbortController();
+    const retained = new AbortController();
+    const sourceSignals = [];
+    let executions = 0;
+    const execute = async (requests, sourceSignal) => {
+      sourceSignals.push(sourceSignal);
+      executions += 1;
+      if (executions === 1) {
+        await firstGate.opened;
+        return 'first';
+      }
+      await followerGate.opened;
+      if (sourceSignal.aborted) {
+        throw sourceSignal.reason;
+      }
+      return `follower-${requests.length}`;
+    };
+
+    const first = refresh.run('repo', { signal: undefined }, execute);
+    await flush();
+    const second = refresh.run('repo', { signal: cancelled.signal }, execute);
+    const third = refresh.run('repo', { signal: retained.signal }, execute);
+
+    firstGate.release();
+    await expect(first).resolves.toBe('first');
+    await flush();
+    expect(sourceSignals[1]).toBeInstanceOf(AbortSignal);
+    expect(sourceSignals[1].aborted).toBe(false);
+
+    cancelled.abort('one follower disconnected');
+    await expect(second).rejects.toBe('one follower disconnected');
+    expect(sourceSignals[1].aborted).toBe(false);
+
+    followerGate.release();
+    await expect(third).resolves.toBe('follower-2');
+    expect(sourceSignals[1].aborted).toBe(false);
+    expect(refresh.activeKeys).toEqual([]);
+  });
+
+  it('does not reuse a cancelled follower and keeps the current source for its waiter', async () => {
+    const refresh = createSerialRefresh();
+    const firstGate = createGate();
+    const followerGate = createGate();
+    const cancelled = new AbortController();
+    const sourceSignals = [];
+    let executions = 0;
+    const execute = async (_requests, sourceSignal) => {
+      sourceSignals.push(sourceSignal);
+      executions += 1;
+      if (executions === 1) {
+        await firstGate.opened;
+        return 'first';
+      }
+      await followerGate.opened;
+      if (sourceSignal.aborted) throw sourceSignal.reason;
+      return 'fresh-follower';
+    };
+
+    const first = refresh.run('repo', null, execute);
+    await flush();
+    const staleFollower = refresh.run('repo', { signal: cancelled.signal }, execute);
+    await flush();
+
+    cancelled.abort('stale follower disconnected');
+    await expect(staleFollower).rejects.toBe('stale follower disconnected');
+    expect(sourceSignals[0].aborted).toBe(false);
+
+    const late = refresh.run('repo', null, execute);
+    firstGate.release();
+    await expect(first).resolves.toBe('first');
+    await flush();
+    expect(executions).toBe(2);
+    expect(sourceSignals[1].aborted).toBe(false);
+
+    followerGate.release();
+    await expect(late).resolves.toBe('fresh-follower');
+    await flush();
+    expect(refresh.activeKeys).toEqual([]);
+  });
+
+  it('aborts the current source after the primary and every follower leave', async () => {
+    const refresh = createSerialRefresh();
+    const primary = new AbortController();
+    const followerOne = new AbortController();
+    const followerTwo = new AbortController();
+    let sourceSignal;
+    let sourceAbortCount = 0;
+    let finishSource;
+    const sourceFinished = new Promise((resolve) => { finishSource = resolve; });
+    const execute = async (_requests, signal) => {
+      sourceSignal = signal;
+      signal.addEventListener('abort', () => {
+        sourceAbortCount += 1;
+        finishSource();
+      }, { once: true });
+      await sourceFinished;
+      return 'unreachable';
+    };
+
+    const first = refresh.run('repo', { signal: primary.signal }, execute);
+    await flush();
+    const second = refresh.run('repo', { signal: followerOne.signal }, execute);
+    const third = refresh.run('repo', { signal: followerTwo.signal }, execute);
+    await flush();
+
+    followerOne.abort('follower one disconnected');
+    followerTwo.abort('follower two disconnected');
+    await expect(second).rejects.toBe('follower one disconnected');
+    await expect(third).rejects.toBe('follower two disconnected');
+    expect(sourceSignal.aborted).toBe(false);
+
+    primary.abort('primary disconnected');
+    await expect(first).rejects.toBe('primary disconnected');
+    await sourceFinished;
+    await flush();
+    expect(sourceSignal.aborted).toBe(true);
+    expect(sourceAbortCount).toBe(1);
+    expect(refresh.activeKeys).toEqual([]);
+  });
+
   it('keeps keys independent and bounds how many run at once', async () => {
     const refresh = createSerialRefresh({ maxConcurrent: 2 });
     const gates = new Map();

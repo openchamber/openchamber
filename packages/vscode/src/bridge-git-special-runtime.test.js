@@ -19,8 +19,15 @@ const rawFetch = mock(async () => {
   throw new Error('raw fetch should not be used');
 });
 
+const gitExecutionRuntime = {
+  discover: mock(),
+  withRawRead: mock(),
+};
+const rawReadOptions = [];
+
 mock.module('./gitService', () => gitService);
 mock.module('@opencode/client', () => ({ OpenCode: { make } }));
+mock.module('./git-execution-runtime', () => ({ gitExecutionRuntime }));
 
 const { handleSpecialGitBridgeMessage, setUnavailableRetryDelaysForTest } = await import('./bridge-git-special-runtime');
 
@@ -31,10 +38,26 @@ describe('bridge git special runtime', () => {
     sdkClient.model.list.mockReset();
     sdkClient.generate.text.mockReset();
     make.mockReset();
+    gitExecutionRuntime.discover.mockReset();
+    gitExecutionRuntime.withRawRead.mockReset();
+    rawReadOptions.length = 0;
     rawFetch.mockClear();
 
     globalThis.fetch = rawFetch;
     make.mockImplementation(() => sdkClient);
+    gitExecutionRuntime.discover.mockResolvedValue({
+      isRepository: true,
+      requestedDirectory: '/repo',
+      topLevel: '/repo',
+      gitDir: '/repo/.git',
+      commonDir: '/repo/.git',
+      commonId: '/repo/.git',
+      worktreeId: '/repo',
+    });
+    gitExecutionRuntime.withRawRead.mockImplementation((_directory, task, options) => {
+      rawReadOptions.push(options);
+      return task();
+    });
     gitService.getGitRangeFiles.mockImplementation(async () => ['src/a.ts']);
     gitService.getGitRangeDiff.mockImplementation(async () => ({ diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line' }));
     sdkClient.model.list.mockImplementation(async () => ({
@@ -74,6 +97,23 @@ describe('bridge git special runtime', () => {
       data: { title: 'PR title', body: 'PR body' },
     });
     expect(rawFetch).not.toHaveBeenCalled();
+    expect(rawReadOptions).toHaveLength(2);
+    expect(rawReadOptions.every((options) => options?.signal instanceof AbortSignal
+      && options.queueTimeoutMs === 3_000)).toBe(true);
+    expect(gitService.getGitRangeFiles).toHaveBeenCalledWith(
+      '/repo',
+      'main',
+      'feature',
+      { signal: rawReadOptions[0].signal },
+    );
+    expect(gitService.getGitRangeDiff).toHaveBeenCalledWith(
+      '/repo',
+      'main',
+      'feature',
+      'src/a.ts',
+      3,
+      { signal: rawReadOptions[1].signal },
+    );
     expect(make).toHaveBeenCalledWith({
       baseUrl: 'http://opencode.test',
       headers: { Authorization: 'Bearer test' },
@@ -151,5 +191,123 @@ describe('bridge git special runtime', () => {
       expect(sdkClient.generate.text).toHaveBeenCalledTimes(1);
       setUnavailableRetryDelaysForTest();
     });
+  });
+
+  it('does not turn discovery failures into an empty diff response', async () => {
+    gitExecutionRuntime.discover.mockRejectedValue(
+      Object.assign(new Error('Git context discovery failed: permission denied'), { code: 'EACCES' }),
+    );
+
+    await expect(handleSpecialGitBridgeMessage({
+      id: 'discovery-failure',
+      type: 'api:git/pr-description',
+      payload: { directory: '/repo', base: 'main', head: 'feature' },
+    }, undefined, {
+      readSettings: () => ({}),
+      execGit: mock(),
+    })).rejects.toThrow('permission denied');
+
+    expect(gitService.getGitRangeFiles).not.toHaveBeenCalled();
+    expect(sdkClient.generate.text).not.toHaveBeenCalled();
+  });
+
+  it('keeps the empty diff response for a confirmed non-repository', async () => {
+    gitExecutionRuntime.discover.mockResolvedValue({
+      isRepository: false,
+      requestedDirectory: '/repo',
+      reason: 'not-a-repository',
+    });
+
+    await expect(handleSpecialGitBridgeMessage({
+      id: 'non-repository',
+      type: 'api:git/pr-description',
+      payload: { directory: '/repo', base: 'main', head: 'feature' },
+    }, undefined, {
+      readSettings: () => ({}),
+      execGit: mock(),
+    })).resolves.toEqual({
+      id: 'non-repository',
+      type: 'api:git/pr-description',
+      success: false,
+      error: 'No diffs available for base...head',
+    });
+    expect(gitService.getGitRangeFiles).not.toHaveBeenCalled();
+  });
+
+  it('does not turn range execution failures into an empty diff response', async () => {
+    gitService.getGitRangeFiles.mockRejectedValue(new Error('Git range file discovery failed: bad revision'));
+
+    await expect(handleSpecialGitBridgeMessage({
+      id: 'range-failure',
+      type: 'api:git/pr-description',
+      payload: { directory: '/repo', base: 'main', head: 'feature' },
+    }, undefined, {
+      readSettings: () => ({}),
+      execGit: mock(),
+    })).rejects.toThrow('bad revision');
+    expect(sdkClient.generate.text).not.toHaveBeenCalled();
+  });
+
+  it('passes the bounded status signal to every raw conflict-details command', async () => {
+    const execOptions = [];
+    const response = await handleSpecialGitBridgeMessage({
+      id: 'conflict-details',
+      type: 'api:git/conflict-details',
+      payload: { directory: '/repo' },
+    }, undefined, {
+      readSettings: () => ({}),
+      execGit: async (args, _directory, options) => {
+        execOptions.push({ args, options });
+        if (args[0] === 'status') {
+          return { stdout: ' M src/a.ts\n', stderr: '', exitCode: 0 };
+        }
+        if (args[1] === '--name-only') {
+          return { stdout: 'src/a.ts\n', stderr: '', exitCode: 0 };
+        }
+        if (args[0] === 'diff') {
+          return { stdout: 'diff --git a/src/a.ts b/src/a.ts\n', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 1 };
+      },
+    });
+
+    expect(response).toMatchObject({
+      id: 'conflict-details',
+      type: 'api:git/conflict-details',
+      success: true,
+    });
+    expect(execOptions).toHaveLength(5);
+    expect(execOptions.every(({ options }) => options?.signal instanceof AbortSignal)).toBe(true);
+    expect(rawReadOptions).toHaveLength(5);
+    expect(rawReadOptions.every((options) => options?.signal instanceof AbortSignal
+      && options.queueTimeoutMs === 3_000)).toBe(true);
+  });
+
+  it('does not interpret cleanup-blocked conflict output as an empty successful result', async () => {
+    const cleanupBlocked = {
+      stdout: '',
+      stderr: 'Git process cleanup was not confirmed',
+      exitCode: 1,
+      code: 'ERR_PROCESS_TREE_TERMINATION',
+      cleanupBlocked: true,
+      descendantsTerminated: false,
+    };
+
+    const response = await handleSpecialGitBridgeMessage({
+      id: 'conflict-cleanup-blocked',
+      type: 'api:git/conflict-details',
+      payload: { directory: '/repo' },
+    }, undefined, {
+      readSettings: () => ({}),
+      execGit: async () => cleanupBlocked,
+    });
+
+    expect(response).toEqual({
+      id: 'conflict-cleanup-blocked',
+      type: 'api:git/conflict-details',
+      success: false,
+      error: 'Git process cleanup was not confirmed',
+    });
+    expect(rawReadOptions).toHaveLength(1);
   });
 });

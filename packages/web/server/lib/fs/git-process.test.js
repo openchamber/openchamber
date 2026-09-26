@@ -12,7 +12,7 @@ const noisyGit = `
   const fs = require('node:fs');
   const chunk = Buffer.alloc(65536, 'x');
   for (let i = 0; i < 32; i++) fs.writeSync(2, chunk);
-  fs.writeSync(1, 'ignored.txt\\n');
+  fs.writeSync(1, 'ignored.txt\\0');
 `;
 
 describe('filesystem Git process ownership', () => {
@@ -74,4 +74,66 @@ describe('filesystem Git process ownership', () => {
       }
     }, 15_000);
   }
+
+  it('does not hide blocked Gitignore cleanup in list or search fallbacks', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-git-cleanup-fallback-'));
+    const cleanupFailure = Object.assign(new Error('Git process tree cleanup was not confirmed'), {
+      code: 'ERR_PROCESS_TREE_TERMINATION',
+      cleanupBlocked: true,
+      descendantsTerminated: false,
+      rootClosed: false,
+      pid: 9191,
+    });
+    const gitExecutionService = {
+      withRawRead: async () => { throw cleanupFailure; },
+    };
+    const dependencies = {
+      fsPromises: fs,
+      path,
+      spawn: () => { throw new Error('spawn should not run after admission failure'); },
+      resolveGitBinaryForSpawn: () => 'git',
+      gitExecutionService,
+    };
+
+    try {
+      await fs.writeFile(path.join(root, 'visible.txt'), 'visible');
+      const search = createFsSearchRuntime(dependencies);
+      await expect(search.searchFilesystemFiles(root, {
+        query: '',
+        limit: 10,
+        respectGitignore: true,
+      })).rejects.toMatchObject({
+        code: 'ERR_PROCESS_TREE_TERMINATION',
+        cleanupBlocked: true,
+        descendantsTerminated: false,
+      });
+
+      const routes = new Map();
+      registerFsRoutes({
+        get(route, handler) { routes.set(route, handler); },
+        post() {},
+        put() {},
+        delete() {},
+      }, {
+        ...dependencies,
+        os,
+        crypto,
+        normalizeDirectoryPath: (value) => value,
+        resolveProjectDirectory: async () => ({ directory: root }),
+        buildAugmentedPath: () => process.env.PATH,
+        openchamberUserConfigRoot: root,
+      });
+      const response = {
+        writableEnded: false,
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(value) { this.body = value; return this; },
+      };
+      await routes.get('/api/fs/list')({ query: { path: root, respectGitignore: 'true' } }, response);
+      expect(response.statusCode).toBe(500);
+      expect(response.body.error).toMatch(/cleanup was not confirmed/i);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });

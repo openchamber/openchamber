@@ -1,7 +1,10 @@
 import { getRemoteUrl } from '../../git/index.js';
+import { isGitProcessCleanupBlocked } from '../../git/execution-errors.js';
+
+const isStringValue = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 export const parseGitHubRemoteUrl = (raw) => {
-  if (typeof raw !== 'string') {
+  if (!isStringValue(raw)) {
     return null;
   }
   const value = raw.trim();
@@ -43,8 +46,11 @@ export const parseGitHubRemoteUrl = (raw) => {
   }
 };
 
-export async function resolveGitHubRepoFromDirectory(directory, remoteName = 'origin') {
-  const remoteUrl = await getRemoteUrl(directory, remoteName).catch(() => null);
+export async function resolveGitHubRepoFromDirectory(directory, remoteName = 'origin', options = {}) {
+  const remoteUrl = await getRemoteUrl(directory, remoteName, options).catch((error) => {
+    if (options?.signal?.aborted || isGitProcessCleanupBlocked(error)) throw error;
+    return null;
+  });
   if (!remoteUrl) {
     return { repo: null, remoteUrl: null };
   }

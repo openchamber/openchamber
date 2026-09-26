@@ -21,9 +21,13 @@ const normalizeRepoKey = (owner, repo) => {
   return `${o}/${r}`;
 };
 
-const getRepoMetadata = async (octokit, repo) => {
+const getRepoMetadata = async (octokit, repo, { signal = undefined } = {}) => {
   const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
   if (!repoKey) return null;
+
+  if (signal?.aborted) {
+    throw signal.reason || new Error('GitHub repository lookup was cancelled');
+  }
 
   const cached = repoMetadataCache.get(repoKey);
   if (cached && Date.now() - cached.fetchedAt < REPO_METADATA_TTL_MS) {
@@ -31,14 +35,17 @@ const getRepoMetadata = async (octokit, repo) => {
   }
 
   try {
-    const response = await octokit.rest.repos.get({
+    const request = {
       owner: repo.owner,
       repo: repo.repo,
-    });
+    };
+    if (signal) request.signal = signal;
+    const response = await octokit.rest.repos.get(request);
     const data = response?.data ?? null;
     setRepoMetadataCache(repoKey, data);
     return data;
   } catch (error) {
+    if (signal?.aborted) throw error;
     if (error?.status === 403 || error?.status === 404) {
       setRepoMetadataCache(repoKey, null);
       return null;
@@ -57,11 +64,14 @@ const getRepoMetadata = async (octokit, repo) => {
  * @returns {Promise<Array<{ owner: string, repo: string, url: string, source: string }> | null>}
  *   Array of repos to query (origin first, then upstream), or null if not a fork.
  */
-export async function resolveRepoNetwork(octokit, directory, remoteName = 'origin') {
-  const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName).catch(() => ({ repo: null }));
+export async function resolveRepoNetwork(octokit, directory, remoteName = 'origin', { signal = undefined } = {}) {
+  const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName, signal ? { signal } : {}).catch((error) => {
+    if (signal?.aborted) throw error;
+    return { repo: null };
+  });
   if (!repo) return null;
 
-  const metadata = await getRepoMetadata(octokit, repo);
+  const metadata = await getRepoMetadata(octokit, repo, { signal });
   if (!metadata) return [{ ...repo, source: 'origin' }];
 
   const result = [{ ...repo, source: 'origin' }];

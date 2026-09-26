@@ -14,12 +14,14 @@ import {
   cherryPick,
   createWorktree,
   getWorktreeBootstrapStatus,
+  getWorktreeBootstrapStateKey,
   getBranches,
   getUnpushedBranchCounts,
   getRangeDiff,
   getBranchBase,
   getCommitDiff,
   getCommitFiles,
+  getCommitFileDiff,
   getLog,
   getStatus,
   getTrackingBranch,
@@ -146,6 +148,12 @@ describe('unsupportedRepositoryRootReason', () => {
     expect(unsupportedRepositoryRootReason(path.join(home, 'project'), home)).toBeNull();
     expect(unsupportedRepositoryRootReason(path.join(os.tmpdir(), 'repo'), home)).toBeNull();
     expect(unsupportedRepositoryRootReason('', home)).toBeNull();
+  });
+
+  it('treats Windows home and filesystem-root casing as the same identity', () => {
+    expect(unsupportedRepositoryRootReason('c:\\', 'C:\\Users\\Alice', 'win32')).toBe('filesystem-root');
+    expect(unsupportedRepositoryRootReason('c:\\users\\alice\\', 'C:\\Users\\Alice', 'win32')).toBe('home');
+    expect(unsupportedRepositoryRootReason('C:\\Users\\Alice\\project', 'c:\\users\\alice', 'win32')).toBeNull();
   });
 });
 
@@ -526,6 +534,23 @@ describe('symlink diffs', () => {
       modified: 'source',
       isBinary: false,
     });
+  });
+});
+
+describe.runIf(canRunGit())('image file diffs', () => {
+  it('reads committed image bytes through the owned Git process path', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    const originalBytes = Buffer.from([0, 255, 17]);
+    const modifiedBytes = Buffer.from([3, 128, 42]);
+    fs.writeFileSync(path.join(tmpDir, 'image.png'), originalBytes);
+    await git.add('image.png');
+    await git.commit('add image');
+    fs.writeFileSync(path.join(tmpDir, 'image.png'), modifiedBytes);
+
+    const result = await getFileDiff(tmpDir, { path: 'image.png' });
+    expect(result.original).toBe(`data:image/png;base64,${originalBytes.toString('base64')}`);
+    expect(result.modified).toBe(`data:image/png;base64,${modifiedBytes.toString('base64')}`);
+    expect(result.isBinary).toBe(false);
   });
 });
 
@@ -1062,6 +1087,18 @@ describe('getWorktrees', () => {
 // ---------------------------------------------------------------------------
 
 describe('createWorktree', () => {
+  it('folds Windows path casing for internal bootstrap task keys', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      expect(getWorktreeBootstrapStateKey('/Worktrees/Feature')).toBe(
+        getWorktreeBootstrapStateKey('/worktrees/feature'),
+      );
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('returns ready/setup-ready when no bootstrap state is recorded', async () => {
     const directory = path.join(createTempDir(), 'missing-worktree');
 
@@ -2132,6 +2169,20 @@ describe.runIf(canRunGit())('getBranches', () => {
     expect(branches.all).toContain('remotes/origin/react');
   });
 
+  it('preserves unreachable remote branches alongside reachable remote results', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    const offlineRemote = path.join(remote, 'missing');
+    runGit(repository, ['remote', 'add', 'offline', offlineRemote]);
+    const branchHash = runGit(repository, ['rev-parse', 'refs/remotes/origin/react']).trim();
+    runGit(repository, ['update-ref', 'refs/remotes/offline/react', branchHash]);
+    runGit(repository, ['symbolic-ref', 'refs/remotes/offline/HEAD', 'refs/remotes/offline/react']);
+
+    const branches = await getBranches(repository);
+
+    expect(branches.all).toContain('remotes/origin/react');
+    expect(branches.all).toContain('remotes/offline/react');
+  });
+
   it('includes remote branches with no local tracking ref and prunes refs deleted on the remote (#2098)', async () => {
     const remote = createTempDir();
     runGit(remote, ['init', '--bare', '--initial-branch=main']);
@@ -2235,6 +2286,25 @@ describe.runIf(canRunGit())('commit comparisons', () => {
     expect(() => parseSource({ kind: 'commit', hash: [root] })).toThrow();
     await expect(getCommitDiff(repository, { hash: 'HEAD' })).rejects.toThrow();
     await expect(getCommitFiles(repository, '0'.repeat(40))).rejects.toThrow();
+  });
+
+  it('propagates cancellation through committed-object reads', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hash = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    const filesController = new AbortController();
+    const fileController = new AbortController();
+    filesController.abort('commit files request disconnected');
+    fileController.abort('commit file request disconnected');
+
+    await expect(getCommitFiles(repository, hash, { signal: filesController.signal }))
+      .rejects.toMatchObject({ code: 'ABORT_ERR' });
+    await expect(getCommitFileDiff(
+      repository,
+      hash,
+      'README.md',
+      false,
+      { signal: fileController.signal },
+    )).rejects.toMatchObject({ code: 'ABORT_ERR' });
   });
 
   it('keeps rename paths and original contents together, including whitespace in names', async () => {

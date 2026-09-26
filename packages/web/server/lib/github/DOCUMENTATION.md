@@ -17,6 +17,19 @@
 - `packages/web/server/index.js`: API route layer that calls this module.
 - `packages/web/src/api/github.ts`: web client wrapper for GitHub endpoints.
 
+All GitHub read routes bind their local Git discovery and Octokit calls to the
+HTTP request lifetime. A disconnected client aborts repository, branch, issue,
+pull-request, and authenticated-user reads instead of allowing their remaining
+pagination or fork-network work to continue. Shared repository pull-list
+requests keep one source call for concurrent polling while each HTTP request
+can cancel its own waiter. Cached reads remain ordinary successful responses
+and do not start new work.
+
+PR-status permission checks share one authenticated-user lookup per route-runtime
+generation. Each request owns its waiter signal, so one disconnect does not
+abort another request; a source is aborted only after its last waiter leaves,
+and a stale source cannot clear a newer generation.
+
 ## Public exports
 
 ### Auth

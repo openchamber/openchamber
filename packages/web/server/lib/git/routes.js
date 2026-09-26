@@ -1,3 +1,5 @@
+import { canRespondToRequest, createRequestAbortSignal } from '../request-abort.js';
+
 export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
@@ -40,7 +42,23 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       .join('\n');
   };
 
-  const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+  const isNonRepoGitError = (error) => {
+    if (error == null) {
+      return false;
+    }
+
+    if (error.code === 'GIT_NOT_A_REPOSITORY' || error.reason === 'not-a-repository') {
+      return true;
+    }
+
+    const details = error.details;
+    if (details && details.reason === 'not-a-repository') {
+      return true;
+    }
+
+    const gitErrorCode = String(error.gitErrorCode || '').toLowerCase().replace(/[^a-z]/g, '');
+    return gitErrorCode === 'notagitrepository' || gitErrorCode === 'notarepository';
+  };
 
   const nonRepoStatusPayload = () => ({
     isGitRepository: false,
@@ -121,26 +139,31 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/check', async (req, res) => {
     const { isGitRepository } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, { signal: requestAbort.signal });
       res.json({ isGitRepository: isRepo });
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       if (isNonRepoGitError(error)) {
         console.warn('Git check treated non-repository path as not a git repo:', extractGitErrorText(error));
         return res.json({ isGitRepository: false });
       }
       console.error('Failed to check git repository:', error);
       res.status(500).json({ error: 'Failed to check git repository' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/remote-url', async (req, res) => {
     const { getRemoteUrl } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
@@ -148,11 +171,14 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
       const remote = req.query.remote || 'origin';
 
-      const url = await getRemoteUrl(directory, remote);
+      const url = await getRemoteUrl(directory, remote, { signal: requestAbort.signal });
       res.json({ url });
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get remote url:', error);
       res.status(500).json({ error: 'Failed to get remote url' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -234,14 +260,17 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository, observeWorktreeTopology } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
 
     try {
+      if (!canRespondToRequest(res, requestAbort)) return;
       const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, { signal: requestAbort.signal });
+      if (!canRespondToRequest(res, requestAbort)) return;
       if (!isRepo) {
         return res.json(nonRepoStatusPayload());
       }
@@ -252,9 +281,11 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       void observeWorktreeTopology(directory);
 
       const mode = req.query.mode === 'light' ? 'light' : undefined;
-      const status = await getStatus(directory, { mode });
+      const status = await getStatus(directory, { mode, signal: requestAbort.signal });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json(status);
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       // Non-repo / GitError must not abort callers that enumerate projects or
       // sessions (e.g. sidebar discovery). Log a warning and continue.
       if (isNonRepoGitError(error)) {
@@ -263,36 +294,46 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
       console.error('Failed to get git status:', error);
       res.status(500).json({ error: error.message || 'Failed to get git status' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/primary-root', async (req, res) => {
     const { resolvePrimaryWorktreeRoot } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const result = await resolvePrimaryWorktreeRoot(directory);
+      const result = await resolvePrimaryWorktreeRoot(directory, { signal: requestAbort.signal });
       res.json(result);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to resolve git primary root:', error);
       res.status(500).json({ error: error.message || 'Failed to resolve git primary root' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/toplevel', async (req, res) => {
     const { resolveWorktreeTopLevel } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const result = await resolveWorktreeTopLevel(directory);
+      const result = await resolveWorktreeTopLevel(directory, { signal: requestAbort.signal });
       res.json(result);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to resolve git worktree toplevel:', error);
       res.status(500).json({ error: error.message || 'Failed to resolve git worktree toplevel' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -356,7 +397,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/diff', async (req, res) => {
     const { getPathDiff } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
+      if (!canRespondToRequest(res, requestAbort)) return;
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
@@ -374,19 +417,26 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         path,
         staged,
         contextLines: Number.isFinite(context) ? context : 3,
+        signal: requestAbort.signal,
       });
 
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json({ diff, submodule });
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       if (sendGitPathError(res, error)) return;
       console.error('Failed to get git diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git diff' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/file-diff', async (req, res) => {
     const { getFileDiff } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
+      if (!canRespondToRequest(res, requestAbort)) return;
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
@@ -402,8 +452,10 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       const result = await getFileDiff(directory, {
         path: pathParam,
         staged,
+        signal: requestAbort.signal,
       });
 
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json({
         original: result.original,
         modified: result.modified,
@@ -412,15 +464,20 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         submodule: result.submodule ?? null,
       });
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       if (sendGitPathError(res, error)) return;
       console.error('Failed to get git file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git file diff' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/range-diff', async (req, res) => {
     const { getRangeDiff } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
+      if (!canRespondToRequest(res, requestAbort)) return;
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
@@ -441,17 +498,23 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         includeWorkingTree: req.query.includeWorkingTree === 'true',
         path: pathParam,
         contextLines: Number.isFinite(context) ? context : 3,
+        signal: requestAbort.signal,
       });
 
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json({ diff });
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       console.error('Failed to get git range diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git range diff' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/branch-base', async (req, res) => {
     const { getBranchBase } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
@@ -463,17 +526,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         return res.status(400).json({ error: 'branch parameter is required' });
       }
 
-      const result = await getBranchBase(directory, branch);
+      const result = await getBranchBase(directory, branch, { signal: requestAbort.signal });
       res.json(result);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get branch base:', error);
       res.status(500).json({ error: error.message || 'Failed to get branch base' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/range-files', async (req, res) => {
     const { getRangeFiles } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
+      if (!canRespondToRequest(res, requestAbort)) return;
       const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
@@ -485,11 +553,20 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         return res.status(400).json({ error: 'base and head parameters are required' });
       }
 
-      const files = await getRangeFiles(directory, { base, head, includeWorkingTree: req.query.includeWorkingTree === 'true' });
+      const files = await getRangeFiles(directory, {
+        base,
+        head,
+        includeWorkingTree: req.query.includeWorkingTree === 'true',
+        signal: requestAbort.signal,
+      });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json({ files });
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       console.error('Failed to get git range files:', error);
       res.status(500).json({ error: error.message || 'Failed to get git range files' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -619,25 +696,33 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/stashes', async (req, res) => {
     const { listStashes } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json({ stashes: await listStashes(directory) });
+      res.json({ stashes: await listStashes(directory, { signal: requestAbort.signal }) });
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to list stashes:', error);
       res.status(500).json({ error: error.message || 'Failed to list stashes' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.post('/api/git/stashes/file-counts', async (req, res) => {
     const { countStashFiles } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json({ counts: await countStashFiles(directory, req.body?.refs) });
+      res.json({ counts: await countStashFiles(directory, req.body?.refs, { signal: requestAbort.signal }) });
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to count stash files:', error);
       res.status(500).json({ error: error.message || 'Failed to count stash files' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -707,17 +792,21 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/remotes', async (req, res) => {
     const { getRemotes } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const remotes = await getRemotes(directory);
+      const remotes = await getRemotes(directory, { signal: requestAbort.signal });
       res.json(remotes);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get remotes:', error);
       res.status(500).json({ error: error.message || 'Failed to get remotes' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -840,17 +929,21 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/conflict-details', async (req, res) => {
     const { getConflictDetails } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const result = await getConflictDetails(directory);
+      const result = await getConflictDetails(directory, { signal: requestAbort.signal });
       res.json(result);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get conflict details:', error);
       res.status(500).json({ error: error.message || 'Failed to get conflict details' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -881,22 +974,27 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/branches', async (req, res) => {
     const { getBranches } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const branches = await getBranches(directory);
+      const branches = await getBranches(directory, { signal: requestAbort.signal });
       res.json(branches);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get branches:', error);
       res.status(500).json({ error: error.message || 'Failed to get branches' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.post('/api/git/branch-push-status', async (req, res) => {
     const { getUnpushedBranchCounts } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       const branches = req.body?.branches;
@@ -904,10 +1002,13 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
         return res.status(400).json({ error: 'branches must be an array of branch names' });
       }
-      res.json(await getUnpushedBranchCounts(directory, branches));
+      res.json(await getUnpushedBranchCounts(directory, branches, { signal: requestAbort.signal }));
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get branch push status:', error);
       res.status(500).json({ error: error.message || 'Failed to get branch push status' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -1100,13 +1201,14 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees, observeWorktreeTopology } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const worktrees = await getWorktrees(directory);
+      const worktrees = await getWorktrees(directory, { signal: requestAbort.signal });
       // A repository always lists at least its primary worktree; an empty
       // list means "not a repository" and has no topology to track.
       if (worktrees.length > 0) {
@@ -1114,11 +1216,14 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
       res.json(worktrees);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       // A directory outside any repository still answers `[]` from getWorktrees.
       // Anything else is a real failure the client must not mistake for "no
       // worktrees", or it would drop the ones it already knows.
       console.error('Failed to get worktrees:', error);
       res.status(500).json({ error: error.message || 'Failed to get worktrees' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -1128,17 +1233,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       return res.status(501).json({ error: 'Worktree validation is not available' });
     }
 
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const result = await validateWorktreeCreate(directory, req.body || {});
+      const result = await validateWorktreeCreate(directory, req.body || {}, { signal: requestAbort.signal });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json(result);
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       console.error('Failed to validate worktree creation:', error);
       res.status(500).json({ error: error.message || 'Failed to validate worktree creation' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -1148,17 +1258,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       return res.status(501).json({ error: 'Worktree creation is not available' });
     }
 
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const created = await createWorktree(directory, req.body || {});
+      const created = await createWorktree(directory, req.body || {}, { signal: requestAbort.signal });
+      if (requestAbort.signal.aborted) return;
       res.json(created);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to create worktree:', error);
       res.status(500).json({ error: error.message || 'Failed to create worktree' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -1168,17 +1283,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       return res.status(501).json({ error: 'Worktree preview is not available' });
     }
 
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const preview = await previewWorktreeCreate(directory, req.body || {});
+      const preview = await previewWorktreeCreate(directory, req.body || {}, { signal: requestAbort.signal });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json(preview);
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       console.error('Failed to preview worktree:', error);
       res.status(500).json({ error: error.message || 'Failed to preview worktree' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -1286,6 +1406,7 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
 
   app.get('/api/git/log', async (req, res) => {
     const { getLog } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = req.query.directory;
       if (!directory) {
@@ -1299,17 +1420,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         from,
         to,
         file,
-        all
+        all,
+        signal: requestAbort.signal,
       });
       res.json(log);
     } catch (error) {
+      if (requestAbort.signal.aborted) return;
       console.error('Failed to get log:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit log' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/commit-files', async (req, res) => {
     const { getCommitFiles } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const { directory, hash } = req.query;
       if (!directory) {
@@ -1319,16 +1445,21 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         return res.status(400).json({ error: 'hash parameter is required' });
       }
 
-      const result = await getCommitFiles(directory, hash);
+      const result = await getCommitFiles(directory, hash, { signal: requestAbort.signal });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json(result);
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       console.error('Failed to get commit files:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit files' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/commit-diff', async (req, res) => {
     const { getCommitDiff } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const directory = resolveDirectoryQuery(req.query.directory);
       const hash = resolveDirectoryQuery(req.query.hash);
@@ -1339,15 +1470,21 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         path: resolveDirectoryQuery(req.query.path, true) ?? undefined,
         previousPath: resolveDirectoryQuery(req.query.previousPath, true) ?? undefined,
         contextLines: Number.isFinite(context) ? context : 3,
+        signal: requestAbort.signal,
       });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json({ diff });
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.status(500).json({ error: error.message || 'Failed to get commit diff' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
   app.get('/api/git/commit-file-diff', async (req, res) => {
     const { getCommitFileDiff } = await getGitLibraries();
+    const requestAbort = createRequestAbortSignal(req, res);
     try {
       const { directory, hash, path: filePath } = req.query;
       if (!directory || typeof directory !== 'string') {
@@ -1364,11 +1501,17 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
 
       const isBinary = req.query.binary === 'true';
-      const result = await getCommitFileDiff(directory, hash, filePath, isBinary);
+      const result = await getCommitFileDiff(directory, hash, filePath, isBinary, {
+        signal: requestAbort.signal,
+      });
+      if (!canRespondToRequest(res, requestAbort)) return;
       res.json(result);
     } catch (error) {
+      if (!canRespondToRequest(res, requestAbort)) return;
       console.error('Failed to get commit file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit file diff' });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 

@@ -1,4 +1,4 @@
-import { getRepositoryRoot } from '../git/service.js';
+import { getRepositoryRoot } from '../git/execution-service.js';
 import { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
 import { buildDigest } from './digest.js';
 import { indexHunks } from './hunks.js';
@@ -136,18 +136,23 @@ export function isGenerating(repoRoot, sourceKeyValue) {
  * Resolve the pair the job registry is keyed by, for callers that need to look
  * a job up without doing any diff work.
  */
-export async function getRepositoryRootFor(directory, rawSource) {
+export async function getRepositoryRootFor(directory, rawSource, deps = {}) {
   const source = parseSource(rawSource);
-  return { repoRoot: await getRepositoryRoot(directory), sourceKey: sourceKey(source) };
+  const resolveRepositoryRoot = deps.getRepositoryRoot || getRepositoryRoot;
+  const repoRoot = deps.signal
+    ? await resolveRepositoryRoot(directory, { signal: deps.signal })
+    : await resolveRepositoryRoot(directory);
+  return { repoRoot, sourceKey: sourceKey(source) };
 }
 
 /**
  * Stop a running generation. Only an explicit request does this — leaving the
  * page does not.
  */
-export async function cancelWalkthroughGeneration({ directory, source: rawSource }) {
+export async function cancelWalkthroughGeneration({ directory, source: rawSource }, deps = {}) {
   const source = parseSource(rawSource);
-  const repoRoot = await getRepositoryRoot(directory);
+  const resolveRepositoryRoot = deps.getRepositoryRoot || getRepositoryRoot;
+  const repoRoot = await resolveRepositoryRoot(directory);
   const job = jobs.get(jobKey(repoRoot, sourceKey(source)));
   if (!job) return { cancelled: false };
   job.controller.abort();
@@ -165,7 +170,7 @@ const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
  * saved setting, which in turn outranks the small-model chain — the user picking
  * a roomier model for a risky change is the most specific intent there is.
  */
-const resolveModel = (directory, explicitModel) => describeSmallModel({
+const resolveModel = (directory, explicitModel, describeModel = describeSmallModel) => describeModel({
   directory,
   outputReserveTokens: walkthroughOutputTokens,
   overrideModel: explicitModel || readWalkthroughModelOverride(),
@@ -176,8 +181,8 @@ export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
 /**
  * Current diff for a source, parsed into files and hunks.
  */
-async function loadCurrentDiff(directory, source, deps) {
-  const { sections } = await loadSourceSections(directory, source, deps);
+async function loadCurrentDiff(directory, source, deps, signal) {
+  const { sections } = await loadSourceSections(directory, source, { ...deps, signal });
   const built = buildDigest(sections);
   return built;
 }
@@ -235,7 +240,10 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
  */
 export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, language: rawLanguage }, deps = {}) {
   const source = parseSource(rawSource);
-  const repoRoot = await getRepositoryRoot(directory);
+  const resolveRepositoryRoot = deps.getRepositoryRoot || getRepositoryRoot;
+  const repoRoot = deps.signal
+    ? await resolveRepositoryRoot(directory, { signal: deps.signal })
+    : await resolveRepositoryRoot(directory);
   const key = sourceKey(source);
   const language = normalizeLanguage(rawLanguage);
 
@@ -244,8 +252,8 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   // endpoints the client called in parallel, which meant every panel open ran
   // the whole git pipeline twice.
   const [built, model] = await Promise.all([
-    loadCurrentDiff(directory, source, deps),
-    resolveModel(directory, explicitModel).catch(() => null),
+    loadCurrentDiff(directory, source, deps, deps.signal),
+    resolveModel(directory, explicitModel, deps.describeSmallModel).catch(() => null),
   ]);
   const { files } = built;
   const hunkIndex = indexHunks(files);
@@ -370,7 +378,8 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
  */
 export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, language: rawLanguage }, deps = {}) {
   const source = parseSource(rawSource);
-  const repoRoot = await getRepositoryRoot(directory);
+  const resolveRepositoryRoot = deps.getRepositoryRoot || getRepositoryRoot;
+  const repoRoot = await resolveRepositoryRoot(directory);
   const key = sourceKey(source);
   const language = normalizeLanguage(rawLanguage);
 
@@ -393,7 +402,7 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
 
 async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal }, deps) {
 
-  const model = await resolveModel(directory, explicitModel);
+  const model = await resolveModel(directory, explicitModel, deps.describeSmallModel);
   if (!model) {
     throw fail('No model is available — sign in to a provider first', 404, { code: 'no-model' });
   }
@@ -405,7 +414,12 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     );
   }
 
-  const { digest, files, idByAlias, fileCount, hunkCount, generatedFileCount } = await loadCurrentDiff(directory, source, deps);
+  const { digest, files, idByAlias, fileCount, hunkCount, generatedFileCount } = await loadCurrentDiff(
+    directory,
+    source,
+    deps,
+    signal,
+  );
   setStage(repoRoot, key, 'asking');
   if (hunkCount === 0) {
     if (files.length > 0 && generatedFileCount === files.length) {
@@ -470,7 +484,8 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     );
   }
 
-  const run = (options) => generateSmallModelText({
+  const runSmallModel = deps.generateSmallModelText || generateSmallModelText;
+  const run = (options) => runSmallModel({
     prompt: options.prompt,
     system: options.system,
     directory,

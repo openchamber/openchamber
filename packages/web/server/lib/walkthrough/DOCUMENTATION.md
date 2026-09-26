@@ -57,6 +57,10 @@ written against staged code never silently re-anchors onto an unstaged edit.
 | `commit` | `commit` | `getCommitDiff` compares the full selected commit hash with its first parent; root commits compare with an empty tree |
 | `pr` | `pr:<number>` | GitHub's committed pull-request diff, without local working-tree changes |
 
+Local working-tree and branch sources pass the request's abort signal through
+each Git collection read. A canceled read keeps its execution lease until the
+owned Git child has closed, and a failed cleanup remains visible to the caller.
+
 Changes and walkthrough resolve the current branch's base through
 `packages/ui/src/hooks/useBranchComparisonBase.ts`. An explicit choice in Changes
 outranks reflog detection. Both toolbars use
@@ -95,12 +99,15 @@ PR sources may include `sourceRepo: { owner, repo }`. This qualifies both the
 GitHub request and the cache/job key as `pr:<owner>/<repo>:<number>`. Existing
 number-only sources retain `pr:<number>` and resolve the directory's repository.
 The PR panel forwards its resolved repository when opening walkthrough.
+Generation cancellation reaches local repository resolution and the GitHub diff
+request, so a canceled PR collection does not leave an in-flight request behind.
 
 `GET /api/walkthrough/pr-diff` accepts `directory` and a JSON `source` restricted
 to PRs. It returns GitHub's complete published diff as text, with no model
 readiness checks or generation. Successful empty patches return 200; auth,
-GitHub and malformed-response failures remain errors. Walkthrough generation
-keeps its existing empty-diff refusal. UI comparison behavior is documented in
+GitHub and malformed-response failures remain errors. Request cancellation
+reaches the GitHub collection request. Walkthrough generation keeps its
+existing empty-diff refusal. UI comparison behavior is documented in
 `packages/ui/src/components/views/DOCUMENTATION.md`.
 
 `GET /api/walkthrough/pr-file` takes the same `directory` and PR `source` plus

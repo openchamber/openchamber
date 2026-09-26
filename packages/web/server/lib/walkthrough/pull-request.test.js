@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../github/octokit.js', () => ({ getOctokitOrNull: vi.fn() }));
-vi.mock('../github/repo/index.js', () => ({ resolveGitHubRepoFromDirectory: vi.fn() }));
+import { createPullRequestDiff, createPullRequestFileContents } from './pull-request.js';
 
-const { getPullRequestDiff, getPullRequestFileContents } = await import('./pull-request.js');
-const { getOctokitOrNull } = await import('../github/octokit.js');
-const { resolveGitHubRepoFromDirectory } = await import('../github/repo/index.js');
+const getOctokitOrNull = vi.fn();
+const resolveGitHubRepoFromDirectory = vi.fn();
+const getPullRequestDiff = createPullRequestDiff({
+  getOctokit: getOctokitOrNull,
+  resolveRepo: resolveGitHubRepoFromDirectory,
+});
+const getPullRequestFileContents = createPullRequestFileContents({
+  getOctokit: getOctokitOrNull,
+  resolveRepo: resolveGitHubRepoFromDirectory,
+});
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -44,6 +50,37 @@ describe('getPullRequestDiff', () => {
       pull_number: 2122,
       headers: { accept: 'application/vnd.github.v3.diff' },
     });
+  });
+
+  it('passes cancellation to repository resolution and GitHub', async () => {
+    const controller = new AbortController();
+    await getPullRequestDiff('/repo', 2122, undefined, { signal: controller.signal });
+
+    expect(resolveGitHubRepoFromDirectory).toHaveBeenCalledWith(
+      '/repo',
+      'origin',
+      { signal: controller.signal },
+    );
+    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+      owner: 'openchamber',
+      repo: 'openchamber',
+      pull_number: 2122,
+      headers: { accept: 'application/vnd.github.v3.diff' },
+      signal: controller.signal,
+    });
+  });
+
+  it('settles a canceled GitHub diff request instead of accepting a late response', async () => {
+    const controller = new AbortController();
+    request.mockImplementationOnce((_route, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+    }));
+
+    const pending = getPullRequestDiff('/repo', 2122, undefined, { signal: controller.signal });
+    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('reports a missing GitHub remote only when there really is none', async () => {

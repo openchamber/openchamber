@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { createGitProcessError, isGitProcessCleanupBlocked } from './git-execution-errors';
 
 /**
  * Classifies a path from `git status` before diffing it, matching the web
@@ -9,7 +10,16 @@ import * as path from 'path';
  * empty diff that looks like "no changes".
  */
 
-type GitRunner = (args: string[], cwd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+type GitRunner = (args: string[], cwd: string) => Promise<{
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  cleanupBlocked?: boolean;
+  descendantsTerminated?: boolean;
+  rootClosed?: boolean;
+  pid?: number;
+  code?: string | number;
+}>;
 
 export type GitPathUnavailableReason = 'path_not_found' | 'nested_repository';
 
@@ -36,6 +46,7 @@ const pathExists = (target: string): Promise<boolean> => fs.promises.lstat(targe
 // directory, so only a record for the path itself counts.
 const readEntryMode = async (run: GitRunner, cwd: string, args: string[], repoPath: string): Promise<string | null> => {
   const result = await run(args, cwd);
+  if (isGitProcessCleanupBlocked(result)) throw createGitProcessError(result, 'Git path inspection cleanup was not confirmed');
   if (result.exitCode !== 0) return null;
   for (const record of result.stdout.split('\0')) {
     const tab = record.indexOf('\t');
@@ -69,6 +80,7 @@ export async function resolveGitPathTarget(run: GitRunner, directory: string, fi
 export async function readSubmoduleState(run: GitRunner, directory: string, target: { repoPath: string; absolutePath: string }): Promise<GitSubmoduleState> {
   const status = await run(['status', '--porcelain=v2', '-z', '--', `:(literal)${target.repoPath}`], directory);
   if (status.exitCode !== 0) {
+    if (isGitProcessCleanupBlocked(status)) throw createGitProcessError(status, 'Git submodule status cleanup was not confirmed');
     throw new Error(status.stderr.trim() || 'Failed to read submodule status');
   }
   // Changed: "1 XY S<c><m><u> mH mI mW hH hI path" ("2" adds rename fields
@@ -78,7 +90,11 @@ export async function readSubmoduleState(run: GitRunner, directory: string, targ
   const record = status.stdout.split('\0').find((entry) => /^[12u] /.test(entry))?.split(' ');
   const hasConflict = record?.[0] === 'u';
   // `HEAD:./path` resolves from `directory`; `HEAD:path` would resolve from the repository root.
-  const readHead = async () => (await run(['rev-parse', '--verify', '--quiet', `HEAD:./${target.repoPath}`], directory)).stdout.trim();
+  const readHead = async () => {
+    const result = await run(['rev-parse', '--verify', '--quiet', `HEAD:./${target.repoPath}`], directory);
+    if (isGitProcessCleanupBlocked(result)) throw createGitProcessError(result, 'Git submodule HEAD cleanup was not confirmed');
+    return result.stdout.trim();
+  };
   const head = record && !hasConflict ? record[6] : await readHead();
   const index = hasConflict ? '' : (record ? record[7] : head);
   const flags = record ? record[2] : 'S...';
@@ -86,6 +102,9 @@ export async function readSubmoduleState(run: GitRunner, directory: string, targ
   const worktree = await pathExists(path.join(target.absolutePath, '.git'))
     ? await run(['rev-parse', '--verify', 'HEAD'], target.absolutePath)
     : null;
+  if (worktree && isGitProcessCleanupBlocked(worktree)) {
+    throw createGitProcessError(worktree, 'Git submodule worktree cleanup was not confirmed');
+  }
   const commitOrNull = (value: string): string | null => (value && !/^0+$/.test(value) ? value : null);
 
   return {

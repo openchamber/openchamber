@@ -59,7 +59,13 @@ export function spawnManagedOpenCodeProcess(
     const timer = setTimeout(() => finish(startupError(`Timeout waiting for server to start after ${options.timeoutMs}ms.`)), options.timeoutMs);
     owned.child.stdout.on('data', onStdout);
     owned.child.stderr.on('data', capture);
-    void owned.closed.then((exit) => finish(exit.error ?? startupError(`OpenCode process exited before serving with code ${exit.code}, signal ${exit.signal}.`)));
+    void Promise.race([
+      owned.closed,
+      owned.failedTermination.then((error) => Promise.reject(error)),
+    ]).then(
+      (exit) => finish(exit.error ?? startupError(`OpenCode process exited before serving with code ${exit.code}, signal ${exit.signal}.`)),
+      (error) => finish(error instanceof Error ? error : new Error(String(error))),
+    );
     options.signal.addEventListener('abort', onAbort, { once: true });
     if (options.signal.aborted) onAbort();
   }).catch(async (error) => {

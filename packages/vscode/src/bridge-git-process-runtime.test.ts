@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execGit, stopGitProcesses } from './bridge-git-process-runtime';
+import { execGit, resetGitProcesses, stopGitProcesses } from './bridge-git-process-runtime';
 
 const alive = (pid: number) => {
   try { process.kill(pid, 0); return true; } catch { return false; }
@@ -99,4 +99,12 @@ test('deactivation terminates outstanding Git work and rejects new launches', as
     for (const pid of await readPids(marker)) if (alive(pid)) process.kill(pid, 'SIGKILL');
     await fs.rm(cwd, { recursive: true, force: true });
   }
+});
+
+test('reactivation resets the Git runtime shutdown latch', async () => {
+  await stopGitProcesses();
+  await resetGitProcesses();
+
+  const result = await execGit(['--version'], os.tmpdir());
+  assert.equal(result.exitCode, 0);
 });

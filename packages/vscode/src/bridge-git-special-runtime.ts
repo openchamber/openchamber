@@ -4,7 +4,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
 import * as gitService from './gitService';
 import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel } from './bridge-git-generation-model';
+import { gitExecutionRuntime } from './git-execution-runtime';
+import { createGitProcessError, isGitProcessCleanupBlocked } from './git-execution-errors';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import type { GitProcessExecutionOptions } from './bridge-git-process-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -12,11 +15,23 @@ type BridgeMessageInput = {
   payload?: unknown;
 };
 
-type ExecGitResult = { stdout: string; stderr: string; exitCode: number };
+type ExecGitResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  code?: string;
+  cleanupBlocked?: boolean;
+  descendantsTerminated?: boolean;
+  rootClosed?: boolean;
+  pid?: number;
+  cause?: Error | string | null;
+  rootError?: Error;
+  operationError?: Error;
+};
 
 type SpecialGitDeps = {
   readSettings: (ctx?: BridgeContext) => Record<string, unknown>;
-  execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
+  execGit: (args: string[], cwd: string, options?: GitProcessExecutionOptions) => Promise<ExecGitResult>;
 };
 
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -33,9 +48,45 @@ export const setUnavailableRetryDelaysForTest = (delays: number[] = UNAVAILABLE_
   unavailableRetryDelaysMs = delays;
 };
 const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
+const BRIDGE_GIT_READ_TIMEOUT_MS = 3 * 1000;
 
 let bridgeGitModelCatalogCache: Set<string> | null = null;
 let bridgeGitModelCatalogCacheAt = 0;
+
+const createGitReadTimeout = (message: string) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(message), BRIDGE_GIT_READ_TIMEOUT_MS);
+  return {
+    signal: controller.signal,
+    queueTimeoutMs: BRIDGE_GIT_READ_TIMEOUT_MS,
+    cleanup: () => clearTimeout(timeout),
+  };
+};
+
+const createGitStatusTimeout = () => createGitReadTimeout('Git status timed out');
+const createGitRangeTimeout = () => createGitReadTimeout('Git range read timed out');
+
+const isCleanupBlockedResult = (result: ExecGitResult): boolean => (
+  result.code === 'ERR_PROCESS_TREE_TERMINATION'
+  || isGitProcessCleanupBlocked(result)
+);
+
+const throwIfCleanupBlocked = (result: ExecGitResult): void => {
+  if (!isCleanupBlockedResult(result)) return;
+
+  throw createGitProcessError(result, 'Git process cleanup was not confirmed');
+};
+
+const runConflictGit = async (
+  execGit: SpecialGitDeps['execGit'],
+  args: string[],
+  directory: string,
+  signal: AbortSignal,
+): Promise<ExecGitResult> => {
+  const result = await execGit(args, directory, { signal });
+  throwIfCleanupBlocked(result);
+  return result;
+};
 
 const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, string>): OpenCodeClient => OpenCode.make({
   baseUrl: apiUrl.replace(/\/+$/, ''),
@@ -137,6 +188,46 @@ const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
   }
 };
 
+const readGitRangeFiles = async (directory: string, base: string, head: string): Promise<string[]> => {
+  const rangeTimeout = createGitRangeTimeout();
+  try {
+    const context = await gitExecutionRuntime.discover(directory, { signal: rangeTimeout.signal });
+    if (!context.isRepository) {
+      return [];
+    }
+
+    const listed = await gitExecutionRuntime.withRawRead(
+      directory,
+      () => gitService.getGitRangeFiles(directory, base, head, { signal: rangeTimeout.signal }),
+      rangeTimeout,
+    );
+    if (!Array.isArray(listed)) {
+      throw new Error('Git range file discovery returned an invalid result');
+    }
+    return listed;
+  } finally {
+    rangeTimeout.cleanup();
+  }
+};
+
+const readGitRangeDiff = async (
+  directory: string,
+  base: string,
+  head: string,
+  filePath: string,
+): Promise<{ diff: string }> => {
+  const rangeTimeout = createGitRangeTimeout();
+  try {
+    return await gitExecutionRuntime.withRawRead(
+      directory,
+      () => gitService.getGitRangeDiff(directory, base, head, filePath, 3, { signal: rangeTimeout.signal }),
+      rangeTimeout,
+    );
+  } finally {
+    rangeTimeout.cleanup();
+  }
+};
+
 export async function handleSpecialGitBridgeMessage(
   message: BridgeMessageInput,
   ctx: BridgeContext | undefined,
@@ -162,13 +253,7 @@ export async function handleSpecialGitBridgeMessage(
         return { id, type, success: false, error: 'base and head are required' };
       }
 
-      let files: string[] = [];
-      try {
-        const listed = await gitService.getGitRangeFiles(directory, base, head);
-        files = Array.isArray(listed) ? listed : [];
-      } catch {
-        files = [];
-      }
+      const files = await readGitRangeFiles(directory, base, head);
 
       if (files.length === 0) {
         return { id, type, success: false, error: 'No diffs available for base...head' };
@@ -176,14 +261,13 @@ export async function handleSpecialGitBridgeMessage(
 
       let diffSummaries = '';
       for (const file of files) {
-        try {
-          const diff = await gitService.getGitRangeDiff(directory, base, head, file, 3);
-          const raw = typeof diff?.diff === 'string' ? diff.diff : '';
-          if (!raw.trim()) continue;
-          diffSummaries += `FILE: ${file}\n${raw}\n\n`;
-        } catch {
-          // ignore
+        const diff = await readGitRangeDiff(directory, base, head, file);
+        if (!diff || !diff.diff || !diff.diff.trim) {
+          throw new Error(`Git range diff returned an invalid result for ${file}`);
         }
+        const raw = diff.diff;
+        if (!raw.trim()) continue;
+        diffSummaries += `FILE: ${file}\n${raw}\n\n`;
       }
 
       if (!diffSummaries.trim()) {
@@ -243,23 +327,40 @@ export async function handleSpecialGitBridgeMessage(
         return { id, type, success: false, error: 'Directory is required' };
       }
 
+      const statusTimeout = createGitStatusTimeout();
       try {
-        const statusResult = await deps.execGit(['status', '--porcelain'], directory);
+        const statusResult = await gitExecutionRuntime.withRawRead(
+          directory,
+          () => runConflictGit(deps.execGit, ['status', '--porcelain'], directory, statusTimeout.signal),
+          statusTimeout,
+        );
         const statusPorcelain = statusResult.stdout;
 
-        const unmergedResult = await deps.execGit(['diff', '--name-only', '--diff-filter=U'], directory);
+        const unmergedResult = await gitExecutionRuntime.withRawRead(
+          directory,
+          () => runConflictGit(deps.execGit, ['diff', '--name-only', '--diff-filter=U'], directory, statusTimeout.signal),
+          statusTimeout,
+        );
         const unmergedFiles = unmergedResult.stdout
           .split('\n')
           .map((line) => line.trim())
           .filter(Boolean);
 
-        const diffResult = await deps.execGit(['diff'], directory);
+        const diffResult = await gitExecutionRuntime.withRawRead(
+          directory,
+          () => runConflictGit(deps.execGit, ['diff'], directory, statusTimeout.signal),
+          statusTimeout,
+        );
         const diff = diffResult.stdout;
 
         let operation: 'merge' | 'rebase' = 'merge';
         let headInfo = '';
 
-        const mergeHeadResult = await deps.execGit(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], directory);
+        const mergeHeadResult = await gitExecutionRuntime.withRawRead(
+          directory,
+          () => runConflictGit(deps.execGit, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], directory, statusTimeout.signal),
+          statusTimeout,
+        );
         const mergeHeadExists = mergeHeadResult.exitCode === 0;
 
         if (mergeHeadExists) {
@@ -274,7 +375,11 @@ export async function handleSpecialGitBridgeMessage(
           }
           headInfo = `MERGE_HEAD: ${mergeHead}${mergeMsg ? '\n' + mergeMsg : ''}`;
         } else {
-          const rebaseHeadResult = await deps.execGit(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'], directory);
+          const rebaseHeadResult = await gitExecutionRuntime.withRawRead(
+            directory,
+            () => runConflictGit(deps.execGit, ['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'], directory, statusTimeout.signal),
+            statusTimeout,
+          );
           const rebaseHeadExists = rebaseHeadResult.exitCode === 0;
 
           if (rebaseHeadExists) {
@@ -299,6 +404,8 @@ export async function handleSpecialGitBridgeMessage(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: message };
+      } finally {
+        statusTimeout.cleanup();
       }
     }
 

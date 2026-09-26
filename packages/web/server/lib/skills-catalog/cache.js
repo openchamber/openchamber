@@ -1,4 +1,5 @@
 import { readDiskCache, writeDiskCache } from './disk-cache.js';
+import { createSharedRequest } from '../request-sharing.js';
 
 const DEFAULT_TTL_MS = 3 * 60 * 60 * 1000;
 const DISK_CACHE_FILE = 'skills-catalog-cache.json';
@@ -112,7 +113,10 @@ const pumpScanQueue = () => {
  * run; at most MAX_CONCURRENT_SCANS loaders run at once. Only successful
  * (`ok: true`) results are cached.
  */
-export async function scanWithCache(key, loader, { refresh = false } = {}) {
+export async function scanWithCache(key, loader, { refresh = false, signal = undefined } = {}) {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason || new Error('Skills catalog scan was cancelled'));
+  }
   if (!refresh) {
     const cached = getCachedScan(key);
     if (cached) {
@@ -121,24 +125,37 @@ export async function scanWithCache(key, loader, { refresh = false } = {}) {
   }
 
   const existing = inFlight.get(key);
-  if (existing) {
-    return existing;
+  if (existing && !existing.shared.sourceAbortRequested) {
+    return existing.shared.wait(signal);
   }
 
-  const run = (async () => {
+  let entry;
+  const shared = createSharedRequest(async (sourceSignal) => {
     await acquireScanSlot();
     try {
-      const result = await loader();
-      if (result && result.ok) {
+      const result = await loader({ signal: sourceSignal });
+      if (result && result.ok && !sourceSignal.aborted && inFlight.get(key) === entry) {
         setCachedScan(key, result);
       }
       return result;
     } finally {
       releaseScanSlot();
-      inFlight.delete(key);
     }
-  })();
+  }, { cancellationMessage: 'Skills catalog scan was cancelled' });
+  entry = { shared, promise: shared.promise };
 
-  inFlight.set(key, run);
-  return run;
+  inFlight.set(key, entry);
+  void shared.promise.then(
+    () => {
+      if (inFlight.get(key) === entry) {
+        inFlight.delete(key);
+      }
+    },
+    () => {
+      if (inFlight.get(key) === entry) {
+        inFlight.delete(key);
+      }
+    },
+  );
+  return shared.wait(signal);
 }

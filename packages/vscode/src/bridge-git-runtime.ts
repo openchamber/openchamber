@@ -1,4 +1,4 @@
-import * as gitService from './gitService';
+import * as gitService from './git-execution-service';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -298,7 +298,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         directory?: string;
         remote?: string;
         branch?: string;
-        options?: string[] | Record<string, unknown>;
+        options?: NonNullable<Parameters<typeof gitService.gitPush>[1]>['options'];
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;

@@ -1,3 +1,6 @@
+import { createGitIgnoreReader } from './gitignore.js';
+import { isProcessTreeCleanupBlocked } from '../git/process-tree.js';
+
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'node_modules',
@@ -95,7 +98,18 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
   return score;
 };
 
-export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {
+export const createFsSearchRuntime = ({
+  fsPromises,
+  path,
+  spawn,
+  resolveGitBinaryForSpawn,
+  gitExecutionService,
+}) => {
+  const gitIgnoreReader = createGitIgnoreReader({
+    spawn,
+    resolveGitBinaryForSpawn,
+    gitExecutionService,
+  });
   const searchFilesystemFiles = async (rootPath, options) => {
     const { limit, query, includeHidden, respectGitignore } = options;
     const includeHiddenEntries = Boolean(includeHidden);
@@ -123,29 +137,17 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               return { dir, dirents, ignoredPaths: new Set() };
             }
 
-            const result = await new Promise((resolve) => {
-              const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                cwd: dir,
-                windowsHide: true,
-                // Diagnostics are unused here. An unread pipe can block Git forever.
-                stdio: ['ignore', 'pipe', 'ignore'],
-              });
-
-              let stdout = '';
-              child.stdout.on('data', (data) => { stdout += data.toString(); });
-              child.on('close', () => resolve(stdout));
-              child.on('error', () => resolve(''));
-            });
-
-            const ignoredNames = new Set(
-              String(result)
-                .split('\n')
-                .map((name) => name.trim())
-                .filter(Boolean)
-            );
+            let ignoredNames;
+            try {
+              ignoredNames = await gitIgnoreReader.getIgnoredNames(dir, pathsToCheck);
+            } catch (error) {
+              if (isProcessTreeCleanupBlocked(error)) throw error;
+              ignoredNames = new Set();
+            }
 
             return { dir, dirents, ignoredPaths: ignoredNames };
-          } catch {
+          } catch (error) {
+            if (isProcessTreeCleanupBlocked(error)) throw error;
             return { dir, dirents: await listDirectoryEntries(dir, fsPromises), ignoredPaths: new Set() };
           }
         })

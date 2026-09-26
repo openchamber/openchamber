@@ -21,7 +21,7 @@ The following functions are exported and used by the web server:
 - `getCacheKey({ normalizedRepo, subpath, identityId })`: Generate cache key for scan results.
 - `getCachedScan(key)`: Retrieve cached scan result if not expired.
 - `setCachedScan(key, value, ttlMs)`: Store scan result with TTL (default 3 hours).
-- `scanWithCache(key, loader, { refresh })`: Run a scan loader with cache lookup, in-flight deduplication, and a global concurrency limit (2 concurrent scans); only `ok: true` results are cached.
+- `scanWithCache(key, loader, { refresh, signal })`: Run a scan loader with cache lookup, in-flight deduplication, and a global concurrency limit (2 concurrent scans); only `ok: true` results are cached. Each request can cancel its own waiter without aborting another caller's shared scan. The owner passes a separate source signal to the loader and keeps the in-flight task alive through its cleanup.
 - `clearCache()`: Clear all cached scan results.
 - Scan results persist to `skills-catalog-cache.json` in the OpenChamber data dir (debounced, atomic rename) and survive server restarts within the TTL.
 
@@ -37,19 +37,20 @@ The following functions are exported and used by the web server:
 - `parseSkillRepoSource(source, { subpath })`: Parse git repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format.
 
 ### Git Repository Scanning (`scan.js`)
-- `scanSkillsRepository({ source, subpath, defaultSubpath, identity })`: Scan git repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata.
+- `scanSkillsRepository({ source, subpath, defaultSubpath, identity, gitExecutionService })`: Scan git repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata. When supplied, the shared coordinator reserves the canonical temporary clone destination through sparse checkout, filesystem processing, and cleanup. Network capacity stays held until that work finishes, including delayed cleanup after a process-tree reconciliation.
 
 ### Git Repository Installation (`install.js`)
-- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions })`: Install skills from git repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency.
+- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions, gitExecutionService })`: Install skills from git repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency. Coordinated calls retain the clone-destination reservation and network capacity through sparse checkout, copying, and cleanup, including delayed cleanup after a process-tree reconciliation.
 
 ## Internal Helpers
 
 The following functions are internal helpers used by exported functions:
 
 ### Git Helpers (`git.js`)
-- `runGit(args, options)`: Execute git command with optional SSH identity, timeout, and max buffer. Returns `{ ok, stdout, stderr, message, code, signal }`.
+- `runGit(args, options)`: Execute git command with optional SSH identity, timeout, and max buffer. Returns `{ ok, stdout, stderr, message, code, signal }`. Timeout, cancellation, and output-limit termination use the shared Git process-tree lifecycle so descendants do not outlive the command. Scan metadata reads run in the shared read-only scope (`GIT_OPTIONAL_LOCKS=0`); clone and materialization commands retain normal locking.
 - `looksLikeAuthError(message)`: Detect if error message indicates authentication failure (permission denied, publickey, etc.).
 - `assertGitAvailable()`: Check if git is available in PATH.
+- `runWithGitCloneReservation({ destination, label, queueTimeoutMs, gitExecutionService }, task)`: Run a clone workflow under the shared bounded clone-destination reservation when the execution service is available.
 
 ### Skill Name Validation (used in `install.js`, `scan.js`)
 - `validateSkillName(skillName)`: Validate skill name against pattern `/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/` (1-64 chars, lowercase alphanumeric with hyphens).
@@ -61,7 +62,7 @@ The following functions are internal helpers used by exported functions:
 - `normalizeUserSkillDir(userSkillDir)`: Normalize the user skill directory path (handles the legacy `skill` directory in the XDG config location, or `~/.config/opencode/skill` when XDG is unset, by selecting the plural `skills` directory when appropriate).
 
 ### Git Clone Helpers (`install.js`, `scan.js`)
-- `cloneRepo({ cloneUrl, identity, tempDir })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode.
+- `cloneRepo({ cloneUrl, identity, tempDir, signal })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode; cancellation reaches clone admission and the owned process, and an aborted preferred attempt never starts the fallback.
 
 ### SKILL.md Parsing (`scan.js`)
 - `parseSkillMd(content)`: Parse YAML frontmatter from SKILL.md content. Returns `{ ok, frontmatter, warnings }`.
@@ -126,13 +127,13 @@ The following functions are internal helpers used by exported functions:
 - Cache keys include `normalizedRepo`, `subpath`, and `identityId` for isolation.
 - Default TTL is 3 hours for both scan results and GitHub repository metadata.
 - Scan and GitHub metadata caches persist to JSON files in the OpenChamber data dir, so app restarts and page refreshes reuse previous results instead of re-hitting GitHub.
-- Scans run through a global concurrency limiter (2 at a time) with per-key in-flight deduplication.
+- Scans run through a global concurrency limiter (2 at a time) with per-key in-flight deduplication. Request cancellation releases only that request's waiter; the shared source is aborted only after the last waiter leaves, and an aborted source never populates the cache.
 - The refresh button passes `refresh: true` and bypasses the cache.
 
 ### Security Considerations
 - Path traversal protection in `copyDirectoryNoSymlinks`: resolves real paths and checks containment.
 - Symlinks are explicitly rejected to prevent escape from skill directory.
-- SSH key paths are trimmed but not escaped in `git.js` (assumes safe input from profiles).
+- SSH key paths are validated and shell-quoted by the shared Git helper before they are used in `core.sshCommand`.
 - Temporary directories are cleaned up in `finally` blocks.
 
 ### Error Handling

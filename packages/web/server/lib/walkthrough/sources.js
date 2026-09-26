@@ -1,5 +1,19 @@
-import { getDiff, getRangeDiff, getCommitDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import {
+  getCommitDiff,
+  getDiff,
+  getRangeDiff,
+  getUntrackedDiffs,
+  listUntrackedPaths,
+} from '../git/execution-service.js';
 import assert from 'node:assert/strict';
+
+const defaultGit = Object.freeze({
+  getDiff,
+  getRangeDiff,
+  getUntrackedDiffs,
+  listUntrackedPaths,
+  getCommitDiff,
+});
 
 // A walkthrough source resolves to one or more diff *sections*. A section is a
 // patch plus the scope its hunk ids live in; keeping staged and working-tree
@@ -7,6 +21,15 @@ import assert from 'node:assert/strict';
 // silently re-anchors onto an unstaged edit of the same lines.
 
 const WORKING_TREE_SCOPES = new Set(['all', 'staged', 'working']);
+const isStringValue = (value) => Object.prototype.toString.call(value) === '[object String]';
+const isObjectValue = (value) => Object.prototype.toString.call(value) === '[object Object]';
+const FUNCTION_VALUE_TAGS = new Set([
+  '[object Function]',
+  '[object AsyncFunction]',
+  '[object GeneratorFunction]',
+  '[object AsyncGeneratorFunction]',
+]);
+const isFunctionValue = (value) => FUNCTION_VALUE_TAGS.has(Object.prototype.toString.call(value));
 
 export class WalkthroughSourceError extends Error {
   constructor(message, statusCode = 400, code = undefined) {
@@ -20,12 +43,12 @@ export class WalkthroughSourceError extends Error {
  * Normalize and validate an untrusted source descriptor from the client.
  */
 export function parseSource(raw) {
-  if (!raw || typeof raw !== 'object') {
+  if (!raw || !isObjectValue(raw)) {
     throw new WalkthroughSourceError('source is required');
   }
 
   if (raw.kind === 'working-tree') {
-    const scope = typeof raw.scope === 'string' ? raw.scope : 'all';
+    const scope = isStringValue(raw.scope) ? raw.scope : 'all';
     if (!WORKING_TREE_SCOPES.has(scope)) {
       throw new WalkthroughSourceError(`Unknown working-tree scope "${scope}"`);
     }
@@ -33,8 +56,8 @@ export function parseSource(raw) {
   }
 
   if (raw.kind === 'branch') {
-    const baseRef = typeof raw.baseRef === 'string' ? raw.baseRef.trim() : '';
-    const headRef = typeof raw.headRef === 'string' ? raw.headRef.trim() : '';
+    const baseRef = isStringValue(raw.baseRef) ? raw.baseRef.trim() : '';
+    const headRef = isStringValue(raw.headRef) ? raw.headRef.trim() : '';
     if (!baseRef || !headRef) {
       throw new WalkthroughSourceError('branch sources require baseRef and headRef');
     }
@@ -88,12 +111,13 @@ export function sourceKey(source) {
 // `git diff` never reports untracked files, so a brand-new file would be
 // invisible in a walkthrough of local work. The batch helper resolves the
 // repository once and bounds how many diff processes run at a time.
-const untrackedSections = async (directory) => {
-  const untracked = await listUntrackedPaths(directory);
+const untrackedSections = async (directory, git, signal) => {
+  const readOptions = signal ? { signal } : {};
+  const untracked = await git.listUntrackedPaths(directory, readOptions);
   if (untracked.length === 0) return [];
 
-  const patches = await getUntrackedDiffs(directory, untracked);
-  return patches.filter((patch) => typeof patch === 'string' && patch.trim());
+  const patches = await git.getUntrackedDiffs(directory, untracked, readOptions);
+  return patches.filter((patch) => isStringValue(patch) && patch.trim());
 };
 
 /**
@@ -101,18 +125,23 @@ const untrackedSections = async (directory) => {
  *
  * @returns {Promise<{sections: Array<{scope: string, patch: string}>, meta: object}>}
  */
-export async function loadSourceSections(directory, source, { getPullRequestDiff } = {}) {
+export async function loadSourceSections(
+  directory,
+  source,
+  { getPullRequestDiff, git = defaultGit, signal } = {},
+) {
+  const readOptions = signal ? { signal } : {};
   if (source.kind === 'working-tree') {
     const sections = [];
 
     if (source.scope === 'all' || source.scope === 'staged') {
-      const patch = await getDiff(directory, { staged: true });
+      const patch = await git.getDiff(directory, { staged: true, ...readOptions });
       if (patch && patch.trim()) sections.push({ scope: 'staged', patch });
     }
 
     if (source.scope === 'all' || source.scope === 'working') {
-      const patch = await getDiff(directory, { staged: false });
-      const untracked = await untrackedSections(directory);
+      const patch = await git.getDiff(directory, { staged: false, ...readOptions });
+      const untracked = await untrackedSections(directory, git, signal);
       const combined = [patch, ...untracked].filter((value) => value && value.trim()).join('\n');
       if (combined.trim()) sections.push({ scope: 'working', patch: combined });
     }
@@ -121,7 +150,12 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'branch') {
-    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef, includeWorkingTree: true });
+    const patch = await git.getRangeDiff(directory, {
+      base: source.baseRef,
+      head: source.headRef,
+      includeWorkingTree: true,
+      ...readOptions,
+    });
     return {
       sections: patch && patch.trim() ? [{ scope: 'branch', patch }] : [],
       meta: { baseRef: source.baseRef, headRef: source.headRef },
@@ -129,18 +163,23 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'commit') {
-    const patch = await getCommitDiff(directory, { hash: source.hash });
+    const commitOptions = { hash: source.hash };
+    if (signal) commitOptions.signal = signal;
+    const patch = await git.getCommitDiff(directory, commitOptions);
     return {
       sections: patch.trim() ? [{ scope: 'commit', patch }] : [],
       meta: { hash: source.hash },
     };
   }
 
-  if (typeof getPullRequestDiff !== 'function') {
+  if (!isFunctionValue(getPullRequestDiff)) {
     throw new WalkthroughSourceError('Pull request diffs are unavailable', 500);
   }
 
-  const { patch, meta } = await getPullRequestDiff(directory, source.number, source.sourceRepo);
+  const result = signal
+    ? await getPullRequestDiff(directory, source.number, source.sourceRepo, { signal })
+    : await getPullRequestDiff(directory, source.number, source.sourceRepo);
+  const { patch, meta } = result;
   return {
     sections: patch && patch.trim() ? [{ scope: `pr:${source.number}`, patch }] : [],
     meta: meta || {},
