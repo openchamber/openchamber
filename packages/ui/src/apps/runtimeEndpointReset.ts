@@ -33,6 +33,7 @@ import { useAgentGroupsStore } from '@/stores/useAgentGroupsStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
+import { resetSessionFailureStore } from '@/sync/session-failure-store';
 import { syncDesktopSettings } from '@/lib/persistence';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 
@@ -81,6 +82,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   replaceGlobalSessionStatusById(new Map());
   resetGlobalBlockingRequests();
   resetSessionOrdering();
+  resetSessionFailureStore();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
   resetSessionActivityTiming();

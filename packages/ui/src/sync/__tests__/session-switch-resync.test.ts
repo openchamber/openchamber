@@ -84,6 +84,7 @@ import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { getSessionFailureKey, resetSessionFailureStore, useSessionFailureStore } from "../session-failure-store"
 const {
   createEventRoutingIndex,
   handleEvent,
@@ -132,6 +133,7 @@ describe("resyncBlockingRequestsForDirectory", () => {
     pendingFormsShouldThrow = false
     pendingPermissionsShouldThrow = false
     setActiveSession("", "")
+    resetSessionFailureStore()
   })
 
   test("calls listPendingForms and listPendingPermissions exactly once for the directory", async () => {
@@ -359,6 +361,54 @@ describe("resyncBlockingRequestsForDirectory", () => {
       expect(refreshes).toHaveLength(3)
     } finally {
       unsubscribe()
+      childStores.disposeAll()
+    }
+  })
+
+  test("keeps a failure through idle and clears it for the next busy attempt", () => {
+    const childStores = new ChildStoreManager()
+    childStores.ensureChild("/repo", { bootstrap: false })
+    const routingIndex = createEventRoutingIndex()
+    const runtimeKey = getRuntimeKey()
+    // SAFETY: this fixture supplies the session.error discriminator and the
+    // properties consumed by handleEvent.
+    const failureEvent = {
+      id: "evt_failure",
+      type: "session.error",
+      properties: {
+        sessionID: "ses_a",
+        error: { name: "UnknownError", data: { message: "provider unavailable" } },
+      },
+    } as Event
+    // SAFETY: this fixture supplies the session.idle discriminator and its
+    // addressed session ID.
+    const idleEvent = {
+      type: "session.idle",
+      properties: { sessionID: "ses_a" },
+    } as Event
+    // SAFETY: this fixture supplies the session.status discriminator and the
+    // normalized busy status consumed by handleEvent.
+    const busyEvent = {
+      type: "session.status",
+      properties: { sessionID: "ses_a", status: { type: "busy" } },
+    } as Event
+
+    try {
+      handleEvent("/repo", failureEvent, childStores, routingIndex, `${runtimeKey}:stale`)
+      expect(useSessionFailureStore.getState().failures.has(getSessionFailureKey("/repo", "ses_a"))).toBe(false)
+
+      handleEvent("/repo", failureEvent, childStores, routingIndex, runtimeKey)
+      handleEvent("/repo", idleEvent, childStores, routingIndex, runtimeKey)
+
+      expect(useSessionFailureStore.getState().failures.has(getSessionFailureKey("/repo", "ses_a"))).toBe(true)
+
+      handleEvent("/repo", busyEvent, childStores, routingIndex, `${runtimeKey}:stale`)
+      expect(useSessionFailureStore.getState().failures.has(getSessionFailureKey("/repo", "ses_a"))).toBe(true)
+
+      handleEvent("/repo", busyEvent, childStores, routingIndex, runtimeKey)
+
+      expect(useSessionFailureStore.getState().failures.has(getSessionFailureKey("/repo", "ses_a"))).toBe(false)
+    } finally {
       childStores.disposeAll()
     }
   })

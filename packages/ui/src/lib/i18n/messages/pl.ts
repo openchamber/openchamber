@@ -3368,6 +3368,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.attention.revert': 'Trwa cofanie',
   'chat.workStatus.attention.bisect': 'Trwa bisect',
   'chat.workStatus.subagent.done': 'Gotowe',
+  'chat.workStatus.subagent.failed': 'Niepowodzenie',
+  'chat.workStatus.subagent.failedSummary': 'Nieudane: {count}',
   'chat.workStatus.subagent.untitled': 'Subagent',
   'chat.workStatus.mcp.toggle': 'Przełącz {name}',
   'chat.workStatus.mcp.needsAuth': 'Zaloguj się',

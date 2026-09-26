@@ -3363,6 +3363,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.attention.revert': '되돌리기 진행 중',
   'chat.workStatus.attention.bisect': '이분 탐색 진행 중',
   'chat.workStatus.subagent.done': '완료',
+  'chat.workStatus.subagent.failed': '실패',
+  'chat.workStatus.subagent.failedSummary': '{count}개 실패',
   'chat.workStatus.subagent.untitled': '서브에이전트',
   'chat.workStatus.mcp.toggle': '{name} 전환',
   'chat.workStatus.mcp.needsAuth': '로그인',

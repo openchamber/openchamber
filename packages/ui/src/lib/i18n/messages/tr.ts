@@ -3269,6 +3269,8 @@ export const dict = {
   'chat.workStatus.attention.revert': 'Revert devam ediyor',
   'chat.workStatus.attention.bisect': 'Bisect devam ediyor',
   'chat.workStatus.subagent.done': 'Tamamlandı',
+  'chat.workStatus.subagent.failed': 'Başarısız',
+  'chat.workStatus.subagent.failedSummary': '{count} başarısız',
   'chat.workStatus.subagent.untitled': 'Subagent',
   'chat.workStatus.mcp.toggle': '{name} aç/kapat',
   'chat.workStatus.mcp.needsAuth': 'Oturum aç',
