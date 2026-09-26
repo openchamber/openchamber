@@ -410,6 +410,36 @@ describe("OpenChamber-native frames", () => {
     }
   })
 
+  test("raises an in-app toast for plugin notifications", () => {
+    const childStores = new ChildStoreManager()
+    const routingIndex = createEventRoutingIndex()
+    const event: SyncEvent = {
+      type: "openchamber.notification",
+      properties: {
+        kind: "plugin",
+        title: "Build done",
+        body: "Ready to review",
+        tag: "plugin-build-done",
+      },
+    }
+
+    try {
+      handleEvent("global", event, childStores, routingIndex, getRuntimeKey())
+
+      expect(infoToasts).toEqual([{ title: "Build done", id: "plugin-build-done" }])
+      expect(agentCompletions[0]).toMatchObject({
+        title: "Build done",
+        body: "Ready to review",
+        tag: "plugin-build-done",
+        kind: "plugin",
+        requireHidden: false,
+      })
+      expect(childStores.children.size).toBe(0)
+    } finally {
+      childStores.disposeAll()
+    }
+  })
+
   test("applies an auto-accept policy snapshot to the permission store", () => {
     const childStores = new ChildStoreManager()
     const routingIndex = createEventRoutingIndex()

@@ -544,6 +544,20 @@ const trimmedOrUndefined = (value: string | undefined): string | undefined => {
   return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
+const notificationToastId = (kind?: string, title?: string, body?: string, tag?: string): string | undefined => {
+  if (tag) return tag
+  const fallback = [kind, title, body].filter(Boolean).join("|")
+  return fallback || undefined
+}
+
+const showPluginNotificationToast = (kind?: string, title?: string, body?: string, tag?: string): void => {
+  if (kind !== "plugin" || !title) return
+  toast.info(title, {
+    id: notificationToastId(kind, title, body, tag),
+    description: body,
+  })
+}
+
 /**
  * OpenChamber's own notification frame: the agent-completion notice for
  * desktop, VS Code and mobile (the web surface has its own stream), plus the
@@ -554,6 +568,9 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   const sessionId = trimmedOrUndefined(notification.sessionId)
   const directory = trimmedOrUndefined(notification.directory)
     ?? (fallbackDirectory !== "global" ? fallbackDirectory : "")
+  const title = trimmedOrUndefined(notification.title)
+  const body = trimmedOrUndefined(notification.body)
+  const tag = trimmedOrUndefined(notification.tag)
 
   if (kind === "opencode-restart-interrupted") {
     const dictionary = useI18nStore.getState().dictionary
@@ -574,6 +591,8 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
     } else {
       toast.info(title, options)
     }
+  } else {
+    showPluginNotificationToast(kind, title, body, tag)
   }
 
   // The local desktop shell already delivered this one natively.
@@ -586,9 +605,9 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   if (!notifications?.notifyAgentCompletion) return
 
   void notifications.notifyAgentCompletion({
-    title: trimmedOrUndefined(notification.title),
-    body: trimmedOrUndefined(notification.body),
-    tag: trimmedOrUndefined(notification.tag),
+    title,
+    body,
+    tag,
     kind,
     sessionId,
     directory: directory || undefined,

@@ -89,7 +89,7 @@ This module provides notification message preparation utilities for the web serv
 - Callers: a plugin in the managed OpenCode (agent-tool bearer token, the only reason for the pre-auth registration) or any client that passes regular API auth. No other auth path exists.
 - Body `{ title?, body?, tag?, sessionId?, directory?, showWhenFocused? }`, at least one of title/body; title ≤120, body ≤500 chars, 16kb JSON. `kind` is always `plugin` so callers cannot trigger kinds the UI treats specially.
 - One shared rate window: 10 notifications per 10s, then 429 with `Retry-After`.
-- Follows `nativeNotificationsEnabled` (returns `{ delivered: false }`) and `notificationMode` (`requireHidden`); `showWhenFocused: true` sends `requireHidden: false` so the notice shows even while OpenChamber is focused. Live delivery only: no web push or APNs fanout.
+- Follows `nativeNotificationsEnabled` (returns `{ delivered: false }`) and `notificationMode` (`requireHidden`); `showWhenFocused: true` sends `requireHidden: false` so the notice shows even while OpenChamber is focused. Connected UI clients also show plugin notifications as in-app info toasts. Live delivery only: no web push or APNs fanout.
 - Advertised as the `api.notifications.emit.v1` server capability.
 
 ### Template runtime API (template-runtime.js)
