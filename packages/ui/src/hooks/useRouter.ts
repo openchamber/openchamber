@@ -10,6 +10,14 @@ import { getLastActiveSessionClearGeneration } from '@/sync/last-session-cache';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
+// How long the ?session=recent restore overlay may hold the shell before it
+// falls through to the boot draft. Mirrors MobileApp.tsx's safety valve: the
+// overlay must never strand the user on the splash if the snapshot hangs
+// (server down, hung fetch), and a newer route that wins while a stale
+// resolution is still polling must not stay covered. The resolution itself
+// keeps its long snapshot wait; only the blocking overlay is bounded.
+const RECENT_SESSION_OVERLAY_VALVE_MS = 6_000;
+
 /**
  * Check if running in VS Code webview context.
  */
@@ -74,6 +82,15 @@ export function useRouter(): void {
             // draft is never painted while the restore is still deciding
             // (mirrors the native mobile cold-launch overlay).
             useSessionUIStore.getState().setRecentSessionRestorePending(true);
+            // Safety valve, same as MobileApp.tsx: release the overlay on a
+            // bounded timer so a hanging snapshot or a newer route that wins
+            // while this resolution still polls can never strand the user on
+            // the splash. The resolution keeps running (it may still apply);
+            // only the blocking overlay is capped.
+            const overlayValveTimeoutId = window.setTimeout(
+              () => useSessionUIStore.getState().setRecentSessionRestorePending(false),
+              RECENT_SESSION_OVERLAY_VALVE_MS,
+            );
             try {
               const resolved = await resolveRecentSession();
               if (generation !== routeGenerationRef.current) {
@@ -96,6 +113,7 @@ export function useRouter(): void {
                 await openSessionFromRoute(resolved.sessionId);
               }
             } finally {
+              window.clearTimeout(overlayValveTimeoutId);
               useSessionUIStore.getState().setRecentSessionRestorePending(false);
             }
           } else {
