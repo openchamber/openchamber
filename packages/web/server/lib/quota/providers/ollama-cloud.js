@@ -4,6 +4,11 @@ import { readManagedCredential } from '../credentials/providers.js';
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
 const aliases = ['ollama-cloud', 'ollamacloud'];
+const OLLAMA_CLOUD_ORIGIN = 'https://ollama.com';
+const OLLAMA_SETTINGS_PATH = '/settings';
+const OLLAMA_SIGNIN_PATH = '/signin';
+const OLLAMA_REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+const OLLAMA_MAX_REDIRECTS = 10;
 
 export const parseOllamaSettingsHtml = (html) => {
   const windows = {};
@@ -73,17 +78,63 @@ export const isConfigured = () => {
   return Boolean(readManagedCredential(providerId));
 };
 
+const assertOllamaCloudResponseUrl = (response) => {
+  let url;
+  try {
+    url = new URL(response.url);
+  } catch {
+    throw new Error('Ollama Cloud returned an invalid final URL');
+  }
+
+  if (url.origin !== OLLAMA_CLOUD_ORIGIN) {
+    throw new Error('Ollama Cloud redirected to an unexpected origin');
+  }
+  if (url.pathname === OLLAMA_SIGNIN_PATH) {
+    throw new Error('Ollama Cloud authentication failed');
+  }
+  if (url.pathname !== OLLAMA_SETTINGS_PATH) {
+    throw new Error('Ollama Cloud returned an unexpected final path');
+  }
+};
+
+const fetchOllamaCloudResponse = async (cookie, fetchImpl) => {
+  let requestUrl = `${OLLAMA_CLOUD_ORIGIN}${OLLAMA_SETTINGS_PATH}`;
+  let includeCookie = true;
+
+  for (let redirectCount = 0; ; redirectCount += 1) {
+    const headers = { 'User-Agent': 'OpenChamber quota provider' };
+    if (includeCookie) headers.Cookie = cookie;
+    const response = await fetchImpl(requestUrl, {
+      method: 'GET',
+      headers,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!OLLAMA_REDIRECT_STATUS_CODES.has(response.status)) return response;
+
+    const location = response.headers.get('location');
+    if (!location) return response;
+    if (redirectCount >= OLLAMA_MAX_REDIRECTS) throw new Error('Ollama Cloud returned too many redirects');
+
+    let redirectUrl;
+    try {
+      redirectUrl = new URL(location, requestUrl);
+    } catch {
+      throw new Error('Ollama Cloud returned an invalid redirect URL');
+    }
+    if (redirectUrl.protocol !== 'http:' && redirectUrl.protocol !== 'https:') throw new Error('Ollama Cloud returned an invalid redirect URL');
+    requestUrl = redirectUrl.href;
+    includeCookie = redirectUrl.origin === OLLAMA_CLOUD_ORIGIN;
+  }
+};
+
 export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
-  const response = await fetchImpl('https://ollama.com/settings', {
-    method: 'GET',
-    headers: { Cookie: credential.cookie, 'User-Agent': 'OpenChamber quota provider' },
-    redirect: 'manual',
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
+  const response = await fetchOllamaCloudResponse(credential.cookie, fetchImpl);
+  if (response.status === 401 || response.status === 403) {
     throw new Error('Ollama Cloud authentication failed');
   }
   if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+  assertOllamaCloudResponseUrl(response);
   const windows = parseOllamaSettingsHtml(await response.text());
   if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
   return windows;
