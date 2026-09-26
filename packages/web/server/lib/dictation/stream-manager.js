@@ -26,10 +26,12 @@ const DEFAULT_FINAL_TIMEOUT_MS = 10000;
 // quadratically with segment length (measured: 60s -> 2.1s/+90MB,
 // 300s -> 21.3s/+1.5GB). Segmenting keeps a long dictation off that curve and
 // lets committed segments decode while the user is still speaking, so only the
-// tail is left to transcribe on stop. Typical dictations are shorter than the
-// minimum and are decoded as a single segment.
-const DEFAULT_SEGMENT_MIN_SECONDS = 60;
-const DEFAULT_SEGMENT_MAX_SECONDS = 90;
+// tail is left to transcribe on stop. The decode is synchronous inside the
+// worker, so a long segment on a loaded machine blocks it and can trip the
+// client's request watchdog; the caps keep every decode short. Typical
+// dictations are shorter than the minimum and are decoded as a single segment.
+const DEFAULT_SEGMENT_MIN_SECONDS = 20;
+const DEFAULT_SEGMENT_MAX_SECONDS = 30;
 const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;
