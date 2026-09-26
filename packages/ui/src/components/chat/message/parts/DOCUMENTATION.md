@@ -68,6 +68,9 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `JustificationBlock.tsx`
   - Justification block wrapper over `ReasoningTimelineBlock`.
 
+- `BlockLine.tsx`
+  - The vertical connector line left of a collapsible block's body. It is also a click target: clicking it folds/expands the block via its header toggle handler (`onToggle`), or toggles the nearest native `<details>` when no handler is passed (JSON summary sections). Geometry is inline-styled (12px hit strip centered on the 1px line) so it does not depend on compiled Tailwind classes.
+
 ## Current important behavior
 
 ### Optional live history disclosure

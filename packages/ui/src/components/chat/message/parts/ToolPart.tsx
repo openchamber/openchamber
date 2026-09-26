@@ -4,6 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
+import { BlockLine } from './BlockLine';
 import { FormMarkdown } from '../../FormMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
@@ -2322,11 +2323,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                         <div
                             className="relative ml-2 pl-3"
                         >
-                            <span
-                                aria-hidden="true"
-                                className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
-                                style={{ backgroundColor: 'var(--tools-border)' }}
-                            />
+                            <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
                             <ToolExpandedContent
                                 part={part}
                                 state={state}
