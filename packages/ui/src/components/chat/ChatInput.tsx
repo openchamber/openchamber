@@ -1211,7 +1211,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [isBtwActive, pendingInputText, consumePendingInputText]);
 
-    const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts;
+    // A linked reference is attached context, not decoration: the submission
+    // builder serializes it into the outgoing message, so a composer holding
+    // only one of those chips is not empty and has to be sendable on its own.
+    // BTW sends strip every kind but the guest one, so the gate stays out of BTW.
+    const hasLinkedReferences = Boolean(linkedIssue || linkedPr || linkedLinearIssue || linkedGuestIssue);
+    const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences);
     const hasQueuedMessages = !isBtwActive && queuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
     const canSend = (hasContent || hasQueuedMessages) && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
@@ -1222,9 +1227,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const currentMessage = composerRef.current?.getValue() ?? message;
         return {
             message: currentMessage,
-            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
+            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences),
         };
-    }, [attachedFiles.length, hasDrafts, message]);
+    }, [attachedFiles.length, hasDrafts, hasLinkedReferences, isBtwActive, message]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
@@ -1502,7 +1507,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
-                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
+                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences),
             }
             : getCurrentInputSnapshot();
         if (queuedOnly && autoReviewRunning) {
@@ -3461,8 +3466,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // Linked references render as chips beside the attached files, inside the
     // composer box and inside the mobile pill.
-    const hasLinkedReferences = !isVSCode && Boolean(linkedIssue || linkedPr || linkedLinearIssue || linkedGuestIssue);
-    const linkedReferenceChips = hasLinkedReferences ? (
+    const linkedReferenceChips = !isVSCode && hasLinkedReferences ? (
         <div className="flex flex-wrap items-center gap-2 pt-2">
             {linkedIssue && !isVSCode ? (
                 <LinkedReferenceRow
