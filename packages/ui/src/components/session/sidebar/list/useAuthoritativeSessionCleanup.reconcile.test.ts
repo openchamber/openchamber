@@ -9,7 +9,6 @@ import { setActionRefs } from '@/sync/session-actions';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
-import { getRuntimeKey } from '@/lib/runtime-switch';
 const { useAuthoritativeSessionCleanup } = await import('./useAuthoritativeSessionCleanup');
 
 // SAFETY: the cleanup identity path reads only `id` and `directory`; the rest
