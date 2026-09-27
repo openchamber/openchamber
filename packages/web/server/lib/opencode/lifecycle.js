@@ -1265,7 +1265,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
     const directoryLimit = resolveWarmupDirectoryLimit(localMcpServers);
     if (directoryLimit <= 0) return;
-    if (localMcpServers > 0 && directories.length > directoryLimit) {
+    // Only speak up when the spawned-server budget actually reduced the limit.
+    // A short list is trimmed by the pre-existing directory cap instead, and
+    // calling that "the budget" would misdescribe it to anyone reading boot logs.
+    if (directoryLimit < WARMUP_DIRECTORY_LIMIT && directories.length > directoryLimit) {
       console.log(
         `[OpenCode] Trimming directory warm-up from ${directories.length} to ${directoryLimit}: ` +
           `${localMcpServers} local MCP server(s) per directory would exceed the boot budget of ` +
