@@ -1,0 +1,77 @@
+---
+title: Provedores de classificação (Jev)
+description: Configure o Jev, o pequeno modelo de classificação por trás das decisões em diferentes fluxos de trabalho do OpenChamber.
+---
+
+# Provedores de classificação (Jev)
+
+Algumas funções do OpenChamber precisam de uma decisão rápida antes de agir: este comando é arriscado? Que tipo de tarefa é este prompt? O usuário acabou de começar um trabalho de verdade? Quem responde a essas perguntas é o Jev, um pequeno modelo de decisão da TypeSafe. Esta página mostra como dar ao OpenChamber acesso ao Jev.
+
+O Jev nunca escreve código nem responde no seu chat. Ele só devolve um veredito, e o OpenChamber age de acordo. O OpenChamber espera a resposta por no máximo quatro segundos.
+
+## O que usa o Jev
+
+| Função | A pergunta que o Jev responde |
+| --- | --- |
+| [Permissões e rede de segurança](/pt-br/permissions/) | O agente deve perguntar a você antes de executar esta ação? |
+| [Roteamento automático de modelos](/pt-br/auto-model-routing/) | A qual das suas categorias este prompt pertence? |
+| [Sessões em andamento](/pt-br/sessions-in-work/) | Você acabou de pedir um trabalho de verdade? Este turno parece o fim dele? |
+| [Resumo e sugestão da próxima mensagem](/pt-br/sessions-in-work/) | Vale a pena gerar um resumo ou uma sugestão depois deste turno? |
+
+Sem provedor, a rede de segurança e o Auto ficam ocultos, e as sessões só vão para em andamento quando você mesmo as move. Resumos e sugestões continuam funcionando, só que sem o filtro.
+
+## Configuração
+
+Abra **Configurações → Provedores → Provedores de classificação** e escolha para onde vão as solicitações ao Jev. Há três opções.
+
+### Promoção do OpenCode Zen
+
+Grátis por tempo limitado, sem chave. Enquanto a promoção durar, o OpenCode deixa o OpenChamber usar o Jev pelo OpenCode Zen sem custo. Se você nunca mexeu nesta página, é isso que já está usando.
+
+Quando a promoção acabar, a opção some e o OpenChamber passa para uma das chaves abaixo, se você tiver alguma.
+
+### Chave do OpenCode Zen
+
+Usa a chave de API do Zen salva no OpenCode, paga com o seu saldo do Zen.
+
+1. Abra **Configurações → Provedores** e adicione uma chave de API ao provedor **OpenCode Zen** (veja [Provedores, modelos e agentes](/pt-br/providers/)).
+2. Volte a **Provedores de classificação** e escolha **Chave do OpenCode Zen**.
+
+Entrar com uma conta do OpenCode não basta. Para o Jev, o Zen só aceita uma chave de API.
+
+### Chave de API da TypeSafe
+
+Sua própria chave e sua própria cota da TypeSafe.
+
+1. Obtenha uma chave de API na [TypeSafe](https://docs.typesafe.ai).
+2. Cole-a no campo **Chave de API da TypeSafe** e clique em **Salvar**.
+
+Salvar uma chave também a seleciona. A chave fica no servidor do OpenChamber, em um arquivo próprio, e nunca é enviada ao navegador.
+
+Assim que um provedor funciona, o cartão em **Configurações → Provedores** mostra **Pronto**.
+
+## Quando a sua escolha para de funcionar
+
+Se o provedor escolhido não puder ser usado (a promoção acabou, uma chave foi removida), o OpenChamber recorre ao primeiro que funcionar, suas próprias chaves primeiro: chave da TypeSafe, depois chave do Zen, depois a promoção. A página mostra qual está em uso agora.
+
+Se o Jev estiver lento ou falhar em uma solicitação, nada quebra. Cada função tem uma resposta segura para esse caso:
+
+- A rede de segurança deixa a ação esperando por você.
+- O Auto manda o prompt para o seu modelo de reserva.
+- As sessões em andamento continuam como estão.
+- O resumo e a sugestão são gerados como se o Jev não existisse.
+
+## O que o Jev vê
+
+O Jev recebe trechos curtos da sua conversa: sua última mensagem e, como contexto, até três turnos anteriores, cortados nas primeiras centenas de caracteres. Para a rede de segurança, ele também recebe a ação verificada, do jeito que o OpenCode a descreve: o comando que o agente quer executar, ou o arquivo e a mudança em uma edição. Ele nunca recebe arquivos inteiros nem imagens.
+
+As solicitações vão do servidor do OpenChamber direto para o OpenCode Zen ou para a TypeSafe, conforme a sua escolha.
+
+## Onde funciona
+
+O Jev roda no servidor do OpenChamber, então funciona no app desktop, no app web e no seu celular conectado a qualquer um dos dois. A extensão do VS Code fala direto com o OpenCode e não tem Jev: lá não há rede de segurança, não há Auto, e as sessões só vão para em andamento manualmente.
+
+## Relacionado
+
+- [Provedores, modelos e agentes](/pt-br/providers/): onde fica a chave do OpenCode Zen
+- [Segurança](/pt-br/security/): como o OpenChamber lida com chaves e acesso

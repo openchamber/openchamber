@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { toast } from 'sonner';
 
-import type { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { I18nProvider } from '@/lib/i18n';
 import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
 
@@ -37,12 +36,6 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
   const sessionId = 'ses_exact-mobile-session-id_42';
   const changes: boolean[] = [];
   let setRevealed: (next: boolean) => void = () => {};
-  const aiRename: ReturnType<typeof useSessionAiRenameAction> = {
-    pending: false,
-    disabled: false,
-    hint: 'AI rename',
-    run: () => {},
-  };
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -69,7 +62,6 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
             title="Session"
             revealed={revealed}
             confirmingDelete={false}
-            aiRename={aiRename}
             onRevealedChange={onRevealedChange}
           />
         )}
@@ -87,8 +79,8 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
 
   try {
     await act(async () => root.render(<I18nProvider><Harness /></I18nProvider>));
-    expect(ROW_ACTIONS_WIDTH).toBe(240);
-    expect(container.querySelectorAll('[aria-hidden="false"] button')).toHaveLength(5);
+    expect(ROW_ACTIONS_WIDTH).toBe(192);
+    expect(container.querySelectorAll('[aria-hidden="false"] button')).toHaveLength(4);
 
     await act(async () => {
       getCopyButton().click();

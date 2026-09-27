@@ -1,0 +1,76 @@
+---
+title: Sessões em andamento
+description: Mantenha à vista na barra lateral as sessões com trabalho real em andamento, até você marcá-las como concluídas.
+---
+
+# Sessões em andamento
+
+Perguntas, pesquisas e experimentos rápidos se acumulam depressa, e a sessão em que você está de fato consertando algo fica enterrada no meio deles. O bloco **Em andamento** reúne essas sessões em um só lugar da barra lateral. Uma sessão fica lá até você dizer que ela está concluída.
+
+Essa é a diferença para "Recente". "Recente" mostra tudo o que mudou nos últimos dois dias e se renova sozinho: uma sessão que você abriu hoje de manhã por curiosidade está lá, e uma correção que você pausou na segunda-feira já sumiu. "Em andamento" é a lista do que você ainda não terminou, não importa há quanto tempo abriu.
+
+## Onde encontrar
+
+O bloco **Em andamento** fica na barra lateral, abaixo das conversas e acima de "Recente" (ou da linha do tempo, no modo Timeline). No celular, ele fica no mesmo lugar da lista de sessões.
+
+Uma sessão em andamento vai para lá junto com as suas subsessões. Ela não aparece uma segunda vez em "Recente", na linha do tempo, no seu projeto ou na sua pasta. Marque-a como concluída e ela volta para onde estava.
+
+## Acompanhar e concluir uma sessão manualmente
+
+- **Acompanhar:** passe o mouse sobre uma sessão e clique no olho, ou escolha **Acompanhar como em andamento** no menu da sessão.
+- **Concluir:** passe o mouse sobre uma sessão do bloco e clique no visto, ou escolha **Marcar como concluído** no menu.
+
+No celular, deslize a linha de uma sessão para chegar à mesma ação, ou use o menu da sessão.
+
+Qualquer sessão de projeto pode ficar em andamento, inclusive sessões em worktrees. As subsessões vão junto com a sessão principal. As conversas nunca: são só conversas, então não ganham o olho.
+
+## Deixe o Jev mover as sessões por você
+
+Com um [provedor de classificação](/pt-br/classification-providers/) configurado, você não precisa acompanhar as sessões sozinho. O Jev lê cada mensagem que você envia e coloca a sessão em andamento quando você:
+
+- pede uma mudança
+- relata um bug
+- discute uma mudança concreta que está prestes a fazer
+
+Perguntas, explicações e pesquisas não contam. O Jev olha de novo quando o agente termina um turno, o que pega o trabalho que só fica claro com a resposta.
+
+O Jev só move sessões **para** em andamento. Depois que você marca uma sessão como concluída, só um novo pedido enviado depois disso a traz de volta.
+
+### "Este trabalho parece concluído."
+
+Quando um turno parece o fim do trabalho (você agradeceu, pediu um commit, confirmou que funciona), o Jev não fecha nada e deixa uma dica:
+
+- um visto cinza na linha da sessão na barra lateral
+- uma faixa acima do campo de mensagem: **Este trabalho parece concluído.** com um botão **Marcar como concluído**
+
+Clique em **Marcar como concluído** se o Jev estiver certo. Se não, é só continuar: a dica some com a sua próxima mensagem.
+
+## Resumo e sugestão da próxima mensagem
+
+Quando o agente termina e a sessão fica quieta por um minuto, o OpenChamber pode escrever duas coisas com o seu modelo pequeno (veja [Provedores, modelos e agentes](/pt-br/providers/)):
+
+- **Resumo:** um lembrete curto do que foi feito e de como as coisas ficaram, exibido abaixo da última resposta e na dica da sessão na barra lateral
+- **Sugestão:** a mensagem que você provavelmente mandaria em seguida, como uma linha no topo do campo de mensagem; um clique coloca o texto no campo, e ela nunca é enviada sozinha
+
+Com o Jev disponível, o OpenChamber primeiro pergunta a ele se o turno precisa deles. Um simples "valeu, é isso" depois de um trabalho de verdade ainda ganha um resumo, mas a sugestão é pulada quando não resta nada a fazer, e o modelo pequeno nem é chamado quando nenhum dos dois é útil. Sem o Jev, os dois são gerados depois de cada turno, como antes.
+
+Ative ou desative em **Configurações → Chat → Assistência da sessão**.
+
+## Configurações
+
+Abra **Configurações → Sessões → Sessões em andamento**:
+
+- **Mostrar sessões em andamento:** o próprio bloco; desativado, as sessões ficam onde sempre estiveram
+- **Mover sessões para em andamento automaticamente:** a parte do Jev; desative para acompanhar só manualmente
+
+As duas vêm ativadas por padrão.
+
+## Onde funciona
+
+O bloco e o acompanhamento manual funcionam em todo lugar, inclusive no VS Code. O movimento automático, a dica "parece concluído" e o filtro do Jev para os resumos precisam do servidor do OpenChamber, então funcionam no app desktop, no app web e no celular, mas não no VS Code.
+
+## Relacionado
+
+- [Provedores de classificação (Jev)](/pt-br/classification-providers/): configure o acompanhamento automático
+- [Conversas](/pt-br/chats/): conversas que ficam fora do trabalho em andamento
+- [Objetivos de sessão](/pt-br/session-goals/): faça o agente trabalhar até a linha de chegada

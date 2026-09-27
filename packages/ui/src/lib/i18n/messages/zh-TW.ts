@@ -9,6 +9,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode 隨 OpenChamber 一起提供。請更新 OpenChamber 以取得 OpenCode v2。",
@@ -63,6 +65,8 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
   ...providersI18n['zh-TW'],
+  ...mcpGridI18n['zh-TW'],
+  ...pluginsGridI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',
   'terminalView.actions.copySelection': '複製所選輸出',
   'terminalView.toast.selectionCopied': '已複製輸出',
@@ -204,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.viewMode.projects': '分組',
   'mobile.sessions.viewMode.timeline': '時間軸',
   'mobile.sessions.section.chats': '聊天',
+  'mobile.sessions.section.recent': '最近',
   'mobile.sessions.empty.noProjectsTitle': '尚無專案',
   'mobile.sessions.empty.noProjectsDescription': '新增專案即可開始與程式碼聊天。',
   'mobile.sessions.empty.noSessionsTitle': '尚無會話',
@@ -621,6 +626,13 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': '取消重新命名會話',
   'sessions.sidebar.session.menu.unpin': '取消釘選會話',
   'sessions.sidebar.session.menu.pin': '釘選會話',
+  'sessions.sidebar.work.title': '進行中',
+  'sessions.sidebar.session.work.track': '作為進行中追蹤',
+  'sessions.sidebar.session.work.markDone': '標記為完成',
+  'sessions.sidebar.session.work.doneSuggested': '看起來已完成',
+  'sessions.sidebar.session.work.updateFailed': '無法更新工作階段',
+  'chat.work.doneHint.text': '這項工作看起來已完成。',
+  'chat.work.doneHint.action': '標記為完成',
   'sessions.sidebar.session.menu.share': '分享',
   'sessions.sidebar.session.menu.copied': '已複製',
   'sessions.sidebar.session.menu.copyLink': '複製連結',
@@ -662,7 +674,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.confirm': '匯出',
   'sessions.sidebar.session.status.active': '會話活躍中',
   'sessions.sidebar.session.status.unread': '有未讀更新',
-  'sessions.sidebar.session.status.nextStep': '建議的下一步：{suggestion}',
   'sessions.sidebar.session.status.pinned': '已釘選會話',
   'sessions.sidebar.session.status.movingToWorktree': '正在將會話移至新工作樹',
   'sessions.sidebar.session.status.permissionRequired': '需要權限',
@@ -2412,10 +2423,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
   'chat.chatInput.focusMode.toggleAria': '切換專注模式',
   'chat.chatInput.focusMode.label': '專注模式',
-  'chat.chatInput.permissionAutoAccept.disable': '關閉權限自動接受',
-  'chat.chatInput.permissionAutoAccept.enable': '開啟權限自動接受',
-  'chat.chatInput.permissionAutoAccept.on': '權限自動接受：開',
-  'chat.chatInput.permissionAutoAccept.off': '權限自動接受：關',
   'chat.chatInput.linked.byAuthor': '由 {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '在瀏覽器中開啟 Issue',
   'chat.chatInput.linked.issue.removeAria': '移除已關聯的 Issue',

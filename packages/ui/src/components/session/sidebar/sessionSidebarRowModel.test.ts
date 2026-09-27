@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { deriveRecentActivitySections } from './recent/activitySections';
@@ -79,6 +79,99 @@ const args = (sections: ProjectSection[]): SessionSidebarRowModelArgs => ({
 });
 
 describe('buildSessionSidebarRowModel', () => {
+  test('a session in work moves to the top block and appears nowhere else', () => {
+    const working = node('working');
+    const other = node('other');
+    const input = args([project([group([working, other])])]);
+    input.showRecentSection = true;
+    input.recentSections = [{
+      key: 'active-now',
+      items: [working, other].map((entry) => ({ node: entry, projectId: 'project-a', groupDirectory: '/repo', secondaryMeta: null })),
+    }];
+    input.workItems = [timelineItem('working')];
+    input.workSessionIds = new Set(['working']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const sessionRows = model.rows.flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : []));
+
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'work' });
+    expect(sessionRows).toEqual(['recent:working', 'recent:other', 'project:other']);
+    expect(model.selectionEntries.filter((entry) => entry.id === 'working')).toHaveLength(1);
+  });
+
+  test('timeline keeps work sessions out of the flat list and renders them as timeline rows', () => {
+    const input = args([]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('working'), timelineItem('other')];
+    input.workItems = [timelineItem('working')];
+    input.workSessionIds = new Set(['working']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const headers = rows.flatMap((row) => (row.kind === 'activity-header' ? [row.activityKey] : []));
+    const sessions = rows.flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : []));
+
+    expect(headers).toEqual(['work', 'timeline']);
+    expect(sessions).toEqual(['timeline:working', 'timeline:other']);
+  });
+
+  test('search counts a subsession of a session in work once, and the moved tree leaves its group', () => {
+    const parent = node('ses_parent', [node('ses_child'), node('ses_other')]);
+    const main = group([parent]);
+    const input = args([project([main])]);
+    input.mode = 'search';
+    input.normalizedQuery = 'ses_child';
+    input.groupSearchDataByGroup.set(main, {
+      filteredNodes: [parent],
+      matchedSessionCount: countSessionSearchMatches([parent], 'ses_child'),
+      folderNameMatchCount: 0,
+      groupMatches: false,
+      hasMatch: true,
+    });
+    input.workItems = [{ ...timelineItem('ses_parent'), node: parent }];
+    input.workSessionIds = new Set(['ses_parent']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const rows = model.rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+    expect(model.searchMatchCount).toBe(1);
+    expect(rows).toEqual(['ses_parent', 'ses_child', 'ses_other']);
+    // The project had no other match: no empty project header.
+    expect(model.rows.some((row) => row.kind === 'project-header')).toBe(false);
+  });
+
+  test('search counts every matching subsession of a session in work', () => {
+    const titled = (id: string, title: string, children: SessionNode[] = []): SessionNode => ({ session: { ...session(id), title }, children, worktree: null });
+    const parent = titled('ses_parent', 'Parent', [titled('ses_a', 'fix header'), titled('ses_b', 'header spacing'), titled('ses_c', 'footer')]);
+    const input = args([]);
+    input.mode = 'search';
+    input.normalizedQuery = 'header';
+    input.workItems = [{ ...timelineItem('ses_parent'), node: parent }];
+    input.workSessionIds = new Set(['ses_parent']);
+
+    expect(buildSessionSidebarRowModel(input).searchMatchCount).toBe(2);
+  });
+
+  test('in work sits under Chats and above Recent', () => {
+    const working = node('working');
+    const input = args([project([group([working, node('other')])])]);
+    input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
+    input.showRecentSection = true;
+    input.recentSections = [{ key: 'active-now', items: [{ node: node('other'), projectId: 'project-a', groupDirectory: '/repo', secondaryMeta: null }] }];
+    input.workItems = [timelineItem('working')];
+    input.workSessionIds = new Set(['working']);
+
+    const headers = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'activity-header' ? [row.activityKey] : []));
+
+    expect(headers).toEqual(['chats', 'work', 'active-now']);
+  });
+
+  test('no block while nothing is in work', () => {
+    const input = args([project([group([node('other')])])]);
+    input.workItems = [];
+    const headers = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'activity-header' ? [row.activityKey] : []));
+    expect(headers).not.toContain('work');
+  });
+
   test('expanded Recent rows use their own tooltip metadata, including an explicitly hidden branch', () => {
     const parent = node('parent', [node('child'), node('hidden')]);
     const branches = new Map([['parent', 'main'], ['child', 'feature-child']]);

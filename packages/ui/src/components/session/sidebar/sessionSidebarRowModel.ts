@@ -8,6 +8,7 @@ import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
 import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes } from './sessions/sessionNodeItemUtils';
 import { getSessionFolderIdentityKey, getSessionFolderOwnerKey, getSessionFolderScopes, isArchivedFolderScope } from './sessions/sessionFolderIdentity';
 import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
+import { countSessionTreeQueryMatches } from './recent/activitySections';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -17,7 +18,7 @@ export type SessionSidebarActivityItem = {
   getSecondaryMeta?: (sessionId: string) => SessionSidebarActivityItem['secondaryMeta'];
 };
 
-export type SessionSidebarActivityKey = 'chats' | 'active-now' | 'timeline';
+export type SessionSidebarActivityKey = 'work' | 'chats' | 'active-now' | 'timeline';
 
 // 'timeline-chat' is a Chats row inside the timeline view: one line, no left
 // gutter, status and pin on the right like the three-line timeline rows.
@@ -92,6 +93,14 @@ export type SessionSidebarRowModelArgs = {
   chatGroup: SessionGroup | null;
   recentSections: readonly SessionSidebarActivitySection[];
   timelineItems?: readonly SessionSidebarActivityItem[];
+  /**
+   * Sessions in work, already ordered and search-filtered. They render in
+   * their own block at the top and move out of every other projection
+   * (Recent, Timeline, project groups, folders, Chats): a session appears
+   * once.
+   */
+  workItems?: readonly SessionSidebarActivityItem[];
+  workSessionIds?: ReadonlySet<string>;
   showRecentSection: boolean;
   foldersMap: SessionFoldersMap;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
@@ -114,7 +123,23 @@ export type SessionSidebarRowModelArgs = {
   sessionBatchSize?: number;
 };
 
+/**
+ * How many sessions of search-filtered trees a group reports as matches: for
+ * a `ses_` id query the exact id only, otherwise every session the search
+ * kept. Group search data and the row model both count with this, so taking
+ * trees out of a group takes exactly their share out of its count.
+ */
+export const countSessionSearchMatches = (nodes: readonly SessionNode[], normalizedQuery: string): number => {
+  const idQuery = normalizedQuery.trim().toLowerCase();
+  const isIdQuery = idQuery.startsWith('ses_');
+  const count = (list: readonly SessionNode[]): number => list.reduce((total, node) => (
+    total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + count(node.children)
+  ), 0);
+  return count(nodes);
+};
+
 const EMPTY_FOLDERS: readonly SessionFolder[] = [];
+const EMPTY_WORK_SESSION_IDS: ReadonlySet<string> = new Set();
 const SESSION_ESTIMATE = 32;
 const TIMELINE_SESSION_ESTIMATE = 64;
 const TIMELINE_CHATS_INITIAL_LIMIT = 3;
@@ -207,6 +232,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const keyOccurrences = new Map<string, number>();
   const search = args.mode === 'search';
   const pinned = args.pinnedSessionIds instanceof Set ? args.pinnedSessionIds : new Set(args.pinnedSessionIds);
+  const inWork = args.workSessionIds ?? EMPTY_WORK_SESSION_IDS;
   let searchMatchCount = 0;
 
   const authoritativeRoots = [
@@ -288,6 +314,16 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
+  // A group's search matches once the trees in work are taken out: those
+  // render in their own zone, which counts them. Zero means nothing to show.
+  const groupSearchMatches = (group: SessionGroup): number => {
+    const searchData = args.groupSearchDataByGroup.get(group);
+    if (searchData?.hasMatch !== true) return 0;
+    const movedToWork = inWork.size > 0 ? searchData.filteredNodes.filter((node) => inWork.has(node.session.id)) : [];
+    const sessionMatches = Math.max(0, searchData.matchedSessionCount - countSessionSearchMatches(movedToWork, args.normalizedQuery));
+    return sessionMatches + searchData.folderNameMatchCount + (searchData.groupMatches ? 1 : 0);
+  };
+
   const appendGroup = (
     group: SessionGroup,
     groupKey: string,
@@ -296,11 +332,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     limits?: { initial: number; increment: number; pinnedAlwaysVisible: boolean; renderContext: SessionSidebarRenderContext },
   ): void => {
     const searchData = args.groupSearchDataByGroup.get(group);
-    if (search && searchData?.hasMatch !== true) return;
-    if (search && searchData) {
-      searchMatchCount += searchData.matchedSessionCount + searchData.folderNameMatchCount + (searchData.groupMatches ? 1 : 0);
+    if (search) {
+      const matches = groupSearchMatches(group);
+      if (matches === 0) return;
+      searchMatchCount += matches;
     }
-    const sourceNodes = [...(search ? searchData?.filteredNodes ?? [] : group.sessions)]
+    const sourceNodes = (search ? searchData?.filteredNodes ?? [] : group.sessions)
+      .filter((node) => !inWork.has(node.session.id))
       .sort((left, right) => compareNodes(left, right, pinned, args.sessionOrderIndex));
     const indexed = indexNodes(sourceNodes);
     const selectionPoolOffset = selectionDescendantIds.length;
@@ -450,9 +488,30 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   const timelineMode = args.viewMode === 'timeline';
 
+  const appendActivityItems = (
+    items: readonly SessionSidebarActivityItem[],
+    containerKey: string,
+    renderContext: SessionSidebarRenderContext,
+    scoped: boolean,
+    countMatches: (item: SessionSidebarActivityItem) => number = () => 1,
+  ): void => {
+    for (const item of items) {
+      const indexed = indexNodes([item.node]);
+      const selectionPoolOffset = selectionDescendantIds.length;
+      selectionDescendantIds.push(...indexed.preorderIds);
+      const ownerKey = getSessionFolderOwnerKey(item.projectId, item.groupDirectory);
+      appendSessions({
+        nodes: [item.node], containerKey, projectId: item.projectId, groupDirectory: item.groupDirectory,
+        // A list spanning projects carries no selection scope.
+        ownerKey, selectionScopeKey: scoped ? ownerKey : null, archived: false, renderContext,
+        secondaryMeta: item.secondaryMeta, getSecondaryMeta: item.getSecondaryMeta, indexedNodes: indexed, selectionPoolOffset,
+      });
+      if (search) searchMatchCount += countMatches(item);
+    }
+  };
+
   if (args.chatGroup) {
-    const chatSearchData = args.groupSearchDataByGroup.get(args.chatGroup);
-    if (!search || chatSearchData?.hasMatch === true) {
+    if (!search || groupSearchMatches(args.chatGroup) > 0) {
       const collapsed = appendActivityHeader('chats');
       if (!collapsed) {
         appendGroup(args.chatGroup, 'activity:chats', null, true, timelineMode
@@ -462,31 +521,26 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   }
 
+  // In work sits under Chats and above Recent / the timeline.
+  const workItems = args.workItems ?? [];
+  if (workItems.length > 0) {
+    const collapsed = appendActivityHeader('work');
+    // A tree is listed for its matching subsession too; the ancestors around
+    // it are context, so only real matches count.
+    if (!collapsed) appendActivityItems(workItems, 'activity:work', timelineMode ? 'timeline' : 'recent', false, (item) => countSessionTreeQueryMatches(item.node, args.normalizedQuery));
+  }
+
   if (timelineMode) {
-    const timelineItems = args.timelineItems ?? [];
+    const timelineItems = (args.timelineItems ?? []).filter((item) => !inWork.has(item.node.session.id));
     if (timelineItems.length > 0) {
       const collapsed = appendActivityHeader('timeline');
-      if (!collapsed) {
-        const containerKey = 'activity:timeline';
-        for (const item of timelineItems) {
-          const indexed = indexNodes([item.node]);
-          const selectionPoolOffset = selectionDescendantIds.length;
-          selectionDescendantIds.push(...indexed.preorderIds);
-          const ownerKey = getSessionFolderOwnerKey(item.projectId, item.groupDirectory);
-          appendSessions({
-            nodes: [item.node], containerKey, projectId: item.projectId, groupDirectory: item.groupDirectory,
-            // One flat list: selection spans projects, so it carries no scope.
-            ownerKey, selectionScopeKey: null, archived: false, renderContext: 'timeline',
-            secondaryMeta: item.secondaryMeta, indexedNodes: indexed, selectionPoolOffset,
-          });
-          if (search) searchMatchCount += 1;
-        }
-      }
+      if (!collapsed) appendActivityItems(timelineItems, 'activity:timeline', 'timeline', false);
     }
   }
 
   if (!timelineMode && args.showRecentSection) {
-    for (const section of args.recentSections) {
+    for (const recentSection of args.recentSections) {
+      const section = { ...recentSection, items: recentSection.items.filter((item) => !inWork.has(item.node.session.id)) };
       if (section.items.length === 0) continue;
       const collapsed = appendActivityHeader('active-now');
       if (collapsed) continue;
@@ -515,6 +569,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     projectSections = active ? [active] : [];
   }
   for (const section of projectSections) {
+    const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
+    // A project whose only matches moved to In work shows no empty header.
+    if (search && !descriptors.some((descriptor) => groupSearchMatches(descriptor.group) > 0)) continue;
     const projectCollapsed = !search && !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
     if (!args.showOnlyMainWorkspace) {
       const rowIndex = rows.length;
@@ -522,7 +579,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: section.project.id }));
     }
     if (projectCollapsed) continue;
-    const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
     for (const descriptor of descriptors) appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel);
   }
 

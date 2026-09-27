@@ -79,7 +79,15 @@ their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
 `partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree, with no Recent projection. VS Code excludes worktrees and managed
+project tree. In the grouped view its display panel offers the same Recent
+toggle (`sidebarShowRecentSection`, per surface, so the phone and the desktop
+choose separately): a collapsible section under In work with the desktop's
+membership (`useRecentSessionCollection`), subsessions kept for expansion,
+compact rows labelled "project · branch" through `resolveSidebarSessionLocations`
+with the desktop Recent policy (live root branch included, a branch equal to
+the project label hidden; the branch map is held while the drawer closes),
+seven rows before Show more. The
+timeline never shows Recent. VS Code excludes worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
 
@@ -130,6 +138,49 @@ only for unmarked legacy sessions. Row memoization compares those same semantics
 so metadata-only membership changes update the menu. See
 `lib/multirun/DOCUMENTATION.md` for source selection and fork rules.
 
+## In work
+
+Sessions in work (`metadata.openchamber.work.state === 'open'`, see
+`packages/web/server/lib/session-work/DOCUMENTATION.md`) render in their own
+`work` activity zone under Chats and above Recent / the timeline, in both view
+modes, while `sessionWorkEnabled` is on. `list/SessionProjectCollection.tsx`
+selects them from the ordered collection (top-level, unarchived, not managed
+Chats, shared lifecycle order) and
+passes `workItems` plus `workSessionIds` to the row model. A session in work
+MOVES: the row model drops it from Recent, the Timeline list, project groups,
+and folders, so it appears once. Chats are never in work and offer no Track
+action. An empty zone is not rendered. Rows use
+`renderContext: 'timeline'` in the timeline view and `recent` (project and
+branch shown) in the projects view. Search in the projects view keeps a tree
+whose subsession matches (`sessionTreeMatchesSidebarQuery`): those subsessions
+are nowhere else in the sidebar. The zone counts only sessions that match
+themselves (`countSessionTreeQueryMatches`), and a group subtracts the trees
+that moved out of it with the same counter its search data used
+(`countSessionSearchMatches`), so one exact id is one match; a group or project
+whose only matches moved renders nothing. Track / Done captures the runtime key at the
+click (`setSessionWorkState`), so a server switch mid-request writes nothing to
+the new server.
+
+Row actions revealed on hover are the same three in both views: Track / Done
+(eye in the muted action color like its neighbours / check in
+`status.success`, one icon size up because the glyph draws small), quick
+archive/delete, the menu. Pin/unpin lives in the menu only. Touch layouts (`alwaysShowActions`)
+keep Track / Done in the menu. At rest a row in work shows a grey check only
+while Jev's done hint is current (`isDoneSuggested`); the composer shows the
+same hint as a top row (`components/chat/SessionDoneHintRow.tsx`). The
+whole-row tooltip in the projects view shows the current recap. The mobile
+sheet (`apps/MobileSessionsSheet.tsx`) mirrors it: an "In work" section under
+Chats takes the sessions in work with their subsessions out of the project
+buckets and the timeline, and Track / Done is a swipe action on top-level
+rows. Mobile swipe actions run left to right by how often they are used on a
+phone, because a short drag exposes the leftmost first: archive, pin (top-level
+rows), Track / Done (top-level rows, feature on), delete, rename; AI rename sits
+inside the rename editor. Top-level rows also show a pin marker beside the
+time; pins are the same device-local `useSessionPinnedStore` the desktop menu
+writes, so a pin set on one device does not appear on another. Row memoization
+compares `metadata` by reference and `time.idle`, so metadata-only changes
+(work, goal, recap) re-render the row.
+
 ## Timeline view
 
 `sidebarViewMode` (profile-scoped, per surface) switches the desktop and web
@@ -139,8 +190,8 @@ renders `projects`.
 - Timeline keeps the managed Chats zone, with an initial reveal of 3 instead of
   the usual Chats limit. Pinned chats are always shown and never spend that
   limit, so Show more/Show fewer count only unpinned rows. Chats rows render
-  with `renderContext: 'timeline-chat'`: one line, no left gutter, pin and
-  status dot on the right beside the time. Collapsing a zone header resets its
+  with `renderContext: 'timeline-chat'`: one line, no left gutter, pin marker
+  and status dot on the right beside the time. Collapsing a zone header resets its
   Show more state.
 - Zone headers are sticky in the projects view and never in the timeline; there
   is no user toggle. Timeline zone headers drop the leading icon and use a
@@ -271,7 +322,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
 - Sidebar selection holds the clicked row's viewport position across navigation-driven sidebar updates. Wheel or touch input cancels the hold immediately, so programmatic compensation never fights intentional scrolling.
 - Global session subscriptions are structural: create/delete, title, archive, directory, parent, and slug changes invalidate the tree. Recency-only `time.updated` changes do not trigger a rebuild. The separate lifecycle rank invalidates ordering only on `settled ↔ active` transitions, with root sessions ranked among roots and child sessions only among siblings of the same parent.
-- A worktree Git still registers but whose directory is gone (`prunable` in `git worktree list`) stays in the topology with `worktreeStatus: 'missing'` and a warning icon on its group header. Its sessions remain accessible for manual movement or archiving through worktree deletion. Opening a session does not move it. The ordinary worktree delete action accepts a missing directory. Topology discovery remains event-driven, including `session-created` and server `worktree-changed` control events, with no idle polling. The server sends `worktree-changed` after its own worktree create/remove and when a status or listing request notices that a repository's worktree set changed (see `packages/web/server/lib/git/DOCUMENTATION.md`); the event names every directory of that repository the server has seen, and the sidebar refreshes each registered project among them once, bypassing the 30-second list cache. A worktree this client created and is still bootstrapping keeps its `pending`/`invalid` status through that refresh. Hosted mobile and the desktop mini chat handle the same control event through `lib/worktrees/worktreeTopologyRefresh.ts`; VS Code intentionally excludes worktree topology.
+- A worktree Git still registers but whose directory is gone (`prunable` in `git worktree list`) stays in the topology with `worktreeStatus: 'missing'` and a warning icon on its group header. Its sessions remain accessible for manual movement or archiving through worktree deletion. Opening a session does not move it. The ordinary worktree delete action accepts a missing directory. Topology discovery remains event-driven, including `session-created` and server `worktree-changed` control events, with no idle polling. After an instance switch the project list comes from the local cache, so discovery can run before the instance answers: projects whose discovery failed are discovered again once when the connection comes up. The worktree list and project-root caches are keyed by path, so a runtime switch clears them. The server sends `worktree-changed` after its own worktree create/remove and when a status or listing request notices that a repository's worktree set changed (see `packages/web/server/lib/git/DOCUMENTATION.md`); the event names every directory of that repository the server has seen, and the sidebar refreshes each registered project among them once, bypassing the 30-second list cache. A worktree this client created and is still bootstrapping keeps its `pending`/`invalid` status through that refresh. Hosted mobile and the desktop mini chat handle the same control event through `lib/worktrees/worktreeTopologyRefresh.ts`; VS Code intentionally excludes worktree topology.
 - Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree. The owning project resolves from the row's project id, then from the session's directory, then from the session's worktree metadata `projectDirectory` — the last step keeps sibling destinations listed for a restored session whose own worktree directory was deleted, which matters because relocation out of a dead directory is manual.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event retriggers bounded worktree discovery so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
 - Recent membership includes active root sessions immediately even when their last committed `time.updated` falls outside the 48-hour window. Children and archived sessions remain excluded, and inactive roots remain timestamp-based. The active-ID subscription is disabled while the sidebar is hidden and ignores retry/status detail changes, avoiding streaming-frequency rerenders.

@@ -1,0 +1,61 @@
+---
+title: Otomatik model yönlendirme
+description: Her istem için modeli, düşünme düzeyini ve ajanı OpenChamber seçsin.
+---
+
+# Otomatik model yönlendirme
+
+Model seçicide **Otomatik**'i seçin, OpenChamber gönderdiğiniz her istem için modeli seçsin. Bir yazım hatası düzeltmesi ucuz ve hızlı bir modele, çetrefilli bir hata ise en güçlü modelinize gider. Hangi modelin hangi tür göreve bakacağına ayarlarda bir kez karar verirsiniz.
+
+## Açmak için
+
+1. Bir [sınıflandırma sağlayıcısının](/tr/classification-providers/) kurulu olduğundan emin olun. Auto'nun istemleri sınıflandırmak için Jev'e ihtiyacı var.
+2. **Ayarlar → Yönlendirme** sayfasını açın ve **Auto modunu etkinleştir**'i işaretleyin.
+3. Bir **Yedek model** (ve düşünme düzeyini) seçin. Bunu yapana kadar Auto gizli kalır.
+4. Aşağıdaki kategorilere göz atın ve önem verdiklerinize kendi modellerini atayın.
+
+Her şey hazır olduğunda sayfa **Hazır** gösterir. Herhangi bir oturumda model seçicinin en üstündeki **Otomatik**'i seçin.
+
+## Kategoriler
+
+Her istem bir kategoriye düşer. Dördü yerleşik gelir:
+
+| Kategori | Ne için |
+| --- | --- |
+| Trivial | mekanik işler: yeniden adlandırma, yazım hataları, biçimlendirme, yorumlar, basit komutlar |
+| Research | kodu değiştirmeden okuma ve açıklama |
+| Implement | net bir değişiklik: kapsamı belli bir özellik, testler, nedeni bilinen bir düzeltme |
+| Hard | nedeni bilinmeyen hatalar, tasarım ve planlama, güvenlik, kimlik doğrulama, eşzamanlılık, geçişler, para |
+
+Her kategori için şunları ayarlayabilirsiniz:
+
+- **Model:** boş bırakılırsa yedek model kullanılır
+- **Düşünme:** bu modelin düşünme düzeyi
+- **Ajan:** bu görevleri yürüten ajan; boş bırakılırsa mesaj alanının kullanacağı ajan kalır
+
+Jev istemleri kategori adlarını ve açıklamalarını okuyarak sınıflandırır, yani açıklamalar talimat gibi çalışır. Kategoriye neyin girdiğini ve neyin girmediğini yazın. Kategorileri düzenleyebilir, kapatabilir, kaldırabilir veya ekleyebilirsiniz; fikrinizi değiştirirseniz yerleşik bir kategoriyi geri getirebilirsiniz. Auto'nun en az iki açık kategoriye ihtiyacı vardır.
+
+## Gönderdiğinizde ne olur
+
+1. OpenChamber mesajınızı ve son birkaç turdan kısa bir alıntıyı Jev'e gönderir.
+2. Jev bir kategori seçer ve ne kadar emin olduğunu söyler.
+3. Oturum o kategorinin modeline, düşünme düzeyine ve ajanına geçer, mesajınız da gönderilir.
+
+Her mesaj yeniden sınıflandırılır; böylece bir oturum hızlı bir soru için ucuz bir modelden bir sonraki istekte en güçlü modelinize geçebilir. Mesaj alanı **Otomatik** göstermeye devam eder, ajan ve düşünme seçimleri ise gizlenir çünkü bunlara kategori karar verir.
+
+Yedek model şu durumlarda yanıt verir:
+
+- Jev yeterince emin değilse (yüzde 60'ın altında)
+- Jev hata verirse ya da dört saniyeden uzun sürerse
+- kategorinin kendi modeli yoksa
+
+Seçicide belirli bir model seçmek oturumu Auto'dan çıkarır. Geri dönmek için yeniden **Otomatik**'i seçin. Auto'yu **Ayarlar → Session'lar** bölümünden yeni oturumların varsayılanı da yapabilirsiniz.
+
+## Nerede çalışır
+
+Auto, OpenChamber sunucusunda çalışır: masaüstü uygulamasında, web uygulamasında ve bunlardan birine bağlı telefonunuzda. VS Code Auto sunmaz, çünkü eklenti OpenCode ile doğrudan konuşur.
+
+## İlgili
+
+- [Sınıflandırma sağlayıcıları (Jev)](/tr/classification-providers/): istemleri sınıflandıran modeli kurun
+- [Sağlayıcılar, modeller ve agentlar](/tr/providers/): Auto'nun aralarından seçtiği modelleri bağlayın

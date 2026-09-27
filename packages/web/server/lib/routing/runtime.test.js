@@ -3,6 +3,7 @@ import { createRoutingRuntime, requestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
 import { createJevClient, decidePermission, decideRouting } from './jev.js';
+import { classifierEndpoint, resolveClassifier } from './classifier.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
 const FALLBACK = { model: { providerID: 'anthropic', modelID: 'claude-sonnet-5' }, variant: 'medium' };
@@ -18,7 +19,7 @@ const readyConfig = () => {
   return config;
 };
 
-const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError } = {}) => {
+const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource = null, zenKey = null, zenPromotionActive = true, answers, askError } = {}) => {
   const events = [];
   const store = {
     readConfig: vi.fn(async () => config),
@@ -26,6 +27,8 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError 
     readToken: vi.fn(async () => token),
     writeToken: vi.fn(async () => undefined),
     clearToken: vi.fn(async () => undefined),
+    readClassifierSource: vi.fn(async () => classifierSource),
+    writeClassifierSource: vi.fn(async () => undefined),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
   const runtime = createRoutingRuntime({
@@ -35,6 +38,8 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError 
     broadcastGlobalUiEvent: (event) => events.push(event),
     store,
     jev,
+    readZenKey: () => zenKey,
+    zenPromotionActive,
   });
   return { runtime, store, jev, events };
 };
@@ -135,28 +140,47 @@ describe('resolveAutoSelection', () => {
 });
 
 describe('jev endpoint', () => {
-  const capture = async (token) => {
+  const capture = async (source, keys = {}) => {
     let call = null;
     const fetchImpl = async (url, init) => {
       call = { url, init };
       return { ok: true, status: 200, text: async () => JSON.stringify({ answers: {} }) };
     };
-    await createJevClient({ fetchImpl }).ask({ state: 'x', questions: {} }, token);
+    await createJevClient({ fetchImpl }).ask({ state: 'x', questions: {} }, classifierEndpoint(source, keys));
     return { url: call.url, headers: call.init.headers, body: JSON.parse(call.init.body) };
   };
 
-  it('sends a saved key to TypeSafe and falls back to the free model zen serves without one', async () => {
-    const keyed = await capture('secret');
+  it('sends a TypeSafe key to TypeSafe, a Zen key to the paid zen model, and the promotion keyless', async () => {
+    const keyed = await capture('typesafe', { typesafeKey: 'secret' });
     expect(keyed.url).toBe('https://api.typesafe.ai/v1/systemone');
     expect(keyed.headers.authorization).toBe('Bearer secret');
     expect(keyed.body.model).toBe('jev-latest');
 
-    const free = await capture(null);
+    const zen = await capture('zen-key', { zenKey: 'zen-secret' });
+    expect(zen.url).toBe('https://opencode.ai/zen/v1/systemone');
+    expect(zen.headers.authorization).toBe('Bearer zen-secret');
+    expect(zen.headers['x-opencode-client']).toBe('openchamber');
+    expect(zen.body.model).toBe('jev-1.13');
+
+    const free = await capture('zen-promo');
     expect(free.url).toBe('https://opencode.ai/zen/v1/systemone');
     expect(free.headers.authorization).toBeUndefined();
     // Zen counts our calls by this header, and does not know the `jev-latest` alias.
     expect(free.headers['x-opencode-client']).toBe('openchamber');
     expect(free.body.model).toBe('jev-1.13-free');
+  });
+});
+
+describe('resolveClassifier', () => {
+  it('defaults to a saved TypeSafe key, else the promotion', () => {
+    expect(resolveClassifier({ selected: null, typesafeKey: 'k', zenKey: null, zenPromotionActive: true })).toMatchObject({ selected: 'typesafe', effective: 'typesafe' });
+    expect(resolveClassifier({ selected: null, typesafeKey: null, zenKey: null, zenPromotionActive: true })).toMatchObject({ selected: 'zen-promo', effective: 'zen-promo' });
+  });
+
+  it('falls back to the first usable source, own keys first, when the pick cannot be used', () => {
+    expect(resolveClassifier({ selected: 'zen-promo', typesafeKey: null, zenKey: 'z', zenPromotionActive: false }).effective).toBe('zen-key');
+    expect(resolveClassifier({ selected: 'typesafe', typesafeKey: null, zenKey: null, zenPromotionActive: true }).effective).toBe('zen-promo');
+    expect(resolveClassifier({ selected: 'zen-promo', typesafeKey: null, zenKey: null, zenPromotionActive: false }).effective).toBeNull();
   });
 });
 
@@ -185,18 +209,56 @@ describe('evaluatePermission', () => {
     expect(runtime.heldPermissions()).toEqual([]);
   });
 
-  it('accepts when Jev is unreachable and tells the UI it skipped', async () => {
-    const { runtime, events } = makeRuntime({ askError: Object.assign(new Error('Jev timed out after 4000ms'), { code: 'timeout' }) });
-    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept', skipped: 'Jev timed out after 4000ms' });
-    expect(events.at(-1)).toMatchObject({ type: 'openchamber:routing.safety-skipped', properties: { permissionId: 'p1', error: 'Jev timed out after 4000ms' } });
+  it('accepts a safe permission', async () => {
+    const { runtime } = makeRuntime({ answers: { ask: { noul: 0.1 }, kind: { choice: 'read_only' } } });
+    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept', score: 0.1, kind: 'read_only' });
   });
 
-  it('accepts without asking when the safety net is off', async () => {
+  it('holds when Jev is unreachable, tells the UI why, and asks again next time', async () => {
+    const { runtime, events, jev } = makeRuntime({ askError: Object.assign(new Error('Jev timed out after 4000ms'), { code: 'timeout' }) });
+    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'hold', skipped: 'Jev timed out after 4000ms' });
+    expect(events.at(-1)).toMatchObject({ type: 'openchamber:routing.safety-skipped', properties: { permissionId: 'p1', error: 'Jev timed out after 4000ms' } });
+    await runtime.evaluatePermission(permission, '/repo');
+    expect(jev.ask).toHaveBeenCalledTimes(2);
+    expect(runtime.heldPermissions()).toEqual([]);
+  });
+
+  it('holds quietly without asking when no classification provider is usable', async () => {
+    const { runtime, jev, events } = makeRuntime({ token: null, zenPromotionActive: false, answers: {} });
+    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'hold', unavailable: true });
+    expect(jev.ask).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
+
+  it('works whether or not Auto routing is on', async () => {
+    const config = readyConfig();
+    config.enabled = false;
+    config.safetyNet.enabled = false;
+    const { runtime, jev } = makeRuntime({ config, answers: { ask: { noul: 0.9 } } });
+    expect(await runtime.evaluatePermission(permission, '/repo')).toMatchObject({ action: 'hold', score: 0.9 });
+    expect(jev.ask).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the old global safety-net switch for the policy conversion', async () => {
+    expect(await makeRuntime({ answers: {} }).runtime.legacySafetyNetEnabled()).toBe(true);
     const off = readyConfig();
     off.safetyNet.enabled = false;
-    const { runtime, jev } = makeRuntime({ config: off, answers: {} });
-    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept' });
-    expect(jev.ask).not.toHaveBeenCalled();
+    expect(await makeRuntime({ config: off, answers: {} }).runtime.legacySafetyNetEnabled()).toBe(false);
+  });
+});
+
+describe('classifier pick', () => {
+  it('stores a known source and refuses an unknown one', async () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    await runtime.setClassifierSource('zen-key');
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('zen-key');
+    await expect(runtime.setClassifierSource('vercel')).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('picks TypeSafe when a key is saved', async () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    await runtime.setToken('secret');
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('typesafe');
   });
 });
 
@@ -204,7 +266,13 @@ describe('describe', () => {
   it('reports Auto ready with an enabled config, a fallback and two categories, key or no key', async () => {
     expect((await makeRuntime({ answers: {} }).runtime.describe())).toMatchObject({ autoReady: true, tokenPresent: true, jevSource: 'typesafe' });
     // Without a key the free Jev model on zen answers, so Auto stays available.
-    expect((await makeRuntime({ token: null, answers: {} }).runtime.describe())).toMatchObject({ autoReady: true, tokenPresent: false, jevSource: 'zen-free' });
+    expect((await makeRuntime({ token: null, answers: {} }).runtime.describe())).toMatchObject({ autoReady: true, jevAvailable: true, tokenPresent: false, jevSource: 'zen-free' });
+    // No usable classification provider: no Jev, so no Auto.
+    expect((await makeRuntime({ token: null, zenPromotionActive: false, answers: {} }).runtime.describe())).toMatchObject({
+      autoReady: false,
+      jevAvailable: false,
+      classifier: { selected: 'zen-promo', effective: null },
+    });
     const one = readyConfig();
     one.categories = one.categories.map((c, i) => ({ ...c, enabled: i === 0 }));
     expect((await makeRuntime({ config: one, answers: {} }).runtime.describe()).autoReady).toBe(false);

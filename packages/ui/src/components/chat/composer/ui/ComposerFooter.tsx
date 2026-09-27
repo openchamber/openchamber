@@ -24,6 +24,7 @@ import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 import { FocusModeButton } from './FocusModeButton';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
+import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
 import type { BtwSelection } from '@/stores/useBtwStore';
 
 const MemoModelControls = React.memo(ModelControls);
@@ -49,7 +50,7 @@ export interface ComposerFooterProps {
     canAbort: boolean;
     hasContent: boolean;
     isExpandedInput: boolean;
-    permissionAutoAcceptEnabled: boolean;
+    permissionMode: PermissionMode;
     isPermissionAutoAcceptInteractive: boolean;
     dictationActive: boolean;
 
@@ -63,7 +64,7 @@ export interface ComposerFooterProps {
     onOpenGuestAttach?: (guestId: string) => void;
     onOpenAttachSheet: () => void;
     onToggleExpandedInput: () => void;
-    onTogglePermissionAutoAccept: () => void;
+    onCyclePermissionMode: () => void;
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
     onAbort: () => void;
@@ -97,7 +98,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         canAbort,
         hasContent,
         isExpandedInput,
-        permissionAutoAcceptEnabled,
+        permissionMode,
         isPermissionAutoAcceptInteractive,
         dictationActive,
         onOpenSettings,
@@ -110,7 +111,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         onOpenGuestAttach,
         onOpenAttachSheet,
         onToggleExpandedInput,
-        onTogglePermissionAutoAccept,
+        onCyclePermissionMode,
         onPrimaryAction,
         onQueueMessage,
         onAbort,
@@ -160,8 +161,8 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
                                 isInteractive={isPermissionAutoAcceptInteractive}
-                                permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
-                                handlePermissionAutoAcceptToggle={onTogglePermissionAutoAccept}
+                                permissionMode={permissionMode}
+                                handlePermissionModeCycle={onCyclePermissionMode}
                             />
                             {!isBtw ? <SessionGoalButton
                                 sessionId={currentSessionId}
@@ -239,8 +240,8 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
                             isInteractive={isPermissionAutoAcceptInteractive}
-                            permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
-                            handlePermissionAutoAcceptToggle={onTogglePermissionAutoAccept}
+                            permissionMode={permissionMode}
+                            handlePermissionModeCycle={onCyclePermissionMode}
                             withTooltip
                         />
                         {!isBtw ? <SessionGoalButton

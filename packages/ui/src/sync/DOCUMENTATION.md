@@ -572,8 +572,8 @@ after this final read cannot be guarded atomically.
 both title context and Markdown export. Export keeps full text; title input
 limits individual fields and each message while retaining head/tail excerpts.
 Web, Electron, hosted mobile and Capacitor use the existing Small Model route.
-Mobile session rows expose the same action beside manual rename when swiped
-open, with four 48px action slots and a session-scoped generation spinner.
+Mobile session rows expose the same action inside the manual rename editor
+(swipe, then rename), with a session-scoped generation spinner on the row.
 VS Code has no Small Model route and exposes a disabled action with an explicit
 explanation.
 

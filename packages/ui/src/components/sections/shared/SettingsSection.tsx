@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
@@ -539,6 +540,12 @@ interface SettingsChipOption<T extends string> {
   value: T;
   label: React.ReactNode;
   disabled?: boolean;
+  /**
+   * Shown on hover (long-press on touch). The popup stays open while the
+   * pointer is on it, so it may carry a link. Keep what the user must read
+   * visible elsewhere: touch users rarely long-press.
+   */
+  tooltip?: React.ReactNode;
 }
 
 interface SettingsChipGroupProps<T extends string> {
@@ -563,20 +570,35 @@ export function SettingsChipGroup<T extends string>({
       aria-label={ariaLabel}
       className={cn('flex flex-wrap items-center gap-1', className)}
     >
-      {options.map((option) => (
-        <Button
-          key={option.value}
-          type="button"
-          variant="chip"
-          size="xs"
-          disabled={option.disabled}
-          aria-pressed={value === option.value}
-          className="!font-normal"
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </Button>
-      ))}
+      {options.map((option) => {
+        const chip = (
+          <Button
+            key={option.value}
+            type="button"
+            variant="chip"
+            size="xs"
+            disabled={option.disabled}
+            aria-pressed={value === option.value}
+            className="!font-normal"
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        );
+        if (!option.tooltip) return chip;
+        return (
+          <Tooltip key={option.value}>
+            {/* A disabled button gets no hover events, so its tooltip (usually
+                the reason it is disabled) hangs on a wrapper instead. */}
+            <TooltipTrigger asChild>
+              {option.disabled ? <span className="inline-flex" tabIndex={0}>{chip}</span> : chip}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6} className="max-w-xs">
+              {option.tooltip}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }

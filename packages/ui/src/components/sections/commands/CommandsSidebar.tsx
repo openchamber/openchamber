@@ -25,6 +25,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { SettingsSidebarNoMatches, SettingsSidebarSearch } from '@/components/sections/shared/SettingsSidebarSearch';
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
@@ -35,6 +37,7 @@ interface CommandsSidebarProps {
 
 export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
   const [renameDialogCommand, setRenameDialogCommand] = React.useState<Command | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [confirmActionCommand, setConfirmActionCommand] = React.useState<Command | null>(null);
@@ -228,8 +231,9 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     setRenameDialogCommand(null);
   };
 
-  const builtInCommands = commandOnlyItems.filter(isCommandBuiltIn);
-  const customCommands = commandOnlyItems.filter((cmd) => !isCommandBuiltIn(cmd));
+  const shownCommands = commandOnlyItems.filter((command) => matchesRankQuery([command.name, command.description], query));
+  const builtInCommands = shownCommands.filter(isCommandBuiltIn);
+  const customCommands = shownCommands.filter((cmd) => !isCommandBuiltIn(cmd));
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
@@ -247,6 +251,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
+        {commandOnlyItems.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2">
@@ -256,6 +261,8 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
             <p className="typography-ui-label font-medium">{t('settings.commands.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.commands.sidebar.empty.description')}</p>
           </div>
+        ) : shownCommands.length === 0 ? (
+          <SettingsSidebarNoMatches query={query} />
         ) : (
           <>
             {builtInCommands.length > 0 && (

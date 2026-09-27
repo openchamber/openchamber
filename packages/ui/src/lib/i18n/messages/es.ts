@@ -9,6 +9,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode viene incluido en OpenChamber. Actualiza OpenChamber para obtener OpenCode v2.",
@@ -63,6 +65,8 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.es,
   ...webSearchI18n.es,
   ...providersI18n.es,
+  ...mcpGridI18n.es,
+  ...pluginsGridI18n.es,
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
   'terminalView.toast.selectionCopied': 'Salida copiada',
@@ -204,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   "mobile.sessions.viewMode.projects": "Agrupado",
   "mobile.sessions.viewMode.timeline": "Cronología",
   "mobile.sessions.section.chats": "Chats",
+  "mobile.sessions.section.recent": "Recientes",
   "mobile.sessions.empty.noProjectsTitle": "Sin proyectos",
   "mobile.sessions.empty.noProjectsDescription": "Agrega un proyecto para empezar a chatear con tu código.",
   "mobile.sessions.empty.noSessionsTitle": "Sin sesiones",
@@ -608,6 +613,13 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.rename.cancel": "Cancelar cambio de nombre de sesión",
   "sessions.sidebar.session.menu.unpin": "Desanclar sesión",
   "sessions.sidebar.session.menu.pin": "Anclar sesión",
+  "sessions.sidebar.work.title": "En curso",
+  "sessions.sidebar.session.work.track": "Seguir como en curso",
+  "sessions.sidebar.session.work.markDone": "Marcar como hecho",
+  "sessions.sidebar.session.work.doneSuggested": "Parece terminado",
+  "sessions.sidebar.session.work.updateFailed": "No se pudo actualizar la sesión",
+  "chat.work.doneHint.text": "Este trabajo parece terminado.",
+  "chat.work.doneHint.action": "Marcar como hecho",
   "sessions.sidebar.session.menu.share": "Compartir",
   "sessions.sidebar.session.menu.copied": "Copiado",
   "sessions.sidebar.session.menu.copyLink": "Copiar enlace",
@@ -649,7 +661,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
   "sessions.sidebar.session.status.active": "Sesión activa",
   "sessions.sidebar.session.status.unread": "Actualizaciones no leídas",
-  "sessions.sidebar.session.status.nextStep": "Siguiente paso sugerido: {suggestion}",
   "sessions.sidebar.session.status.pinned": "Sesión anclada",
   "sessions.sidebar.session.status.movingToWorktree": "Moviendo la sesión a un worktree nuevo",
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",
@@ -2420,10 +2431,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.stopGeneratingAria": "Detener generación",
   "chat.chatInput.focusMode.toggleAria": "Activar o desactivar modo de enfoque",
   "chat.chatInput.focusMode.label": "Modo de enfoque",
-  "chat.chatInput.permissionAutoAccept.disable": "Desactivar aceptación automática de permisos",
-  "chat.chatInput.permissionAutoAccept.enable": "Activar aceptación automática de permisos",
-  "chat.chatInput.permissionAutoAccept.on": "Aceptación automática de permisos: activada",
-  "chat.chatInput.permissionAutoAccept.off": "Aceptación automática de permisos: desactivada",
   "chat.chatInput.linked.byAuthor": "por {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Abrir issue en el navegador",
   "chat.chatInput.linked.issue.removeAria": "Eliminar issue vinculado",

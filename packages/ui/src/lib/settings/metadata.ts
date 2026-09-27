@@ -133,14 +133,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'mcp',
     title: 'MCP',
     group: 'opencode',
-    kind: 'split',
+    kind: 'single',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },
   {
     slug: 'plugins',
     title: 'Plugins',
     group: 'opencode',
-    kind: 'split',
+    kind: 'single',
     keywords: ['plugin', 'plugins', 'addons', 'npm', 'opencode-wakatime'],
   },
   {

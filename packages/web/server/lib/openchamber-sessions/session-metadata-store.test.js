@@ -148,6 +148,24 @@ describe('createSessionMetadataStore', () => {
     expect(openCode.sessions.get('ses_1')).toEqual({ keep: true });
   });
 
+  it('decides a conditional patch against the record as it is at write time', async () => {
+    const openCode = createFakeOpenCode({ ses_1: { openchamber: { work: { state: 'open' } } } });
+    const { store } = makeStore(openCode);
+    const closeUnlessDone = (current) => (current.openchamber?.work?.state === 'done'
+      ? null
+      : { openchamber: { work: { state: 'done' } } });
+
+    // Queued behind the first write, the second decision sees its result.
+    const [first, second] = await Promise.all([
+      store.updateSessionMetadata('ses_1', closeUnlessDone),
+      store.updateSessionMetadata('ses_1', closeUnlessDone),
+    ]);
+
+    expect(first).toEqual({ metadata: { openchamber: { work: { state: 'done' } } }, changed: true });
+    expect(second.changed).toBe(false);
+    expect(openCode.write).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a missing id or a non-object patch', async () => {
     const { store } = makeStore(createFakeOpenCode());
     await expect(store.setSessionMetadata('', { a: 1 })).rejects.toThrow();

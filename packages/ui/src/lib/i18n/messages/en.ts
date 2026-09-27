@@ -8,6 +8,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode is bundled with OpenChamber. Update OpenChamber to get OpenCode v2.",
@@ -62,6 +64,8 @@ export const dict = {
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...providersI18n.en,
+  ...mcpGridI18n.en,
+  ...pluginsGridI18n.en,
   'terminalView.actions.attachSelection': 'Attach selected output',
   'terminalView.actions.copySelection': 'Copy selected output',
   'terminalView.toast.selectionCopied': 'Output copied',
@@ -200,6 +204,7 @@ export const dict = {
   'mobile.sessions.section.otherProjects': 'Switch project',
   'mobile.sessions.section.projects': 'Projects',
   'mobile.sessions.section.chats': 'Chats',
+  'mobile.sessions.section.recent': 'Recent',
   'mobile.sessions.viewMode.label': 'View',
   'mobile.sessions.viewMode.projects': 'Grouped',
   'mobile.sessions.viewMode.timeline': 'Timeline',
@@ -607,6 +612,13 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Cancel renaming session',
   'sessions.sidebar.session.menu.unpin': 'Unpin session',
   'sessions.sidebar.session.menu.pin': 'Pin session',
+  'sessions.sidebar.work.title': 'In work',
+  'sessions.sidebar.session.work.track': 'Track as in work',
+  'sessions.sidebar.session.work.markDone': 'Mark done',
+  'sessions.sidebar.session.work.doneSuggested': 'Looks done',
+  'sessions.sidebar.session.work.updateFailed': 'Couldn\'t update the session',
+  'chat.work.doneHint.text': 'This work looks done.',
+  'chat.work.doneHint.action': 'Mark done',
   'sessions.sidebar.session.menu.share': 'Share',
   'sessions.sidebar.session.menu.copied': 'Copied',
   'sessions.sidebar.session.menu.copyLink': 'Copy link',
@@ -648,7 +660,6 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.confirm': 'Export',
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Unread updates',
-  'sessions.sidebar.session.status.nextStep': 'Suggested next step: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'Pinned session',
   'sessions.sidebar.session.status.movingToWorktree': 'Moving session to a new worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
@@ -2442,10 +2453,6 @@ export const dict = {
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',
   'chat.chatInput.focusMode.label': 'Focus mode',
-  'chat.chatInput.permissionAutoAccept.disable': 'Disable permission auto-accept',
-  'chat.chatInput.permissionAutoAccept.enable': 'Enable permission auto-accept',
-  'chat.chatInput.permissionAutoAccept.on': 'Permission auto-accept: on',
-  'chat.chatInput.permissionAutoAccept.off': 'Permission auto-accept: off',
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Open issue in browser',
   'chat.chatInput.linked.issue.removeAria': 'Remove linked issue',

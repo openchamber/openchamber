@@ -40,7 +40,7 @@ import { toast } from '@/components/ui';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
-import { getDescendantIds, partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
+import { getDescendantIds, partitionSidebarSessions, useRecentSessionCollection } from '@/components/session/sidebar/list/sessionCollection';
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { collectSessionSubtreeIds, runSessionSubtreeAction, type SessionSubtreeAction } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
 import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
@@ -63,7 +63,7 @@ import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansi
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
@@ -82,7 +82,17 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectIcon } from './MobileProjectIcon';
 import { MobileSessionRenameForm } from './MobileSessionRenameForm';
-import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
+import {
+  MobileSessionRowActions,
+  MobileSwipeActionsRow,
+  ROW_ACTION_SLOT_WIDTH,
+  ROW_ACTIONS_WIDTH,
+  type MobileSessionPinAction,
+  type MobileSessionWorkAction,
+} from './MobileSessionSwipe';
+import { isDoneSuggested, isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { setSessionWorkState } from '@/sync/session-actions';
+import { useUIStore } from '@/stores/useUIStore';
 import {
   MobileTimelineList,
   type TimelineEntry,
@@ -184,6 +194,10 @@ const TIMELINE_CHAT_PAGE_SIZE = 3;
 // parent label. Root/project-level sessions align with the project label;
 // worktree sessions sit one level deeper. SessionRow adds 16px (dot + gap) on top.
 const PROJECT_SESSION_INDENT = 40;
+/** Expansion key of the "In work" section, alongside project ids. */
+const WORK_SECTION_ID = 'openchamber:work';
+/** Expansion key of the optional Recent section in the grouped view. */
+const RECENT_SECTION_ID = 'openchamber:recent';
 // Timeline chats align with the timeline rows' text, which has no gutter.
 const TIMELINE_CHAT_INDENT = 12;
 // Extra left padding applied to each nested subsession level.
@@ -290,6 +304,10 @@ const SessionRow: React.FC<{
   onCancelRename?: () => void;
   /** Timeline chats: no left gutter; the status dot sits before the time instead. */
   statusOnRight?: boolean;
+  /** Track / Done in the swipe actions; top-level rows while the feature is on. */
+  work?: MobileSessionWorkAction;
+  /** Pin / Unpin in the swipe actions, and the pin marker; top-level rows. */
+  pin?: MobileSessionPinAction;
 }> = ({
   session,
   active,
@@ -310,12 +328,14 @@ const SessionRow: React.FC<{
   onRequestRename,
   onSubmitRename,
   onCancelRename,
+  work,
+  pin,
 }) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const swipeEnabled = Boolean(onRevealedChange && onArchive);
-  const aiRename = useSessionAiRenameAction(session.id, session.directory, swipeEnabled && revealed);
+  const aiRename = useSessionAiRenameAction(session.id, session.directory, swipeEnabled && (revealed || renaming));
   // Live indicators, same conventions as the desktop sidebar: busy/retry →
   // spinner; unseen activity on a non-active row → attention dot.
   const unseenCount = useSessionUnseenCount(session.id);
@@ -323,6 +343,8 @@ const SessionRow: React.FC<{
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
+  // Jev thinks this work looks finished: the same quiet check the sidebar shows.
+  const showDoneHint = Boolean(work?.inWork) && !isStreaming && isDoneSuggested(session);
 
   const rowContent = (
     <>
@@ -361,6 +383,7 @@ const SessionRow: React.FC<{
         <MobileSessionRenameForm
           initialTitle={title}
           indent={indent}
+          aiRename={aiRename}
           onSubmit={onSubmitRename}
           onCancel={onCancelRename}
         />
@@ -396,6 +419,9 @@ const SessionRow: React.FC<{
             >
               {title}
             </span>
+            {pin?.pinned ? (
+              <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
+            ) : null}
             {statusOnRight && (aiRename.pending || isStreaming || showUnreadDot) ? (
               aiRename.pending
                 ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
@@ -403,6 +429,9 @@ const SessionRow: React.FC<{
                     state={isStreaming ? 'running' : 'unread'}
                     label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
                   />
+            ) : null}
+            {showDoneHint ? (
+              <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
             ) : null}
             {/* The elapsed turn takes the time slot while it matters, then
                 hands it back to the relative timestamp. */}
@@ -445,7 +474,7 @@ const SessionRow: React.FC<{
 
   return (
     <MobileSwipeActionsRow
-      actionsWidth={ROW_ACTIONS_WIDTH}
+      actionsWidth={ROW_ACTIONS_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0) + (pin ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
       onRevealedChange={(next) => onRevealedChange?.(next)}
       dataActiveSession={active}
@@ -459,12 +488,13 @@ const SessionRow: React.FC<{
           title={title}
           revealed={revealed}
           confirmingDelete={confirmingDelete}
-          aiRename={aiRename}
           onArchive={onArchive}
           onRequestDelete={onRequestDelete}
           onConfirmDelete={onConfirmDelete}
           onRequestRename={onRequestRename}
           onRevealedChange={onRevealedChange}
+          work={work}
+          pin={pin}
         />
       )}
     >
@@ -676,10 +706,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const sidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
   const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
-  // Branch per directory, for the timeline row's third line: worktree sessions
-  // read their worktree's branch, root sessions the project root's checked-out
-  // branch, which only the git store knows. The grouped view never asks.
-  const gitBranchesByDirectory = useGitAllBranches(presented && sidebarViewMode === 'timeline');
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const setShowRecentSection = useSessionDisplayStore((state) => state.setShowRecentSection);
+  const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
+  const recentShown = sidebarViewMode === 'projects' && showRecentSection;
+  // Branch per directory, for the timeline row's third line and the Recent
+  // row's "project · branch": worktree sessions read their worktree's branch,
+  // root sessions the project root's checked-out branch, which only the git
+  // store knows. The grouped project tree itself never asks.
+  const gitBranchesByDirectory = useGitAllBranches(presented && (sidebarViewMode === 'timeline' || recentShown));
   const removeProject = useProjectsStore((state) => state.removeProject);
   const projectExpandedMap = useMobileSessionTreeStore((state) => state.projectExpanded);
   const worktreeExpandedMap = useMobileSessionTreeStore((state) => state.worktreeExpanded);
@@ -775,24 +810,36 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         projects.map(async (project) => {
           const path = normalizePath(project.path);
           if (!path) return null;
-          const isGitRepo = await git.checkIsGitRepository(path).catch(() => false);
+          // null = the lookup failed, not "no worktrees": that project keeps
+          // what it showed, so a flaky request on open cannot fold its
+          // worktree groups into the root or drop their branch labels.
+          const isGitRepo = await git.checkIsGitRepository(path).catch(() => null);
           const worktrees = isGitRepo
-            ? await listProjectWorktrees({ id: project.id, path }).catch(() => [])
+            ? await listProjectWorktrees({ id: project.id, path }).catch(() => null)
             : [];
           return [path, worktrees, isGitRepo] as const;
         }),
       );
       if (cancelled) return;
-      const discoveredWorktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const nextGitProjectPaths = new Set<string>();
-      for (const entry of entries) {
-        if (entry) {
-          discoveredWorktreesByProject.set(entry[0], entry[1]);
-          if (entry[2]) nextGitProjectPaths.add(entry[0]);
+      setWorktreesByProject((previous) => {
+        const discoveredWorktreesByProject = new Map<string, WorktreeMetadata[]>();
+        for (const entry of entries) {
+          if (!entry) continue;
+          const [path, worktrees, isGitRepo] = entry;
+          const failed = isGitRepo === null || worktrees === null;
+          discoveredWorktreesByProject.set(path, failed ? previous.get(path) ?? [] : worktrees);
         }
-      }
-      setWorktreesByProject(partitionWorktreesByRegisteredProject(projects, discoveredWorktreesByProject));
-      setGitProjectPaths(nextGitProjectPaths);
+        return partitionWorktreesByRegisteredProject(projects, discoveredWorktreesByProject);
+      });
+      setGitProjectPaths((previous) => {
+        const next = new Set<string>();
+        for (const entry of entries) {
+          if (!entry) continue;
+          const [path, , isGitRepo] = entry;
+          if (isGitRepo === null ? previous.has(path) : isGitRepo) next.add(path);
+        }
+        return next;
+      });
     };
     void run();
     return () => {
@@ -869,6 +916,30 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     () => partitionSidebarSessions(sessions, false),
     [sessions],
   );
+
+  // Sessions in work, with their subsessions, move to their own section under
+  // Chats and leave the projects and the timeline, like the desktop sidebar.
+  // Chats are plain conversations and never in work. Ownership and search
+  // still see every session.
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const workSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (!sessionWorkEnabled) return ids;
+    for (const session of sessions) {
+      if (getParentId(session) || isChatDirectoryPath(getSessionDirectory(session)) || !isSessionInWork(session)) continue;
+      ids.add(session.id);
+      for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
+    }
+    return ids;
+  }, [childrenBySessionId, sessionWorkEnabled, sessions]);
+  const sectionProjectSessions = React.useMemo(
+    () => (workSessionIds.size > 0 ? projectSessions.filter((session) => !workSessionIds.has(session.id)) : projectSessions),
+    [projectSessions, workSessionIds],
+  );
+  const sectionChatSessions = React.useMemo(
+    () => (workSessionIds.size > 0 ? chatSessions.filter((session) => !workSessionIds.has(session.id)) : chatSessions),
+    [chatSessions, workSessionIds],
+  );
   const spaces = useSpacesStore((state) => state.spaces);
   const spaceList = React.useMemo(() => Array.from(spaces.values()), [spaces]);
   const spaceLabelById = React.useMemo(
@@ -890,12 +961,85 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     path: '',
     worktree: null,
     space: null,
-    sessions: orderSessionsByLifecycleScopes(chatSessions, pinnedSessionIds, sessionOrderRanks),
-  }), [chatSessions, pinnedSessionIds, sessionOrderRanks]);
+    sessions: orderSessionsByLifecycleScopes(sectionChatSessions, pinnedSessionIds, sessionOrderRanks),
+  }), [pinnedSessionIds, sectionChatSessions, sessionOrderRanks]);
+  // Pins are keyed by runtime, directory and id, so the timeline's
+  // "pinned chats always show" rule needs the plain ids of the pinned ones.
+  const pinnedChatIds = React.useMemo(() => new Set(
+    chatsBucket.sessions
+      .filter((session) => isSessionPinned(pinnedSessionIds, getSessionDirectory(session) || null, session.id))
+      .map((session) => session.id),
+  ), [chatsBucket, pinnedSessionIds]);
+  const workBucket = React.useMemo<WorktreeBucket>(() => ({
+    key: WORK_SECTION_ID,
+    label: '',
+    path: '',
+    worktree: null,
+    space: null,
+    sessions: workSessionIds.size > 0
+      ? orderSessionsByLifecycleScopes(sessions.filter((session) => workSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+      : [],
+  }), [pinnedSessionIds, sessionOrderRanks, sessions, workSessionIds]);
+  // Recent, the grouped view's optional cross-project section: the desktop's
+  // membership rule (root project sessions running now or touched in the last
+  // 48 hours), with their subsessions so a row can still expand. Sessions in
+  // work already left for their own section.
+  // The live-status subscription runs only while presented. Closed, the list
+  // holds what it last showed, like pins and branches above: an empty list at
+  // that moment would drop the whole section mid exit slide.
+  const liveRecentRoots = useRecentSessionCollection({
+    enabled: presented && recentShown,
+    isVSCode: false,
+    pinnedSessionIds,
+    sessionOrderRanks,
+    sessions: sectionProjectSessions,
+  });
+  const [heldRecentRoots, setHeldRecentRoots] = React.useState(liveRecentRoots);
+  if (presented && heldRecentRoots !== liveRecentRoots) setHeldRecentRoots(liveRecentRoots);
+  const recentRoots = presented ? liveRecentRoots : heldRecentRoots;
+  const recentBucket = React.useMemo<WorktreeBucket>(() => {
+    const ids = new Set<string>();
+    for (const root of recentRoots) {
+      ids.add(root.id);
+      for (const id of getDescendantIds(childrenBySessionId, root.id)) ids.add(id);
+    }
+    return {
+      key: RECENT_SECTION_ID,
+      label: '',
+      path: '',
+      worktree: null,
+      space: null,
+      sessions: ids.size > 0
+        ? orderSessionsByLifecycleScopes(sectionProjectSessions.filter((session) => ids.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+        : [],
+    };
+  }, [childrenBySessionId, pinnedSessionIds, recentRoots, sectionProjectSessions, sessionOrderRanks]);
+  // "project · branch" under each Recent row, from the same resolver as the
+  // desktop Recent: the live branch for root sessions too, a space's name for
+  // space sessions, and no branch that only repeats the project label.
+  const recentContextLabelById = React.useMemo(() => {
+    const labels = new Map<string, string>();
+    if (recentRoots.length === 0) return labels;
+    const locations = resolveSidebarSessionLocations({
+      sessions: recentRoots,
+      projects: projectsMeta.map((project) => ({ id: project.id, normalizedPath: project.path, label: project.label })),
+      ownerBySessionId: sessionOwnership.bySessionId,
+      availableWorktreesByProject: new Map(projectsMeta.map((project) => [project.path, project.worktrees])),
+      gitBranches: gitBranchesByDirectory,
+      homeDirectory: null,
+      hideBranchMatchingProjectLabel: true,
+      spaceLabelById,
+    });
+    for (const [sessionId, location] of locations) {
+      if (!location.projectLabel) continue;
+      labels.set(sessionId, location.branchLabel ? `${location.projectLabel} · ${location.branchLabel}` : location.projectLabel);
+    }
+    return labels;
+  }, [gitBranchesByDirectory, projectsMeta, recentRoots, sessionOwnership, spaceLabelById]);
   const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
   const chatRootCount = React.useMemo(
-    () => chatSessions.filter((session) => !getParentId(session)).length,
-    [chatSessions],
+    () => sectionChatSessions.filter((session) => !getParentId(session)).length,
+    [sectionChatSessions],
   );
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -947,7 +1091,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       for (const worktree of node.project.worktrees) ensureBucket(node, worktree.path, worktree);
     }
 
-    for (const session of projectSessions) {
+    for (const session of sectionProjectSessions) {
       const owner = sessionOwnership.bySessionId.get(session.id);
       if (!owner) continue;
       const node = nodes.find((entry) => entry.project.id === owner.projectId);
@@ -973,7 +1117,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectSessions, projectsMeta, sessionOrderRanks, sessionOwnership, spaces, t]);
+  }, [activeProjectId, pinnedSessionIds, projectsMeta, sectionProjectSessions, sessionOrderRanks, sessionOwnership, spaces, t]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -1040,6 +1184,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       alwaysVisibleIds?: Set<string>;
       /** Timeline chats: flush-left rows with the status dot on the right. */
       statusOnRight?: boolean;
+      /** Cross-project lists (Recent) name each top-level row's project and branch. */
+      rootContextLabel?: (session: Session) => string;
     },
   ) => {
     const pageSize = options?.pageSize ?? SESSIONS_PER_BUCKET;
@@ -1079,12 +1225,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       const children = childrenByParent.get(session.id) ?? [];
       const hasChildren = children.length > 0;
       const expanded = Boolean(expandedParents[session.id]);
+      const isRoot = rowIndent === indent;
       return (
         <React.Fragment key={session.id}>
           <SessionRow
             session={session}
             active={currentSessionId === session.id}
             indent={rowIndent}
+            contextLabel={isRoot ? options?.rootContextLabel?.(session) : undefined}
             hasChildren={hasChildren}
             expanded={expanded}
             onToggleChildren={hasChildren ? () => toggleParent(session.id) : undefined}
@@ -1100,6 +1248,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onRequestRename={() => handleRequestRename(session.id)}
             onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
             onCancelRename={() => setRenamingSessionId(null)}
+            work={workActionFor(session)}
+            pin={pinActionFor(session)}
           />
           {hasChildren && expanded
             ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
@@ -1184,6 +1334,36 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const handleArchive = (session: Session) => runSubtreeAction('archive', session);
 
+  const handleToggleWork = async (session: Session, inWork: boolean) => {
+    try {
+      await setSessionWorkState(session.id, getSessionDirectory(session) || null, inWork ? 'done' : 'open');
+    } catch {
+      toast.error(t('sessions.sidebar.session.work.updateFailed'));
+    }
+  };
+
+  /** Track / Done for a top-level row while the feature is on. */
+  const workActionFor = (session: Session): MobileSessionWorkAction | undefined => {
+    if (!sessionWorkEnabled || getParentId(session) || isChatDirectoryPath(getSessionDirectory(session))) return undefined;
+    const inWork = workSessionIds.has(session.id);
+    return { inWork, onToggle: () => { void handleToggleWork(session, inWork); } };
+  };
+
+  const isPinned = (session: Session): boolean => (
+    isSessionPinned(pinnedSessionIds, getSessionDirectory(session) || null, session.id)
+  );
+
+  const handleTogglePin = (session: Session) => {
+    const directory = getSessionDirectory(session);
+    if (directory) togglePinnedSession({ directory, sessionId: session.id });
+  };
+
+  /** Pin / Unpin for a top-level row, the same local pin the desktop menu sets. */
+  const pinActionFor = (session: Session): MobileSessionPinAction | undefined => {
+    if (getParentId(session) || !getSessionDirectory(session)) return undefined;
+    return { pinned: isPinned(session), onToggle: () => handleTogglePin(session) };
+  };
+
   const handleConfirmDelete = (session: Session) => runSubtreeAction('delete', session);
 
   const handleRequestRename = (sessionId: string) => {
@@ -1232,6 +1412,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     setSidebarViewMode(mode);
     void updateDesktopSettings({ sidebarViewMode: mode });
     if (mode === 'timeline') setEditingOrder(false);
+  };
+
+  // Also per surface: Recent on the desktop must not fill the phone's drawer.
+  const handleToggleRecentSection = () => {
+    const next = !showRecentSection;
+    setShowRecentSection(next);
+    void updateDesktopSettings({ sidebarShowRecentSection: next });
   };
 
   const handleReorderDragEnd = (event: DragEndEvent) => {
@@ -1325,15 +1512,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const timelineActive = sidebarViewMode === 'timeline' && !normalizedQuery && !editingOrder;
 
   // The git store only knows directories something asked about. The grouped
-  // view never needs project root branches, so the timeline requests them
-  // itself, the way the desktop sidebar's project headers do.
+  // project tree never needs project root branches, so the timeline and Recent
+  // request them themselves, the way the desktop sidebar's project headers do.
+  const needsRootBranches = timelineActive || recentShown;
   React.useEffect(() => {
-    if (!timelineActive || !git) return;
+    if (!needsRootBranches || !git) return;
     for (const project of projectsMeta) {
       const root = normalizePath(project.path);
       if (root) void runBackgroundNetworkTask(() => ensureGitStatus(root, git));
     }
-  }, [ensureGitStatus, git, projectsMeta, timelineActive]);
+  }, [ensureGitStatus, git, needsRootBranches, projectsMeta]);
 
   // Project, worktree and branch resolved once per session rather than per row.
   const timelineContextById = React.useMemo(() => {
@@ -1361,14 +1549,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const timelineEntries = React.useMemo<TimelineEntry[]>(() => {
     if (!timelineActive) return [];
-    const roots = projectSessions.filter(
+    const roots = sectionProjectSessions.filter(
       (session) => !getParentId(session) && timelineContextById.has(session.id),
     );
     return orderSessionsByLifecycleScopes(roots, pinnedSessionIds, sessionOrderRanks).flatMap((session) => {
       const context = timelineContextById.get(session.id);
       return context ? [{ session, project: context.project, branch: context.branch }] : [];
     });
-  }, [pinnedSessionIds, projectSessions, sessionOrderRanks, timelineActive, timelineContextById]);
+  }, [pinnedSessionIds, sectionProjectSessions, sessionOrderRanks, timelineActive, timelineContextById]);
 
   const revealMoreTimelineSessions = React.useCallback(() => {
     setTimelineVisibleCount((current) => revealNextTimelinePage(current, timelineEntries.length));
@@ -1387,6 +1575,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     onRequestRename: handleRequestRename,
     onSubmitRename: (sessionId, title) => void handleSubmitRename(sessionId, title),
     onCancelRename: () => setRenamingSessionId(null),
+    onToggleWork: sessionWorkEnabled ? (session, inWork) => { void handleToggleWork(session, inWork); } : undefined,
+    isPinned,
+    onTogglePin: handleTogglePin,
   };
 
   const hasNoMatches =
@@ -1666,7 +1857,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                             chatsBucket,
                             timelineActive ? TIMELINE_CHAT_INDENT : PROJECT_SESSION_INDENT,
                             timelineActive
-                              ? { pageSize: TIMELINE_CHAT_PAGE_SIZE, alwaysVisibleIds: pinnedSessionIds, statusOnRight: true }
+                              ? { pageSize: TIMELINE_CHAT_PAGE_SIZE, alwaysVisibleIds: pinnedChatIds, statusOnRight: true }
                               : undefined,
                           )
                         ) : (
@@ -1679,6 +1870,93 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   </section>
                 );
               })()}
+              {workBucket.sessions.length > 0 ? (() => {
+                const workExpanded = projectExpandedMap[WORK_SECTION_ID] ?? true;
+                const workLabel = t('sessions.sidebar.work.title');
+                return (
+                  <section>
+                    <button
+                      type="button"
+                      className="flex min-h-12 w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => {
+                        if (revealedRowId) {
+                          handleRowKeyRevealedChange(revealedRowId, false);
+                          return;
+                        }
+                        toggleProject(WORK_SECTION_ID, workExpanded);
+                      }}
+                      aria-expanded={workExpanded}
+                      aria-label={
+                        workExpanded
+                          ? t('sessions.sidebar.group.collapseAria', { label: workLabel })
+                          : t('sessions.sidebar.group.expandAria', { label: workLabel })
+                      }
+                      style={{ touchAction: 'manipulation' }}
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-muted)] text-muted-foreground">
+                        <Icon name="eye" className="size-4" />
+                      </span>
+                      <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                        {workLabel}
+                      </span>
+                      <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                        {workBucket.sessions.filter((session) => !getParentId(session)).length}
+                      </span>
+                    </button>
+                    {workExpanded ? (
+                      <div className="pb-2">
+                        {renderBucketSessions(`${WORK_SECTION_ID}::${WORK_SECTION_ID}`, workBucket, PROJECT_SESSION_INDENT, { pageSize: Number.MAX_SAFE_INTEGER })}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })() : null}
+              {!timelineActive && recentBucket.sessions.length > 0 ? (() => {
+                const recentExpanded = projectExpandedMap[RECENT_SECTION_ID] ?? true;
+                const recentLabel = t('mobile.sessions.section.recent');
+                return (
+                  <section>
+                    <button
+                      type="button"
+                      className="flex min-h-12 w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => {
+                        if (revealedRowId) {
+                          handleRowKeyRevealedChange(revealedRowId, false);
+                          return;
+                        }
+                        toggleProject(RECENT_SECTION_ID, recentExpanded);
+                      }}
+                      aria-expanded={recentExpanded}
+                      aria-label={
+                        recentExpanded
+                          ? t('sessions.sidebar.group.collapseAria', { label: recentLabel })
+                          : t('sessions.sidebar.group.expandAria', { label: recentLabel })
+                      }
+                      style={{ touchAction: 'manipulation' }}
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-muted)] text-muted-foreground">
+                        <Icon name="history" className="size-4" />
+                      </span>
+                      <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                        {recentLabel}
+                      </span>
+                      <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                        {recentRoots.length}
+                      </span>
+                    </button>
+                    {recentExpanded ? (
+                      <div className="pb-2">
+                        {renderBucketSessions(
+                          `${RECENT_SECTION_ID}::${RECENT_SECTION_ID}`,
+                          recentBucket,
+                          PROJECT_SESSION_INDENT,
+                          { rootContextLabel: (session) => recentContextLabelById.get(session.id) ?? buildSessionContextLabel(session) },
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })() : null}
               {timelineActive ? (
                 <MobileTimelineList
                   entries={timelineEntries}
@@ -2033,6 +2311,25 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 {projectSortOrder === order ? <Icon name="check" className="size-4" /> : null}
               </button>
             ))}
+            {/* Recent is a grouped-view section; the timeline already is one. */}
+            {sidebarViewMode === 'timeline' ? null : (
+              <button
+                type="button"
+                aria-pressed={showRecentSection}
+                className={cn(
+                  'mt-2 flex min-h-11 w-full items-center justify-between rounded-lg px-3 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  showRecentSection ? 'text-primary' : 'text-foreground',
+                )}
+                onClick={() => {
+                  handleToggleRecentSection();
+                  setSortPanelOpen(false);
+                }}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <span className="typography-ui-label">{t('sessions.sidebar.header.displayMode.showRecent')}</span>
+                {showRecentSection ? <Icon name="check" className="size-4" /> : null}
+              </button>
+            )}
           </div>
         </MobileOverlayPanel>
 

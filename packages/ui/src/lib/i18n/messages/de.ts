@@ -8,6 +8,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode ist in OpenChamber enthalten. Aktualisieren Sie OpenChamber, um OpenCode v2 zu erhalten.",
@@ -62,6 +64,8 @@ export const dict = {
   ...usageStatsI18n.de,
   ...webSearchI18n.de,
   ...providersI18n.de,
+  ...mcpGridI18n.de,
+  ...pluginsGridI18n.de,
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',
@@ -168,6 +172,7 @@ export const dict = {
   'mobile.sessions.viewMode.projects': 'Gruppiert',
   'mobile.sessions.viewMode.timeline': 'Zeitleiste',
   'mobile.sessions.section.chats': 'Chats',
+  'mobile.sessions.section.recent': 'Zuletzt',
   'mobile.sessions.empty.noProjectsTitle': 'Noch keine Projekte',
   'mobile.sessions.empty.noProjectsDescription': 'Füge ein Projekt hinzu, um mit deinem Code zu chatten.',
   'mobile.sessions.empty.noSessionsTitle': 'Noch keine Sitzungen',
@@ -537,6 +542,13 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Umbenennung abbrechen',
   'sessions.sidebar.session.menu.unpin': 'Sitzung lösen',
   'sessions.sidebar.session.menu.pin': 'Sitzung anheften',
+  'sessions.sidebar.work.title': 'In Arbeit',
+  'sessions.sidebar.session.work.track': 'Als in Arbeit verfolgen',
+  'sessions.sidebar.session.work.markDone': 'Als erledigt markieren',
+  'sessions.sidebar.session.work.doneSuggested': 'Sieht erledigt aus',
+  'sessions.sidebar.session.work.updateFailed': 'Sitzung konnte nicht aktualisiert werden',
+  'chat.work.doneHint.text': 'Diese Arbeit scheint erledigt.',
+  'chat.work.doneHint.action': 'Als erledigt markieren',
   'sessions.sidebar.session.menu.share': 'Teilen',
   'sessions.sidebar.session.menu.copied': 'Kopiert',
   'sessions.sidebar.session.menu.copyLink': 'Link kopieren',
@@ -561,7 +573,6 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.confirm': 'Exportieren',
   'sessions.sidebar.session.status.active': 'Sitzung aktiv',
   'sessions.sidebar.session.status.unread': 'Ungelesene Updates',
-  'sessions.sidebar.session.status.nextStep': 'Vorgeschlagener nächster Schritt: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'Angeheftete Sitzung',
   'sessions.sidebar.session.status.permissionRequired': 'Berechtigung erforderlich',
   'sessions.sidebar.session.status.questionPendingSingle': '1 ausstehende Frage',
@@ -2231,10 +2242,6 @@ export const dict = {
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
   'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',
   'chat.chatInput.focusMode.label': 'Fokusmodus',
-  'chat.chatInput.permissionAutoAccept.disable': 'Automatische Zustimmung für Berechtigungen deaktivieren',
-  'chat.chatInput.permissionAutoAccept.enable': 'Automatische Zustimmung für Berechtigungen aktivieren',
-  'chat.chatInput.permissionAutoAccept.on': 'Automatische Zustimmung für Berechtigungen: an',
-  'chat.chatInput.permissionAutoAccept.off': 'Automatische Zustimmung für Berechtigungen: aus',
   'chat.chatInput.linked.byAuthor': 'von {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue im Browser öffnen',
   'chat.chatInput.linked.issue.removeAria': 'Verknüpftes Issue entfernen',

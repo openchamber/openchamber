@@ -95,7 +95,9 @@ import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useComman
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
-import { togglePermissionAutoAccept } from './permissionAutoAccept';
+import { cyclePermissionMode } from './permissionAutoAccept';
+import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { useKeybind } from '@/hooks/useKeybind';
 import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
@@ -189,6 +191,7 @@ import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessageDock } from './composer/ui/RevertedMessageDock';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
+import { SessionDoneHintRow } from '@/components/chat/SessionDoneHintRow';
 import { FormDock } from '@/components/chat/FormDock';
 import { PermissionDock } from '@/components/chat/PermissionDock';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
@@ -489,11 +492,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const newSessionDraftAnnouncesDirtyState = newSessionDraftOpen && newSessionDraft?.openedAutomatically !== true;
-    const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
-        s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
+    const draftPermissionMode = useSessionUIStore((s) => (
+        s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
-    const setDraftPermissionAutoAcceptEnabled = useSessionUIStore((s) => s.setDraftPermissionAutoAcceptEnabled);
+    const setDraftPermissionMode = useSessionUIStore((s) => s.setDraftPermissionMode);
     const prepareChatDraftDirectory = useSessionUIStore((s) => s.prepareChatDraftDirectory);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
@@ -600,9 +603,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const ensureGitStatus = useGitStore((state) => state.ensureStatus);
     const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const clearGitDiffCache = useGitStore((state) => state.clearDiffCache);
-    const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
-    const pendingBtwAutoAccept = useBtwStore(React.useCallback(
-        (state) => currentSessionId ? state.byParent[currentSessionId]?.pendingAutoAccept === true : false,
+    const setSessionMode = usePermissionStore((state) => state.setSessionMode);
+    const pendingBtwPermissionMode = useBtwStore(React.useCallback(
+        (state) => currentSessionId ? state.byParent[currentSessionId]?.pendingPermissionMode : undefined,
         [currentSessionId],
     ));
     const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
@@ -2009,7 +2012,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     attachments: sendableAttachments,
                     additionalParts,
                     skills: sendMessageOptions?.skills,
-                    permissionAutoAccept: pendingBtwAutoAccept,
+                    permissionMode: pendingBtwPermissionMode,
                 });
                 if (!ownsPendingBtwSend()) return;
                 if (getRuntimeKey() !== submitRuntimeKey) {
@@ -3532,6 +3535,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             onApply={applyAssistSuggestion}
         />
     ) : null;
+    // Jev's "looks done" hint shares the composer's top row slot, above the
+    // suggestion, so nothing below the input moves.
+    const doneHintRow = !isBtwActive && !newSessionDraftOpen ? (
+        <SessionDoneHintRow
+            sessionId={currentSessionId}
+            directory={currentSessionDirectoryForSync ?? currentDirectory}
+        />
+    ) : null;
+    // Null exactly when the suggestion row alone would have been: the mobile
+    // pill picks its shape from whether a top row exists.
+    const composerTopRows = doneHintRow || suggestionRow ? (
+        <>
+            {doneHintRow}
+            {suggestionRow}
+        </>
+    ) : null;
     const mobileModelAgentRow = isMobile && !isBtwActive ? (
         // px-3.5 lines the model logo and the agent label up with the attach
         // and mic icons above them; the buttons drop their own padding so the
@@ -3581,47 +3600,54 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
     const footerIconButtonClass = cn(iconButtonBaseClass, buttonSizeClass);
     const permissionScopeSessionId = isBtwActive ? btwSessionId : currentSessionId ?? currentManagementSessionId;
-    const permissionAutoAcceptEnabled = usePermissionStore((state) => {
-        if (isBtwActive && !btwSessionId) return pendingBtwAutoAccept;
+    const safetyNetAvailable = useRoutingStore(selectSafetyNetAvailable);
+    // A session not created yet (a draft, an unsent btw fork) shows its own
+    // choice, else the mode the server will give it: the Settings default.
+    // VS Code has no server to apply one.
+    const defaultPermissionMode = useUIStore((state) => (isVSCode ? 'ask' : state.permissionDefaultMode));
+    const permissionMode = usePermissionStore((state) => {
+        if (isBtwActive && !btwSessionId) return pendingBtwPermissionMode ?? defaultPermissionMode;
         if (!permissionScopeSessionId) {
-            return draftPermissionAutoAcceptEnabled;
+            return draftPermissionMode ?? defaultPermissionMode;
         }
-        return state.isSessionAutoAccepting(permissionScopeSessionId);
+        return state.getSessionMode(permissionScopeSessionId);
     });
+    const shownPermissionMode = displayedPermissionMode(permissionMode, safetyNetAvailable);
     const isPermissionAutoAcceptInteractive = Boolean(permissionScopeSessionId || newSessionDraftOpen);
 
-    const handlePermissionAutoAcceptToggle = React.useCallback(() => {
+    const handlePermissionModeCycle = React.useCallback(() => {
         if (isBtwActive && !btwSessionId && currentSessionId) {
-            useBtwStore.getState().setPanelState(currentSessionId, { pendingAutoAccept: !pendingBtwAutoAccept });
+            useBtwStore.getState().setPanelState(currentSessionId, {
+                pendingPermissionMode: nextPermissionMode(permissionMode, safetyNetAvailable),
+            });
             return;
         }
-        togglePermissionAutoAccept({
+        cyclePermissionMode({
             permissionScopeSessionId,
             newSessionDraftOpen,
-            draftPermissionAutoAcceptEnabled,
-            permissionAutoAcceptEnabled,
-            setDraftPermissionAutoAcceptEnabled,
-            setSessionAutoAccept,
+            currentMode: permissionMode,
+            safetyAvailable: safetyNetAvailable,
+            setDraftPermissionMode,
+            setSessionMode,
             onOpenSessionFirst: () => toast.error(t('chat.chatInput.toast.openSessionFirst')),
             onToggleFailed: () => toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed')),
         });
     }, [
-        draftPermissionAutoAcceptEnabled,
         newSessionDraftOpen,
-        permissionAutoAcceptEnabled,
+        permissionMode,
         permissionScopeSessionId,
+        safetyNetAvailable,
         isBtwActive,
         btwSessionId,
         currentSessionId,
-        pendingBtwAutoAccept,
-        setDraftPermissionAutoAcceptEnabled,
-        setSessionAutoAccept,
+        setDraftPermissionMode,
+        setSessionMode,
         t,
     ]);
 
     useKeybind('toggle_permission_auto_accept', () => {
         if (!isPermissionAutoAcceptInteractive) return false;
-        handlePermissionAutoAcceptToggle();
+        handlePermissionModeCycle();
     });
 
     // Acknowledging the abort record is what lets the working chip resume for
@@ -3757,7 +3783,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         iconSizeClass={iconSizeClass}
                         sendIconSizeClass={sendIconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
-                        topRow={suggestionRow}
+                        topRow={composerTopRows}
                         attachments={(
                             <div className="px-3 pt-1">
                                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} className="pt-2" />
@@ -3850,7 +3876,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         text area + footer exactly. */}
                     <div className={cn('relative flex flex-col', isComposerExpanded && 'flex-1 min-h-0')}>
                     <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                        {suggestionRow}
+                        {composerTopRows}
                         {isMobile && isBtwActive ? (
                             <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
                                 <ModelControls
@@ -3953,7 +3979,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isExpandedInput={isExpandedInput}
-                        permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
+                        permissionMode={shownPermissionMode}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
                         dictationActive={mobileShell.dictationActive}
                         onOpenSettings={onOpenSettings}
@@ -3966,7 +3992,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenGuestAttach={openGuestAttach}
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
-                        onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
+                        onCyclePermissionMode={handlePermissionModeCycle}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}
                         onAbort={handleAbort}

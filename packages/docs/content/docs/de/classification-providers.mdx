@@ -1,0 +1,77 @@
+---
+title: Klassifizierungsanbieter (Jev)
+description: Richte Jev ein, das kleine Klassifizierungsmodell hinter Entscheidungen in verschiedenen Abläufen von OpenChamber.
+---
+
+# Klassifizierungsanbieter (Jev)
+
+Manche Funktionen von OpenChamber brauchen eine schnelle Entscheidung, bevor sie handeln: Ist dieser Befehl riskant, was für eine Aufgabe ist dieser Prompt, hat der Nutzer gerade mit echter Arbeit angefangen? Diese Fragen beantwortet Jev, ein kleines Entscheidungsmodell von TypeSafe. Auf dieser Seite erfährst du, wie du OpenChamber Zugang zu Jev gibst.
+
+Jev schreibt keinen Code und antwortet nicht in deinem Chat. Es liefert nur ein Urteil, und OpenChamber handelt danach. Auf eine Antwort wartet OpenChamber höchstens vier Sekunden.
+
+## Was Jev nutzt
+
+| Funktion | Die Frage, die Jev beantwortet |
+| --- | --- |
+| [Berechtigungen und Sicherheitsnetz](/de/permissions/) | Soll der Agent dich fragen, bevor er diese Aktion ausführt? |
+| [Automatische Modellwahl](/de/auto-model-routing/) | Zu welcher deiner Kategorien gehört dieser Prompt? |
+| [Sitzungen in Arbeit](/de/sessions-in-work/) | Hast du gerade um echte Arbeit gebeten? Sieht dieser Zug nach ihrem Ende aus? |
+| [Zusammenfassung und Vorschlag für die nächste Nachricht](/de/sessions-in-work/) | Lohnt sich nach diesem Zug eine Zusammenfassung oder ein Vorschlag? |
+
+Ohne Anbieter sind das Sicherheitsnetz und Auto ausgeblendet, und Sitzungen kommen nur in Arbeit, wenn du sie selbst verschiebst. Zusammenfassungen und Vorschläge funktionieren weiter, nur ohne den Filter.
+
+## Einrichtung
+
+Öffne **Einstellungen → Anbieter → Klassifizierungsanbieter** und wähle, wohin Anfragen an Jev gehen. Es gibt drei Möglichkeiten.
+
+### OpenCode-Zen-Aktion
+
+Für begrenzte Zeit kostenlos, kein Schlüssel nötig. Solange die Aktion läuft, lässt OpenCode OpenChamber Jev über OpenCode Zen kostenlos nutzen. Wenn du diese Seite nie angefasst hast, nutzt du bereits genau das.
+
+Wenn die Aktion endet, verschwindet die Option, und OpenChamber wechselt zu einem der Schlüssel unten, falls du einen hast.
+
+### OpenCode-Zen-Schlüssel
+
+Nutzt den in OpenCode gespeicherten Zen-API-Schlüssel und rechnet über dein Zen-Guthaben ab.
+
+1. Öffne **Einstellungen → Anbieter** und füge dem Anbieter **OpenCode Zen** einen API-Schlüssel hinzu (siehe [Anbieter, Modelle und Agenten](/de/providers/)).
+2. Geh zurück zu **Klassifizierungsanbieter** und wähle **OpenCode-Zen-Schlüssel**.
+
+Die Anmeldung mit einem OpenCode-Konto reicht nicht. Für Jev akzeptiert Zen nur einen API-Schlüssel.
+
+### TypeSafe-API-Schlüssel
+
+Dein eigener TypeSafe-Schlüssel und dein eigenes Kontingent.
+
+1. Hol dir einen API-Schlüssel bei [TypeSafe](https://docs.typesafe.ai).
+2. Füge ihn in das Feld **TypeSafe-API-Schlüssel** ein und klicke auf **Speichern**.
+
+Ein gespeicherter Schlüssel wird gleich ausgewählt. Er bleibt in einer eigenen Datei auf dem OpenChamber-Server und wird nie an den Browser gesendet.
+
+Sobald ein Anbieter funktioniert, zeigt die Karte unter **Einstellungen → Anbieter** **Bereit**.
+
+## Wenn deine Wahl nicht mehr funktioniert
+
+Lässt sich der gewählte Anbieter nicht nutzen (die Aktion ist vorbei, ein Schlüssel wurde entfernt), weicht OpenChamber auf den ersten aus, der funktioniert, deine eigenen Schlüssel zuerst: TypeSafe-Schlüssel, dann Zen-Schlüssel, dann die Aktion. Die Seite zeigt, welcher gerade benutzt wird.
+
+Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kaputt. Jede Funktion hat für diesen Fall eine sichere Antwort:
+
+- Das Sicherheitsnetz lässt die Aktion auf dich warten.
+- Auto schickt den Prompt an dein Fallback-Modell.
+- Sitzungen in Arbeit bleiben, wie sie sind.
+- Zusammenfassung und Vorschlag entstehen so, als gäbe es Jev nicht.
+
+## Was Jev sieht
+
+Jev bekommt kurze Auszüge deiner Unterhaltung: deine letzte Nachricht und als Kontext bis zu drei vorherige Züge, gekürzt auf ihre ersten paar hundert Zeichen. Für das Sicherheitsnetz bekommt es außerdem die geprüfte Aktion, so wie OpenCode sie beschreibt: den Befehl, den der Agent ausführen will, oder die Datei und die Änderung bei einer Bearbeitung. Ganze Dateien oder Bilder bekommt es nie.
+
+Anfragen gehen vom OpenChamber-Server direkt an OpenCode Zen oder TypeSafe, je nach deiner Wahl.
+
+## Wo es funktioniert
+
+Jev läuft im OpenChamber-Server, also in der Desktop-App, in der Web-App und auf deinem Handy, wenn es mit einer der beiden verbunden ist. Die VS-Code-Erweiterung spricht direkt mit OpenCode und hat kein Jev: Dort gibt es kein Sicherheitsnetz, kein Auto, und Sitzungen kommen nur von Hand in Arbeit.
+
+## Verwandt
+
+- [Anbieter, Modelle und Agenten](/de/providers/): wo der OpenCode-Zen-Schlüssel liegt
+- [Sicherheit](/de/security/): wie OpenChamber mit Schlüsseln und Zugriff umgeht

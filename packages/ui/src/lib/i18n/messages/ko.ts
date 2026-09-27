@@ -9,6 +9,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode는 OpenChamber에 포함되어 있습니다. OpenCode v2를 사용하려면 OpenChamber를 업데이트하세요.",
@@ -63,6 +65,8 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...providersI18n.ko,
+  ...mcpGridI18n.ko,
+  ...pluginsGridI18n.ko,
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
   'terminalView.toast.selectionCopied': '출력을 복사했습니다',
@@ -204,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.viewMode.projects': '그룹 보기',
   'mobile.sessions.viewMode.timeline': '타임라인',
   'mobile.sessions.section.chats': '채팅',
+  'mobile.sessions.section.recent': '최근',
   'mobile.sessions.empty.noProjectsTitle': '프로젝트 없음',
   'mobile.sessions.empty.noProjectsDescription': '코드와 채팅을 시작하려면 프로젝트를 추가하세요.',
   'mobile.sessions.empty.noSessionsTitle': '세션 없음',
@@ -608,6 +613,13 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': '세션 이름 변경 취소',
   'sessions.sidebar.session.menu.unpin': '세션 고정 해제',
   'sessions.sidebar.session.menu.pin': '세션 고정',
+  'sessions.sidebar.work.title': '작업 중',
+  'sessions.sidebar.session.work.track': '작업 중으로 추적',
+  'sessions.sidebar.session.work.markDone': '완료로 표시',
+  'sessions.sidebar.session.work.doneSuggested': '완료된 것 같습니다',
+  'sessions.sidebar.session.work.updateFailed': '세션을 업데이트할 수 없습니다',
+  'chat.work.doneHint.text': '이 작업은 완료된 것 같습니다.',
+  'chat.work.doneHint.action': '완료로 표시',
   'sessions.sidebar.session.menu.share': '공유',
   'sessions.sidebar.session.menu.copied': '복사됨',
   'sessions.sidebar.session.menu.copyLink': '링크 복사',
@@ -649,7 +661,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.confirm': '내보내기',
   'sessions.sidebar.session.status.active': '활성 세션',
   'sessions.sidebar.session.status.unread': '읽지 않은 업데이트',
-  'sessions.sidebar.session.status.nextStep': '제안된 다음 단계: {suggestion}',
   'sessions.sidebar.session.status.pinned': '고정된 세션',
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
@@ -2442,10 +2453,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
   'chat.chatInput.focusMode.toggleAria': '집중 모드 전환',
   'chat.chatInput.focusMode.label': '집중 모드',
-  'chat.chatInput.permissionAutoAccept.disable': '권한 자동 승인 끄기',
-  'chat.chatInput.permissionAutoAccept.enable': '권한 자동 승인 켜기',
-  'chat.chatInput.permissionAutoAccept.on': '권한 자동 승인: 켜짐',
-  'chat.chatInput.permissionAutoAccept.off': '권한 자동 승인: 꺼짐',
   'chat.chatInput.linked.byAuthor': '작성자: {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '브라우저에서 이슈 열기',
   'chat.chatInput.linked.issue.removeAria': '연결된 이슈 제거',

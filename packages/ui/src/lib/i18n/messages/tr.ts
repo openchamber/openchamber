@@ -8,6 +8,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode, OpenChamber ile birlikte gelir. OpenCode v2 için OpenChamber’ı güncelleyin.",
@@ -62,6 +64,8 @@ export const dict = {
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
   ...providersI18n.tr,
+  ...mcpGridI18n.tr,
+  ...pluginsGridI18n.tr,
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
   'terminalView.toast.selectionCopied': 'Çıktı kopyalandı',
@@ -189,6 +193,7 @@ export const dict = {
   'mobile.sessions.viewMode.projects': 'Gruplu',
   'mobile.sessions.viewMode.timeline': 'Zaman çizelgesi',
   'mobile.sessions.section.chats': 'Sohbetler',
+  'mobile.sessions.section.recent': 'Son kullanılanlar',
   'mobile.sessions.empty.noProjectsTitle': 'Henüz proje yok',
   'mobile.sessions.empty.noProjectsDescription': 'Kodunuzla sohbet etmeye başlamak için bir proje ekleyin.',
   'mobile.sessions.empty.noSessionsTitle': 'Henüz session yok',
@@ -588,6 +593,13 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Session yeniden adlandırmayı iptal et',
   'sessions.sidebar.session.menu.unpin': 'Session\'ın sabitlemesini kaldır',
   'sessions.sidebar.session.menu.pin': 'Session\'ı sabitle',
+  'sessions.sidebar.work.title': 'Devam eden',
+  'sessions.sidebar.session.work.track': 'Devam eden iş olarak izle',
+  'sessions.sidebar.session.work.markDone': 'Tamamlandı olarak işaretle',
+  'sessions.sidebar.session.work.doneSuggested': 'Tamamlanmış görünüyor',
+  'sessions.sidebar.session.work.updateFailed': 'Oturum güncellenemedi',
+  'chat.work.doneHint.text': 'Bu iş tamamlanmış görünüyor.',
+  'chat.work.doneHint.action': 'Tamamlandı olarak işaretle',
   'sessions.sidebar.session.menu.share': 'Paylaş',
   'sessions.sidebar.session.menu.copied': 'Kopyalandı',
   'sessions.sidebar.session.menu.copyLink': 'Bağlantıyı kopyala',
@@ -629,7 +641,6 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.confirm': 'Dışa aktar',
   'sessions.sidebar.session.status.active': 'Session aktif',
   'sessions.sidebar.session.status.unread': 'Okunmamış güncellemeler',
-  'sessions.sidebar.session.status.nextStep': 'Önerilen sonraki adım: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'Sabitlenmiş session',
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
@@ -2375,10 +2386,6 @@ export const dict = {
   'chat.chatInput.actions.stopGeneratingAria': 'Üretmeyi durdur',
   'chat.chatInput.focusMode.toggleAria': 'Odak modunu aç/kapat',
   'chat.chatInput.focusMode.label': 'Odak modu',
-  'chat.chatInput.permissionAutoAccept.disable': 'İzin otomatik kabulünü devre dışı bırak',
-  'chat.chatInput.permissionAutoAccept.enable': 'İzin otomatik kabulünü etkinleştir',
-  'chat.chatInput.permissionAutoAccept.on': 'İzin otomatik kabulü: açık',
-  'chat.chatInput.permissionAutoAccept.off': 'İzin otomatik kabulü: kapalı',
   'chat.chatInput.linked.byAuthor': '{author} tarafından',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue\'ı tarayıcıda aç',
   'chat.chatInput.linked.issue.removeAria': 'Bağlı issue\'ı kaldır',

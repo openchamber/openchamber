@@ -1,0 +1,77 @@
+---
+title: Sınıflandırma sağlayıcıları (Jev)
+description: OpenChamber'ın farklı iş akışlarındaki kararların arkasındaki küçük sınıflandırma modeli Jev'i kurun.
+---
+
+# Sınıflandırma sağlayıcıları (Jev)
+
+Bazı OpenChamber özelliklerinin harekete geçmeden önce hızlı bir karara ihtiyacı vardır: Bu komut riskli mi, bu istem ne tür bir görev, kullanıcı gerçek bir işe yeni mi başladı? Bu soruları TypeSafe'in küçük karar modeli Jev yanıtlar. Bu sayfa, OpenChamber'a Jev erişimini nasıl vereceğinizi anlatır.
+
+Jev asla kod yazmaz ve sohbetinizde yanıt vermez. Yalnızca bir karar döndürür, OpenChamber da ona göre davranır. OpenChamber bir yanıtı en fazla dört saniye bekler.
+
+## Jev'i neler kullanır
+
+| Özellik | Jev'in yanıtladığı soru |
+| --- | --- |
+| [İzinler ve güvenlik ağı](/tr/permissions/) | Ajan bu eylemi çalıştırmadan önce size sormalı mı? |
+| [Otomatik model yönlendirme](/tr/auto-model-routing/) | Bu istem kategorilerinizden hangisine ait? |
+| [Devam eden oturumlar](/tr/sessions-in-work/) | Az önce gerçek bir iş mi istediniz? Bu tur işin sonu gibi mi görünüyor? |
+| [Özet ve sonraki mesaj önerisi](/tr/sessions-in-work/) | Bu turdan sonra bir özet ya da öneri üretmeye değer mi? |
+
+Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, oturumlar da yalnızca siz taşıdığınızda devam edenlere geçer. Özetler ve öneriler çalışmaya devam eder, sadece filtre olmadan.
+
+## Kurulum
+
+**Ayarlar → Provider'lar → Sınıflandırma sağlayıcıları** sayfasını açın ve Jev isteklerinin nereye gideceğini seçin. Üç seçenek var.
+
+### OpenCode Zen kampanyası
+
+Sınırlı bir süre ücretsiz, anahtar gerekmez. Kampanya sürdüğü sürece OpenCode, OpenChamber'ın Jev'i OpenCode Zen üzerinden ücretsiz kullanmasına izin veriyor. Bu sayfaya hiç dokunmadıysanız zaten bunu kullanıyorsunuz.
+
+Kampanya bittiğinde bu seçenek kaybolur ve varsa OpenChamber aşağıdaki anahtarlardan birine geçer.
+
+### OpenCode Zen anahtarı
+
+OpenCode'da kayıtlı Zen API anahtarını kullanır, ücret Zen bakiyenizden düşer.
+
+1. **Ayarlar → Provider'lar** sayfasını açın ve **OpenCode Zen** sağlayıcısına bir API anahtarı ekleyin ([Sağlayıcılar, modeller ve agentlar](/tr/providers/) sayfasına bakın).
+2. **Sınıflandırma sağlayıcıları** sayfasına dönün ve **OpenCode Zen anahtarı** seçeneğini seçin.
+
+Bir OpenCode hesabıyla giriş yapmak yetmez. Zen, Jev için yalnızca API anahtarı kabul eder.
+
+### TypeSafe API anahtarı
+
+Kendi TypeSafe anahtarınız ve kotanız.
+
+1. [TypeSafe](https://docs.typesafe.ai) üzerinden bir API anahtarı alın.
+2. Anahtarı **TypeSafe API anahtarı** alanına yapıştırın ve **Kaydet**'e basın.
+
+Kaydedilen anahtar aynı zamanda seçilmiş olur. Anahtar OpenChamber sunucusunda kendi dosyasında durur ve asla tarayıcıya gönderilmez.
+
+Bir sağlayıcı çalıştığında **Ayarlar → Provider'lar** sayfasındaki kart **Hazır** gösterir.
+
+## Seçiminiz çalışmayı bıraktığında
+
+Seçtiğiniz sağlayıcı kullanılamıyorsa (kampanya bitti, bir anahtar kaldırıldı), OpenChamber çalışan ilk sağlayıcıya geçer, önce kendi anahtarlarınız: TypeSafe anahtarı, sonra Zen anahtarı, sonra kampanya. Sayfa şu anda hangisinin kullanıldığını gösterir.
+
+Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. Her özelliğin bu durum için güvenli bir yanıtı vardır:
+
+- Güvenlik ağı eylemi sizin kararınızı beklemeye bırakır.
+- Auto istemi yedek modelinize gönderir.
+- Devam eden oturumlar olduğu gibi kalır.
+- Özet ve öneri, Jev hiç yokmuş gibi üretilir.
+
+## Jev neyi görür
+
+Jev konuşmanızdan kısa alıntılar alır: son mesajınızı ve bağlam için en fazla üç önceki turu, ilk birkaç yüz karakterine kısaltılmış olarak. Güvenlik ağı için kontrol edilen eylemi de OpenCode'un tarif ettiği şekliyle alır: ajanın çalıştırmak istediği komutu ya da bir düzenlemede dosyayı ve değişikliği. Asla dosyaların tamamını veya görselleri almaz.
+
+İstekler, seçiminize göre OpenChamber sunucusundan doğrudan OpenCode Zen'e veya TypeSafe'e gider.
+
+## Nerede çalışır
+
+Jev OpenChamber sunucusunda çalışır; yani masaüstü uygulamasında, web uygulamasında ve bunlardan birine bağlı telefonunuzda kullanılabilir. VS Code eklentisi OpenCode ile doğrudan konuşur ve Jev'e sahip değildir: Orada güvenlik ağı ve Auto yoktur, oturumlar da devam edenlere yalnızca elle taşınır.
+
+## İlgili
+
+- [Sağlayıcılar, modeller ve agentlar](/tr/providers/): OpenCode Zen anahtarının bulunduğu yer
+- [Güvenlik](/tr/security/): OpenChamber'ın anahtarları ve erişimi nasıl ele aldığı

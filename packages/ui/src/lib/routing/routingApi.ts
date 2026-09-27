@@ -34,14 +34,27 @@ const heldPermissionSchema = z.object({ permissionId: z.string(), score: z.numbe
 
 const builtinCategorySchema = z.object({ id: z.string().min(1), name: z.string().min(1), description: z.string().min(1) });
 
-/** Which Jev endpoint the server is calling: the user's TypeSafe key, or the free model zen serves. */
+/** Which Jev endpoint the server is calling: the user's TypeSafe key, or zen. */
 const jevSourceSchema = z.enum(['typesafe', 'zen-free']);
 
+/** A classification provider: which service answers Jev requests. */
+const classifierSourceSchema = z.enum(['zen-promo', 'zen-key', 'typesafe']);
+
+const classifierSchema = z.object({
+  selected: classifierSourceSchema,
+  effective: classifierSourceSchema.nullable(),
+  sources: z.array(z.object({ id: classifierSourceSchema, usable: z.boolean() })),
+});
+
+// Servers from before the classifier pick send neither `jevAvailable` nor
+// `classifier`; Jev always answered there, through the free zen model.
 const stateSchema = z.object({
   available: z.boolean(),
   autoReady: z.boolean(),
+  jevAvailable: z.boolean().default(true),
   tokenPresent: z.boolean(),
   jevSource: jevSourceSchema,
+  classifier: classifierSchema.nullable().default(null),
   config: routingConfigSchema.nullable(),
   builtins: z.array(builtinCategorySchema),
   heldPermissions: z.array(heldPermissionSchema).optional(),
@@ -51,9 +64,20 @@ export type RoutingCategory = z.infer<typeof routingCategorySchema>;
 export type RoutingConfig = z.infer<typeof routingConfigSchema>;
 export type RoutingHeldPermission = z.infer<typeof heldPermissionSchema>;
 export type RoutingJevSource = z.infer<typeof jevSourceSchema>;
+export type ClassifierSource = z.infer<typeof classifierSourceSchema>;
 export type RoutingState = z.infer<typeof stateSchema>;
 
-export const ROUTING_UNAVAILABLE: RoutingState = { available: false, autoReady: false, tokenPresent: false, jevSource: 'zen-free', config: null, builtins: [], heldPermissions: [] };
+export const ROUTING_UNAVAILABLE: RoutingState = {
+  available: false,
+  autoReady: false,
+  jevAvailable: false,
+  tokenPresent: false,
+  jevSource: 'zen-free',
+  classifier: null,
+  config: null,
+  builtins: [],
+  heldPermissions: [],
+};
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 
@@ -85,3 +109,10 @@ export const saveRoutingToken = async (token: string): Promise<RoutingState> =>
 
 export const clearRoutingToken = async (): Promise<RoutingState> =>
   readState(await runtimeFetch('/api/routing/token', { method: 'DELETE' }));
+
+export const saveClassifierSource = async (source: ClassifierSource): Promise<RoutingState> =>
+  readState(await runtimeFetch('/api/routing/classifier', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }),
+  }));

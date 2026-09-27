@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSessionAssistRuntime } from './runtime.js';
+import { createSessionLineage } from '../session-lineage.js';
 
 /**
  * The recap and the suggestion live in OpenChamber's own session metadata
@@ -162,6 +163,50 @@ describe('session assist runtime', () => {
     expect(persistSessionAssist).toHaveBeenCalledTimes(2);
     expect(persistSessionAssist.mock.calls[1][2]).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it('asks the turn-end gate first and arms nothing when it rules both fields out', async () => {
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const getSmallModelService = vi.fn(async () => {
+      throw new Error('the small model must not be woken');
+    });
+    const evaluateTurn = vi.fn(async () => ({ recap: false, suggestion: false }));
+    const { runtime, buildOpenCodeUrl } = makeRuntime({ persistSessionAssist, getSmallModelService, evaluateTurn });
+
+    runtime.processPayload(idle());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(evaluateTurn).toHaveBeenCalledWith({ sessionId: 'ses_1', directory: '', assist: { recap: true, suggestion: true } });
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
+    expect(getSmallModelService).not.toHaveBeenCalled();
+  });
+
+  it('arms nothing for a known subsession: no gate, no timer, no read', async () => {
+    const lineage = createSessionLineage();
+    lineage.remember('ses_1', 'ses_parent');
+    const evaluateTurn = vi.fn(async () => null);
+    const { runtime, buildOpenCodeUrl } = makeRuntime({ persistSessionAssist: vi.fn(async () => undefined), evaluateTurn, lineage });
+
+    runtime.processPayload(idle());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(evaluateTurn).not.toHaveBeenCalled();
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
+  });
+
+  it('drops a gate answer that arrives after the next turn started', async () => {
+    const persistSessionAssist = vi.fn(async () => undefined);
+    let answer;
+    const evaluateTurn = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const { runtime, buildOpenCodeUrl } = makeRuntime({ persistSessionAssist, evaluateTurn });
+
+    runtime.processPayload(idle());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    answer({ recap: true, suggestion: true });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
   });
 
   it('arms generation again as soon as a store is injected', async () => {

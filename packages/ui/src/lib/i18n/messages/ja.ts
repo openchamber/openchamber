@@ -9,6 +9,8 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { providersI18n } from './providers.i18n';
+import { mcpGridI18n } from './mcp-grid.i18n';
+import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode は OpenChamber に同梱されています。OpenCode v2 を利用するには OpenChamber を更新してください。",
@@ -63,6 +65,8 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
   ...providersI18n.ja,
+  ...mcpGridI18n.ja,
+  ...pluginsGridI18n.ja,
   'terminalView.actions.attachSelection': '選択した出力を添付',
   'terminalView.actions.copySelection': '選択した出力をコピー',
   'terminalView.toast.selectionCopied': '出力をコピーしました',
@@ -204,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.viewMode.projects': 'グループ表示',
   'mobile.sessions.viewMode.timeline': 'タイムライン',
   'mobile.sessions.section.chats': 'チャット',
+  'mobile.sessions.section.recent': '最近',
   'mobile.sessions.empty.noProjectsTitle': 'まだプロジェクトがありません',
   'mobile.sessions.empty.noProjectsDescription': 'プロジェクトを追加してコードとチャットを始めましょう。',
   'mobile.sessions.empty.noSessionsTitle': 'まだセッションがありません',
@@ -608,6 +613,13 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': 'セッション名の変更をキャンセル',
   'sessions.sidebar.session.menu.unpin': 'セッションのピン留めを解除',
   'sessions.sidebar.session.menu.pin': 'セッションをピン留め',
+  'sessions.sidebar.work.title': '作業中',
+  'sessions.sidebar.session.work.track': '作業中として追跡',
+  'sessions.sidebar.session.work.markDone': '完了にする',
+  'sessions.sidebar.session.work.doneSuggested': '完了したようです',
+  'sessions.sidebar.session.work.updateFailed': 'セッションを更新できませんでした',
+  'chat.work.doneHint.text': 'この作業は完了したようです。',
+  'chat.work.doneHint.action': '完了にする',
   'sessions.sidebar.session.menu.share': '共有',
   'sessions.sidebar.session.menu.copied': 'コピーしました',
   'sessions.sidebar.session.menu.copyLink': 'リンクをコピー',
@@ -649,7 +661,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.confirm': 'エクスポート',
   'sessions.sidebar.session.status.active': 'セッションアクティブ',
   'sessions.sidebar.session.status.unread': '未読の更新',
-  'sessions.sidebar.session.status.nextStep': '提案された次のステップ: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'ピン留めされたセッション',
   'sessions.sidebar.session.status.movingToWorktree': 'セッションを新しいworktreeへ移動中',
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
@@ -2438,10 +2449,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.stopGeneratingAria': '生成を停止',
   'chat.chatInput.focusMode.toggleAria': 'フォーカスモードの切り替え',
   'chat.chatInput.focusMode.label': 'フォーカスモード',
-  'chat.chatInput.permissionAutoAccept.disable': '権限の自動承認を無効にする',
-  'chat.chatInput.permissionAutoAccept.enable': '権限の自動承認を有効にする',
-  'chat.chatInput.permissionAutoAccept.on': '権限の自動承認: オン',
-  'chat.chatInput.permissionAutoAccept.off': '権限の自動承認: オフ',
   'chat.chatInput.linked.byAuthor': '{author}による',
   'chat.chatInput.linked.issue.openInBrowserAria': 'ブラウザでIssueを開く',
   'chat.chatInput.linked.issue.removeAria': 'リンクされたIssueを削除',

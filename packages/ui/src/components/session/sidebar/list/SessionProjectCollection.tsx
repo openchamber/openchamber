@@ -18,7 +18,7 @@ import { useProjectSessionLists } from '../projects/useProjectSessionLists';
 import { useSessionSidebarSections } from '../projects/useSessionSidebarSections';
 import { SessionPrefetchEffect } from './useSessionPrefetch';
 import { normalizePath } from '../utils';
-import type { SessionGroup } from '../types';
+import type { SessionGroup, SessionNode } from '../types';
 import { SessionProjectScroller } from '../projects/SessionProjectScroller';
 import { useSessionGrouping } from '../projects/useSessionGrouping';
 import { SessionBulkActions } from '../folders/SessionBulkActions';
@@ -27,9 +27,9 @@ import type { useSessionProjectViewState } from '../projects/useSessionProjectVi
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import type { DeleteSessionConfirmState } from '../sessions/useSessionActions';
 import { useExpandedParents } from '../sessions/useExpandedParents';
-import { getChatsRootForHome, getChatsRootFromDirectory } from '@/lib/chatDirectories';
+import { getChatsRootForHome, getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isCapacitorApp } from '@/lib/platform';
-import { deriveRecentActivitySections, deriveTimelineActivityItems } from '../recent/activitySections';
+import { deriveRecentActivitySections, deriveTimelineActivityItems, sessionTreeMatchesSidebarQuery } from '../recent/activitySections';
 import { resolveSidebarSessionLocations } from '../recent/sessionLocation';
 import { buildSessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { useSidebarGroupStatus } from './useSidebarGroupStatus';
@@ -37,6 +37,8 @@ import { getSessionFolderOwnerKey, getSessionFolderScopes } from '../sessions/se
 import { SessionRowOrderProvider } from '../sessions/sessionRowOrder';
 import { canRequestNativeDirectoryAccess } from '@/lib/desktop';
 import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
+import { useUIStore } from '@/stores/useUIStore';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 
 const PR_NO_PR_RETRY_MS = 5 * 60_000;
 
@@ -45,6 +47,7 @@ const PR_NO_PR_RETRY_MS = 5 * 60_000;
 const EMPTY_STANDALONE_GROUPS: SessionGroup[] = [];
 
 const EMPTY_TIMELINE_ITEMS: ReturnType<typeof deriveTimelineActivityItems> = [];
+const EMPTY_WORK_SESSIONS: readonly Session[] = [];
 
 const isRootSession = (session: Session): boolean => {
   // SAFETY: OpenCode attaches parentID to hierarchical session records,
@@ -376,7 +379,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       getSessionNode: (session) => nodes.get(session.id) ?? buildActiveSessionNode(collection.childrenMap, session),
       query: view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '',
     });
-  }, [collection.childrenMap, ownership.bySessionId, recentSessions, topology.availableWorktreesByProject, topology.gitBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  }, [collection.childrenMap, ownership.bySessionId, recentSessions, spaceLabelById, topology.availableWorktreesByProject, topology.gitBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
 
   // Timeline lists the project sessions themselves, in the shared lifecycle
   // order (pinned first), with no project, worktree, or folder structure.
@@ -407,7 +410,57 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       }),
       query: view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '',
     });
-  }, [collection.childrenMap, collection.orderedSessions, collection.rootSessions, ownership.bySessionId, timelineMode, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  }, [collection.childrenMap, collection.orderedSessions, collection.rootSessions, ownership.bySessionId, spaceLabelById, timelineMode, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+
+  // Sessions in work: top-level, unarchived project sessions (Chats are plain
+  // conversations and never in work), in the shared lifecycle order.
+  // They leave every other projection, so the row model gets the id set too.
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const workSessions = React.useMemo(() => {
+    if (!sessionWorkEnabled) return EMPTY_WORK_SESSIONS;
+    const sessions = collection.orderedSessions.filter((session) => !session.parentID && !session.time?.archived && !isChatDirectoryPath(session.directory) && isSessionInWork(session));
+    return sessions.length > 0 ? sessions : EMPTY_WORK_SESSIONS;
+  }, [collection.orderedSessions, sessionWorkEnabled]);
+  const workSessionIds = React.useMemo(() => new Set(workSessions.map((session) => session.id)), [workSessions]);
+  const workItems = React.useMemo(() => {
+    if (workSessions.length === 0) return EMPTY_TIMELINE_ITEMS;
+    const locations = resolveSidebarSessionLocations({
+      sessions: [...workSessions],
+      projects: topology.projects,
+      ownerBySessionId: ownership.bySessionId,
+      spaceLabelById,
+      availableWorktreesByProject: topology.availableWorktreesByProject,
+      gitBranches: topology.gitBranches,
+      homeDirectory: view.homeDirectory,
+      rootBranchByProjectId: topology.projectRootBranches,
+      hideBranchMatchingProjectLabel: !timelineMode,
+    });
+    // Timeline rows never expand; the Projects view keeps subsessions
+    // reachable, the way Recent does, and searches the whole tree: these
+    // sessions are nowhere else in the sidebar.
+    const nodes = new Map(workSessions.map((session) => {
+      const tree = buildActiveSessionNode(collection.childrenMap, session);
+      const node: SessionNode = {
+        ...tree,
+        children: timelineMode ? [] : tree.children,
+        worktree: locations.get(session.id)?.worktree ?? null,
+      };
+      return [session.id, node];
+    }));
+    const query = view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '';
+    const listed = query
+      ? workSessions.filter((session) => {
+        const node = nodes.get(session.id);
+        return node ? sessionTreeMatchesSidebarQuery(node, query) : false;
+      })
+      : [...workSessions];
+    return deriveTimelineActivityItems({
+      sessions: listed,
+      getSessionLocation: (sessionId) => locations.get(sessionId) ?? null,
+      getSessionNode: (session) => nodes.get(session.id) ?? buildActiveSessionNode(collection.childrenMap, session),
+      query: '',
+    });
+  }, [collection.childrenMap, ownership.bySessionId, spaceLabelById, timelineMode, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery, workSessions]);
 
   const { groupStatusByKey, bootstrapSnapshot } = useSidebarGroupStatus({
     childStores,
@@ -537,6 +590,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     chatGroup,
     recentSections: recentActivitySections,
     timelineItems,
+    workItems,
+    workSessionIds,
     showRecentSection: showRecentSection && !singleProjectMode && !timelineMode,
     foldersMap,
     groupSearchDataByGroup,
@@ -557,7 +612,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     showOnlyMainWorkspace: view.showOnlyMainWorkspace,
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
-  }), [chatGroup, collapsedActivityKeys, timelineItems, timelineMode, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, recentActivitySections, selectedSingleProjectId, sessionOrderIndex, showRecentSection, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [chatGroup, collapsedActivityKeys, timelineItems, timelineMode, workItems, workSessionIds, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, recentActivitySections, selectedSingleProjectId, sessionOrderIndex, showRecentSection, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

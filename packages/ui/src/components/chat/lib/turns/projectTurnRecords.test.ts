@@ -77,6 +77,29 @@ describe('projectTurnRecords', () => {
         expect(projection.indexes.messageToTurnId.has('a1')).toBe(false);
     });
 
+    test('opens a turn at a subagent run report so the parent reply renders under it', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
+        const report: ChatMessageEntry = {
+            info: {
+                id: 's1',
+                sessionID: 'ses_1',
+                role: 'synthetic',
+                time: { created: 3 },
+                text: '<subagent sessionID="ses_child" state="completed" description="review">\nok\n</subagent>',
+                metadata: { source: 'subagent', childID: 'ses_child', state: 'completed' },
+            },
+            parts: [],
+        };
+        const reaction = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
+
+        const projection = projectTurnRecords([user, assistant, report, reaction]);
+
+        expect(projection.turns.map((turn) => turn.turnId)).toEqual(['u1', 's1']);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+        expect(projection.ungroupedMessageIds.has('s1')).toBe(false);
+    });
+
     test('keeps non-assistant orphan messages available as ungrouped entries', () => {
         const system = createMessageEntry({ id: 's1', role: 'system', createdAt: 1 });
 

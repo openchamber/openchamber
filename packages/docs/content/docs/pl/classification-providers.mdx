@@ -1,0 +1,77 @@
+---
+title: Dostawcy klasyfikacji (Jev)
+description: Skonfiguruj Jev, mały model klasyfikacji, który podejmuje decyzje w różnych przepływach pracy OpenChamber.
+---
+
+# Dostawcy klasyfikacji (Jev)
+
+Niektóre funkcje OpenChamber potrzebują szybkiej decyzji, zanim zaczną działać: czy to polecenie jest ryzykowne, jakiego rodzaju zadaniem jest ten prompt, czy użytkownik właśnie zabrał się do prawdziwej pracy? Na takie pytania odpowiada Jev, mały model decyzyjny od TypeSafe. Ta strona pokazuje, jak dać OpenChamber dostęp do Jev.
+
+Jev nie pisze kodu i nie odpowiada na Twoim czacie. Zwraca tylko werdykt, a OpenChamber działa zgodnie z nim. Na odpowiedź OpenChamber czeka najwyżej cztery sekundy.
+
+## Co korzysta z Jev
+
+| Funkcja | Pytanie, na które odpowiada Jev |
+| --- | --- |
+| [Uprawnienia i siatka bezpieczeństwa](/pl/permissions/) | Czy agent powinien Cię zapytać, zanim wykona to działanie? |
+| [Automatyczny wybór modelu](/pl/auto-model-routing/) | Do której z Twoich kategorii należy ten prompt? |
+| [Sesje w toku](/pl/sessions-in-work/) | Czy właśnie poprosiłeś o prawdziwą pracę? Czy ta tura wygląda na jej koniec? |
+| [Podsumowanie i podpowiedź następnej wiadomości](/pl/sessions-in-work/) | Czy po tej turze warto wygenerować podsumowanie albo podpowiedź? |
+
+Bez dostawcy siatka bezpieczeństwa i Auto są ukryte, a sesje trafiają do toku tylko wtedy, gdy sam je tam przeniesiesz. Podsumowania i podpowiedzi dalej działają, tylko bez filtra.
+
+## Konfiguracja
+
+Otwórz **Ustawienia → Dostawcy → Dostawcy klasyfikacji** i wybierz, dokąd trafiają zapytania do Jev. Są trzy możliwości.
+
+### Promocja OpenCode Zen
+
+Za darmo przez ograniczony czas, bez klucza. Dopóki trwa promocja, OpenCode pozwala OpenChamber korzystać z Jev przez OpenCode Zen bezpłatnie. Jeśli nigdy nie ruszałeś tej strony, właśnie z tego korzystasz.
+
+Kiedy promocja się skończy, ta opcja zniknie, a OpenChamber przełączy się na jeden z kluczy poniżej, jeśli go masz.
+
+### Klucz OpenCode Zen
+
+Korzysta z klucza API Zen zapisanego w OpenCode, a opłaty idą z Twojego salda Zen.
+
+1. Otwórz **Ustawienia → Dostawcy** i dodaj klucz API do dostawcy **OpenCode Zen** (zobacz [Dostawcy, modele i agenci](/pl/providers/)).
+2. Wróć do **Dostawcy klasyfikacji** i wybierz **Klucz OpenCode Zen**.
+
+Samo zalogowanie się kontem OpenCode nie wystarczy. Do Jev Zen przyjmuje tylko klucz API.
+
+### Klucz API TypeSafe
+
+Twój własny klucz i limit TypeSafe.
+
+1. Zdobądź klucz API w [TypeSafe](https://docs.typesafe.ai).
+2. Wklej go w pole **Klucz API TypeSafe** i kliknij **Zapisz**.
+
+Zapisany klucz od razu zostaje wybrany. Leży na serwerze OpenChamber w osobnym pliku i nigdy nie trafia do przeglądarki.
+
+Gdy dostawca zacznie działać, karta w **Ustawienia → Dostawcy** pokaże **Gotowe**.
+
+## Kiedy Twój wybór przestaje działać
+
+Jeśli z wybranego dostawcy nie da się skorzystać (promocja się skończyła, klucz usunięto), OpenChamber przechodzi na pierwszego działającego, najpierw na Twoje własne klucze: klucz TypeSafe, potem klucz Zen, potem promocję. Strona pokazuje, którego używa w tej chwili.
+
+Jeśli Jev odpowiada wolno albo zawodzi przy pojedynczym zapytaniu, nic się nie psuje. Każda funkcja ma na ten wypadek bezpieczną odpowiedź:
+
+- Siatka bezpieczeństwa zostawia działanie, żeby czekało na Twoją decyzję.
+- Auto wysyła prompt do Twojego modelu zapasowego.
+- Sesje w toku zostają bez zmian.
+- Podsumowanie i podpowiedź powstają tak, jakby Jev nie istniał.
+
+## Co widzi Jev
+
+Jev dostaje krótkie fragmenty Twojej rozmowy: Twoją ostatnią wiadomość i, jako kontekst, do trzech poprzednich tur, przyciętych do kilkuset pierwszych znaków. Dla siatki bezpieczeństwa dostaje też sprawdzane działanie w takiej postaci, w jakiej opisuje je OpenCode: polecenie, które agent chce uruchomić, albo plik i zmianę przy edycji. Nigdy nie dostaje całych plików ani obrazów.
+
+Zapytania idą z serwera OpenChamber prosto do OpenCode Zen albo do TypeSafe, zależnie od Twojego wyboru.
+
+## Gdzie to działa
+
+Jev działa na serwerze OpenChamber, więc jest dostępny w aplikacji desktopowej, w aplikacji webowej i na telefonie połączonym z którąkolwiek z nich. Rozszerzenie VS Code rozmawia z OpenCode bezpośrednio i nie ma Jev: nie ma tam siatki bezpieczeństwa ani Auto, a sesje trafiają do toku tylko ręcznie.
+
+## Powiązane
+
+- [Dostawcy, modele i agenci](/pl/providers/): gdzie jest klucz OpenCode Zen
+- [Bezpieczeństwo](/pl/security/): jak OpenChamber obchodzi się z kluczami i dostępem

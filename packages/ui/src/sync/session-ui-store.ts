@@ -16,6 +16,7 @@ import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
 import type { Metadata, ModelRef, Part, Session, TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
+import type { PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
@@ -385,7 +386,8 @@ export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
   directoryOverride: string | null
-  permissionAutoAcceptEnabled?: boolean
+  /** Chosen with the composer's shield button; absent means the new session takes the default from Settings. */
+  permissionMode?: PermissionMode
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -453,7 +455,7 @@ export type SessionUIState = {
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
-  setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
+  setDraftPermissionMode: (mode: PermissionMode) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
@@ -1000,7 +1002,7 @@ export async function materializeOpenDraftSession(selection: {
   const store = useSessionUIStore.getState()
   const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
-  const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
+  const draftPermissionMode = draft.permissionMode
 
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
     ? selection.agent.trim()
@@ -1088,11 +1090,12 @@ export async function materializeOpenDraftSession(selection: {
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  if (draftPermissionAutoAcceptEnabled) {
+  // Without a choice in the draft the server writes the default mode itself.
+  if (draftPermissionMode) {
     void import("@/stores/permissionStore")
-      .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionAutoAccept(created.id, true))
+      .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionMode(created.id, draftPermissionMode))
       .catch((error) => {
-        console.warn("Failed to apply draft permission auto-accept to new session:", error)
+        console.warn("Failed to apply the draft permission mode to the new session:", error)
       })
   }
 
@@ -1420,7 +1423,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       preparedChatDirectory: null,
       selectedProjectId: selectedProject?.id ?? null,
       directoryOverride: directory,
-      permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
       pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
       bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
       preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
@@ -1510,7 +1512,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       && currentDraft.initialPrompt === undefined
       && currentDraft.syntheticParts === undefined
       && currentDraft.targetFolderId === undefined
-      && currentDraft.permissionAutoAcceptEnabled === undefined
+      && currentDraft.permissionMode === undefined
     ) {
       return
     }
@@ -1578,10 +1580,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return { newSessionDraft: { ...s.newSessionDraft, preserveDirectoryOverride: value } }
     }),
 
-  setDraftPermissionAutoAcceptEnabled: (enabled) =>
+  setDraftPermissionMode: (mode) =>
     set((s) => {
       if (!s.newSessionDraft?.open) return s
-      return { newSessionDraft: { ...s.newSessionDraft, permissionAutoAcceptEnabled: enabled } }
+      return { newSessionDraft: { ...s.newSessionDraft, permissionMode: mode } }
     }),
 
   setDraftProjectContextPin: (kind, id, pinned) =>

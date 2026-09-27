@@ -99,6 +99,9 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
+import { createJevClient } from './lib/routing/jev.js';
+import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
+import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
 import { findInstalledGuest } from './lib/guests/catalog.js';
@@ -544,6 +547,18 @@ const persistSessionMetadataPatch = async (sessionID, patch, { directory = '' } 
   return metadata;
 };
 
+/** A metadata change decided against the record at write time; broadcast only when it changed. */
+const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } = {}) => {
+  const result = await sessionMetadataStore.updateSessionMetadata(sessionID, decide, { directory });
+  if (result.changed) {
+    broadcastOpenChamberUiEvent({
+      type: 'openchamber:session-metadata',
+      properties: { sessionID, metadata: result.metadata },
+    });
+  }
+  return result;
+};
+
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
@@ -880,6 +895,9 @@ const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSen
 const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
+// Which sessions are subsessions: per-turn work skips them without reading.
+const sessionLineage = createSessionLineage();
+
 const sessionAssistRuntime = createSessionAssistRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -888,6 +906,9 @@ const sessionAssistRuntime = createSessionAssistRuntime({
     persistSessionMetadataPatch(sessionID, { openchamber: { assist } }, { directory }),
   // Declared further down; only ever called after startup.
   isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
+  // Declared further down; only ever called after startup.
+  evaluateTurn: (input) => sessionWorkRuntime.evaluateTurnEnd(input),
+  lineage: sessionLineage,
 });
 
 const sessionGoalRuntime = createSessionGoalRuntime({
@@ -976,6 +997,20 @@ const routingRuntime = createRoutingRuntime({
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
 });
 
+// "In work": Jev opens a session when real work starts in it and hints when a
+// turn looks like the end of it. The same turn-end call gates session assist.
+const sessionWorkRuntime = createSessionWorkRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  classifierEndpoint: () => routingRuntime.classifierEndpoint(),
+  jev: createJevClient(),
+  readMetadata: (sessionID, directory) => sessionMetadataStore.get(sessionID, { directory }),
+  updateMetadata: updateSessionMetadataWith,
+  isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
+  chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
+  lineage: sessionLineage,
+});
+
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
@@ -985,10 +1020,13 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   broadcastGlobalUiEvent,
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
+  resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
 });
 permissionAutoAcceptRuntime.start();
+// A request the safety net held still needs the user, so only one that was
+// actually answered automatically skips the notification.
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
-  (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
+  (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
 );
 
 // Queued follow-up messages are delivered by the server so a closed tab or a
@@ -1036,7 +1074,9 @@ globalMessageStreamHub.subscribeEvent((event) => {
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
       agentToolRuntime?.abortSession?.(payload.properties.sessionID);
     }
+    sessionLineage.observe(payload);
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
+    sessionWorkRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     linearSessionStatusRuntime.processPayload(payload);
@@ -1657,6 +1697,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   syncToHmrState,
   openCodeWatcherRuntime,
   sessionAssistRuntime,
+  sessionWorkRuntime,
   sessionGoalRuntime,
   contextObligatoryRuntime,
   messageQueueRuntime,

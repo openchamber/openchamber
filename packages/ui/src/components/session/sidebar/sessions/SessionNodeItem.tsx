@@ -54,11 +54,13 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
-import { getOpenSessionSuggestion } from '@/lib/sessionAssistMetadata';
+import { getCurrentSessionAssist } from '@/lib/sessionAssistMetadata';
+import { isDoneSuggested, isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { setSessionWorkState } from '@/sync/session-actions';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { getChatsRootFromDirectory } from '@/lib/chatDirectories';
+import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { getMultiRunIdentity, sameMultiRunIdentity } from '@/lib/multirun/identity';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
@@ -341,26 +343,32 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     : 'group-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
   const showOpenInEditorAction = isVSCode;
   const showQuickArchiveAction = !archivedBucket && !mobileVariant;
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const sessionRecapEnabled = useUIStore((state) => state.sessionRecapEnabled);
+  // Track / Done belongs to top-level project sessions: Chats are plain
+  // conversations, never work. Touch layouts keep their actions permanently
+  // visible, where an icon on every row would be noise: there it lives in the
+  // session menu only.
+  const canTrackWork = sessionWorkEnabled && !archivedBucket && !node.session.parentID && !isChatDirectoryPath(node.session.directory);
+  const showWorkAction = canTrackWork && !alwaysShowActions;
+  // Hover-revealed actions besides the menu: work, quick archive, and in VS
+  // Code open-in-editor, each 16px. The date sits in the row flow, so the
+  // title must shrink enough to clear them or they overlap the timestamp.
+  const extraHoverActions = (showWorkAction ? 1 : 0) + (showQuickArchiveAction ? 1 : 0) + (showOpenInEditorAction ? 1 : 0);
   const revealPaddingClass = isVSCode
-    // VS Code rows reveal up to three actions on hover
-    // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
-    // row flow, so the title must shrink enough to clear the actions or they
-    // overlap the timestamp. Open-in-editor is always present in VS Code.
-    ? (showQuickArchiveAction && showOpenInEditorAction
-        ? 'group-hover:pr-18'
-        : showQuickArchiveAction || showOpenInEditorAction
-          ? 'group-hover:pr-14'
-          : 'group-hover:pr-8')
-    // Reserve just enough room for the hover-revealed actions (two 16px
-    // buttons + gap, anchored at the row edge past the title's own end) so
-    // they never overlap the title without leaving a large hole.
-    : (showQuickArchiveAction
-        ? 'group-hover:pr-7 group-has-[:focus-visible]:pr-7'
-        : 'group-hover:pr-3 group-has-[:focus-visible]:pr-3');
+    ? ['group-hover:pr-8', 'group-hover:pr-14', 'group-hover:pr-18', 'group-hover:pr-22'][extraHoverActions]
+    // Just enough room for the revealed buttons, anchored at the row edge
+    // past the title's own end, so they never overlap the title without
+    // leaving a large hole.
+    : [
+      'group-hover:pr-3 group-has-[:focus-visible]:pr-3',
+      'group-hover:pr-7 group-has-[:focus-visible]:pr-7',
+      'group-hover:pr-11 group-has-[:focus-visible]:pr-11',
+    ][extraHoverActions];
   const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
   const menuActionPaddingClass = isVSCode
-    ? (showQuickArchiveAction ? 'pr-18' : 'pr-14')
-    : (showQuickArchiveAction ? 'pr-7' : 'pr-3');
+    ? ['pr-8', 'pr-14', 'pr-18', 'pr-22'][extraHoverActions]
+    : ['pr-3', 'pr-7', 'pr-11'][extraHoverActions];
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
   const editingIdRef = React.useRef(editingId);
@@ -509,7 +517,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const worktreeLoadSequenceRef = React.useRef(0);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
-  const sessionSuggestionEnabled = useUIStore((state) => state.sessionSuggestionEnabled);
+  const isInWork = canTrackWork && isSessionInWork(resolvedSession);
+  const showDoneHint = isInWork && !isStreaming && isDoneSuggested(resolvedSession);
+  const workActionLabel = isInWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track');
+  const toggleSessionWork = async () => {
+    try {
+      await setSessionWorkState(session.id, sessionDirectory, isInWork ? 'done' : 'open');
+    } catch {
+      toast.error(t('sessions.sidebar.session.work.updateFailed'));
+    }
+  };
   const sessionGoalGlyph = sessionGoal ? (
     // SAFETY: sessionGoalStatusLabelKey contains an i18n key for every SessionGoalStatus.
     <span
@@ -1113,6 +1130,12 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {isPinnedSession ? <Icon name="unpin" className="mr-1 h-4 w-4" /> : <Icon name="pushpin" className="mr-1 h-4 w-4" />}
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </Item>
+      {canTrackWork ? (
+        <Item onClick={() => { void toggleSessionWork(); }} className="[&>svg]:mr-1">
+          <Icon name={isInWork ? 'check' : 'eye'} className="mr-1 h-4 w-4" />
+          {isInWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </Item>
+      ) : null}
       <Item onClick={() => { void handleExportSession(); }} className="[&>svg]:mr-1">
         <Icon name="download" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
@@ -1375,52 +1398,34 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </>
   );
 
-  const handlePinToggleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleWorkToggleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!sessionDirectory) return;
-    togglePinnedSession({ directory: sessionDirectory, sessionId: session.id });
+    void toggleSessionWork();
   };
 
   // Three-line timeline rows are taller, so their hover actions step up one
   // size to match the metadata they replace (the pin marker, the dot, the time).
   const actionButtonSizeClass = alwaysShowActions ? 'h-6 w-6' : isTimelineRow && !isTimelineChatRow ? 'h-5 w-5' : 'h-4 w-4';
   const actionIconSizeClass = alwaysShowActions ? 'h-3.5 w-3.5' : isTimelineRow && !isTimelineChatRow ? 'h-3 w-3' : 'h-2.5 w-2.5';
+  const checkIconSizeClass = alwaysShowActions ? 'h-4 w-4' : isTimelineRow && !isTimelineChatRow ? 'h-3.5 w-3.5' : 'h-3 w-3';
 
-  // The agent stopped with requested work still open: the assist wrote a next
-  // message for it. The open chat shows it in the composer instead.
-  const openSuggestion = sessionSuggestionEnabled && !isStreaming && !isActive
-    ? getOpenSessionSuggestion(resolvedSession)
+  // The recap of the last turn, for the whole-row tooltip, under the same
+  // freshness rule the chat uses.
+  const currentRecap = sessionRecapEnabled && !isStreaming
+    ? getCurrentSessionAssist(resolvedSession)?.recap || null
     : null;
-  const nextStepLabel = openSuggestion
-    ? t('sessions.sidebar.session.status.nextStep', { suggestion: openSuggestion })
-    : '';
-  // Projects rows list the suggestion in the whole-row tooltip (a nested
-  // badge tooltip would open alongside it). Elsewhere the badge fades under
-  // the hover actions like the permission badge, so only the three-line
-  // timeline row, whose badges sit on the third line and stay visible, gives
-  // the badge its own tooltip, like its PR badge.
-  const badgeCarriesTooltip = isTimelineRow && !isTimelineChatRow;
-  const nextStepBadge = (className?: string) => {
-    if (!openSuggestion) return null;
-    const badge = (
-      <span className={cn('inline-flex flex-shrink-0 items-center text-status-info', className)} aria-label={nextStepLabel}>
-        <Icon name="pencil-ai-2" className="h-3 w-3" />
-      </span>
-    );
-    if (!badgeCarriesTooltip) return badge;
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>{badge}</TooltipTrigger>
-        <TooltipContent side="top" sideOffset={6} className="max-w-xs">
-          <p>{nextStepLabel}</p>
-        </TooltipContent>
-      </Tooltip>
-    );
-  };
-  const rowBadges = (pendingPermissionCount > 0 || pendingFormCount > 0 || openSuggestion) ? (
+  // Jev thinks the work looks finished: a quiet check next to the row until a
+  // new turn starts or the user closes it.
+  const doneHintLabel = t('sessions.sidebar.session.work.doneSuggested');
+  const doneHintBadge = (className?: string) => (showDoneHint ? (
+    <span className={cn('inline-flex flex-shrink-0 items-center text-muted-foreground/75', className)} title={doneHintLabel} aria-label={doneHintLabel}>
+      <Icon name="check" className="h-3.5 w-3.5" />
+    </span>
+  ) : null);
+  const rowBadges = (pendingPermissionCount > 0 || pendingFormCount > 0 || showDoneHint) ? (
     <>
-      {nextStepBadge()}
+      {doneHintBadge()}
       {pendingPermissionCount > 0 ? (
         <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
           <Icon name="shield" className="h-3 w-3" />
@@ -1487,7 +1492,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       badges={rowBadges}
       providerId={resolvedSession.model?.providerID ?? null}
       metaPaddingClass={alwaysShowActions
-        ? (showQuickArchiveAction ? 'pr-19' : 'pr-13')
+        ? (showQuickArchiveAction ? 'pr-13' : 'pr-7')
         : undefined}
       // An open row menu (dropdown or right-click) keeps the actions shown,
       // so the meta they overlay must give way too, hover or not.
@@ -1711,7 +1716,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                           </span>
                         </div>
                       ) : null}
-                      {nextStepBadge(badgeVisibilityClass)}
+                      {doneHintBadge(badgeVisibilityClass)}
                       {pendingPermissionCount > 0 ? (
                         <span className={cn('inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0', badgeVisibilityClass)} title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
                           <Icon name="shield" className="h-3 w-3" />
@@ -1757,11 +1762,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                         </span>
                       </div>
                     ) : null}
-                    {openSuggestion ? (
-                      <div className="flex min-w-0 items-start gap-1.5 text-status-info">
-                        <Icon name="pencil-ai-2" className="mt-0.5 h-3 w-3 flex-shrink-0" />
-                        <span className="min-w-0 line-clamp-3">{nextStepLabel}</span>
-                      </div>
+                    {currentRecap ? (
+                      <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}
                   </div>
                 </TooltipContent>
@@ -1789,22 +1791,31 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
-            {isTimelineRow ? (
-              <button
-                type="button"
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-opacity',
-                  actionButtonSizeClass,
-                  isPinnedSession ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-                )}
-                aria-label={isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
-                onPointerDown={handleRowActionPointerDown}
-                onMouseDown={handleRowActionMouseDown}
-                onClick={handlePinToggleClick}
-                onKeyDown={(event) => event.stopPropagation()}
-              >
-                <Icon name="pushpin" className={actionIconSizeClass} />
-              </button>
+            {showWorkAction ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-opacity',
+                      actionButtonSizeClass,
+                      isInWork ? 'text-status-success' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                    aria-label={workActionLabel}
+                    onPointerDown={handleRowActionPointerDown}
+                    onMouseDown={handleRowActionMouseDown}
+                    onClick={handleWorkToggleClick}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    {/* The check glyph draws smaller than the others at the same
+                        box, so it takes the next icon size; the button stays put. */}
+                    <Icon name={isInWork ? 'check' : 'eye'} className={isInWork ? checkIconSizeClass : actionIconSizeClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                  {workActionLabel}
+                </TooltipContent>
+              </Tooltip>
             ) : null}
             {showQuickArchiveAction ? (
               <QuickSessionAction
@@ -2004,6 +2015,11 @@ const areSessionRenderSemanticsEqual = (prev: Session, next: Session): boolean =
   && prev.time?.created === next.time?.created
   && prev.time?.updated === next.time?.updated
   && prev.time?.archived === next.time?.archived
+  // The row renders from metadata (goal, in-work state, the recap tooltip) and
+  // judges the done hint and the recap against `time.idle`. A metadata change
+  // arrives as a new object, so the reference is the cheap exact signal.
+  && prev.time?.idle === next.time?.idle
+  && prev.metadata === next.metadata
   && sameMultiRunIdentity(prev, next)
 );
 

@@ -44,7 +44,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
 import { setActionRefs } from "./session-actions"
-import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged } from "./sync-refs"
+import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { upsertSessionRecord } from "./session-records"
@@ -61,7 +61,8 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { useRoutingStore } from "@/stores/useRoutingStore"
+import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
+import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
 import {
@@ -1578,6 +1579,24 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
   })
 }
 
+/**
+ * Whether the server answers this session's requests without the user: `auto`
+ * always, `safety` while the safety net can run. Those raise no toast when
+ * asked; a request the safety net holds is announced when it is held
+ * (`notifyHeldPermission`).
+ */
+const isAnsweredWithoutUser = (sessionID: string): boolean => {
+  const mode = usePermissionStore.getState().getSessionMode(sessionID)
+  return mode === "auto" || (mode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))
+}
+
+/** The toast an `ask` session's request would have raised, for one the safety net left to the user. */
+export const notifyHeldPermission = (permissionID: string, sessionID: string, directory: string | null): void => {
+  if (!directory || isVSCodeRuntime()) return
+  const permission = getDirectoryState(directory)?.permission[sessionID]?.find((entry) => entry.id === permissionID)
+  if (permission) notifyPermissionAsked(permission, directory)
+}
+
 const notifyFormCreated = (form: FormRequest, directory: string): void => {
   const sessionID = form.sessionID
   const toastKey = getFormToastKey(sessionID, form.id)
@@ -1598,7 +1617,7 @@ const notifyBlockingRequestWithoutStore = (payload: SyncEvent, directory: string
   if (isVSCodeRuntime()) return
   if (payload.type === "permission.asked") {
     const permission = payload.properties
-    if (usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) return
+    if (isAnsweredWithoutUser(permission.sessionID)) return
     notifyPermissionAsked(permission, directory)
     return
   }
@@ -1648,8 +1667,7 @@ export function handleEvent(
   }
 
   if (payload.type === "openchamber.permission-auto-accept") {
-    const { sessions, revision } = payload.properties
-    usePermissionStore.getState().applySnapshot({ sessions, revision }, expectedRuntimeKey)
+    usePermissionStore.getState().applySnapshot(policySnapshotFromWire(payload.properties), expectedRuntimeKey)
     return
   }
 
@@ -1833,7 +1851,7 @@ export function handleEvent(
       )
       return
     }
-    if (!isVSCodeRuntime() && usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) {
+    if (!isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
