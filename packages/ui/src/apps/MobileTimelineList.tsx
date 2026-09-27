@@ -77,6 +77,7 @@ const MobileTimelineRow: React.FC<{
       )}
       actions={(
         <MobileSessionRowActions
+          sessionId={session.id}
           title={title}
           revealed={revealed}
           confirmingDelete={confirmingDelete}

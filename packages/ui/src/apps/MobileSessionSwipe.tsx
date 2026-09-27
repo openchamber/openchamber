@@ -1,14 +1,16 @@
 import React from 'react';
 import { RiArchiveLine, RiDeleteBinLine, RiEdit2Line } from '@remixicon/react';
+import { toast } from 'sonner';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 
-// Four 48px action slots: delete, archive, manual rename and AI rename.
-export const ROW_ACTIONS_WIDTH = 192;
+// Five 48px action slots: delete, archive, manual rename, AI rename and copy ID.
+export const ROW_ACTIONS_WIDTH = 240;
 const ROW_SWIPE_SNAP_MS = 180;
 
 /** Generic swipe-right-to-reveal wrapper for drawer rows (sessions, projects,
@@ -107,10 +109,11 @@ export const MobileSwipeActionsRow: React.FC<{
 
 type MobileSessionAiRename = ReturnType<typeof useSessionAiRenameAction>;
 
-/** The four session swipe actions, shared by every mobile session row.
+/** The five session swipe actions, shared by every mobile session row.
     `aiRename` is passed in so the owning row can also show its pending
     spinner without running the hook twice. */
 export const MobileSessionRowActions: React.FC<{
+  sessionId: string;
   title: string;
   revealed: boolean;
   confirmingDelete: boolean;
@@ -121,6 +124,7 @@ export const MobileSessionRowActions: React.FC<{
   onRequestRename?: () => void;
   onRevealedChange?: (revealed: boolean) => void;
 }> = ({
+  sessionId,
   title,
   revealed,
   confirmingDelete,
@@ -133,6 +137,17 @@ export const MobileSessionRowActions: React.FC<{
 }) => {
   const { t } = useI18n();
   const tabIndex = revealed ? 0 : -1;
+
+  const handleCopySessionId = async () => {
+    const result = await copyTextToClipboard(sessionId).catch(() => null);
+    if (!result?.ok) {
+      toast.error(t('sessions.sidebar.session.copyId.error'));
+      return;
+    }
+
+    onRevealedChange?.(false);
+    toast.success(t('sessions.sidebar.session.copyId.success'));
+  };
 
   return (
     <>
@@ -190,6 +205,16 @@ export const MobileSessionRowActions: React.FC<{
       >
         <Icon name={aiRename.pending ? 'loader-4' : 'ai-generate-2'} className={aiRename.pending ? 'size-[18px] animate-spin' : 'size-[18px]'} />
       </Button>
+      <button
+        type="button"
+        tabIndex={tabIndex}
+        className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        aria-label={t('sessions.sidebar.session.menu.copyId')}
+        onClick={() => { void handleCopySessionId(); }}
+        style={{ touchAction: 'manipulation' }}
+      >
+        <Icon name="file-copy" className="size-[18px]" />
+      </button>
     </>
   );
 };
