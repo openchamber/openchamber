@@ -85,6 +85,8 @@ type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<ty
 const routingUpdatedSchema = z.object({
   available: z.boolean(),
   autoReady: z.boolean(),
+  // Absent from servers before the classifier pick, where Jev always answered.
+  jevAvailable: z.boolean().default(true),
   tokenPresent: z.boolean(),
   jevSource: z.enum(['typesafe', 'zen-free']),
 });
@@ -105,6 +107,8 @@ const routingDecisionSchema = z.object({
 const routingPermissionHeldSchema = z.object({
   permissionId: z.string().min(1),
   sessionId: z.string().min(1),
+  // Where the request lives, so the held request can be announced from its directory's store.
+  directory: z.string().nullable().default(null),
   score: z.number(),
   kind: z.string().nullable(),
 });
@@ -112,6 +116,7 @@ const routingPermissionHeldSchema = z.object({
 const routingSafetySkippedSchema = z.object({
   permissionId: z.string().min(1),
   sessionId: z.string().min(1),
+  directory: z.string().nullable().default(null),
   error: z.string(),
 });
 

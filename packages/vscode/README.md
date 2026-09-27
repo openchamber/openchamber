@@ -14,7 +14,7 @@
 ## What you get
 
 - **Chat beside your code** — responsive layout that adapts to narrow and wide panels
-- **Agent Manager** — run the same prompt across multiple models in parallel, compare results side by side
+- **Run on several models** — send one prompt to several models at once, compare the answers side by side, keep the best or fuse them
 - **Right-click actions** — add context, explain selections, and improve code in-place
 - **Click-to-open** — file paths in tool output open directly in your editor; edit-style results land in a focused diff view
 - **Session editor panel** — keep chat sessions open alongside files
@@ -29,7 +29,7 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Focus Chat` | Focus the chat panel |
 | `OpenChamber: New Session` | Start a new chat session |
 | `OpenChamber: Open Sidebar` | Open the OpenChamber sidebar |
-| `OpenChamber: Open Agent Manager` | Launch parallel multi-model runs |
+| `OpenChamber: Run on Several Models` | Open a new tab set up to run one prompt on several models |
 | `OpenChamber: Open Session in Editor` | Open current or new session in an editor tab |
 | `OpenChamber: Settings` | Open extension settings |
 | `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
@@ -50,7 +50,7 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. Authenticates with `OPENCODE_SERVER_PASSWORD`; when that is unset and the URL points at OpenCode's background service (`opencode service start`), the service's own password is used. |
+| `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. Authenticates with `OPENCODE_PASSWORD` (or the legacy `OPENCODE_SERVER_PASSWORD`); when both are unset and the URL points at OpenCode's background service (`opencode service start`), the service's own password is used. |
 | `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
 
 ## Requirements

@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, mock } from "bun:test"
+import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 import type { FormRequest } from "@/lib/opencode/model"
 import type { InputState } from "./input-store"
@@ -19,6 +19,8 @@ let sessionForkError: Error | null = null
 let beforeSessionForkResolve: (() => void) | null = null
 const selectedSessions: Array<{ sessionId: string | null; directoryHint?: string | null }> = []
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
+// Lets a test switch runtime while a session read is in flight.
+let beforeSessionGetResolve: (() => void) | null = null
 const sessionMoveErrorsById = new Map<string, Error>()
 let globalHasLoaded = true
 const deletedChatDirectories: string[] = []
@@ -57,6 +59,7 @@ mock.module("@/lib/opencode/client", () => ({
     getActiveSessionStatuses: mock(() => readActiveStatusSnapshot()),
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
+      beforeSessionGetResolve?.()
       const record = sessionRecords.get(sessionId)
       if (!record) throw notFound("Session")
       return record
@@ -2216,6 +2219,41 @@ describe("revertToMessage passes session directory", () => {
     ])
   })
 
+  test("reverting a subagent run report reverts its child from the start and leaves the composer alone", async () => {
+    const earlier = { id: "root-context", sessionID: "root", role: "synthetic", time: { created: 5 }, text: "ctx" } as Message
+    const report = {
+      id: "root-report",
+      sessionID: "root",
+      role: "synthetic",
+      time: { created: 40 },
+      text: "done",
+      metadata: { source: "subagent", childID: "child", state: "completed" },
+    } as Message
+    const sessions = [
+      { ...sessionFixture("root"), directory: "/tree", time: { created: 1, updated: 1 } },
+      { ...sessionFixture("child"), parentID: "root", directory: "/tree", time: { created: 10, updated: 10 } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions, message: { root: [earlier, report] } })
+    sessionMessageRecords.set("child", [
+      { info: { id: "child-prompt", sessionID: "child", role: "user", time: { created: 11 } } as Message, parts: [] },
+    ])
+    inputState.pendingInputText = "still typing"
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(createChildStores([["/tree", store]]), () => "/tree")
+
+    await revertToMessage("root", "root-report")
+
+    expect(replyCalls.filter((call) => call.method === "session.revert.stage").map((call) => [
+      call.params.sessionID,
+      call.params.messageID,
+    ])).toEqual([
+      ["child", "child-prompt"],
+      ["root", "root-report"],
+    ])
+    expect(inputState.pendingInputText).toBe("still typing")
+  })
+
   test("continues reverting other descendants and the parent when one child fails", async () => {
     const rootMessage = { id: "root-cutoff", sessionID: "root", role: "user", time: { created: 20 } } as Message
     const sessions = [
@@ -2852,3 +2890,56 @@ describe("dismissOpenPermissionsForSession", () => {
     }
   })
 })
+
+describe("setSessionWorkState", () => {
+  const savedArchiveResponse = archiveBatchResponse
+
+  beforeEach(() => {
+    runtimeKey = "runtime-a"
+    openchamberRouteRequests.length = 0
+    globalUpsertedSessions.length = 0
+    beforeSessionGetResolve = null
+    beforeArchiveRouteResolve = null
+    sessionRecords.set("ses-work", { ...sessionFixture("ses-work"), metadata: {} })
+    archiveBatchResponse = { status: 200, body: { metadata: { openchamber: { work: { state: "open" } } } } }
+  })
+
+  afterEach(() => {
+    archiveBatchResponse = savedArchiveResponse
+    beforeSessionGetResolve = null
+    beforeArchiveRouteResolve = null
+  })
+
+  test("tracks the session through the metadata route", async () => {
+    const { setSessionWorkState } = await import("./session-actions")
+
+    const updated = await setSessionWorkState("ses-work", "/test/project", "open")
+
+    expect(updated?.metadata).toEqual({ openchamber: { work: { state: "open" } } })
+    const request = openchamberRouteRequests.find((entry) => entry.path.endsWith("/ses-work/metadata"))
+    expect(request?.body).toMatchObject({ patch: { openchamber: { work: { state: "open", openedBy: "user" } } } })
+  })
+
+  test("writes nothing to the new server when the runtime switches during the read", async () => {
+    const { setSessionWorkState } = await import("./session-actions")
+    beforeSessionGetResolve = () => {
+      runtimeKey = "runtime-b"
+    }
+
+    expect(await setSessionWorkState("ses-work", "/test/project", "done")).toBeNull()
+
+    expect(openchamberRouteRequests).toHaveLength(0)
+    expect(globalUpsertedSessions).toHaveLength(0)
+  })
+
+  test("keeps the old server's answer out of the new server's cache when the runtime switches during the write", async () => {
+    const { setSessionWorkState } = await import("./session-actions")
+    beforeArchiveRouteResolve = () => {
+      runtimeKey = "runtime-b"
+    }
+
+    expect(await setSessionWorkState("ses-work", "/test/project", "done")).toBeNull()
+
+    expect(globalUpsertedSessions).toHaveLength(0)
+  })
+});

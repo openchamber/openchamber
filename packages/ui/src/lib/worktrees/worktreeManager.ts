@@ -497,6 +497,16 @@ const invalidateWorktreeList = (projectDirectory: string): void => {
   _worktreeListCache.delete(projectDirectory);
 };
 
+// The list and root caches are keyed by path, and two instances can have a
+// project at the same path. Bumping every generation also makes a read still
+// in flight against the previous instance retry instead of caching its answer.
+subscribeRuntimeEndpointChanged(() => {
+  const directories = new Set([..._worktreeListGeneration.keys(), ..._worktreeListCache.keys(), ..._worktreeListInflight.keys()]);
+  for (const directory of directories) invalidateWorktreeList(directory);
+  _worktreeListInflight.clear();
+  invalidateResolvedProjectRootCache();
+});
+
 const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   const normalizedProjectDirectory = normalizePath(projectDirectory);

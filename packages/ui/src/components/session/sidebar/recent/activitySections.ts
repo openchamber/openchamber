@@ -27,6 +27,23 @@ const matchesSidebarSessionQuery = (session: Session, query: string): boolean =>
   return title.includes(query);
 };
 
+/**
+ * Whether a session tree answers a sidebar query: its root or any session
+ * below it. A zone that lists whole trees and takes them out of every other
+ * projection (In work) must keep a root whose subsession is the match, or the
+ * match disappears from the sidebar entirely.
+ */
+export const sessionTreeMatchesSidebarQuery = (node: SessionNode, query: string): boolean => (
+  matchesSidebarSessionQuery(node.session, query)
+  || node.children.some((child) => sessionTreeMatchesSidebarQuery(child, query))
+);
+
+/** Sessions in a tree that answer the query themselves, ancestors kept only as context excluded. */
+export const countSessionTreeQueryMatches = (node: SessionNode, query: string): number => (
+  (matchesSidebarSessionQuery(node.session, query) ? 1 : 0)
+  + node.children.reduce((total, child) => total + countSessionTreeQueryMatches(child, query), 0)
+);
+
 const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 const isSubtaskSession = (session: Session): boolean => {

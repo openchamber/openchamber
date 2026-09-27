@@ -17,6 +17,21 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('finds the Claude Code integration by name and package, never in VS Code', () => {
+    for (const query of ['claude', '@openchamber/opencode-claude']) {
+      for (const isVSCode of [false, true]) {
+        const results = buildSettingsSearchResults({
+          query,
+          runtimeCtx: { ...runtimeCtx, isVSCode },
+          t,
+          getPageTitle: (page) => page,
+        });
+
+        expect(results.some((result) => result.id === 'integrations.third-party.opencode-claude')).toBe(!isVSCode);
+      }
+    }
+  });
+
   test('Enter-to-send is searchable only outside mobile', () => {
     for (const isMobile of [false, true]) {
       const results = buildSettingsSearchResults({

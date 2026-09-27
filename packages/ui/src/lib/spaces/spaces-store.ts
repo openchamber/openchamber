@@ -2,8 +2,12 @@
 // kept for the sidebar and for the rules that depend on a space existing at all. Runtime-scoped:
 // reset when the runtime endpoint changes, filled again by the next global list.
 
+import React from 'react';
 import { create } from 'zustand';
 import { z } from 'zod';
+
+import { listSpaces, type SpaceEntry } from './spaces-api';
+import type { SpaceProgress } from '@/sync/event-pipeline';
 
 /**
  * How the last answer of a space stood when the host merged the list: `complete`, `partial`
@@ -30,8 +34,33 @@ export const spaceMarkSchema = z.object({
   directory: z.string().nullable().default(null),
 });
 
+export type SpaceAccessFailure = { provider: string; code: string; message: string };
+
+/** The model access a creation in this window gives once the space is ready, while and after it does. */
+type SpaceCreationAccess = { kind: 'giving' } | { kind: 'failed'; failures: readonly SpaceAccessFailure[] };
+
 type SpacesState = {
   spaces: ReadonlyMap<string, SpaceMark>;
+  /**
+   * The journey route's list, the one source that knows a space still being made or one whose
+   * making failed; null until it answered once for this runtime. The steps of a creation that
+   * arrive as events after a read began win over that read's answer.
+   */
+  journey: ReadonlyMap<string, SpaceEntry> | null;
+  /** Counts progress events, so a read can tell which of them it has not seen. */
+  progressRevision: number;
+  /** Replaces the journey entries with a complete list whose read began at `revision`. */
+  applyJourney: (entries: readonly SpaceEntry[], revision: number) => void;
+  /** A creation step announced by the host. Resolves whether the space was known to the list. */
+  noteProgress: (progress: SpaceProgress) => boolean;
+  /** A creation this window started, shown at once, before the next read of the list. */
+  addJourneyEntry: (entry: SpaceEntry) => void;
+  /**
+   * The model access a creation in this window is giving or could not give, per space. Only this
+   * window knows it: the host keeps no grant it could not deliver.
+   */
+  creationAccess: ReadonlyMap<string, SpaceCreationAccess>;
+  noteCreationAccess: (spaceId: string, access: SpaceCreationAccess | null) => void;
   /** Replaces the marks with those of a complete global list. */
   applyMarks: (marks: readonly SpaceMark[]) => void;
   /** The space's event connection came or went; a gap shows the space as stale until the next list. */
@@ -39,9 +68,19 @@ type SpacesState = {
   /** A per-directory read of the space answered, so it is reachable again. */
   noteReachable: (spaceId: string) => void;
   resetForRuntimeSwitch: () => void;
+  /** The feature was turned off here: none of its spaces is reachable until it is on again. */
+  forgetForSwitchOff: () => void;
 };
 
 const EMPTY: ReadonlyMap<string, SpaceMark> = new Map();
+
+// Which space each progress event touched, by the revision it arrived at; a list whose read began
+// earlier keeps the step the event gave rather than its own older view.
+const progressAt = new Map<string, number>();
+
+const withProgress = (entry: SpaceEntry, progress: SpaceProgress): SpaceEntry => (progress.step === 'failed'
+  ? { ...entry, state: 'failed', failure: progress.failure }
+  : { ...entry, state: progress.step === 'ready' ? 'running' : 'preparing', step: progress.step === 'ready' ? null : progress.step, failure: null });
 
 const withState = (spaces: ReadonlyMap<string, SpaceMark>, spaceId: string, state: SpaceListState): ReadonlyMap<string, SpaceMark> => {
   const current = spaces.get(spaceId);
@@ -51,8 +90,46 @@ const withState = (spaces: ReadonlyMap<string, SpaceMark>, spaceId: string, stat
   return next;
 };
 
-export const useSpacesStore = create<SpacesState>((set) => ({
+export const useSpacesStore = create<SpacesState>((set, get) => ({
   spaces: EMPTY,
+  journey: null,
+  progressRevision: 0,
+  applyJourney: (entries, revision) => set((current) => {
+    const next = new Map(entries.map((entry) => [entry.id, entry]));
+    for (const [spaceId, at] of progressAt) {
+      const newer = current.journey?.get(spaceId);
+      if (at > revision && newer) next.set(spaceId, newer);
+    }
+    return { journey: next };
+  }),
+  addJourneyEntry: (entry) => set((current) => {
+    // Counted like a step, so a read that began before the creation does not drop it.
+    const progressRevision = current.progressRevision + 1;
+    progressAt.set(entry.id, progressRevision);
+    const journey = new Map(current.journey ?? []);
+    journey.set(entry.id, entry);
+    return { journey, progressRevision };
+  }),
+  creationAccess: new Map(),
+  noteCreationAccess: (spaceId, access) => set((current) => {
+    const creationAccess = new Map(current.creationAccess);
+    if (access) creationAccess.set(spaceId, access);
+    else creationAccess.delete(spaceId);
+    return { creationAccess };
+  }),
+  noteProgress: (progress) => {
+    const revision = get().progressRevision + 1;
+    progressAt.set(progress.spaceId, revision);
+    const entry = get().journey?.get(progress.spaceId);
+    if (!entry) {
+      set({ progressRevision: revision });
+      return false;
+    }
+    const journey = new Map(get().journey);
+    journey.set(progress.spaceId, withProgress(entry, progress));
+    set({ journey, progressRevision: revision });
+    return true;
+  },
   applyMarks: (marks) => set((current) => {
     const next = new Map(marks.map((mark) => [mark.id, mark]));
     if (next.size === 0 && current.spaces.size === 0) return current;
@@ -64,10 +141,49 @@ export const useSpacesStore = create<SpacesState>((set) => ({
     return { spaces: withState(current.spaces, spaceId, 'stale') };
   }),
   noteReachable: (spaceId) => set((current) => ({ spaces: withState(current.spaces, spaceId, 'complete') })),
-  resetForRuntimeSwitch: () => set({ spaces: EMPTY }),
+  resetForRuntimeSwitch: () => {
+    progressAt.clear();
+    journeyGeneration += 1;
+    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map() });
+  },
+  forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
 }));
+
+let journeyGeneration = 0;
+
+/**
+ * Reads the journey list again and keeps it. A read that fails leaves the last list in place and
+ * rejects, so a failure never reads as "no spaces"; one that a runtime switch overtook is dropped.
+ */
+export const refreshSpacesJourney = async (): Promise<void> => {
+  const generation = journeyGeneration;
+  const revision = useSpacesStore.getState().progressRevision;
+  const entries = await listSpaces();
+  if (generation !== journeyGeneration) return;
+  useSpacesStore.getState().applyJourney(entries, revision);
+};
 
 /** Whether this runtime has any isolated space at all, reachable or not. */
 export const hasIsolatedSpaces = (): boolean => useSpacesStore.getState().spaces.size > 0;
 
 export const getSpaceMark = (spaceId: string): SpaceMark | null => useSpacesStore.getState().spaces.get(spaceId) ?? null;
+
+/**
+ * The spaces the sidebar shows a group for: every space the session list marked, and the ones
+ * only the journey list knows, a space being made or whose making failed among them, so its group
+ * appears the moment it exists. A journey-only space has no session list yet, so it is not stale.
+ */
+const mergeSidebarSpaces = (marks: ReadonlyMap<string, SpaceMark>, journey: ReadonlyMap<string, SpaceEntry> | null): SpaceMark[] => {
+  const merged = Array.from(marks.values());
+  for (const entry of journey?.values() ?? []) {
+    if (marks.has(entry.id) || entry.projectDirectory === null || entry.directory === null) continue;
+    merged.push({ id: entry.id, name: entry.name, state: 'complete', projectDirectory: entry.projectDirectory, directory: entry.directory });
+  }
+  return merged;
+};
+
+export const useSidebarSpaces = (): SpaceMark[] => {
+  const marks = useSpacesStore((state) => state.spaces);
+  const journey = useSpacesStore((state) => state.journey);
+  return React.useMemo(() => mergeSidebarSpaces(marks, journey), [journey, marks]);
+};

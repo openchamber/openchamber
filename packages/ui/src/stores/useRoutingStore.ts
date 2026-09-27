@@ -10,8 +10,10 @@ import {
   clearRoutingToken,
   fetchRoutingState,
   ROUTING_UNAVAILABLE,
+  saveClassifierSource,
   saveRoutingConfig,
   saveRoutingToken,
+  type ClassifierSource,
   type RoutingConfig,
   type RoutingHeldPermission,
   type RoutingJevSource,
@@ -39,13 +41,14 @@ interface RoutingStoreState extends RoutingState {
   load: () => Promise<void>;
   resetForRuntime: () => void;
   applyState: (state: RoutingState) => void;
-  applyAvailability: (state: { available: boolean; autoReady: boolean; tokenPresent: boolean; jevSource: RoutingJevSource }) => void;
+  applyAvailability: (state: { available: boolean; autoReady: boolean; jevAvailable: boolean; tokenPresent: boolean; jevSource: RoutingJevSource }) => void;
   recordDecision: (decision: RoutingDecision) => void;
   holdPermission: (held: RoutingHeldPermission) => void;
   releasePermission: (permissionId: string) => void;
   saveConfig: (config: RoutingConfig) => Promise<void>;
   setToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  setClassifierSource: (source: ClassifierSource) => Promise<void>;
 }
 
 /** Bumped on every load and every runtime switch; a response from an older generation is dropped. */
@@ -85,8 +88,8 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
     set({ ...state, held: state.heldPermissions ? heldRecord(state.heldPermissions) : get().held, loaded: true, loadError: null });
   },
 
-  applyAvailability: ({ available, autoReady, tokenPresent, jevSource }) => {
-    set({ available, autoReady, tokenPresent, jevSource });
+  applyAvailability: ({ available, autoReady, jevAvailable, tokenPresent, jevSource }) => {
+    set({ available, autoReady, jevAvailable, tokenPresent, jevSource });
     // The config behind the change lives on the server; re-read rather than guess.
     if (available) void get().load();
   },
@@ -125,7 +128,16 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
     const state = await clearRoutingToken();
     if (generation === loadGeneration) get().applyState(state);
   },
+
+  setClassifierSource: async (source) => {
+    const generation = loadGeneration;
+    const state = await saveClassifierSource(source);
+    if (generation === loadGeneration) get().applyState(state);
+  },
 }));
 
 /** Whether the composer may offer the Auto row right now. */
 export const selectAutoReady = (state: RoutingStoreState): boolean => state.available && state.autoReady;
+
+/** Whether the safety net can be offered: this runtime has a server and a classification provider answers. */
+export const selectSafetyNetAvailable = (state: RoutingStoreState): boolean => state.available && state.jevAvailable;

@@ -5,7 +5,7 @@
   "command.focusChat.title": "Focus Chat",
   "command.restartApi.title": "Restart API Connection",
   "command.showOpenCodeStatus.title": "Show OpenCode Status",
-  "command.openAgentManager.title": "Open Agent Manager",
+  "command.openAgentManager.title": "Run on Several Models",
   "command.openActiveSessionInEditor.title": "Open Active Session in Editor",
   "command.openNewSessionInEditor.title": "Open New Session in Editor",
   "command.openCurrentOrNewSessionInEditor.title": "Open Session in Editor",

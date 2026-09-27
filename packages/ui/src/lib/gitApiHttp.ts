@@ -20,6 +20,8 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  GitWorktreeSnapshotPayload,
+  GitWorktreeSnapshotResult,
   GitWorktreeValidationResult,
   CreateGitCommitOptions,
   GitCommitResult,
@@ -805,6 +807,25 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
   }
 
   return response.json();
+}
+
+const worktreeSnapshotResultSchema = z.object({
+  ref: z.string(),
+  commit: z.string().min(1),
+  head: z.string().min(1),
+});
+
+export async function snapshotGitWorktree(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/snapshot`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to snapshot worktree');
+  }
+  return worktreeSnapshotResultSchema.parse(await response.json());
 }
 
 export async function createGitCommit(

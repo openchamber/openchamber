@@ -1230,6 +1230,20 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
     }
   });
 
+  app.post('/api/git/worktrees/snapshot', async (req, res) => {
+    const { snapshotWorktree } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      res.json(await snapshotWorktree(directory, { ref: req.body?.ref }));
+    } catch (error) {
+      console.error('Failed to snapshot worktree:', error);
+      res.status(500).json({ error: error.message || 'Failed to snapshot worktree' });
+    }
+  });
+
   app.get('/api/git/worktree-type', async (req, res) => {
     const { isLinkedWorktree } = await getGitLibraries();
     try {

@@ -1,6 +1,6 @@
 ---
 title: Integracje
-description: Połącz GitHub i Linear z OpenChamber.
+description: Połącz usługi i subskrypcje, z którymi pracuje OpenChamber.
 ---
 
 # Integracje
@@ -45,6 +45,31 @@ W polu czatu wybierz **Link Linear Issue**. Issue trafia jako kontekst do Twojej
 ### Komentarze sesji
 
 Włącz **Session comments** na karcie Linear, a sesja rozpoczęta z issue doda na nim komentarz przy starcie, zakończeniu lub błędzie, każdy z linkiem otwierającym sesję. Komentarze są publikowane tylko wtedy, gdy ten serwer OpenChamber ma publiczny adres, aby link działał dla wszystkich w issue; przy adresie lokalnym lub prywatnym nic nie jest publikowane.
+
+## Instalacja integracji
+
+1. Otwórz **Settings → Integrations**.
+2. Znajdź integrację i wybierz **Install**.
+3. Uruchom OpenCode ponownie, gdy o to poproszą — dostawca pojawi się po restarcie.
+4. Wybierz **Set up** i zaloguj się. Modele pojawią się potem w selektorze modeli na czacie.
+
+Integracje instalują się dla Twojego użytkownika, więc działają w każdym projekcie. W każdej chwili możesz je zaktualizować lub usunąć z tej samej karty.
+
+## Claude Code
+
+Claude Code korzysta z Twojego planu Claude Pro lub Max przez Claude Code CLI na Twoim komputerze — bez kluczy API.
+
+1. Zainstaluj integrację (patrz wyżej).
+2. Wybierz **Set up** i zaloguj się. Jeśli nie masz jeszcze Claude Code CLI, konfiguracja zaoferuje najpierw jego instalację, a potem logowanie.
+
+**Jak chronione jest Twoje konto Claude:** ta integracja używa oficjalnego Claude Agent SDK od Anthropic i Twojego zainstalowanego Claude Code CLI. Nie przechwytuje OAuth, nie wyodrębnia ani nie odtwarza tokenów przeglądarki, nie podszywa się pod nieobsługiwany klient i nie omija uwierzytelniania Anthropic. Działa na obsługiwanej przez Anthropic ścieżce dostępu, więc nie niesie ryzyka zablokowania konta związanego z przechwytywaniem tokenów lub nieautoryzowanymi obejściami uwierzytelniania.
+
+## Aktualizacja i usuwanie
+
+- **Update** instaluje najnowszą opublikowaną wersję wtyczki.
+- **Remove** usuwa wtyczkę z konfiguracji OpenCode. Dostawca przestanie się ładować po odświeżeniu OpenCode.
+
+Jeśli karta wskazuje, że wpisy wymagają ręcznego zarządzania, wybierz **Manage plugins** i wyczyść tam duplikaty.
 
 ## Powiązane
 

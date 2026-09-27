@@ -237,6 +237,32 @@ export const createSessionMetadataStore = ({
   };
 
   /**
+   * Like `setSessionMetadata`, but the patch is decided from the record as it
+   * is when this session's turn in the write queue comes: `decide(current)`
+   * returns a merge patch, or null to leave the record alone. A writer whose
+   * change depends on the current value (open only when not closed after the
+   * request) cannot be overtaken between its read and its write this way.
+   * Resolves `{ metadata, changed }`.
+   */
+  const updateSessionMetadata = async (sessionID, decide, { directory = '' } = {}) => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new Error('a session id is required to store session metadata');
+    await loadLegacy();
+
+    return runForSession(id, async () => {
+      const fromLegacy = unmigrated.has(id);
+      const current = fromLegacy ? unmigrated.get(id) : await openCode.read(id, { directory });
+      if (current === null) throw new Error(`session ${id} was not found`);
+      const patch = decide(current);
+      if (!isPlainObject(patch)) return { metadata: current, changed: false };
+      const merged = mergeMetadataPatch(current, patch);
+      await openCode.write(id, merged, { directory });
+      if (fromLegacy) await forgetLegacy(id);
+      return { metadata: merged, changed: true };
+    });
+  };
+
+  /**
    * Pushes every legacy entry to OpenCode. A session OpenCode no longer knows
    * has nothing to receive its metadata, so its entry is dropped. Any other
    * failure keeps the entry for the next sweep. Resolves the number of entries
@@ -278,6 +304,7 @@ export const createSessionMetadataStore = ({
   return {
     get,
     setSessionMetadata,
+    updateSessionMetadata,
     migrateLegacy,
     listUnmigrated,
     legacyPath,

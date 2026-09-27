@@ -1,6 +1,6 @@
 ---
 title: Integrationen
-description: Verbinde GitHub und Linear mit OpenChamber.
+description: Verbinde die Dienste und Abonnements, mit denen OpenChamber arbeitet.
 ---
 
 # Integrationen
@@ -45,6 +45,31 @@ Wähle im Chat-Composer **Link Linear Issue**. Das Issue geht als Kontext mit de
 ### Session-Kommentare
 
 Schalte **Session comments** in der Linear-Karte ein, und eine aus einem Issue gestartete Session schreibt beim Start, beim Abschluss oder bei einem Fehler einen Kommentar auf das Issue, jeweils mit einem Link, der die Session öffnet. Kommentare werden nur gepostet, wenn dieser OpenChamber-Server eine öffentliche Adresse hat, damit der Link für alle am Issue funktioniert; bei einer lokalen oder privaten Adresse wird nichts gepostet.
+
+## Integration installieren
+
+1. Öffne **Settings → Integrations**.
+2. Suche die Integration und wähle **Install**.
+3. Starte OpenCode neu, wenn darum gebeten wird — der Provider erscheint nach dem Neustart.
+4. Wähle **Set up** und melde dich an. Die Modelle erscheinen danach in der Modellauswahl im Chat.
+
+Integrationen werden für deinen Benutzer installiert und funktionieren damit in jedem Projekt. Aktualisieren oder entfernen kannst du sie jederzeit über dieselbe Karte.
+
+## Claude Code
+
+Claude Code nutzt deinen Claude Pro- oder Max-Plan über die Claude Code CLI auf deinem Rechner — ohne API-Keys.
+
+1. Installiere die Integration (siehe oben).
+2. Wähle **Set up** und melde dich an. Wenn du die Claude Code CLI noch nicht hast, bietet die Einrichtung an, sie zuerst zu installieren, und meldet dich danach an.
+
+**Wie dein Claude-Konto geschützt bleibt:** Diese Integration nutzt das offizielle Claude Agent SDK von Anthropic und deine installierte Claude Code CLI. Sie kapert kein OAuth, extrahiert oder wiederholt keine Browser-Tokens, gibt sich nicht als nicht unterstützter Client aus und umgeht nicht Anthropics Authentifizierung. Sie bleibt auf dem von Anthropic unterstützten Zugriffsweg und trägt daher nicht das mit Token-Hijacking oder unautorisierten Authentifizierungsumgehungen verbundene Sperrrisiko.
+
+## Aktualisieren oder entfernen
+
+- **Update** installiert die neueste veröffentlichte Version des Plugins.
+- **Remove** löscht das Plugin aus deiner OpenCode-Konfiguration. Der Provider wird beim nächsten Neuladen von OpenCode nicht mehr geladen.
+
+Wenn eine Karte meldet, dass Einträge manuell verwaltet werden müssen, wähle **Manage plugins** und bereinige die Duplikate dort.
 
 ## Verwandtes
 

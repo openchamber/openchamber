@@ -3,7 +3,7 @@ import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/auto
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
-import type { Provider, Model, Agent, Config } from "@/lib/opencode/model";
+import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
 import type { DesktopSettings } from "@/lib/desktop";
 import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
@@ -198,14 +198,12 @@ const normalizeOptionalString = (value: unknown): string | undefined => {
     return trimmed.length > 0 ? trimmed : undefined;
 };
 
-/** A lookup accepts `modelID` or the entry's own `id`; a generated Fast model is keyed by the latter. */
-const matchesModelId = (model: Model, id: string): boolean => model.id === id || model.modelID === id;
 const findProviderModel = (
     providers: ProviderWithModelList[],
     providerId: string,
     modelId: string,
 ): Model | undefined => (
-    providers.find((provider) => provider.id === providerId)?.models.find((model) => matchesModelId(model, modelId))
+    findCatalogModel(providers.find((provider) => provider.id === providerId)?.models, modelId)
 );
 
 /** v2 lists model variants as records with an `id`, not as a keyed map. */
@@ -227,7 +225,7 @@ const hasProviderModel = (
     if (!provider) {
         return false;
     }
-    return provider.models.some((model) => matchesModelId(model, modelId));
+    return findCatalogModel(provider.models, modelId) !== undefined;
 };
 
 /**
@@ -2049,8 +2047,8 @@ export const useConfigStore = create<ConfigStore>()(
                                 const parsed = parseModelString(state.settingsDefaultModel);
                                 if (parsed) {
                                     const settingsProvider = previousProviders.find((p) => p.id === parsed.providerId);
-                                    if (settingsProvider?.models.some((m) => m.modelID === parsed.modelId)) {
-                                        const model = settingsProvider.models.find((m) => m.modelID === parsed.modelId);
+                                    const model = findCatalogModel(settingsProvider?.models, parsed.modelId);
+                                    if (model) {
                                         const currentVariant = modelHasVariant(model, state.settingsDefaultVariant)
                                             ? state.settingsDefaultVariant
                                             : undefined;
@@ -2937,7 +2935,7 @@ export const useConfigStore = create<ConfigStore>()(
                         if (agentModelSelection?.providerID && agentModelSelection?.id) {
                             const { providerID, id: modelID } = agentModelSelection;
                             const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.modelID === modelID);
+                            const agentModel = findCatalogModel(agentProvider?.models, modelID);
 
                             if (agentModel) {
                                 applyResolvedModelSelection(
@@ -2986,7 +2984,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const parsed = parseModelString(settingsDefaultModel);
                             if (parsed) {
                                 const settingsProvider = providers.find((p) => p.id === parsed.providerId);
-                                if (settingsProvider?.models.some((m) => m.modelID === parsed.modelId)) {
+                                if (findCatalogModel(settingsProvider?.models, parsed.modelId)) {
                                     applyResolvedModelSelection(
                                         parsed.providerId,
                                         parsed.modelId,
@@ -3814,7 +3812,7 @@ export const useConfigStore = create<ConfigStore>()(
                     if (!provider) {
                         return undefined;
                     }
-                    return provider.models.find((model) => matchesModelId(model, currentModelId));
+                    return findCatalogModel(provider.models, currentModelId);
                 },
 
                 getCurrentAgent: () => {
@@ -3829,9 +3827,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     const { modelsMetadata, providers } = get();
                     const cached = modelsMetadata.get(key);
-                    const model = providers
-                        .find((p) => p.id === providerId)
-                        ?.models.find((m) => m.modelID === modelId);
+                    const model = findCatalogModel(providers.find((p) => p.id === providerId)?.models, modelId);
 
                     // The running OpenCode's limits win over the models.dev
                     // catalog: providers adjust them per auth (ChatGPT sign-in

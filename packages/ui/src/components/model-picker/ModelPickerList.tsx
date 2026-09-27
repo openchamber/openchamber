@@ -212,17 +212,26 @@ const ModelPickerRowHighlight: React.FC<{
   return <>{children(isHighlighted)}</>;
 });
 
+// The leading action's place in the keyboard list: it is highlighted and
+// chosen like a row, but it is not a model entry.
+const LEADING_ACTION_SLOT = 'leading-action';
+type NavigationItem = ModelPickerEntry | typeof LEADING_ACTION_SLOT;
+
+const entryOf = (item: NavigationItem | undefined): ModelPickerEntry | undefined => (
+  item === LEADING_ACTION_SLOT ? undefined : item
+);
+
 const ModelPickerFooter: React.FC<{
   store: IndexSelectionStore;
-  flatModelList: ModelPickerEntry[];
+  navigationList: NavigationItem[];
   footerContent: ModelPickerListProps['footerContent'];
   fallback: React.ReactNode;
-}> = ({ store, flatModelList, footerContent, fallback }) => {
+}> = ({ store, navigationList, footerContent, fallback }) => {
   const [selectedIndex, setSelectedIndex] = React.useState(() => store.getSnapshot());
 
   React.useEffect(() => store.subscribe(() => setSelectedIndex(store.getSnapshot())), [store]);
 
-  const activeEntry = flatModelList[selectedIndex];
+  const activeEntry = entryOf(navigationList[selectedIndex]);
   return <>{typeof footerContent === 'function' ? footerContent(activeEntry) : (footerContent ?? fallback)}</>;
 };
 
@@ -450,6 +459,13 @@ interface ModelPickerListProps {
    * and is filtered by the search query on its display name.
    */
   leadingEntry?: ModelPickerEntry | null;
+  /**
+   * An action pinned right after the leading entry (the composer's "Run on
+   * several models"). It is not a model, but it looks and navigates like a
+   * row: arrows and the pointer highlight it, Enter runs it. It hides while a
+   * search query is typed.
+   */
+  leadingAction?: { label: string; icon: React.ReactNode; onSelect: () => void } | null;
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
   /**
@@ -495,6 +511,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   labels,
   selectedModel,
   leadingEntry = null,
+  leadingAction = null,
   hiddenModels = [],
   allowedProviderIds,
   isModelAllowed,
@@ -688,19 +705,23 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return matchesQuery(getModelDisplayName(leadingEntry.model), leadingEntry.providerID, leadingEntry.modelID) ? leadingEntry : null;
   }, [leadingEntry, matchesQuery]);
 
+  const showLeadingAction = Boolean(leadingAction) && !searchQuery.trim();
+
   const flatModelList = React.useMemo(() => {
-    const items: ModelPickerEntry[] = [];
+    const items: NavigationItem[] = [];
     if (visibleLeadingEntry) items.push(visibleLeadingEntry);
+    if (showLeadingAction) items.push(LEADING_ACTION_SLOT);
     if (!collapsedSections.has('favorites')) filteredFavorites.forEach((entry) => items.push(entry));
     if (!collapsedSections.has('recent')) filteredRecents.forEach((entry) => items.push(entry));
     filteredProviders.forEach((provider) => {
       if (collapsedSections.has(`provider:${provider.id}`)) return;
+      // SAFETY: filteredProviders keeps only models whose id is a non-empty string.
       provider.models.forEach((model) => items.push({ model, providerID: provider.id, modelID: model.id as string }));
     });
     return items;
-  }, [collapsedSections, filteredFavorites, filteredProviders, filteredRecents, visibleLeadingEntry]);
+  }, [collapsedSections, filteredFavorites, filteredProviders, filteredRecents, showLeadingAction, visibleLeadingEntry]);
 
-  const hasResults = flatModelList.length > 0;
+  const hasResults = flatModelList.some((item) => item !== LEADING_ACTION_SLOT);
   const favoriteSortingEnabled = Boolean(onReorderFavorite) && searchQuery.trim().length === 0 && filteredFavorites.length > 1;
   const providerSortingEnabled = Boolean(onReorderProvider) && searchQuery.trim().length === 0 && !allowedProviderSet && filteredProviders.length > 1;
   const favoriteLookup: Map<string, ModelPickerEntry> = React.useMemo(() => new Map(
@@ -708,7 +729,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   ), [filteredFavorites]);
 
   const initialSelectionIndex = searchQuery.trim() || !selectedModel ? 0 : Math.max(0,
-    flatModelList.findIndex((entry) => entry.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID),
+    flatModelList.findIndex((item) => {
+      const entry = entryOf(item);
+      return entry?.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID;
+    }),
   );
 
   // A row inside a virtualized section may not be mounted yet: scroll its
@@ -737,7 +761,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   const selectIndex = React.useCallback((index: number) => {
     selectionStore.set(index);
-    onActiveEntryChange?.(flatModelList[index]);
+    onActiveEntryChange?.(entryOf(flatModelList[index]));
   }, [flatModelList, onActiveEntryChange, selectionStore]);
 
   const moveSelection = React.useCallback((direction: 1 | -1) => {
@@ -748,12 +772,12 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const currentIndex = selectionStore.getSnapshot();
     const nextIndex = (currentIndex + direction + total) % total;
     selectionStore.set(nextIndex);
-    onActiveEntryChange?.(flatModelList[nextIndex]);
+    onActiveEntryChange?.(entryOf(flatModelList[nextIndex]));
     requestAnimationFrame(() => revealIndex(nextIndex));
   }, [flatModelList, onActiveEntryChange, revealIndex, selectionStore]);
 
   React.useEffect(() => {
-    onActiveEntryChange?.(flatModelList[selectionStore.getSnapshot()]);
+    onActiveEntryChange?.(entryOf(flatModelList[selectionStore.getSnapshot()]));
   }, [flatModelList, initialSelectionIndex, onActiveEntryChange, selectionStore]);
 
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent) => {
@@ -762,11 +786,12 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       moveSelection(navigationKey === 'ArrowDown' ? 1 : -1);
     })) return;
     event.stopPropagation();
+    const activeItem = flatModelList[selectionStore.getSnapshot()];
+    const activeEntry = entryOf(activeItem);
     if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-      const selected = flatModelList[selectionStore.getSnapshot()];
-      if (selected && onVariantKey?.(event, selected)) return;
+      if (activeEntry && onVariantKey?.(event, activeEntry)) return;
     }
-    onActiveKeyDown?.(event, flatModelList[selectionStore.getSnapshot()]);
+    onActiveKeyDown?.(event, activeEntry);
     if (event.defaultPrevented) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
@@ -780,15 +805,16 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const selected = flatModelList[selectionStore.getSnapshot()];
-      if (selected && !disabled) onSelect(selected);
+      if (disabled) return;
+      if (activeItem === LEADING_ACTION_SLOT) leadingAction?.onSelect();
+      else if (activeEntry) onSelect(activeEntry);
       return;
     }
     if (event.key === 'Escape') {
       event.preventDefault();
       onEscape?.();
     }
-  }, [disabled, flatModelList, moveSelection, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore]);
+  }, [disabled, flatModelList, leadingAction, moveSelection, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore]);
 
   const headerClassName = cn(
     'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 px-2 py-1.5',
@@ -798,6 +824,50 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   let currentFlatIndex = 0;
 
+  const highlightOnPointer = (event: React.MouseEvent, rowIndex: number) => {
+    const nextPosition = { x: event.clientX, y: event.clientY };
+    const previousPosition = lastMousePositionRef.current;
+    const pointerMoved = !previousPosition || previousPosition.x !== nextPosition.x || previousPosition.y !== nextPosition.y;
+    lastMousePositionRef.current = nextPosition;
+
+    if (keyboardOwnsSelectionRef.current && !previousPosition) return;
+    if (keyboardOwnsSelectionRef.current && !pointerMoved) return;
+    if (keyboardOwnsSelectionRef.current && pointerMoved) keyboardOwnsSelectionRef.current = false;
+    selectIndex(rowIndex);
+  };
+
+  const rowHighlightClassName = (isHighlighted: boolean) => cn(
+    'w-full text-left px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer',
+    !disabled && (isHighlighted
+      ? 'bg-interactive-selection text-interactive-selection-foreground'
+      : 'hover:bg-interactive-hover/50'),
+    disabled && 'cursor-not-allowed opacity-60',
+    rowClassName,
+  );
+
+  const renderLeadingAction = (action: NonNullable<typeof leadingAction>, rowIndex: number) => (
+    <ModelPickerRowHighlight key="leading-action" store={selectionStore} index={rowIndex} renderVersion={renderVersion}>
+      {(isHighlighted) => (
+        <div
+          ref={(el) => { itemRefs.current[rowIndex] = el; }}
+          role="option"
+          aria-selected={false}
+          aria-disabled={disabled || undefined}
+          tabIndex={-1}
+          onClick={() => { if (!disabled) action.onSelect(); }}
+          onMouseEnter={(event) => highlightOnPointer(event, rowIndex)}
+          onMouseMove={(event) => highlightOnPointer(event, rowIndex)}
+          className={rowHighlightClassName(isHighlighted)}
+        >
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            {action.icon}
+            <span className="font-medium truncate">{action.label}</span>
+          </div>
+        </div>
+      )}
+    </ModelPickerRowHighlight>
+  );
+
   const renderRow = (entry: ModelPickerEntry, keyPrefix: string, showProviderLogo: boolean, rowIndex: number, dragHandleProps?: SortableFavoriteHandleProps | null) => {
     const metadata = mergeModelMetadataWithLiveModel(entry.providerID, entry.model, getModelMetadata(entry.providerID, entry.modelID));
     const contextTokens = formatModelContextTokens(metadata?.limit?.context);
@@ -805,17 +875,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const isSelected = selectedModel?.providerID === entry.providerID && selectedModel.modelID === entry.modelID;
     const favorite = isFavorite?.(entry) ?? false;
 
-    const handleMouseActivity = (event: React.MouseEvent) => {
-      const nextPosition = { x: event.clientX, y: event.clientY };
-      const previousPosition = lastMousePositionRef.current;
-      const pointerMoved = !previousPosition || previousPosition.x !== nextPosition.x || previousPosition.y !== nextPosition.y;
-      lastMousePositionRef.current = nextPosition;
-
-      if (keyboardOwnsSelectionRef.current && !previousPosition) return;
-      if (keyboardOwnsSelectionRef.current && !pointerMoved) return;
-      if (keyboardOwnsSelectionRef.current && pointerMoved) keyboardOwnsSelectionRef.current = false;
-      selectIndex(rowIndex);
-    };
+    const handleMouseActivity = (event: React.MouseEvent) => highlightOnPointer(event, rowIndex);
 
     return (
       <ModelPickerRowHighlight key={`${keyPrefix}-${entry.providerID}-${entry.modelID}`} store={selectionStore} index={rowIndex} renderVersion={renderVersion}>
@@ -837,14 +897,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               }}
               onMouseEnter={handleMouseActivity}
               onMouseMove={handleMouseActivity}
-              className={cn(
-                'w-full text-left px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer',
-                !disabled && (isHighlighted
-                  ? 'bg-interactive-selection text-interactive-selection-foreground'
-                  : 'hover:bg-interactive-hover/50'),
-                disabled && 'cursor-not-allowed opacity-60',
-                rowClassName,
-              )}
+              className={rowHighlightClassName(isHighlighted)}
             >
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 {dragHandleProps ? (
@@ -1085,7 +1138,14 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           {visibleLeadingEntry ? (
             <>
               {renderRow(visibleLeadingEntry, 'leading', false, currentFlatIndex++)}
-              {filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
+              {!showLeadingAction && (filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0) ? <div className="h-px bg-border/40 my-1" /> : null}
+            </>
+          ) : null}
+
+          {leadingAction && showLeadingAction ? (
+            <>
+              {renderLeadingAction(leadingAction, currentFlatIndex++)}
+              <div className="h-px bg-border/40 my-1" />
             </>
           ) : null}
 
@@ -1153,7 +1213,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       </div>
 
       <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-        <ModelPickerFooter store={selectionStore} flatModelList={flatModelList} footerContent={footerContent} fallback={labels.keyboardHint} />
+        <ModelPickerFooter store={selectionStore} navigationList={flatModelList} footerContent={footerContent} fallback={labels.keyboardHint} />
       </div>
     </>
   );

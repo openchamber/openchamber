@@ -1,6 +1,6 @@
 ---
 title: Intégrations
-description: Connecte GitHub et Linear à OpenChamber.
+description: Connecte les services et abonnements avec lesquels OpenChamber travaille.
 ---
 
 # Intégrations
@@ -45,6 +45,31 @@ Dans le composer du chat, choisis **Link Linear Issue**. L'issue accompagne ton 
 ### Commentaires de session
 
 Active **Session comments** dans la carte Linear : une session démarrée depuis une issue publie un commentaire sur cette issue au démarrage, à la fin ou en cas d'échec, chacun avec un lien qui ouvre la session. Les commentaires ne sont publiés que si ce serveur OpenChamber a une adresse publique, pour que le lien fonctionne pour tout le monde sur l'issue ; sur une adresse locale ou privée, rien n'est publié.
+
+## Installer une intégration
+
+1. Ouvre **Settings → Integrations**.
+2. Trouve l'intégration et choisis **Install**.
+3. Redémarre OpenCode quand c'est demandé — le fournisseur apparaît après le redémarrage.
+4. Choisis **Set up** et connecte-toi. Les modèles apparaissent ensuite dans le sélecteur de modèles du chat.
+
+Les intégrations s'installent pour ton utilisateur et fonctionnent donc dans tous les projets. Tu peux les mettre à jour ou les retirer à tout moment depuis la même carte.
+
+## Claude Code
+
+Claude Code utilise ton plan Claude Pro ou Max via la CLI Claude Code installée sur ta machine — sans clés API.
+
+1. Installe l'intégration (ci-dessus).
+2. Choisis **Set up** et connecte-toi. Si tu n'as pas encore la CLI Claude Code, la configuration propose de l'installer d'abord, puis de te connecter.
+
+**Comment ton compte Claude reste protégé :** cette intégration utilise le Claude Agent SDK officiel d'Anthropic et ta CLI Claude Code installée. Elle ne détourne pas l'OAuth, n'extrait ni rejoue de tokens de navigateur, ne se fait pas passer pour un client non pris en charge et ne contourne pas l'authentification d'Anthropic. Elle reste sur la voie d'accès prise en charge par Anthropic et ne porte donc pas le risque de bannissement associé au détournement de tokens ou aux contournements d'authentification non autorisés.
+
+## Mettre à jour ou retirer
+
+- **Update** installe la dernière version publiée du plugin.
+- **Remove** supprime le plugin de ta configuration OpenCode. Le fournisseur cesse d'être chargé au prochain rechargement d'OpenCode.
+
+Si une carte indique que les entrées nécessitent une gestion manuelle, choisis **Manage plugins** et nettoie les doublons à cet endroit.
 
 ## À voir aussi
 

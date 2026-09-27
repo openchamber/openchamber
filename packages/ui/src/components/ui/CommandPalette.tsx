@@ -54,6 +54,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
+import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 
 type CommandEntry = {
   id: string;
@@ -95,7 +96,6 @@ export const CommandPalette: React.FC = () => {
   const openContextSurface = useUIStore((s) => s.openContextSurface);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
-  const openMultiRunLauncher = useUIStore((s) => s.openMultiRunLauncher);
   const setArchivePageOpen = useUIStore((s) => s.setArchivePageOpen);
   const setProjectContextTab = useUIStore((s) => s.setProjectContextTab);
 
@@ -311,7 +311,7 @@ export const CommandPalette: React.FC = () => {
         searchText: t('commandPalette.item.openMultiRun'),
         onSelect: run(() => {
           setSessionSwitcherOpen(false);
-          openMultiRunLauncher();
+          openParallelComposer();
         }),
       },
       {
@@ -407,7 +407,6 @@ export const CommandPalette: React.FC = () => {
     activeProject?.path,
     currentSessionId,
     togglePinnedSession,
-    openMultiRunLauncher,
     setArchivePageOpen,
     setProjectContextTab,
   ]);

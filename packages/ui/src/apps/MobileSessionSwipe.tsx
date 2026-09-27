@@ -2,13 +2,18 @@ import React from 'react';
 import { RiArchiveLine, RiDeleteBinLine, RiEdit2Line } from '@remixicon/react';
 
 import { Icon } from '@/components/icon/Icon';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import type { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 
-// Four 48px action slots: delete, archive, manual rename and AI rename.
-export const ROW_ACTIONS_WIDTH = 192;
+export const ROW_ACTION_SLOT_WIDTH = 48;
+
+// Three slots every session row has: archive, delete and rename (AI renaming
+// lives inside the rename editor). Top-level rows add one slot each for Pin
+// and Track / Done (while the feature is on).
+export const ROW_ACTIONS_WIDTH = 3 * ROW_ACTION_SLOT_WIDTH;
+
+export type MobileSessionWorkAction = { inWork: boolean; onToggle: () => void };
+export type MobileSessionPinAction = { pinned: boolean; onToggle: () => void };
 const ROW_SWIPE_SNAP_MS = 180;
 
 /** Generic swipe-right-to-reveal wrapper for drawer rows (sessions, projects,
@@ -105,31 +110,34 @@ export const MobileSwipeActionsRow: React.FC<{
   );
 };
 
-type MobileSessionAiRename = ReturnType<typeof useSessionAiRenameAction>;
-
-/** The four session swipe actions, shared by every mobile session row.
-    `aiRename` is passed in so the owning row can also show its pending
-    spinner without running the hook twice. */
+/** The session swipe actions, shared by every mobile session row. Ordered
+    left to right by how often they are used on a phone: the leftmost slot is
+    the one a short drag exposes first, so archive leads and the destructive
+    delete never sits under a partial swipe. */
 export const MobileSessionRowActions: React.FC<{
   title: string;
   revealed: boolean;
   confirmingDelete: boolean;
-  aiRename: MobileSessionAiRename;
   onArchive?: () => void;
   onRequestDelete?: () => void;
   onConfirmDelete?: () => void;
   onRequestRename?: () => void;
   onRevealedChange?: (revealed: boolean) => void;
+  /** Track / Done, when the feature is on and the row is a top-level session. */
+  work?: MobileSessionWorkAction;
+  /** Pin / Unpin, on top-level rows. */
+  pin?: MobileSessionPinAction;
 }> = ({
   title,
   revealed,
   confirmingDelete,
-  aiRename,
   onArchive,
   onRequestDelete,
   onConfirmDelete,
   onRequestRename,
   onRevealedChange,
+  work,
+  pin,
 }) => {
   const { t } = useI18n();
   const tabIndex = revealed ? 0 : -1;
@@ -137,8 +145,45 @@ export const MobileSessionRowActions: React.FC<{
   return (
     <>
       {/* Icon-only actions on the row's own background — they read as the row
-          extending to reveal extra controls, not a separate panel. Ordered
-          outward from the content, so a partial drag exposes delete first. */}
+          extending to reveal extra controls, not a separate panel. */}
+      <button
+        type="button"
+        tabIndex={tabIndex}
+        className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        aria-label={t('mobile.sessions.archiveSessionAria', { title })}
+        onClick={onArchive}
+        style={{ touchAction: 'manipulation' }}
+      >
+        <RiArchiveLine className="size-[18px]" />
+      </button>
+      {pin ? (
+        <button
+          type="button"
+          tabIndex={tabIndex}
+          className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          aria-label={pin.pinned ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
+          onClick={() => { pin.onToggle(); onRevealedChange?.(false); }}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Icon name={pin.pinned ? 'unpin' : 'pushpin'} className="size-[18px]" />
+        </button>
+      ) : null}
+      {work ? (
+        <button
+          type="button"
+          tabIndex={tabIndex}
+          className={cn(
+            'flex flex-1 items-center justify-center transition-colors active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+            work.inWork ? 'text-status-success' : 'text-muted-foreground active:text-foreground',
+          )}
+          aria-label={work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+          onClick={() => { work.onToggle(); onRevealedChange?.(false); }}
+          style={{ touchAction: 'manipulation' }}
+        >
+          {/* The check glyph draws smaller than the others at the same box. */}
+          <Icon name={work.inWork ? 'check' : 'eye'} className={work.inWork ? 'size-5' : 'size-[18px]'} />
+        </button>
+      ) : null}
       <button
         type="button"
         tabIndex={tabIndex}
@@ -160,36 +205,12 @@ export const MobileSessionRowActions: React.FC<{
         type="button"
         tabIndex={tabIndex}
         className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        aria-label={t('mobile.sessions.archiveSessionAria', { title })}
-        onClick={onArchive}
-        style={{ touchAction: 'manipulation' }}
-      >
-        <RiArchiveLine className="size-[18px]" />
-      </button>
-      <button
-        type="button"
-        tabIndex={tabIndex}
-        className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         aria-label={t('mobile.sessions.renameSessionAria', { title })}
         onClick={onRequestRename}
         style={{ touchAction: 'manipulation' }}
       >
         <RiEdit2Line className="size-[18px]" />
       </button>
-      <Button
-        variant="ghost"
-        size="icon"
-        tabIndex={tabIndex}
-        className="flex-1 self-center text-muted-foreground"
-        disabled={aiRename.disabled}
-        aria-label={t('sessions.aiRename.action')}
-        aria-description={aiRename.hint}
-        title={aiRename.hint}
-        onClick={() => { aiRename.run(); onRevealedChange?.(false); }}
-        style={{ touchAction: 'manipulation' }}
-      >
-        <Icon name={aiRename.pending ? 'loader-4' : 'ai-generate-2'} className={aiRename.pending ? 'size-[18px] animate-spin' : 'size-[18px]'} />
-      </Button>
     </>
   );
 };

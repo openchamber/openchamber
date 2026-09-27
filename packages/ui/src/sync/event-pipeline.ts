@@ -24,6 +24,7 @@ import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runt
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
@@ -75,6 +76,11 @@ export type EventPipelineInput = {
    * had been connected before.
    */
   onSpaceStream?: (details: { spaceId: string; status: "connected" | "disconnected"; wasReady: boolean }) => void
+  /**
+   * Called when the host announces a step of an isolated space's creation, `failed` with the
+   * failure of the step that stopped it.
+   */
+  onSpaceProgress?: (details: SpaceProgress) => void
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -148,9 +154,25 @@ const openchamberSpaceStreamSchema = z.object({
   }),
 })
 
+// A step of an isolated space's creation, announced on the host's hub the same way.
+const openchamberSpaceProgressSchema = z.object({
+  type: z.literal("openchamber:space-progress"),
+  properties: z.object({
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/),
+    step: z.union([spaceCreationStepSchema, z.literal("failed")]),
+    failure: z.object({ code: z.string(), message: z.string() }).nullable(),
+  }),
+})
+
+export type SpaceProgress = z.infer<typeof openchamberSpaceProgressSchema>["properties"]
+
 const openchamberAutoAcceptSchema = z.object({
   type: z.literal("openchamber:permission-auto-accept.updated"),
-  properties: z.object({ sessions: z.record(z.string(), z.boolean()), revision: z.number().optional() }),
+  properties: z.object({
+    sessions: z.record(z.string(), z.boolean()),
+    modes: z.record(z.string(), z.enum(["ask", "safety", "auto"])).optional(),
+    revision: z.number().optional(),
+  }),
 })
 
 // The wire event contract is generated from the server; the stream is trusted
@@ -302,6 +324,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onDisconnect,
     onTransportSwitch,
     onSpaceStream,
+    onSpaceProgress,
     routeDirectory,
     transport = "auto",
     heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
@@ -546,6 +569,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     const spaceStream = openchamberSpaceStreamSchema.safeParse(payload)
     if (spaceStream.success) {
       onSpaceStream?.(spaceStream.data.properties)
+      return
+    }
+    const spaceProgress = openchamberSpaceProgressSchema.safeParse(payload)
+    if (spaceProgress.success) {
+      onSpaceProgress?.(spaceProgress.data.properties)
       return
     }
     for (const { directory, event } of translatePayload(payload, frameDirectory)) {

@@ -264,6 +264,13 @@ describe('the journey: start, stop, remove', () => {
     expect((await place.list()).map((space) => space.state).sort()).toEqual(['exited', 'exited', 'running']);
   });
 
+  it('turns off without the list when the place cannot give one, and says it does not know what runs', async () => {
+    const { journey, place } = await ready();
+    place.list = async () => { throw new SpaceError('docker_command_failed', 'docker ps exited 1'); };
+    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [], unknown: { code: 'docker_command_failed', message: 'docker ps exited 1', details: null } });
+    await expect(journey.createSpace(REQUEST)).rejects.toMatchObject({ code: 'isolated_spaces_off' });
+  });
+
   it('does not turn the switch off while a space is being made', async () => {
     const { journey, events, releaseCodeIn } = journeyWith({ holdCodeIn: true });
     const { id } = await journey.createSpace(REQUEST);

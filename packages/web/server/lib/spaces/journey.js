@@ -479,13 +479,22 @@ export function createSpaceJourney({
 
   /**
    * Stops every running space, for the switch being turned off. Each space is tried on its own:
-   * one that could not be stopped is reported as still running, never counted as stopped.
+   * one that could not be stopped is reported as still running, never counted as stopped. When
+   * the place cannot even list them, Docker being down among the reasons, the turn-off still goes
+   * through and says so in `unknown`: the switch must stay reachable, and what runs cannot be
+   * stopped from here either way (decision 18).
    */
   const stopAllSpaces = async () => {
     const preparing = Array.from(pending.values()).filter((entry) => entry.state === 'preparing');
     if (preparing.length > 0) throw new SpaceError('space_preparing', `${preparing.length === 1 ? 'A space is' : `${preparing.length} spaces are`} still being made. Wait for that to finish first.`, { spaces: preparing.map((entry) => entry.id) });
     closing = true;
-    const spaces = await manager.listSpaces({ placeId: place.id });
+    let spaces;
+    try {
+      spaces = await manager.listSpaces({ placeId: place.id });
+    } catch (error) {
+      logger.warn?.(`[spaces] turning off without knowing which spaces run: ${error?.code ?? error?.message ?? error}`);
+      return { stopped: [], stillRunning: [], unknown: failureOf(error) };
+    }
     const stopped = [];
     const stillRunning = [];
     for (const space of spaces) {

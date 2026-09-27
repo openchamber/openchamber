@@ -129,10 +129,10 @@ so a delayed or lost handshake cannot hide an already-materialized transcript
 
 ### Session / project coordination stores
 
-`useMultiRunStore` creates ID-bound multi-run members. `useAgentGroupsStore`
-projects those identities for selection and group deletion, retaining failed
-directory scopes and resetting on runtime changes. Membership, fork handling,
-fusion and legacy compatibility are owned by `lib/multirun/DOCUMENTATION.md`.
+`useMultiRunStore` creates ID-bound multi-run members. Runs are projected from
+the session lists (`lib/multirun/runs.ts`), not kept in a store of their own.
+Membership, fork handling, fusion and legacy compatibility are owned by
+`lib/multirun/DOCUMENTATION.md`.
 
 `useProjectsStore.hasServerSnapshot` distinguishes a server-confirmed project list from persisted startup hints; `serverSnapshotFailed` records a failed settings sync without clearing the last confirmed list. Successful settings adoption clears that failure even for an unchanged list. Runtime switching clears both flags. Extension project subscriptions consume these flags and project records without changing active selection.
 

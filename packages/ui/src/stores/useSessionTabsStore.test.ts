@@ -15,6 +15,14 @@ describe('useSessionTabsStore', () => {
     expect(useSessionTabsStore.getState().tabIds).toEqual(['a', 'b']);
   });
 
+  test('lanes of one run share a tab: opening another lane reuses it in place', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'lane-1', 'b', 'lane-2'] });
+    useSessionTabsStore.getState().ensureTab('lane-3', ['lane-1', 'lane-2', 'lane-3']);
+    expect(useSessionTabsStore.getState().tabIds).toEqual(['a', 'lane-3', 'b']);
+    useSessionTabsStore.getState().ensureTab('c', []);
+    expect(useSessionTabsStore.getState().tabIds).toEqual(['a', 'lane-3', 'b', 'c']);
+  });
+
   test('closeTab removes only the given id; closeOtherTabs keeps only it', () => {
     useSessionTabsStore.setState({ tabIds: ['a', 'b', 'c'] });
     useSessionTabsStore.getState().closeTab('b');

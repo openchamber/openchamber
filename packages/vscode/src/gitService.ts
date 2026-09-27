@@ -309,8 +309,8 @@ function cleanBranchName(branch: string): string {
 /**
  * Execute a raw git command and return the output
  */
-async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git' });
+async function execGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git', env });
 }
 
 function isValidCommitHash(hash: string): boolean {
@@ -2187,8 +2187,13 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   })();
 
   if (!matchedEntry?.worktree) {
+    // Only a leftover directory inside the managed worktree root may be deleted;
+    // an arbitrary unregistered path is never removed recursively.
+    const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
+    const isManagedOrphan = targetCanonical !== worktreeRootCanonical
+      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
     const targetExists = await checkPathExists(targetDirectory);
-    if (targetExists) {
+    if (targetExists && isManagedOrphan) {
       await fs.promises.rm(targetDirectory, { recursive: true, force: true });
     }
 
@@ -2217,6 +2222,59 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   clearWorktreeBootstrapState(matchedEntry.worktree);
 
   return true;
+}
+
+// Run snapshots live under a private namespace so they never show up as
+// branches or tags, yet stay reachable (and safe from gc) until deleted.
+// Mirrors packages/web/server/lib/git/service.js snapshotWorktree.
+const RUN_SNAPSHOT_REF_PATTERN = /^refs\/openchamber\/runs\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+const assertRunSnapshotRef = (ref: string | undefined): string => {
+  const value = typeof ref === 'string' ? ref.trim() : '';
+  if (!RUN_SNAPSHOT_REF_PATTERN.test(value) || value.includes('..')) {
+    throw new Error('Invalid snapshot ref');
+  }
+  return value;
+};
+
+const SNAPSHOT_IDENTITY_ENV = {
+  GIT_AUTHOR_NAME: 'OpenChamber',
+  GIT_AUTHOR_EMAIL: 'snapshot@openchamber.local',
+  GIT_COMMITTER_NAME: 'OpenChamber',
+  GIT_COMMITTER_EMAIL: 'snapshot@openchamber.local',
+};
+
+export async function snapshotWorktree(directory: string, input: { ref?: string }): Promise<{ ref: string; commit: string; head: string }> {
+  const worktreeDirectory = normalizeDirectoryPath(directory);
+  if (!worktreeDirectory) {
+    throw new Error('Worktree directory is required');
+  }
+  const ref = assertRunSnapshotRef(input?.ref);
+  const head = (await runGitCommandOrThrow(worktreeDirectory, ['rev-parse', '--verify', 'HEAD'], 'Worktree has no HEAD commit')).stdout.trim();
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-snapshot-'));
+  const indexEnv = { GIT_INDEX_FILE: path.join(tempDir, 'index') };
+  try {
+    const run = async (args: string[], message: string, env: NodeJS.ProcessEnv = indexEnv): Promise<string> => {
+      const result = await execGit(args, worktreeDirectory, env);
+      if (result.exitCode !== 0) {
+        throw new Error(String(result.stderr || '').trim() || message);
+      }
+      return String(result.stdout || '').trim();
+    };
+    await run(['read-tree', head], 'Failed to prepare snapshot index');
+    await run(['add', '-A'], 'Failed to collect worktree changes');
+    const tree = await run(['write-tree'], 'Failed to write snapshot tree');
+    const commit = await run(
+      ['commit-tree', tree, '-p', head, '-m', 'OpenChamber run snapshot'],
+      'Failed to write snapshot commit',
+      { ...indexEnv, ...SNAPSHOT_IDENTITY_ENV },
+    );
+    await run(['update-ref', ref, commit], 'Failed to store snapshot ref', {});
+    return { ref, commit, head };
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 // ============== Diff Operations ==============

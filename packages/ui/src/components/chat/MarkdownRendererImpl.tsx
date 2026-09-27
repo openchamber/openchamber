@@ -408,9 +408,57 @@ const useFileReferenceInteractions = ({
       unwrapBlockCodePathTokens(container);
     };
 
+    const openFileReference = async (sourceElement: HTMLElement) => {
+      const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
+      const resolved = getResolvedReference(raw, effectiveDirectory);
+      if (!resolved) {
+        return;
+      }
+
+      const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
+      if (preferRuntimeEditor && editor) {
+        void editor.openFile(
+          resolved.resolvedPath,
+          Number.isFinite(resolved.line ?? Number.NaN)
+            ? Math.max(1, Math.trunc(resolved.line as number))
+            : undefined,
+          Number.isFinite(resolved.column ?? Number.NaN)
+            ? Math.max(1, Math.trunc(resolved.column as number))
+            : undefined,
+        );
+        return;
+      }
+
+      const uiStore = useUIStore.getState();
+      if (Number.isFinite(resolved.line ?? Number.NaN)) {
+        uiStore.openContextFileAtLine(
+          contextDirectory,
+          resolved.resolvedPath,
+          Math.max(1, Math.trunc(resolved.line as number)),
+          Number.isFinite(resolved.column ?? Number.NaN)
+            ? Math.max(1, Math.trunc(resolved.column as number))
+            : 1,
+        );
+      } else {
+        uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
+      }
+    };
+
+    const attachClickGuard = () => attachFileRefClickGuard(container, {
+      hrefCandidate: extractHrefFileReferenceCandidate,
+      isResolvable: (raw) => getResolvedReference(raw, effectiveDirectory) !== null,
+      openFileReference,
+    });
+
     if (!fileReferencesEnabled) {
       clearAnnotatedFileLinks();
-      return;
+      if (!enabled) {
+        return;
+      }
+      // Mobile skips the probing annotation pass, but a markdown link whose
+      // href is a file path still has to open the file viewer: left to its
+      // default, the WebView navigates to the path as a URL and fails.
+      return attachClickGuard();
     }
 
     const scheduleAnnotation = (delayMs = 0) => {
@@ -496,42 +544,6 @@ const useFileReferenceInteractions = ({
       }
     };
 
-    const openFileReference = async (sourceElement: HTMLElement) => {
-      const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
-      const resolved = getResolvedReference(raw, effectiveDirectory);
-      if (!resolved) {
-        return;
-      }
-
-      const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
-      if (preferRuntimeEditor && editor) {
-        void editor.openFile(
-          resolved.resolvedPath,
-          Number.isFinite(resolved.line ?? Number.NaN)
-            ? Math.max(1, Math.trunc(resolved.line as number))
-            : undefined,
-          Number.isFinite(resolved.column ?? Number.NaN)
-            ? Math.max(1, Math.trunc(resolved.column as number))
-            : undefined,
-        );
-        return;
-      }
-
-      const uiStore = useUIStore.getState();
-      if (Number.isFinite(resolved.line ?? Number.NaN)) {
-        uiStore.openContextFileAtLine(
-          contextDirectory,
-          resolved.resolvedPath,
-          Math.max(1, Math.trunc(resolved.line as number)),
-          Number.isFinite(resolved.column ?? Number.NaN)
-            ? Math.max(1, Math.trunc(resolved.column as number))
-            : 1,
-        );
-      } else {
-        uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
-      }
-    };
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' && event.key !== ' ') {
         return;
@@ -564,11 +576,7 @@ const useFileReferenceInteractions = ({
     });
 
     container.addEventListener('keydown', handleKeyDown);
-    const removeClickGuard = attachFileRefClickGuard(container, {
-      hrefCandidate: extractHrefFileReferenceCandidate,
-      isResolvable: (raw) => getResolvedReference(raw, effectiveDirectory) !== null,
-      openFileReference,
-    });
+    const removeClickGuard = attachClickGuard();
 
     return () => {
       cancelled = true;

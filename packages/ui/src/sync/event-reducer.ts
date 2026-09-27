@@ -225,6 +225,7 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
     if (patch.shell) {
       next.status = patch.shell.status
       if (patch.shell.exit !== undefined) next.exit = patch.shell.exit
+      if (patch.shell.signal !== undefined) next.signal = patch.shell.signal
       if (patch.shell.output !== undefined) next.output = patch.shell.output
     }
     return next

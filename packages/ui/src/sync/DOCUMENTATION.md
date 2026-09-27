@@ -296,7 +296,7 @@ then the normal cadence continues. Store error status, including a chats-root
 lookup failure, drives recovery because the loader returns retained data on
 failure. Runtime changes retire the old timer and start a fresh load immediately;
 late completions cannot restart the old timer or seed the new runtime.
-Embedded chats and the VS Code agent-manager panel do not poll.
+Embedded chats do not poll.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
@@ -323,7 +323,16 @@ host's empty answer would otherwise mark a turn running inside as interrupted.
 A space that dies in the middle of a turn sends no settle event, so the
 session keeps the busy state it last reported until the space answers again
 or the user acts; the group's stale mark is what says the space is gone. The
-status and repair actions of a later stage own that. VS Code never applies
+status and repair actions of a later stage own that.
+
+The host also announces each step of a creation as
+`openchamber:space-progress`; the pipeline hands it to `sync-context.tsx`, which
+moves the space's entry in `spaces-store.ts` on. That store also keeps the
+journey route's list, the only source that knows a space still being made or
+one whose making failed, read on every (re)connection while the switch is on:
+a step announced after a read began wins over that read's answer, and a read a
+runtime switch overtook is dropped. The sidebar shows a group for every space
+of either list (`useSidebarSpaces`). VS Code never applies
 the prefix and never shows a space (decision 16 of the design).
 
 Not done here: the session-keyed actions still fall back to the current
@@ -572,8 +581,8 @@ after this final read cannot be guarded atomically.
 both title context and Markdown export. Export keeps full text; title input
 limits individual fields and each message while retaining head/tail excerpts.
 Web, Electron, hosted mobile and Capacitor use the existing Small Model route.
-Mobile session rows expose the same action beside manual rename when swiped
-open, with four 48px action slots and a session-scoped generation spinner.
+Mobile session rows expose the same action inside the manual rename editor
+(swipe, then rename), with a session-scoped generation spinner on the row.
 VS Code has no Small Model route and exposes a disabled action with an explicit
 explanation.
 

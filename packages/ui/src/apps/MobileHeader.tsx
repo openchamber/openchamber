@@ -3,7 +3,9 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
@@ -40,10 +42,16 @@ export const MobileHeader: React.FC<{
     return Boolean(status && !status.isClean);
   });
 
+  // An open run overview covers the chat, so the header names the run and
+  // drops the session-only metadata button rather than describe a session
+  // that is not on screen.
+  const runOverviewKey = useUIStore((state) => state.runOverviewKey);
+  const runTitle = useMultiRunTitle(runOverviewKey);
   const sessionTitle = currentSession?.title?.trim();
   // Single-line title, desktop-style: session title, or the "New session"
   // placeholder on the draft screen. No project/branch metadata line.
-  const primaryLabel = sessionTitle
+  const primaryLabel = (runOverviewKey ? runTitle : null)
+    || sessionTitle
     || (currentSessionId ? t('mobile.sessions.untitled') : t('sessions.switcher.draftTitle'));
 
   React.useEffect(() => {
@@ -123,13 +131,15 @@ export const MobileHeader: React.FC<{
               controls stay pinned to the right edge. */}
           {compactTitle ? <div className="min-w-0 flex-1" /> : null}
 
-          <MobileSessionMetadataButton
-            open={metadataOpen}
-            onOpenChange={handleMetadataOpenChange}
-            currentSessionId={currentSessionId}
-            effectiveDirectory={effectiveDirectory}
-            isNewSessionDraftOpen={isNewSessionDraftOpen}
-          />
+          {runOverviewKey ? null : (
+            <MobileSessionMetadataButton
+              open={metadataOpen}
+              onOpenChange={handleMetadataOpenChange}
+              currentSessionId={currentSessionId}
+              effectiveDirectory={effectiveDirectory}
+              isNewSessionDraftOpen={isNewSessionDraftOpen}
+            />
+          )}
 
           <button
             type="button"

@@ -20,14 +20,13 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { cn } from '@/lib/utils';
+import { useDeviceInfo } from '@/lib/device';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listWebSearchProviders } from '@/lib/opencode/websearch';
 import type { IntegrationInfo } from '@opencode/client';
-import type { Provider } from '@/lib/opencode/model';
-import { z } from 'zod';
 import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
 import {
   providerHasCredentials,
@@ -39,7 +38,13 @@ import {
   getOAuthMethods,
   getProviderConnections,
   getSignInIntegrationId,
+  readProviderApiKeySetting,
+  type CredentialConnection,
 } from './providerAuth';
+import { ProviderGrid } from './ProviderGrid';
+import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
+import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
+import { ProviderAccounts } from './ProviderAccounts';
 import { CustomProviderForm } from './CustomProviderForm';
 
 import { ProviderOAuthMethods } from './ProviderOAuthMethods';
@@ -76,6 +81,8 @@ const formatTokens = (value?: number | null) => {
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
+/** Not an OpenCode provider id: the page for OpenChamber's own classification providers (Jev). */
+const CLASSIFICATION_PAGE_ID = '__classification__';
 
 interface ProviderOption {
   id: string;
@@ -142,34 +149,59 @@ const parseProvidersPayload = (payload: unknown): ProviderOption[] => {
   });
 };
 
-/**
- * An API key written straight into the provider entry. OpenCode 2 keeps request
- * settings under `settings`, an open record whose typed keys (timeout,
- * compaction, transport since 2.0.10) never include the key itself, so it is
- * read as a free-form entry and kept only when it is a string.
- */
-const providerApiKeySetting = z.string();
-const readProviderApiKeySetting = (provider: Pick<Provider, 'settings'> | undefined): string | null =>
-  providerApiKeySetting.safeParse(provider?.settings?.apiKey).data ?? null;
-
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
-  const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
-  const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
+  // Which provider the page shows is its own state. The config store's
+  // selectedProviderId belongs to the chat's model selection; sharing it made
+  // Settings open on the chat's provider and marked the chat selection manual.
+  const connectRequested = useUIStore((state) => state.settingsProvidersConnectRequested);
+  const setConnectRequested = useUIStore((state) => state.setSettingsProvidersConnectRequested);
+  const classificationRequested = useUIStore((state) => state.settingsProvidersClassificationRequested);
+  const setClassificationRequested = useUIStore((state) => state.setSettingsProvidersClassificationRequested);
+  const openRequested = useUIStore((state) => state.settingsProvidersOpenRequested);
+  const setOpenRequested = useUIStore((state) => state.setSettingsProvidersOpenRequested);
+  const [selectedProviderId, setSelectedProvider] = React.useState(() => (
+    connectRequested ? ADD_PROVIDER_ID : classificationRequested ? CLASSIFICATION_PAGE_ID : openRequested ?? ''
+  ));
+  React.useEffect(() => {
+    if (!connectRequested) return;
+    setSelectedProvider(ADD_PROVIDER_ID);
+    setConnectRequested(false);
+  }, [connectRequested, setConnectRequested]);
+  React.useEffect(() => {
+    if (!classificationRequested) return;
+    setSelectedProvider(CLASSIFICATION_PAGE_ID);
+    setClassificationRequested(false);
+  }, [classificationRequested, setClassificationRequested]);
+  React.useEffect(() => {
+    if (!openRequested) return;
+    setSelectedProvider(openRequested);
+    setOpenRequested(null);
+  }, [openRequested, setOpenRequested]);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
 
+  // The app only loads providers for the project it is on; Settings has to ask
+  // for the one it is looking at.
+  const loadProviders = useConfigStore((state) => state.loadProviders);
+  React.useEffect(() => {
+    if (!settingsDirectory) return;
+    void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
+  }, [loadProviders, settingsDirectory]);
+
   const [integrations, setIntegrations] = React.useState<IntegrationInfo[] | null>(null);
   const [authLoading, setAuthLoading] = React.useState(false);
   const [apiKeyInputs, setApiKeyInputs] = React.useState<Record<string, string>>({});
   const [authBusyKey, setAuthBusyKey] = React.useState<string | null>(null);
+  const [accountBusyId, setAccountBusyId] = React.useState<string | null>(null);
   const [modelQuery, setModelQuery] = React.useState('');
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
   const [availableLoading, setAvailableLoading] = React.useState(false);
@@ -204,20 +236,11 @@ export const ProvidersPage: React.FC = () => {
   );
 
   React.useEffect(() => {
-    if (!selectedProviderId && providers.length > 0) {
-      setSelectedProvider(providers[0].id);
-    }
-  }, [providers, selectedProviderId, setSelectedProvider]);
-
-  React.useEffect(() => {
     // Auth methods drive which credential UI to show (API key vs OAuth). Keep
     // them loaded for the active provider view so OAuth-only plugins never fall
     // back to an API key form merely because methods were never fetched, and so
-    // an already-listed provider can still offer re-authentication.
-    if (!selectedProviderId) {
-      return;
-    }
-
+    // an already-listed provider can still offer re-authentication. The card
+    // grid reads the same list for each provider's status.
     let isMounted = true;
 
     const loadIntegrations = async () => {
@@ -242,7 +265,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedProviderId, integrationsRevision, t]);
+  }, [integrationsRevision, t]);
 
   React.useEffect(() => {
     if (!shouldLoadAvailableProviders(isAddMode)) {
@@ -308,7 +331,9 @@ export const ProvidersPage: React.FC = () => {
   );
 
   React.useEffect(() => {
-    if (selectedProviderId !== ADD_PROVIDER_ID) {
+    // A candidate requested from Classification providers arrives before the
+    // list does; judge it only once there is a list to judge it against.
+    if (selectedProviderId !== ADD_PROVIDER_ID || availableLoading || availableProviders.length === 0) {
       return;
     }
 
@@ -319,7 +344,7 @@ export const ProvidersPage: React.FC = () => {
     ) {
       setCandidateProviderId('');
     }
-  }, [selectedProviderId, candidateProviderId, unconnectedProviders]);
+  }, [selectedProviderId, candidateProviderId, unconnectedProviders, availableLoading, availableProviders.length]);
 
   React.useEffect(() => {
     if (selectedProviderId === ADD_PROVIDER_ID) {
@@ -345,7 +370,7 @@ export const ProvidersPage: React.FC = () => {
   // Unauthenticated providers (OAuth-only plugins before login) should open the
   // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
   React.useEffect(() => {
-    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
       return;
     }
     const sources = providerSources[selectedProviderId];
@@ -373,7 +398,7 @@ export const ProvidersPage: React.FC = () => {
   }, [selectedProviderId, providerSources, providers, integrations, authPanelDismissedForId]);
 
   React.useEffect(() => {
-    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
       return;
     }
 
@@ -583,22 +608,82 @@ export const ProvidersPage: React.FC = () => {
     setCandidateProviderId('');
   };
 
-  if (!isAddMode && providers.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <Icon name="stack" className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">{t('settings.providers.page.empty.noProvidersDetected')}</p>
-          <p className="typography-meta mt-1 opacity-75">{t('settings.providers.page.empty.checkOpenCodeConfiguration')}</p>
-        </div>
-      </div>
-    );
+  // Each account action waits for the server's answer and then rereads the
+  // integration list; OpenCode owns which credential is active, so nothing is
+  // flipped locally first.
+  const runAccountAction = async (
+    account: CredentialConnection,
+    action: () => Promise<void>,
+    messages: { success?: string; failure: string },
+  ) => {
+    setAccountBusyId(account.id);
+    try {
+      await action();
+      if (messages.success) toast.success(messages.success);
+    } catch (error) {
+      console.error('Provider account action failed:', error);
+      toast.error(messages.failure);
+    } finally {
+      setAccountBusyId(null);
+      refreshIntegrations();
+    }
+  };
+
+  const handleActivateAccount = (account: CredentialConnection) => runAccountAction(
+    account,
+    async () => {
+      await opencodeClient.getSdkClient().credential.activate({ credentialID: account.id });
+    },
+    {
+      success: t('settings.providers.accounts.toast.switched', { account: account.label }),
+      failure: t('settings.providers.accounts.toast.switchFailed'),
+    },
+  );
+
+  const handleRenameAccount = (account: CredentialConnection, label: string) => runAccountAction(
+    account,
+    async () => {
+      await opencodeClient.getSdkClient().credential.update({ credentialID: account.id, label });
+    },
+    { failure: t('settings.providers.accounts.toast.renameFailed') },
+  );
+
+  const handleRemoveAccount = (account: CredentialConnection) => runAccountAction(
+    account,
+    async () => {
+      await opencodeClient.getSdkClient().credential.remove({ credentialID: account.id });
+      refreshProviderSources();
+    },
+    {
+      success: t('settings.providers.accounts.toast.removed'),
+      failure: t('settings.providers.accounts.toast.removeFailed'),
+    },
+  );
+
+  const backToGrid = () => setSelectedProvider('');
+  const backButton = <SettingsBackButton label={t('settings.providers.page.back')} onClick={backToGrid} />;
+
+
+  // A classification source that needs a key links to the provider holding it:
+  // its own page when OpenCode already lists it, the connect form otherwise.
+  const openProviderForKey = (providerId: string) => {
+    if (providers.some((provider) => provider.id === providerId)) {
+      setSelectedProvider(providerId);
+      return;
+    }
+    setCandidateProviderId(providerId);
+    setSelectedProvider(ADD_PROVIDER_ID);
+  };
+
+  if (selectedProviderId === CLASSIFICATION_PAGE_ID) {
+    return <ClassificationProvidersPage titleLeading={backButton} onOpenProvider={openProviderForKey} />;
   }
 
   if (isAddMode) {
     return (
       <SettingsPageLayout
         title={t('settings.providers.page.connect.title')}
+        titleLeading={backButton}
         showSaveStatus={false}
       >
         <SettingsSection
@@ -805,13 +890,14 @@ export const ProvidersPage: React.FC = () => {
 
   if (!selectedProvider) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <Icon name="stack" className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">{t('settings.providers.page.empty.selectProviderFromSidebar')}</p>
-          <p className="typography-meta mt-1 opacity-75">{t('settings.providers.page.empty.reviewDetailsAndConfigureAuth')}</p>
-        </div>
-      </div>
+      <ProviderGrid
+        providers={providers}
+        integrations={integrations}
+        directory={settingsDirectory}
+        onSelect={setSelectedProvider}
+        onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
+        onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
+      />
     );
   }
 
@@ -836,9 +922,40 @@ export const ProvidersPage: React.FC = () => {
     hasCredentials,
     isEditableCustomProvider,
   });
-  const incompleteAuthHint = !showApiKeyAuth && oauthAuthMethods.length > 0
-    ? t('settings.providers.page.auth.useReconnectHint')
-    : t('settings.providers.page.auth.incompleteHint');
+  const providerConnections = getProviderConnections(integrations ?? [], selectedProvider.id) ?? [];
+  // Requests go through one integration only: the provider's own, or the one it
+  // is bound to (OpenCode Go moves to the Console once you are signed in there).
+  // Its first credential is the active account; credentials stored under the
+  // other integration stay listed so they can be removed, but are not in use.
+  const usedIntegrationId = selectedProvider.integrationID ?? selectedProvider.id;
+  const usedCredentials = getCredentialConnections(findIntegrationForProvider(integrations ?? [], usedIntegrationId));
+  const activeAccountId = usedCredentials[0]?.id ?? null;
+  const unusedAccountIds = new Set(
+    providerConnections.flatMap((connection) => (
+      connection.type === 'credential' && !usedCredentials.some((used) => used.id === connection.id)
+        ? [connection.id]
+        : []
+    )),
+  );
+  const configSources = [
+    selectedSources?.user.exists ? t('settings.providers.page.connectionDetails.source.userConfig') : null,
+    selectedSources?.project.exists ? t('settings.providers.page.connectionDetails.source.projectConfig') : null,
+    selectedSources?.custom?.exists ? t('settings.providers.page.connectionDetails.source.customConfig') : null,
+  ].filter((source): source is string => source !== null);
+  const providerTitleLeading = (
+    <span className="flex items-center gap-2">
+      {backButton}
+      <ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />
+    </span>
+  );
+  const providerDescription = (
+    <span className="typography-settings-description text-muted-foreground">
+      <span className="font-mono">{selectedProvider.id}</span>
+      {configSources.length > 0
+        ? <> · {t('settings.providers.page.configuredIn', { sources: configSources.join(', ') })}</>
+        : null}
+    </span>
+  );
 
   const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
     typeof model?.name === 'string' ? model.name : '',
@@ -849,8 +966,8 @@ export const ProvidersPage: React.FC = () => {
     return (
       <SettingsPageLayout
         title={selectedProvider.name || selectedProvider.id}
-        titleLeading={<ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />}
-        description={<span className="font-mono typography-settings-description text-muted-foreground">{selectedProvider.id}</span>}
+        titleLeading={providerTitleLeading}
+        description={providerDescription}
         showSaveStatus={false}
       >
         <CustomProviderForm
@@ -877,12 +994,13 @@ export const ProvidersPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={selectedProvider.name || selectedProvider.id}
-      titleLeading={<ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />}
-      description={<span className="font-mono typography-settings-description text-muted-foreground">{selectedProvider.id}</span>}
+      titleLeading={providerTitleLeading}
+      description={providerDescription}
       showSaveStatus={false}
     >
       <SettingsSection
-        title={t('settings.providers.page.auth.title')}
+        title={t('settings.providers.accounts.title')}
+        info={t('settings.providers.accounts.info')}
         divider={false}
         headerAction={(
           <div className="flex items-center gap-1">
@@ -914,106 +1032,91 @@ export const ProvidersPage: React.FC = () => {
                 setAuthPanelDismissedForId(nextOpen ? null : selectedProvider.id);
               }}
             >
-              {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
+              {showAuthPanel ? (
+                t('settings.providers.page.actions.cancel')
+              ) : (
+                <>
+                  <Icon name="add" className="size-3.5" />
+                  {providerConnections.length > 0
+                    ? t('settings.providers.accounts.add')
+                    : t('settings.providers.page.actions.connect')}
+                </>
+              )}
             </Button>
           </div>
         )}
         settingsItem="providers.auth"
+        contentClassName="space-y-4"
       >
-            {!showAuthPanel ? (
-              authStatusIncomplete ? (
-                <div className="flex items-center gap-1.5 py-1.5">
-                  <Icon name="alert" className="w-4 h-4 text-[var(--status-warning)] shrink-0" />
-                  <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.incomplete')}</span>
-                  <SettingsInfoHint>{incompleteAuthHint}</SettingsInfoHint>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 py-1.5">
-                  <Icon name="check" className="w-4 h-4 text-[var(--status-success)] shrink-0" />
-                  <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.connected')}</span>
-                  <SettingsInfoHint>{t('settings.providers.page.auth.useReconnectHint')}</SettingsInfoHint>
-                </div>
-              )
-            ) : authLoading ? (
-              <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
-            ) : (
-              <div className="space-y-4">
-                {showApiKeyAuth ? (
-                  <div className="py-1.5">
-                    <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                      {t('settings.providers.page.auth.apiKeyLabel')}
-                      <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-                    </label>
-                    <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-                      <Input
-                        type="password"
-                        value={apiKeyInputs[selectedProvider.id] ?? ''}
-                        onChange={(event) =>
-                          setApiKeyInputs((prev) => ({
-                            ...prev,
-                            [selectedProvider.id]: event.target.value,
-                          }))
-                        }
-                        placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-                        className="flex-1 font-mono text-xs"
-                      />
-                      <Button
-                        size="xs"
-                        className="!font-normal shrink-0"
-                        onClick={() => handleSaveApiKey(selectedProvider.id)}
-                        disabled={authBusyKey === `api:${selectedProvider.id}`}
-                      >
-                        {authBusyKey === `api:${selectedProvider.id}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
+        {providerConnections.length > 0 ? (
+          <ProviderAccounts
+            connections={providerConnections}
+            activeId={activeAccountId}
+            unusedIds={unusedAccountIds}
+            busyId={accountBusyId}
+            onActivate={(account) => void handleActivateAccount(account)}
+            onRename={(account, label) => void handleRenameAccount(account, label)}
+            onRemove={(account) => void handleRemoveAccount(account)}
+          />
+        ) : !showAuthPanel && authStatusIncomplete ? (
+          <div className="flex items-center gap-1.5 py-1.5">
+            <Icon name="alert" className="w-4 h-4 text-[var(--status-warning)] shrink-0" />
+            <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.incomplete')}</span>
+            {showApiKeyAuth ? <SettingsInfoHint>{t('settings.providers.page.auth.incompleteHint')}</SettingsInfoHint> : null}
+          </div>
+        ) : null}
 
-                {oauthAuthMethods.length > 0 && (
-                  <ProviderOAuthMethods
-                    key={selectedProvider.id}
-                    integrationId={getSignInIntegrationId(selectedProvider.id)}
-                    methods={oauthAuthMethods}
-                    onConnected={() => handleOAuthConnected(selectedProvider.id)}
-                    className={cn(showApiKeyAuth && 'border-t border-[var(--surface-subtle)] pt-2')}
-                  />
-                )}
-              </div>
+        {!showAuthPanel ? null : authLoading ? (
+          <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
+        ) : (
+          <div
+            className={cn(
+              'space-y-4',
+              providerConnections.length > 0 && 'rounded-xl border border-[var(--interactive-border)] p-4',
             )}
-      </SettingsSection>
-
-
-      <SettingsSection
-        title={t('settings.providers.page.connectionDetails.title')}
-        settingsItem="providers.connection-details"
-      >
-            <div className="flex flex-col gap-2 py-1.5 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-8">
-              <div className="flex min-w-0 flex-col">
-                {(hasCredentials || selectedSources?.user.exists || selectedSources?.project.exists || selectedSources?.custom?.exists) ? (
-                  <span className="typography-meta text-muted-foreground">
-                    {t('settings.providers.page.connectionDetails.configuredIn')}{' '}
-                    {[
-                      hasCredentials ? t('settings.providers.page.connectionDetails.source.authCredentials') : null,
-                      selectedSources?.user.exists ? t('settings.providers.page.connectionDetails.source.userConfig') : null,
-                      selectedSources?.project.exists ? t('settings.providers.page.connectionDetails.source.projectConfig') : null,
-                      selectedSources?.custom?.exists ? t('settings.providers.page.connectionDetails.source.customConfig') : null,
-                    ].filter(Boolean).join(', ')}
-                  </span>
-                ) : (
-                  <span className="typography-meta text-muted-foreground">{t('settings.providers.page.connectionDetails.noActiveSource')}</span>
-                )}
+          >
+            {showApiKeyAuth ? (
+              <div className="py-1.5">
+                <label className="typography-ui-label text-foreground flex items-center gap-1.5">
+                  {t('settings.providers.page.auth.apiKeyLabel')}
+                  <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
+                </label>
+                <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
+                  <Input
+                    type="password"
+                    value={apiKeyInputs[selectedProvider.id] ?? ''}
+                    onChange={(event) =>
+                      setApiKeyInputs((prev) => ({
+                        ...prev,
+                        [selectedProvider.id]: event.target.value,
+                      }))
+                    }
+                    placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
+                    className="flex-1 font-mono text-xs"
+                  />
+                  <Button
+                    size="xs"
+                    className="!font-normal shrink-0"
+                    onClick={() => handleSaveApiKey(selectedProvider.id)}
+                    disabled={authBusyKey === `api:${selectedProvider.id}`}
+                  >
+                    {authBusyKey === `api:${selectedProvider.id}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
+                  </Button>
+                </div>
               </div>
+            ) : null}
 
-              <Button
-                variant="ghost"
-                size="xs"
-                className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
-                onClick={() => handleDisconnectProvider(selectedProvider.id)}
-                disabled={authBusyKey === `disconnect:${selectedProvider.id}`}
-              >
-                {authBusyKey === `disconnect:${selectedProvider.id}` ? t('settings.providers.page.actions.disconnecting') : t('settings.providers.page.actions.disconnect')}
-              </Button>
-            </div>
+            {oauthAuthMethods.length > 0 && (
+              <ProviderOAuthMethods
+                key={selectedProvider.id}
+                integrationId={getSignInIntegrationId(selectedProvider.id)}
+                methods={oauthAuthMethods}
+                onConnected={() => handleOAuthConnected(selectedProvider.id)}
+                className={cn(showApiKeyAuth && 'border-t border-[var(--surface-subtle)] pt-2')}
+              />
+            )}
+          </div>
+        )}
       </SettingsSection>
 
       {showModelsSection ? (
@@ -1075,6 +1178,10 @@ export const ProvidersPage: React.FC = () => {
 
                   const contextTokens = formatTokens(metadata?.limit?.context);
                   const outputTokens = formatTokens(metadata?.limit?.output);
+                  const tokenSummary = [
+                    contextTokens ? `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` : null,
+                    outputTokens ? `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` : null,
+                  ].filter(Boolean).join(' · ');
 
                   const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
                   if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
@@ -1093,13 +1200,29 @@ export const ProvidersPage: React.FC = () => {
                         {modelName}
                       </span>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {(contextTokens || outputTokens) && (
+                        {isMobile ? (
+                          // A phone row has room for the name only; the limits
+                          // and capabilities move behind a tap.
+                          (tokenSummary || capabilityIcons.length > 0) ? (
+                            <SettingsInfoHint className="h-6 w-6">
+                              <div className="space-y-1.5">
+                                {tokenSummary ? <div className="font-medium">{tokenSummary}</div> : null}
+                                {capabilityIcons.map(({ key, icon: iconName, label }) => (
+                                  <div key={key} className="flex items-center gap-1.5">
+                                    <Icon name={iconName} className="h-3.5 w-3.5" />
+                                    {label}
+                                  </div>
+                                ))}
+                              </div>
+                            </SettingsInfoHint>
+                          ) : null
+                        ) : (
+                          <>
+                        {tokenSummary ? (
                           <span className="typography-micro text-muted-foreground flex-shrink-0 bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">
-                            {contextTokens ? `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` : ''}
-                            {contextTokens && outputTokens ? ' · ' : ''}
-                            {outputTokens ? `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` : ''}
+                            {tokenSummary}
                           </span>
-                        )}
+                        ) : null}
                         {capabilityIcons.length > 0 && (
                           <div className="flex items-center gap-1 flex-shrink-0">
                             {capabilityIcons.map(({ key, icon: iconName, label }) => (
@@ -1113,6 +1236,8 @@ export const ProvidersPage: React.FC = () => {
                               </span>
                             ))}
                           </div>
+                        )}
+                          </>
                         )}
                         <button
                           type="button"

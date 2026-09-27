@@ -524,6 +524,19 @@ export interface RemoveGitWorktreePayload {
   deleteLocalBranch?: boolean;
 }
 
+/** Private ref (`refs/openchamber/runs/<group>/<session>`) holding a worktree snapshot. */
+export interface GitWorktreeSnapshotPayload {
+  ref: string;
+}
+
+export interface GitWorktreeSnapshotResult {
+  ref: string;
+  /** Snapshot commit: HEAD plus every staged, unstaged and untracked (not ignored) change. */
+  commit: string;
+  /** The worktree HEAD the snapshot was taken on top of. */
+  head: string;
+}
+
 export interface GitDeleteBranchPayload {
   branch: string;
   force?: boolean;
@@ -569,6 +582,8 @@ interface GitWorktreeAPI {
   preview?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
+  /** `directory` is the worktree to snapshot. */
+  snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
 }
 
 export interface GitAPI {
@@ -822,7 +837,6 @@ export interface EditorAPI {
 
 export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
-  openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
   pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;

@@ -6,6 +6,8 @@
 export interface VSCodeBootstrapConfig {
   workspaceFolder?: string;
   workspaceFolders?: unknown;
+  /** "parallel" on the tab the "Run on several models" command opens. */
+  initialComposer?: unknown;
 }
 
 export const getVSCodeBootstrapConfig = (): VSCodeBootstrapConfig | null => {

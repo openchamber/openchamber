@@ -73,6 +73,11 @@ export interface DraftTargetProps {
     showBranchSelector: boolean;
     onProjectChange: (projectId: string) => void;
     onDirectoryChange: (directory: string) => void;
+    /**
+     * Opens the create dialog of an isolated space; absent where the entry is not offered: while
+     * the feature's switch is off, and always in VS Code (decision 16 of the design).
+     */
+    onCreateSpace?: () => void;
     theme: Theme;
 }
 
@@ -155,6 +160,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
         showBranchSelector,
         onProjectChange,
         onDirectoryChange,
+        onCreateSpace,
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
@@ -474,6 +480,21 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
+                        {onCreateSpace ? (
+                            <>
+                                <SelectSeparator />
+                                <div className="px-2 py-1.5">
+                                    <button
+                                        type="button"
+                                        className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                        onPointerDown={(e) => { e.stopPropagation(); }}
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                                    >
+                                        {t('spaces.picker.new')}
+                                    </button>
+                                </div>
+                            </>
+                        ) : null}
                     </SelectContent>
                 </Select>
             ) : null}
@@ -604,6 +625,7 @@ export function MobileDraftTargetSheets(
         branchItems,
         onProjectChange,
         onDirectoryChange,
+        onCreateSpace,
         openPicker,
         onOpenPickerChange,
         theme,
@@ -691,6 +713,20 @@ export function MobileDraftTargetSheets(
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
+                                    {onCreateSpace ? (
+                                        <div className="px-2 pb-1 pt-2">
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onClick={() => {
+                                                    onOpenPickerChange(null);
+                                                    onCreateSpace();
+                                                }}
+                                            >
+                                                {t('spaces.picker.new')}
+                                            </button>
+                                        </div>
+                                    ) : null}
                                 </>
                             );
                         })()}

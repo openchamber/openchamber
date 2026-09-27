@@ -10,6 +10,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { ModelSelector } from './ModelSelector';
 import { useI18n } from '@/lib/i18n';
 import { formatModelSelection, parseModelIdentifier, parseModelSelection } from '@/lib/modelIdentifier';
+import { findCatalogModel } from '@/lib/opencode/model';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
@@ -44,7 +45,7 @@ import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsL
 
 type AgentVariantProvider = {
   id: string;
-  models: Array<{ modelID: string; variants: Array<{ id: string }> }>;
+  models: Array<{ id: string; modelID: string; variants: Array<{ id: string }> }>;
 };
 
 const getVariantOptionsForModel = (
@@ -57,7 +58,7 @@ const getVariantOptionsForModel = (
   }
 
   const provider = providers.find((item) => item.id === parsedModel.providerId);
-  const model = provider?.models.find((item) => item.modelID === parsedModel.modelId);
+  const model = findCatalogModel(provider?.models, parsedModel.modelId);
   return model?.variants.map((variant) => variant.id) ?? [];
 };
 /** Everything the page writes into the agent's config file. */

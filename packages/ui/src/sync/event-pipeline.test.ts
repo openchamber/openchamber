@@ -159,12 +159,12 @@ describe("createEventPipeline", () => {
     const { events } = await collect(
       [
         { type: "openchamber:notification", properties: { kind: "agent-complete", sessionId: "ses_1", title: "Done" } },
-        { type: "openchamber:permission-auto-accept.updated", properties: { sessions: { ses_1: true }, revision: 3 } as never },
+        { type: "openchamber:permission-auto-accept.updated", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } as never },
       ],
       2,
     )
     expect(events[0]).toEqual({ type: "openchamber.notification", properties: { kind: "agent-complete", sessionId: "ses_1", title: "Done" } })
-    expect(events[1]).toEqual({ type: "openchamber.permission-auto-accept", properties: { sessions: { ses_1: true }, revision: 3 } })
+    expect(events[1]).toEqual({ type: "openchamber.permission-auto-accept", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } })
   })
 
   test("ignores payloads that are neither wire events nor bridge events", async () => {
@@ -195,6 +195,36 @@ describe("createEventPipeline", () => {
       pipeline.cleanup()
     }
     expect(announced).toEqual([{ spaceId: "a1b2c3d4e5f6", status: "connected", wasReady: false }])
+    expect(delivered.map(describeEvent)).toEqual(["updated:a"])
+  })
+
+  test("hands a creation step of a space to its owner, failure included, and delivers no event for it", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const delivered: SyncEvent[] = []
+    const steps: Array<{ spaceId: string; step: string; failure: { code: string; message: string } | null }> = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "creating", failure: null, timestamp: 1 } as never },
+        { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "failed", failure: { code: "docker_daemon_unreachable", message: "down", details: null }, timestamp: 2 } as never },
+        { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "dancing", failure: null } as never },
+        textEnded("a"),
+      ], resolveStreamFinished),
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onSpaceProgress: (progress) => { steps.push(progress) },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      await streamFinished
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    expect(steps).toEqual([
+      { spaceId: "a1b2c3d4e5f6", step: "creating", failure: null },
+      { spaceId: "a1b2c3d4e5f6", step: "failed", failure: { code: "docker_daemon_unreachable", message: "down" } },
+    ])
     expect(delivered.map(describeEvent)).toEqual(["updated:a"])
   })
 })

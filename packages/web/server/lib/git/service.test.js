@@ -28,6 +28,7 @@ import {
   observeWorktreeTopology,
   populateWorktreeWithLockRecovery,
   removeWorktree,
+  snapshotWorktree,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
   resetToCommit,
@@ -1698,6 +1699,58 @@ describe('removeWorktree', () => {
       }
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// snapshotWorktree
+// ---------------------------------------------------------------------------
+
+describe('snapshotWorktree', () => {
+  const createSnapshotRepo = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'secret.env\n');
+    runGit(repo, ['add', 'README.md', '.gitignore']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    return repo;
+  };
+
+  it('captures staged, unstaged and untracked changes without touching the worktree', async () => {
+    if (!canRunGit()) return;
+    const repo = createSnapshotRepo();
+    const head = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Changed\n');
+    fs.writeFileSync(path.join(repo, 'staged.txt'), 'staged\n');
+    runGit(repo, ['add', 'staged.txt']);
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'untracked\n');
+    fs.writeFileSync(path.join(repo, 'secret.env'), 'TOKEN=1\n');
+    const statusBefore = runGit(repo, ['status', '--porcelain']);
+
+    const ref = 'refs/openchamber/runs/group-1/ses_abc';
+    const result = await snapshotWorktree(repo, { ref });
+
+    expect(result).toMatchObject({ ref, head });
+    expect(runGit(repo, ['rev-parse', ref]).trim()).toBe(result.commit);
+    expect(runGit(repo, ['rev-parse', `${result.commit}^`]).trim()).toBe(head);
+    const files = runGit(repo, ['ls-tree', '-r', '--name-only', result.commit]).trim().split('\n').sort();
+    expect(files).toEqual(['.gitignore', 'README.md', 'new.txt', 'staged.txt']);
+    expect(runGit(repo, ['show', `${result.commit}:README.md`])).toBe('# Changed\n');
+
+    expect(runGit(repo, ['rev-parse', 'HEAD']).trim()).toBe(head);
+    expect(runGit(repo, ['status', '--porcelain'])).toBe(statusBefore);
+    expect(runGit(repo, ['branch', '--list']).trim()).toBe('* main');
+  });
+
+  it('rejects refs outside the private namespace', async () => {
+    if (!canRunGit()) return;
+    const repo = createSnapshotRepo();
+    await expect(snapshotWorktree(repo, { ref: 'refs/heads/main' })).rejects.toThrow('Invalid snapshot ref');
+    await expect(snapshotWorktree(repo, { ref: 'refs/openchamber/runs/../heads' })).rejects.toThrow('Invalid snapshot ref');
+  });
+
 });
 
 // ---------------------------------------------------------------------------

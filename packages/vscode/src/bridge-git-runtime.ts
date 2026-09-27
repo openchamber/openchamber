@@ -163,6 +163,14 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
     }
 
+    case 'api:git/worktrees/snapshot': {
+      const { directory, ref } = (payload || {}) as { directory?: string; ref?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const result = await gitService.snapshotWorktree(directory!, { ref });
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/worktrees/validate': {
       const { directory } = (payload || {}) as { directory?: string };
       const dirError = requireDirectory(id, type, directory);

@@ -28,13 +28,13 @@ mock.module("@/lib/opencode/client", () => ({
   },
 }))
 
-const autoAcceptSnapshots: Array<{ snapshot: { sessions: Record<string, boolean>; revision?: number }; runtimeKey?: string }> = []
+const autoAcceptSnapshots: Array<{ snapshot: { modes: Record<string, string>; revision?: number }; runtimeKey?: string }> = []
 
 mock.module("@/stores/permissionStore", () => ({
   usePermissionStore: {
     getState: () => ({
-      isSessionAutoAccepting: () => false,
-      applySnapshot: (snapshot: { sessions: Record<string, boolean>; revision?: number }, runtimeKey?: string) => {
+      getSessionMode: () => "ask",
+      applySnapshot: (snapshot: { modes: Record<string, string>; revision?: number }, runtimeKey?: string) => {
         autoAcceptSnapshots.push({ snapshot, runtimeKey })
       },
     }),
@@ -422,7 +422,8 @@ describe("OpenChamber-native frames", () => {
       handleEvent("global", event, childStores, routingIndex, getRuntimeKey())
 
       expect(autoAcceptSnapshots).toEqual([{
-        snapshot: { sessions: { ses_a: true, ses_b: false }, revision: 7 },
+        // A policy from before the modes reads on as auto and off as ask.
+        snapshot: { modes: { ses_a: "auto", ses_b: "ask" }, revision: 7 },
         runtimeKey: getRuntimeKey(),
       }])
       expect(childStores.children.size).toBe(0)

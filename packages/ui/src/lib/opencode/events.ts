@@ -66,7 +66,7 @@ export type MessagePatch = {
   snapshot?: { start?: string; end?: string; files?: string[] }
   retry?: Extract<Message, { role: "assistant" }>["retry"] | null
   /** Shell messages: exit status and captured output. */
-  shell?: { status: "running" | "exited" | "timeout" | "killed"; exit?: number; output?: Extract<Message, { role: "shell" }>["output"] }
+  shell?: { status: "running" | "exited" | "timeout" | "killed"; exit?: number; signal?: string; output?: Extract<Message, { role: "shell" }>["output"] }
 }
 
 /** State transitions of a tool call that need the part's existing state to apply. */
@@ -140,7 +140,8 @@ export type SyncEvent =
   | { type: "location.shutdown"; properties: Record<never, never> }
   // OpenChamber's own server frames that ride the same stream.
   | { type: "openchamber.notification"; properties: OpenchamberNotification }
-  | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; revision?: number } }
+  // `modes` is the policy; `sessions` is its on/off view for clients from before the modes.
+  | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; modes?: Record<string, "ask" | "safety" | "auto">; revision?: number } }
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {
@@ -696,7 +697,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
             messageID: `shell:${event.data.shell.id}`,
             patch: {
               time: { completed: event.created },
-              shell: compact({ status: event.data.shell.status, exit: finiteExit(event.data.shell.exit), output: event.data.output }),
+              shell: compact({ status: event.data.shell.status, exit: finiteExit(event.data.shell.exit), signal: event.data.shell.signal, output: event.data.output }),
             },
           },
         },

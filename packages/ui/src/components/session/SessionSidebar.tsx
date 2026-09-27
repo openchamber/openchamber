@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
@@ -137,7 +138,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const setArchivePageOpen = useUIStore((state) => state.setArchivePageOpen);
   const setUsageStatsPageOpen = useUIStore((state) => state.setUsageStatsPageOpen);
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
-  const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
 
   const normalizedSessionSearchQuery = React.useMemo(
@@ -207,6 +207,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
+  const unresolvedWorktreeProjectPathsRef = React.useRef(unresolvedWorktreeProjectPaths);
+  unresolvedWorktreeProjectPathsRef.current = unresolvedWorktreeProjectPaths;
+  const isConnected = useConfigStore((state) => state.isConnected);
   const rawWorktreesByProjectRef = React.useRef<RawWorktreesByProjectScope>({
     runtimeKey: null,
     revision: 0,
@@ -218,6 +221,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
     const discoverWorktrees = async () => {
       const discoveryRuntimeKey = runtimeKey;
+      const connectedAtStart = useConfigStore.getState().isConnected;
       const projectEntries = useProjectsStore.getState().projects;
       useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map(projectEntries.map((project) => [normalizePath(project.path) ?? project.path, 'loading'])) });
       if (projectEntries.length === 0 || isVSCode) {
@@ -320,6 +324,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         return [path, unresolvedProjectPaths.has(path) ? 'error' : 'ready'];
       })) });
       setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
+      // Projects come from the local cache right after an instance switch, so
+      // discovery can run before the instance answers. Failures from before the
+      // connection was up say nothing about the instance: ask once more.
+      if (unresolvedProjectPaths.size > 0 && !connectedAtStart && useConfigStore.getState().isConnected) {
+        requestWorktreeDiscovery();
+      }
     };
 
     void discoverWorktrees();
@@ -328,6 +338,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       cancelled = true;
     };
   }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
+
+  // A discovery that failed while the instance was unreachable (switch,
+  // reconnect) is retried when the connection comes up; a discovery still in
+  // flight at that moment retries itself above.
+  React.useEffect(() => {
+    if (isConnected && unresolvedWorktreeProjectPathsRef.current.size > 0) {
+      requestWorktreeDiscovery();
+    }
+  }, [isConnected]);
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
@@ -533,13 +552,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
   const headerActionIconClass = 'h-4.5 w-4.5';
 
-  const handleOpenMultiRunFromHeader = React.useCallback(() => {
-    if (mobileVariant) {
-      setSessionSwitcherOpen(false);
-    }
-    openMultiRunLauncher();
-  }, [mobileVariant, openMultiRunLauncher, setSessionSwitcherOpen]);
-
   const worktreeRefreshDependencies = React.useMemo(() => ({
     projects,
     getCurrentProjects: () => useProjectsStore.getState().projects,
@@ -633,8 +645,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           if (mobileVariant) setSessionSwitcherOpen(false);
           setScheduledTasksDialogOpen(true);
         }}
-        onOpenMultiRun={handleOpenMultiRunFromHeader}
-        canOpenMultiRun={projects.length > 0}
         onOpenArchive={() => {
           if (mobileVariant) setSessionSwitcherOpen(false);
           setArchivePageOpen(true);

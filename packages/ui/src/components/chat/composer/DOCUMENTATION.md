@@ -123,6 +123,7 @@ does not hide its entry actions behind the chat header.
 | `submit/` | Turning what the user has into what gets sent. `guestCommands.ts` routes an extension's slash command (`contributes.commands`) before anything is sent: `/name args` never reaches the model, the extension resolves it into a chip |
 | `attachments/` | Files: paths, drop payloads |
 | `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub, Linear, then guests with `contributes.attach`. `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. Message and session actions (`contributes.actions`) travel the same two roads with a `GuestMessageItem` / `GuestSessionItem` (`lib/guests/dialog-store.ts` `openGuestWithItem`); the dialog they open lives in `layout/GuestHosts.tsx`, not here, and an `attach` from it closes it through `handleGuestAttach`. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
+| `parallel/` | "Run in parallel": the launch state of a new-session draft (prompt variants, models per variant, worktrees, setup, auto-fusion) and the strip that renders it above the editor |
 | `text.ts` | How inserted text meets the text already there |
 | `largeTextPaste.ts` | Detect large plain-text pastes and build virtual `.txt` files |
 | `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
@@ -466,6 +467,37 @@ morph announces `oc:composer-morph` (`hold` with the slot's height delta,
 automatic end write while a transition runs, lets the geometry land in one
 step, and drives scrollTop on the same curve. Mobile browsers, Android and
 reduced motion keep the instant swap.
+
+## Run in parallel
+
+The desktop model picker offers "Run on several models" right under Auto
+(`ModelPickerList.leadingAction`). It is a row of the picker's keyboard list,
+not a separate button: arrows and the pointer highlight it like Auto, and Enter
+runs it. On a new-session draft it turns the composer
+into parallel mode; elsewhere it opens a new draft in that mode with the typed
+text. The command palette and "Start new multi-run from this
+answer" reach the same mode through `useUIStore.requestParallelComposer`, which
+`useParallelComposer` consumes once. Mobile and BTW never enter it.
+
+The state lives in `parallel/useParallelComposer.ts`, local to `ChatInput`.
+The editor stays the one `ComposerEditor` and always shows the active variant's
+prompt: switching a variant tab stores the editor text in the variant it leaves
+and loads the one it opens, so autocomplete, drafts and attachments are the
+composer's own. `ParallelComposerStrip` renders above the editor inside the box,
+so the box grows upward and the text field never moves: one row of model chips
+(each with its thinking effort; the same model at another effort is a separate
+lane) plus a summary button that opens the launch settings dialog: two fixed
+columns (where lanes work, base branch, setup | fusion, judge and its effort,
+prompt variants) where options that do not apply are disabled, not hidden, so
+the dialog keeps its size. Lanes share the project directory by default;
+worktrees are opt-in, and a tab row only
+once there are two or more variants. Model pickers there render through a
+portal because the box clips its content; the footer drops the model button
+and keeps the ordinary send button (`ComposerActionButtons` with a
+`sendLabel` naming the run count), disabled below two runs or while
+launching. Enter and the send button launch instead of sending. Launching goes through `useMultiRunStore.createMultiRun`, clears the
+draft text and attachments, and opens the run overview. Attachments go to every
+variant; prompt text is sent as typed, the way the old launcher sent it.
 
 ## Chat quote highlights
 

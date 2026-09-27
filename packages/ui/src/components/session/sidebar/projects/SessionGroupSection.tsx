@@ -40,6 +40,7 @@ import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityS
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { FolderDeleteConfirmDialog } from '../shell/ConfirmDialogs';
 import { getSessionFolderOwnerKey } from '../sessions/sessionFolderIdentity';
+import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -1132,6 +1133,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
            </div>
          ) : null}
       </div>
+      {/* Outside the header, which is a button of its own: the status line can hold one. */}
+      {group.space ? <SpaceGroupStatus spaceId={group.space.id} className="pb-1 pl-5" /> : null}
       {!isCollapsed && renderBody ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>{folderDeleteDialog}</>
   );

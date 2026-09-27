@@ -260,6 +260,25 @@ describe("message events", () => {
     })
     expect(draft.message.ses_1[0]).toMatchObject({ status: "exited", exit: 0, time: { completed: 9 }, output: { output: "a" } })
   })
+
+  test("a shell killed by a signal keeps the signal", () => {
+    const shell: Message = {
+      id: "msg_s",
+      sessionID: "ses_1",
+      role: "shell",
+      time: { created: 5 },
+      shellID: "sh_1",
+      command: "sleep 60",
+      status: "running",
+    }
+    const draft = state({ message: { ses_1: [shell] } })
+    apply(draft, {
+      type: "message.patched",
+      properties: { sessionID: "ses_1", messageID: "shell:sh_1", patch: { time: { completed: 9 }, shell: { status: "exited", signal: "SIGTERM" } } },
+    })
+    expect(draft.message.ses_1[0]).toMatchObject({ status: "exited", signal: "SIGTERM" })
+    expect("exit" in draft.message.ses_1[0]).toBe(false)
+  })
 })
 
 describe("streaming parts", () => {

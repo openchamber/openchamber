@@ -775,6 +775,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ...process.env,
           ...managedOpenCodeEnv,
           PATH: envPath,
+          // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+          // user's own OPENCODE_PASSWORD would otherwise win and every request
+          // we send with openCodePassword would get 401.
+          OPENCODE_PASSWORD: openCodePassword,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         })),
       });

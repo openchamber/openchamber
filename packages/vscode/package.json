@@ -87,7 +87,7 @@
         "command": "openchamber.openAgentManager",
         "category": "OpenChamber",
         "title": "%command.openAgentManager.title%",
-        "icon": "$(circuit-board)"
+        "icon": "$(repo-forked)"
       },
       {
         "command": "openchamber.openActiveSessionInEditor",
@@ -288,7 +288,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode/client": "2.0.16",
+    "@opencode/client": "2.0.18",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

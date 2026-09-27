@@ -1,0 +1,57 @@
+---
+title: İzinler ve güvenlik ağı
+description: Ajanın sormadan ne kadar şey yapabileceğini oturum bazında seçin.
+---
+
+# İzinler ve güvenlik ağı
+
+Ajanın yaptığı her eylem (bir komut çalıştırmak, bir dosyayı düzenlemek, bir MCP aracını çağırmak, bir sayfa getirmek) önce izin kurallarından geçer. OpenChamber'ın izin modları, bir kural "ask" dediğinde ne olacağına karar verir.
+
+## Allow, ask ve deny
+
+İzin kuralları OpenCode'da yaşar. Her kural bir eyleme üç sonuçtan birini verir:
+
+- **allow:** ajan devam eder
+- **deny:** eylem engellenir
+- **ask:** ajan durur ve bir yanıt bekler
+
+Kutudan çıktığı haliyle çoğu şeye izin verilir. OpenCode yalnızca ajan proje dışındaki klasörlere dokunmadan ya da `.env` dosyalarını okumadan önce sorar. Örneğin her terminal komutundan önce sorulması için kendi kurallarınızı ekleyin. Kural biçimi [OpenCode'un izinler belgesinde](https://opencode.ai/v2/docs/permissions/) anlatılır; bir ajanın izinlerini OpenChamber'da **Ayarlar → Agent'ler** bölümünde görebilirsiniz.
+
+İzin modları yalnızca "ask"a kimin yanıt vereceğini değiştirir. Bir "deny"ı asla kaldırmazlar, "allow" ise hiç sormaz.
+
+## Üç mod
+
+| Mod | "ask"a kim yanıt verir |
+| --- | --- |
+| **Her seferinde sor** | Siz. Her istek yanıtınızı bekler. |
+| **Güvenlik ağı** | Jev rutin eylemleri geçirir, riskli olanları size bırakır. |
+| **Her şeyi kabul et** | OpenChamber, her zaman evet. Her isteğe kontrol yapılmadan hemen izin verilir. |
+
+**Her şeyi kabul et** başka bir şeye ihtiyaç duymaz: Bu mod her "ask"ı basitçe izin verilmiş sayar. Göreve güvendiğinizde ve kesintiye uğramak istemediğinizde kullanın.
+
+## Mod değiştirme
+
+- **Tek bir oturum için:** Mesaj alanındaki kalkan düğmesine basın. Her basış bir sonraki moda geçer.
+- **Yeni oturumlar için:** Varsayılanı **Ayarlar → Session'lar → İzinler** bölümünden seçin. Mevcut oturumlar kendi modlarını korur.
+
+Alt ajanlar, kendilerini başlatan oturumu izler.
+
+## Güvenlik ağı
+
+Bu modda OpenChamber her istek için [Jev](/tr/classification-providers/)'e sorar: Bu rutin mi, yoksa karar sizin mi olmalı? Okuma, derleme, testleri çalıştırma, proje dosyalarını düzenleme ve sıradan commit'ler geçer. Git geçmişini yeniden yazmak, veri silmek, sistemi değiştirmek, deploy etmek, bir yerde bir şey yayımlamak ya da dosyaları dışarı göndermek, belirsiz olan her şey gibi sizi bekler.
+
+Beklemeye alınan bir istek, olağan izin kartını bir satır fazlasıyla gösterir: **Güvenlik ağı bu eylemi karar vermeniz için beklemeye aldı** ve eylemin türü. Jev dört saniye içinde yanıt vermezse eylem yine sizi bekler. Güvenlik ağı, kontrol başarısız oldu diye hiçbir şeye izin vermez.
+
+Güvenlik ağının bir [sınıflandırma sağlayıcısına](/tr/classification-providers/) ihtiyacı vardır. Sağlayıcı yoksa kalkan düğmesi bu modu atlar ve ayarlarda devre dışı görünür.
+
+## Siz yokken de çalışır
+
+Mod OpenChamber sunucusunda yaşar; sekmeyi kapattığınızda ya da telefonunuzu kilitlediğinizde isteklere yanıt vermeye devam eder ve yeniden başlatmalardan sonra da korunur.
+
+> VS Code'da güvenlik ağı yoktur. Eklenti "Her seferinde sor" ve "Her şeyi kabul et" seçeneklerini sunar ve isteklere yalnızca bir OpenChamber paneli açıkken yanıt verir.
+
+## İlgili
+
+- [OpenCode belgelerinde izinler](https://opencode.ai/v2/docs/permissions/): kendi allow, ask ve deny kurallarınızı yazın
+- [Sınıflandırma sağlayıcıları (Jev)](/tr/classification-providers/): güvenlik ağının arkasındaki modeli kurun
+- [Bildirimler](/tr/notifications/): bir istek sizi beklediğinde haberdar olun
