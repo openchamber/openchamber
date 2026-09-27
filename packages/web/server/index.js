@@ -52,6 +52,7 @@ import {
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
+import { listMcpConfigs } from './lib/opencode/mcp.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { providedLoginShellEnvSnapshot } from './lib/opencode/login-shell-env.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
@@ -1319,6 +1320,18 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       }
     }
     return [...new Set(directories)];
+  },
+  // OpenCode 2 initializes a directory's local MCP servers on its first
+  // directory-scoped read, so the warm-up above spends one set of spawned
+  // servers per directory it touches. Count the enabled local (stdio) servers
+  // from the global config so the lifecycle can bound that product. Remote
+  // servers are excluded on purpose: they are HTTP endpoints, not per-instance
+  // child processes. Read without a working directory so only user-scope
+  // entries count - the layer that is duplicated across every warmed
+  // directory, where project-scope entries differ per project anyway.
+  countLocalMcpServers: () => {
+    const configs = listMcpConfigs(undefined);
+    return configs.filter((config) => config.type === 'local' && !config.disabled).length;
   },
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,

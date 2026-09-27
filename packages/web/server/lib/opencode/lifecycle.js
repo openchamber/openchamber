@@ -51,7 +51,34 @@ const classifyOpenCodeVersion = (version) => {
 // Last-used directory plus the three most recently opened projects — deeper
 // tails are unlikely to be the user's first click and just add background work.
 const WARMUP_DIRECTORY_LIMIT = 4;
+// OpenCode 2 initializes a directory's MCP servers as part of its first
+// directory-scoped read, so warming N directories against M local stdio servers
+// costs N * M spawned child processes at boot. Capping N alone does not bound
+// that: on a 27-server config the cap of 4 still spawns ~108 children, which is
+// the #3350 fleet-spawn regression wearing different clothes. Cap the product
+// instead, and spend what is left on the head of the list, because
+// getWarmupDirectories already returns most-recently-used first.
+const WARMUP_LOCAL_MCP_BUDGET = 8;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
+
+/**
+ * How many directories may be warmed given the configured local MCP servers.
+ *
+ * Zero (or unreadable) local servers means there is no per-directory spawn cost
+ * to bound, so the full directory limit applies. Otherwise the count is
+ * divided out of the boot budget and clamped to the directory limit, so a user
+ * with a handful of servers keeps today's behavior and a user with dozens
+ * warms only the most recent directory (or none, past the budget).
+ */
+export const resolveWarmupDirectoryLimit = (localMcpServerCount) => {
+  if (!Number.isFinite(localMcpServerCount) || localMcpServerCount <= 0) {
+    return WARMUP_DIRECTORY_LIMIT;
+  }
+  return Math.max(
+    0,
+    Math.min(WARMUP_DIRECTORY_LIMIT, Math.floor(WARMUP_LOCAL_MCP_BUDGET / localMcpServerCount)),
+  );
+};
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
 
@@ -138,6 +165,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
+    countLocalMcpServers = () => 0,
     onOpenCodeRestarted = null,
     managedStartupTimeoutMs = 30_000,
     now = Date.now,
@@ -1221,8 +1249,32 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
     if (!Array.isArray(directories) || directories.length === 0) return;
 
+    // Bound the fleet before touching the network: a directory-scoped read
+    // initializes that directory's local MCP servers in OpenCode 2, so warming
+    // more directories than the local-server budget allows is exactly what
+    // spawns every configured server once per directory. Trimming the tail
+    // keeps the warm-up that matters, because the head of the list is the
+    // directory the user is most likely to open next.
+    let localMcpServers = 0;
+    try {
+      localMcpServers = countLocalMcpServers();
+    } catch {
+      // An unreadable config must never disable the warm-up. Zero means "no
+      // per-directory spawn cost known", which is today's uncapped behavior.
+      localMcpServers = 0;
+    }
+    const directoryLimit = resolveWarmupDirectoryLimit(localMcpServers);
+    if (directoryLimit <= 0) return;
+    if (localMcpServers > 0 && directories.length > directoryLimit) {
+      console.log(
+        `[OpenCode] Trimming directory warm-up from ${directories.length} to ${directoryLimit}: ` +
+          `${localMcpServers} local MCP server(s) per directory would exceed the boot budget of ` +
+          `${WARMUP_LOCAL_MCP_BUDGET} spawned servers (#3350)`,
+      );
+    }
+
     const warmedPort = state.openCodePort;
-    for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
+    for (const directory of directories.slice(0, directoryLimit)) {
       if (typeof directory !== 'string' || !directory) continue;
       if (!state.isOpenCodeReady || state.openCodePort !== warmedPort) return;
       let timeout = null;

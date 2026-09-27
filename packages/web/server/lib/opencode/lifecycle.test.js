@@ -18,7 +18,7 @@ vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createOpenCodeLifecycleRuntime, resolveWarmupDirectoryLimit } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
@@ -295,6 +295,130 @@ describe('OpenCode lifecycle', () => {
       'http://127.0.0.1:45678/api/session?directory=%2Ftmp%2Fworktree-a&limit=1',
       'http://127.0.0.1:45678/api/session?directory=%2Ftmp%2Fproject-b&limit=1',
     ]);
+  });
+
+  describe('resolveWarmupDirectoryLimit', () => {
+    it('leaves the directory limit alone when there is no per-directory spawn cost', () => {
+      // No local servers means warming cannot spawn a fleet, so the historical
+      // limit stands and behavior is unchanged.
+      expect(resolveWarmupDirectoryLimit(0)).toBe(4);
+      expect(resolveWarmupDirectoryLimit(-1)).toBe(4);
+      expect(resolveWarmupDirectoryLimit(Number.NaN)).toBe(4);
+      expect(resolveWarmupDirectoryLimit(undefined)).toBe(4);
+    });
+
+    it('keeps the full limit while the fleet fits the boot budget', () => {
+      expect(resolveWarmupDirectoryLimit(1)).toBe(4);
+      expect(resolveWarmupDirectoryLimit(2)).toBe(4);
+    });
+
+    it('divides the budget out of the directory count as servers multiply', () => {
+      // 8 budget / 5 servers = 1 directory, so a 5-server user warms only the
+      // most recent one instead of spawning 20 children at boot.
+      expect(resolveWarmupDirectoryLimit(3)).toBe(2);
+      expect(resolveWarmupDirectoryLimit(5)).toBe(1);
+      expect(resolveWarmupDirectoryLimit(8)).toBe(1);
+    });
+
+    it('drops to zero once a single directory would blow the budget', () => {
+      // The #3350 shape: 27 local servers x 4 directories was ~108 children.
+      expect(resolveWarmupDirectoryLimit(9)).toBe(0);
+      expect(resolveWarmupDirectoryLimit(27)).toBe(0);
+      expect(resolveWarmupDirectoryLimit(1000)).toBe(0);
+    });
+  });
+
+  it('trims the directory warm-up so the spawned fleet fits the boot budget', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    globalThis.fetch = fetchMock;
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => ['/tmp/a', '/tmp/b', '/tmp/c', '/tmp/d']),
+      countLocalMcpServers: vi.fn(() => 5),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const warmupUrls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/api/session?'));
+    // Head of the list survives: the most recently used directory still warms.
+    expect(warmupUrls).toEqual([
+      'http://127.0.0.1:45678/api/session?directory=%2Ftmp%2Fa&limit=1',
+    ]);
+  });
+
+  it('issues no directory request at all when one directory exceeds the budget', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    globalThis.fetch = fetchMock;
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => ['/tmp/a', '/tmp/b', '/tmp/c', '/tmp/d']),
+      countLocalMcpServers: vi.fn(() => 27),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // This is the regression assertion #3350 never got: a boot must not spawn
+    // the user's whole MCP fleet for directories nobody opened.
+    const warmupUrls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/api/session?'));
+    expect(warmupUrls).toEqual([]);
+  });
+
+  it('keeps warming every directory when the local server count cannot be read', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    globalThis.fetch = fetchMock;
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => ['/tmp/a', '/tmp/b', '/tmp/c', '/tmp/d']),
+      countLocalMcpServers: vi.fn(() => {
+        throw new Error('config unreadable');
+      }),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // A broken config must not silently disable the warm-up; fall back to the
+    // pre-existing uncapped behavior.
+    const warmupUrls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/api/session?'));
+    expect(warmupUrls).toHaveLength(4);
   });
 
   it('records an authoritative error terminal event when bootstrap fails', async () => {
