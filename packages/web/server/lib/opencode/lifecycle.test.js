@@ -365,6 +365,7 @@ describe('OpenCode lifecycle', () => {
       json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     globalThis.fetch = fetchMock;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -387,6 +388,46 @@ describe('OpenCode lifecycle', () => {
       .map(([url]) => String(url))
       .filter((url) => url.includes('/api/session?'));
     expect(warmupUrls).toEqual([]);
+    // ...and the exact #3350 shape must say so in the log rather than disabling
+    // the warm-up through a bare early return.
+    const logged = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).toContain('Skipping directory warm-up');
+    expect(logged).toContain('27 local MCP server(s)');
+    logSpy.mockRestore();
+  });
+
+  it('stays silent when the pre-existing directory cap is what trims the list', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    globalThis.fetch = fetchMock;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => ['/tmp/a', '/tmp/b', '/tmp/c', '/tmp/d', '/tmp/e', '/tmp/f']),
+      // Two local servers keep the limit at WARMUP_DIRECTORY_LIMIT, so the four
+      // directory cap is what trims here. That is not the budget biting.
+      countLocalMcpServers: vi.fn(() => 2),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const warmupUrls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/api/session?'));
+    expect(warmupUrls).toHaveLength(4);
+    const logged = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).not.toContain('warm-up');
+    logSpy.mockRestore();
   });
 
   it('keeps warming every directory when the local server count cannot be read', async () => {
