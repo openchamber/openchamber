@@ -29,7 +29,16 @@ const TOWARD_CHANGE = {
   },
 };
 
-const WRAP_UP = 'Does `request` close out the work in this conversation: the user confirms it works or is good, asks to commit, push, or merge it as finished, or thanks the agent, without asking for any further change?';
+/**
+ * Reads the whole turn, not only `request`: a shipping step (commit, push,
+ * merge, sync, release) closes the work once `answer` reports it done.
+ * Measured against the earlier request-only wording at the same threshold:
+ * held-out 70 hints in 106 work sessions (18 followed by more edits) against
+ * 60 (16), and 47 of 81 shipping steps hinted against 33. The threshold then
+ * went from 0.85 to 0.8: 80 hints (22), 53 of 81 shipping steps, so a closing
+ * turn whose answer hands the user a last check still gets the hint.
+ */
+const WRAP_UP = 'Does this turn close out the work in this conversation: in `request` the user confirms it works or is good, thanks the agent, or asks to commit, push, merge, sync, or release it, without asking for any further change, and `answer` reports that step done?';
 
 const RECAP = {
   question: 'Is there substantive work or a finding in this conversation worth a one-line reminder later: something the agent changed, fixed, found out, or a decision that was reached?',
@@ -49,7 +58,7 @@ const NEXT_STEP = {
 
 /** Open when either passes (measured together). */
 const OPEN_THRESHOLDS = { change: 0.85, towardChange: 0.9 };
-const WRAP_UP_THRESHOLD = 0.85;
+const WRAP_UP_THRESHOLD = 0.8;
 /** The recap is skipped only when Jev is nearly sure there is nothing to remind. */
 const RECAP_SKIP_BELOW = 0.3;
 const NEXT_STEP_THRESHOLD = 0.5;

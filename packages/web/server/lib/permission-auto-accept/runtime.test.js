@@ -182,8 +182,11 @@ describe('permission auto-accept runtime', () => {
       fetchImpl,
     });
     connect();
-    await flush();
-    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/root/permission/pending/reply')).toBe(true);
+    // The reconcile chain reads settings and response bodies, so its length in
+    // microtasks is not fixed; wait for the reply instead of counting ticks.
+    await vi.waitFor(() => {
+      expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/root/permission/pending/reply')).toBe(true);
+    });
   });
 
   it('accepts existing pending permissions when a session policy is enabled', async () => {

@@ -72,6 +72,21 @@ export type Config = ConfigDocument["info"]
 export type ConfigSource = ConfigEntry
 export type { JsonValue, ModelRef, PermissionRuleset, TokenUsageInfo }
 
+/**
+ * Finds a catalog model by the id a selection holds. `id` is the catalog key
+ * that pickers, favorites, and session model refs store; `modelID` is the name
+ * sent to the provider API and defaults to `id`. They differ for derived
+ * entries such as `gpt-6-luna-fast`, whose `modelID` is `gpt-6-luna`, so an
+ * exact `id` match wins and `modelID` only answers ids nothing is keyed by.
+ */
+export function findCatalogModel<T extends { id: string; modelID: string }>(
+  models: readonly T[] | undefined,
+  id: string,
+): T | undefined {
+  if (!models || !id) return undefined
+  return models.find((model) => model.id === id) ?? models.find((model) => model.modelID === id)
+}
+
 /** Free-form JSON attached to sessions, messages, and prompts. */
 export type Metadata = Record<string, JsonValue>
 

@@ -43,6 +43,9 @@ const applyPatch = (session: Session, patch: SessionPatch): Session => {
   if (patch.cost !== undefined) next.cost = patch.cost
   if (patch.tokens !== undefined) next.tokens = patch.tokens
   if (patch.permissions !== undefined) next.permissions = patch.permissions
+  // OpenChamber's metadata broadcasts (in work, recap, goal) replace the whole
+  // object; without this the sidebar saw them only on its next full reload.
+  if (patch.metadata !== undefined) next.metadata = patch.metadata
   if (patch.outcome !== undefined) next.outcome = patch.outcome
   if (patch.subpath === null) delete next.subpath
   else if (patch.subpath !== undefined) next.subpath = patch.subpath

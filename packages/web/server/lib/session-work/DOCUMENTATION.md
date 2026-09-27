@@ -74,8 +74,13 @@ also exists in VS Code.
 190 older held-out sessions, labelled before looking at answers, checked it:
 send and turn end together missed 4/92 work sessions and opened 10/78 non-work
 ones (four of them discussions of concrete changes, which count as work). The
-misses are work that starts inside a PR-review session. `wrap_up >= 0.85`
-hinted 60 times across 104 work sessions, 18 of them followed by more work.
+misses are work that starts inside a PR-review session. `wrap_up >= 0.8`
+reads the whole turn (a commit, push, merge, sync or release the answer
+reports done closes the work); on the held-out sessions it hinted 80 times
+across 106 work sessions, 22 of them followed by more edits, and caught 53 of
+81 shipping steps. At 0.85 the same wording hinted 70 times (18) and missed a
+closing turn whose answer asked the user for a last check (0.82); the earlier
+request-only wording at 0.85 hinted 60 times (16) and caught 33.
 `recap` stayed high (0.86–0.96) after a closing "thanks"/"commit" that followed
 real work, because it reads the same three turns the recap does. Do not change
 the wording or thresholds without re-running this measurement.
