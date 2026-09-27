@@ -1838,7 +1838,23 @@ export const useConfigStore = create<ConfigStore>()(
                                 () => opencodeClient.getProvidersForConfig(fromDirectoryKey(directoryKey)),
                                 { directoryKey, source, requestedDirectory, effectiveDirectory, attempt: attempt + 1 },
                             );
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) {
+                                // The endpoint changed while this read was in flight, so
+                                // its answer belongs to the previous runtime and is
+                                // dropped. The directory is unchanged, so no activation
+                                // will replace this load: read it again under the current
+                                // runtime instead of leaving the picker on cached
+                                // built-ins until the user switches sessions.
+                                if (directoryKey === get().activeDirectoryKey) {
+                                    setTimeout(() => {
+                                        void get().loadProviders({
+                                            directory: fromDirectoryKey(directoryKey),
+                                            source: `${source}:supersededRetry`,
+                                        });
+                                    }, 0);
+                                }
+                                return;
+                            }
                             const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
                             const catalogModels = Array.isArray(apiResult?.models) ? apiResult.models : [];
                             // v2 has no `default` map any more: the server resolves one

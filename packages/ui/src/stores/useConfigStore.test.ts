@@ -1591,6 +1591,33 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers).toEqual([]);
   });
 
+  test('a provider read superseded by a runtime change re-reads under the new runtime', async () => {
+    const pending = deferred<TestProviderResponse>();
+    let providerRequest = 0;
+    getProvidersForConfigImpl = async () => {
+      providerRequest += 1;
+      if (providerRequest === 1) return pending.promise;
+      return providerResponse('live');
+    };
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://superseded-a.example', runtimeKey: 'superseded-a' });
+    const superseded = useConfigStore.getState().loadProviders({ directory: DIRECTORY, source: 'test:superseded' });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://superseded-b.example', runtimeKey: 'superseded-b' });
+    pending.resolve(providerResponse('obsolete'));
+    await superseded;
+    // The directory did not change, so the app stays on it: a read the endpoint
+    // change superseded must not leave the picker empty until the user switches
+    // sessions. The stale answer is dropped, and the directory is read again on
+    // the next turn.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(providerRequest).toBe(2);
+    expect(useConfigStore.getState().providers.map((entry) => entry.id)).toEqual(['live']);
+    expect(useConfigStore.getState().providersLoaded).toBe(true);
+  });
+
   test('keeps a saved default model while a sidecar temporarily omits it', async () => {
     liveAgents = [testAgent('build')];
     liveProviderId = 'sidecar';
