@@ -1773,7 +1773,7 @@ export const settingsDict = {
   'settings.notifications.page.sounds.title': 'Sons de notification',
   'settings.notifications.page.sounds.enableAria': 'Activer les sons de notification',
   'settings.notifications.page.sounds.enableLabel': 'Activer les sons',
-  'settings.notifications.page.sounds.hint': 'Joue un signal court quand une session a besoin de vous. Sur le bureau, le signal remplace la son de notification du système : un événement ne produit qu’un seul son.',
+  'settings.notifications.page.sounds.hint': 'Joue un signal court quand une session a besoin de vous. Sur le bureau, le signal remplace le son de notification du système : un événement ne produit qu’un seul son.',
   'settings.notifications.page.sounds.when.label': 'Quand jouer',
   'settings.notifications.page.sounds.when.always': 'Toujours',
   'settings.notifications.page.sounds.when.hiddenOnly': 'Uniquement quand l’application est en arrière-plan',

@@ -5,7 +5,7 @@ import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { getClientPlatform } from '@/lib/platform';
+import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import {
   SettingsSection,
@@ -49,11 +49,9 @@ export const NotificationSettings: React.FC = () => {
   // The native Capacitor app runs in a WKWebView with no Web Notification API; it has its
   // own native (Local Notifications) permission. Treat it as a native runtime, not a
   // browser, so the toggle isn't gated on Notification.permission (which is stuck there).
-  const isNativeApp = React.useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-    return capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
-  }, []);
+  // This is the same predicate `sync-context.tsx` uses to skip the sound cue, so the
+  // section can never appear on a surface that cannot turn the cue off.
+  const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
   const isBrowser = !isDesktop && !isVSCode && !isNativeApp;
   const nativeNotificationsEnabled = useUIStore(state => state.nativeNotificationsEnabled);
   const setNativeNotificationsEnabled = useUIStore(state => state.setNativeNotificationsEnabled);

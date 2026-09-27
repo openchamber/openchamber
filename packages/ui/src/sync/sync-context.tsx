@@ -15,6 +15,7 @@ import type {
 } from "@/lib/opencode/model"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { isCapacitorApp } from "@/lib/platform"
 import type { NotificationPayload } from "@/lib/api/types"
 import { playNotificationSound } from "@/lib/notificationSound"
 import { useUIStore } from "@/stores/useUIStore"
@@ -593,7 +594,11 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
     requireHidden: notification.requireHidden === true,
   };
 
-  playNotificationSound(payload, useUIStore.getState());
+  // The native shell mounts this provider too, so the frame arrives on iOS and
+  // Android as well. It gets no cue: APNs already plays the push sound, a
+  // backgrounded WebView can play audio on top of it, and the settings section
+  // that would let someone turn a cue off is hidden there.
+  if (!isCapacitorApp()) playNotificationSound(payload, useUIStore.getState());
 
   // The local desktop shell already delivered this one natively.
   if (

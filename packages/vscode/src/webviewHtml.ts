@@ -71,6 +71,11 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   // fflate's async browser inflater creates blob-backed workers. Keep blob:
   // scoped to worker-src so document decompression works without allowing blob scripts.
   const workerSrc = uniqueTokens([webview.cspSource, 'blob:', devServerOrigin]);
+  // Notification sound cues. `data:` is required because the Vite build inlines
+  // any bundled clip at or under its 4 KB assetsInlineLimit as a data: URI
+  // rather than emitting a file; the rest load from the webview's own origin.
+  // Scoped to media-src only, so this does not widen script/style/connect.
+  const mediaSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
 
   const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
 
@@ -87,7 +92,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc}; worker-src ${workerSrc};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc}; worker-src ${workerSrc}; media-src ${mediaSrc};">
   <style>
     html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; }
     body { 

@@ -1,6 +1,7 @@
 import type { I18nKey } from '@/lib/i18n/store';
 import { ISOLATED_SPACES_RELEASED } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
+import { isCapacitorApp } from '@/lib/platform';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
@@ -1155,7 +1156,9 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'notifications',
     titleKey: 'settings.notifications.page.sounds.title',
     keywords: ['sound', 'audio', 'chime', 'bell', 'cue', 'alert', 'mute'],
-    isAvailable: (ctx) => !ctx.isMobile,
+    // The same predicate the section's own render condition uses, so a search hit
+    // can never point at a section the surface does not render.
+    isAvailable: () => !isCapacitorApp(),
   },
   {
     id: 'notifications.push',

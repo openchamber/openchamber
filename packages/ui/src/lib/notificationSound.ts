@@ -231,7 +231,9 @@ const loadAssetLoaders = (): SoundAssetLoaders | undefined => {
     // SAFETY: the glob is scoped to this directory and matches `*.aac`, so
     // dropping the extension yields an id the same list is keyed by.
     const id = file?.replace(/\.aac$/, "");
-    if (id) entries.push([isSoundId(id) ? id : ("alert-01" satisfies SoundId), load]);
+    // A file the id list does not know is skipped rather than aliased onto a real
+    // slot, so dropping a stray clip into the directory cannot hijack a sound.
+    if (isSoundId(id)) entries.push([id, load]);
   }
   // SAFETY: every entry key was narrowed to `SoundId` on the line above.
   assetLoaders = Object.fromEntries(entries) as SoundAssetLoaders;
