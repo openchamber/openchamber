@@ -1592,6 +1592,8 @@ export const dict = {
   'filesView.editor.htmlPreviewTitle': 'HTML Preview',
   'filesView.diagram.closeDiagramView': 'Close diagram view',
   'filesView.diagram.saveDiagram': 'Save diagram',
+  'filesView.excalidraw.saveScene': 'Save drawing',
+  'filesView.excalidraw.invalidScene': 'This file is not a valid Excalidraw scene. Fix the source before switching to the canvas.',
   'contextUsage.aria.label': 'Context usage',
   'contextUsage.mobile.title': 'Context Usage',
   'contextUsage.mobile.usedTokens': 'Used tokens',

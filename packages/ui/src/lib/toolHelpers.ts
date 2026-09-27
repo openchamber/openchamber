@@ -726,6 +726,11 @@ export function isDrawioFile(filePath: string): boolean {
   return DIAGRAM_EXTENSIONS.includes(ext || '');
 }
 
+export function isExcalidrawFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.md');
+}
+
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'];
 
 export function isImageFile(filePath: string): boolean {

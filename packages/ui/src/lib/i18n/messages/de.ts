@@ -1403,6 +1403,8 @@ export const dict = {
   'filesView.editor.htmlPreviewTitle': 'HTML-Vorschau',
   'filesView.diagram.closeDiagramView': 'Diagrammansicht schließen',
   'filesView.diagram.saveDiagram': 'Diagramm speichern',
+  'filesView.excalidraw.saveScene': 'Zeichnung speichern',
+  'filesView.excalidraw.invalidScene': 'Diese Datei ist keine gültige Excalidraw-Szene. Korrigiere den Quelltext, bevor du zur Zeichenfläche wechselst.',
   'contextUsage.aria.label': 'Kontextnutzung',
   'contextUsage.mobile.title': 'Kontextnutzung',
   'contextUsage.mobile.usedTokens': 'Verwendete Tokens',

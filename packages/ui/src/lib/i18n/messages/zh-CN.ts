@@ -1558,6 +1558,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.htmlPreviewTitle': 'HTML 预览',
   'filesView.diagram.closeDiagramView': '关闭图表视图',
   'filesView.diagram.saveDiagram': '保存图表',
+  'filesView.excalidraw.saveScene': '保存绘图',
+  'filesView.excalidraw.invalidScene': '此文件不是有效的 Excalidraw 场景。请在切换到画布前修正源代码。',
   'contextUsage.aria.label': '上下文用量',
   'contextUsage.mobile.title': '上下文用量',
   'contextUsage.mobile.usedTokens': '已用 Token',

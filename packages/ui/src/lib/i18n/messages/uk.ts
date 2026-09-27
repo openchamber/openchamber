@@ -1558,6 +1558,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.editor.htmlPreviewTitle": "Попередній перегляд HTML",
   "filesView.diagram.closeDiagramView": "Закрити перегляд діаграми",
   "filesView.diagram.saveDiagram": "Зберегти діаграму",
+  "filesView.excalidraw.saveScene": "Зберегти малюнок",
+  "filesView.excalidraw.invalidScene": "Цей файл не є коректною сценою Excalidraw. Виправте код перед переходом на полотно.",
   "contextUsage.aria.label": "Використання контексту",
   "contextUsage.mobile.title": "Використання контексту",
   "contextUsage.mobile.usedTokens": "Використані токени",

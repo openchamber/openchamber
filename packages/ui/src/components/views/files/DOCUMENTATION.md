@@ -74,6 +74,57 @@ An agent can ask for a file to be shown (`file.open` on the managed
 opens the files drawer. VS Code has no shared file viewer and no managed
 tool, so the event never reaches it.
 
+## Excalidraw scenes
+
+`.excalidraw` and Obsidian `.excalidraw.md` files open in the embedded
+Excalidraw editor (`components/excalidraw/`). The editor is code-split:
+`FilesView` imports only the pure `scene.ts` helpers, and the editor (with
+`document.ts` and the ~4 MB vendor chunk) loads through
+`lazyWithChunkRecovery` when such a file is opened. It mounts in the docked
+chain only, not in the fullscreen overlay: two mounted instances would share
+one ref and the live scene.
+
+`scene.ts` owns the file container. A plain `.excalidraw` is the scene JSON; an
+Obsidian `.excalidraw.md` is markdown whose `## Drawing` section holds the JSON
+in a ` ```json ` or lz-string ` ```compressed-json ` block. A drawing is parsed
+and written back in place, so the frontmatter, the text elements, and the
+trailing `%%` are preserved byte for byte. The Obsidian plugin wraps the base64
+at 256 characters with `\n\n`, which is reproduced on write.
+
+The editor's contract is one-directional content: Excalidraw reads
+`initialData` once and resets the scene when that prop's identity changes.
+The editor therefore parses the document at mount, and the caller remounts it
+with a `key` of path plus `excalidrawRemountNonce` whenever the editor must
+adopt content it did not author (a load, an external write, a toggle to the
+source view, a discard). The editor's own save adopts content without a remount
+so the viewport is not reset. The live scene is exposed through an imperative
+`getContent()` handle and serialized only there, because `onChange` fires on
+every pointer move of a drag.
+
+Canvas edits never enter the text draft. A separate `excalidrawCanvasDirty`
+flag feeds the shared `isDirty`, so autosave, Ctrl+S, the unsaved-changes
+prompt, `saveDraft`, and the external-change guard all see canvas edits as text
+edits. `saveDraft` writes the scene when the canvas is dirty and the text draft
+otherwise.
+
+A file the editor cannot parse must never mount: a blank canvas would be
+serialized over the user's drawing on the next save. The source→canvas toggle
+refuses a draft that does not parse, and `ExcalidrawEditor` repeats the parse
+and reports `onUnsupported`, which returns the viewer to the source view and
+records that mode for the path. The canvas's dirty flag also joins the
+external-change guard, so a poll never applies an external write over unsaved
+drawing work.
+
+`isExcalidrawFile` matches both extensions, and `isMarkdownFile` excludes
+`.excalidraw.md` so the file never takes the markdown preview path. The source
+view for `.excalidraw.md` is the markdown document, which is where its
+non-drawing sections stay editable.
+
+Excalidraw fetches its canvas fonts and the optional "Text to diagram" bundle
+from a version-pinned CDN (`esm.sh`, CORS-enabled) when no asset path is set.
+Only the CSS-embedded Assistant font is bundled; the hand-drawn fonts are not,
+which the desktop and web runtimes allow.
+
 ## Uploads
 
 `useFileTreeUpload` owns uploads for every file browser: `FilesView`,

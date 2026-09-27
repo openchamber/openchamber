@@ -1566,6 +1566,8 @@ export const dict = {
   'filesView.editor.htmlPreviewTitle': 'HTML Önizleme',
   'filesView.diagram.closeDiagramView': 'Diyagram görünümünü kapat',
   'filesView.diagram.saveDiagram': 'Diyagramı kaydet',
+  'filesView.excalidraw.saveScene': 'Çizimi kaydet',
+  'filesView.excalidraw.invalidScene': 'Bu dosya geçerli bir Excalidraw sahnesi değil. Tuvale geçmeden önce kaynağı düzeltin.',
   'contextUsage.aria.label': 'Bağlam kullanımı',
   'contextUsage.mobile.title': 'Bağlam Kullanımı',
   'contextUsage.mobile.usedTokens': 'Kullanılan token',

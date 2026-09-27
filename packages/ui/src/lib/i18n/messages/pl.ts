@@ -2114,6 +2114,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.switchToPreviewMode': 'Przełącz na tryb podglądu',
   'filesView.diagram.closeDiagramView': 'Zamknij widok diagramu',
   'filesView.diagram.saveDiagram': 'Zapisz diagram',
+  'filesView.excalidraw.saveScene': 'Zapisz rysunek',
+  'filesView.excalidraw.invalidScene': 'Ten plik nie jest prawidłową sceną Excalidraw. Popraw źródło przed przejściem do kanwy.',
   'filesView.editor.imageAltFallback': 'Obraz',
   'filesView.editor.openFilesAria': 'Otwarte pliki',
   'filesView.editor.openInDesktopApp': 'Otwórz w aplikacji desktopowej',

@@ -1594,6 +1594,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.htmlPreviewTitle': 'HTML 미리보기',
   'filesView.diagram.closeDiagramView': '다이어그램 보기 닫기',
   'filesView.diagram.saveDiagram': '다이어그램 저장',
+  'filesView.excalidraw.saveScene': '그림 저장',
+  'filesView.excalidraw.invalidScene': '이 파일은 유효한 Excalidraw 장면이 아닙니다. 캔버스로 전환하기 전에 소스를 수정하세요.',
   'contextUsage.aria.label': '컨텍스트 사용량',
   'contextUsage.mobile.title': '컨텍스트 사용량',
   'contextUsage.mobile.usedTokens': '사용한 토큰',

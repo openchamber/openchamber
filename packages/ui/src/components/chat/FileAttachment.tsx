@@ -6,7 +6,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
-import { isDrawioFile } from '@/lib/toolHelpers';
+import { isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -835,9 +835,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         const sourceType = typeof source?.type === 'string' ? source.type : undefined;
         const sourcePath = source && typeof (source as Record<string, unknown>).path === 'string' ? (source as Record<string, unknown>).path as string : undefined;
         const filePath = sourceType === 'file' && sourcePath ? sourcePath : (file.url || '');
-        const isDrawio = filePath && isDrawioFile(filePath);
+        const opensInDiagramEditor = filePath && (isDrawioFile(filePath) || isExcalidrawFile(filePath));
 
-        if (isDrawio) {
+        if (opensInDiagramEditor) {
           return (
             <Tooltip key={file.url || `${fileName}-${index}`}>
               <TooltipTrigger asChild>

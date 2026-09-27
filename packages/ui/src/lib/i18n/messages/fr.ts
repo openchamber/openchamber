@@ -3266,6 +3266,8 @@ export const dict = {
   'contextPanel.browser.trustNotice': 'Les pages ouvertes ici s’exécutent avec un accès complet à OpenChamber — nécessaire pour l’inspection et les captures d’écran. N’ouvrez que des sites de confiance : une page malveillante pourrait lire vos données ou agir en votre nom.',
   'filesView.diagram.closeDiagramView': 'Fermer la vue diagramme',
   'filesView.diagram.saveDiagram': 'Enregistrer le diagramme',
+  'filesView.excalidraw.saveScene': 'Enregistrer le dessin',
+  'filesView.excalidraw.invalidScene': 'Ce fichier n’est pas une scène Excalidraw valide. Corrigez la source avant de passer au canevas.',
   'inlineComment.input.placeholderShort': 'Ajouter un commentaire...',
   'header.services.remoteUpdate.title': 'Mise à jour de l’instance distante',
   'header.services.remoteUpdate.checking': 'Recherche de mises à jour...',
