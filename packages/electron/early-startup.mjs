@@ -566,6 +566,7 @@ const queryWindowsRegistryValue = (key, name) => {
   const result = spawnSync('reg.exe', ['query', key, '/v', name], {
     encoding: 'utf8',
     windowsHide: true,
+    timeout: 10_000,
   });
   if (result.error || result.status !== 0) return '';
   const line = String(result.stdout || '')
