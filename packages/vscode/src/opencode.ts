@@ -443,6 +443,7 @@ function resolveOpencodeCliPath(): string | null {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        timeout: 10_000,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -535,11 +536,12 @@ function getWindowsShellEnvSnapshot(): Record<string, string> | null {
 
   for (const shellPath of powershellCandidates) {
     try {
-      const result = spawnSync(shellPath, ['-NoLogo', '-Command', psScript], {
+      const result = spawnSync(shellPath, ['-NoLogo', '-NoProfile', '-Command', psScript], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
         windowsHide: true,
+        timeout: 10_000,
       });
       if (result.status !== 0) {
         continue;
@@ -560,6 +562,7 @@ function getWindowsShellEnvSnapshot(): Record<string, string> | null {
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
       windowsHide: true,
+      timeout: 10_000,
     });
     if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
       return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
