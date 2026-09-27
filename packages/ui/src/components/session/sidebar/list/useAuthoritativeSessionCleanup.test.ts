@@ -14,8 +14,10 @@ const session = (id: string, directory = '/repo'): Session => ({ id, directory }
 
 const cleanups: Array<{ runtimeKey: string; directory: string; sessionId: string }> = [];
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime' }));
-mock.module('@/sync/session-deletion-cleanup', () => ({
-  cleanupPersistedSessionState: (identity: { runtimeKey: string; directory: string; sessionId: string }) => cleanups.push(identity),
+mock.module('@/sync/session-actions', () => ({
+  reconcileExternallyDeletedSession: (identity: { runtimeKey: string; directory: string; sessionId: string }) => {
+    cleanups.push(identity);
+  },
 }));
 const { useAuthoritativeSessionCleanup } = await import('./useAuthoritativeSessionCleanup');
 const { useSpacesStore } = await import('@/lib/spaces/spaces-store');

@@ -1289,6 +1289,30 @@ function finalizeConfirmedSessionDeletion(
   }
 }
 
+/**
+ * Reconcile a session the authoritative global snapshot proved gone.
+ *
+ * `session.deleted` is the primary signal, but the server can publish it while
+ * this client's stream is being rebuilt, and then nothing removes the session
+ * anywhere else: the live store keeps listing it, the sidebar keeps rendering
+ * it, and the open chat keeps prompting an id the server no longer has. A
+ * later complete snapshot that omits a session from the established baseline
+ * reports the same deletion over the other channel, so it commits the same
+ * reconciliation as a confirmed deletion instead of only clearing persisted
+ * state.
+ *
+ * The captured runtime is rechecked here because the live, global, and UI
+ * stores mutated below are not runtime-scoped.
+ */
+export function reconcileExternallyDeletedSession(identity: {
+  runtimeKey: string
+  directory: string
+  sessionId: string
+}): void {
+  if (isStaleRuntime(identity.runtimeKey)) return
+  finalizeConfirmedSessionDeletion(identity.sessionId, identity.directory, identity.runtimeKey)
+}
+
 type ChatDirectoryCleanupPlan = {
   directory: string | undefined
   /** Only a root session owns its managed chat directory. */

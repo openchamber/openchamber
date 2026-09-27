@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { cleanupPersistedSessionState } from '@/sync/session-deletion-cleanup';
+import { reconcileExternallyDeletedSession } from '@/sync/session-actions';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import {
@@ -37,7 +37,10 @@ export const useAuthoritativeSessionCleanup = (args: {
       const spaceId = spaceIdOfDirectory(identity.directory);
       const space = spaceId === null ? null : spaces.get(spaceId);
       if (space && space.state !== 'complete') continue;
-      cleanupPersistedSessionState({ runtimeKey, ...identity });
+      // The same deletion a lost `session.deleted` event would have committed:
+      // clearing persisted state alone left the session in every live store, in
+      // the sidebar, and as the open chat prompting an id the server no longer has.
+      reconcileExternallyDeletedSession({ runtimeKey, ...identity });
     }
     baselineRef.current = { runtimeKey, identities: current };
   }, [enabled, hasAuthoritativeGlobalSessions, sessions]);
