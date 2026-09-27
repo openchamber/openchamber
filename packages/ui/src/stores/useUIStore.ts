@@ -15,6 +15,7 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
+import { DEFAULT_SOUND_BY_CHANNEL } from '@/lib/notificationSound';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
@@ -960,6 +961,15 @@ interface UIStore {
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
 
+  // Notification sounds (one cue per event; see lib/notificationSound.ts)
+  notificationSoundsEnabled: boolean;
+  /** `hidden-only` leaves the cue to the moments the window is not in view. */
+  notificationSoundWhen: 'always' | 'hidden-only';
+  notificationSoundCompletion: string;
+  notificationSoundQuestion: string;
+  notificationSoundPermission: string;
+  notificationSoundError: string;
+
   // Per-event notification templates
   notificationTemplates: {
     completion: { title: string; message: string };
@@ -1188,6 +1198,12 @@ interface UIStore {
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
+  setNotificationSoundsEnabled: (value: boolean) => void;
+  setNotificationSoundWhen: (value: 'always' | 'hidden-only') => void;
+  setNotificationSoundCompletion: (value: string) => void;
+  setNotificationSoundQuestion: (value: string) => void;
+  setNotificationSoundPermission: (value: string) => void;
+  setNotificationSoundError: (value: string) => void;
   setNotificationTemplates: (
     templates: UIStore['notificationTemplates'] | ((current: UIStore['notificationTemplates']) => UIStore['notificationTemplates']),
   ) => void;
@@ -1365,6 +1381,12 @@ export const useUIStore = create<UIStore>()(
         notifyOnCompletion: true,
         notifyOnError: true,
         notifyOnQuestion: true,
+        notificationSoundsEnabled: true,
+        notificationSoundWhen: 'hidden-only',
+        notificationSoundCompletion: DEFAULT_SOUND_BY_CHANNEL.completion,
+        notificationSoundQuestion: DEFAULT_SOUND_BY_CHANNEL.question,
+        notificationSoundPermission: DEFAULT_SOUND_BY_CHANNEL.permission,
+        notificationSoundError: DEFAULT_SOUND_BY_CHANNEL.error,
         notificationTemplates: {
           completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
           error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
@@ -2720,6 +2742,12 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
+        setNotificationSoundsEnabled: (value) => { set({ notificationSoundsEnabled: value }); },
+        setNotificationSoundWhen: (value) => { set({ notificationSoundWhen: value }); },
+        setNotificationSoundCompletion: (value) => { set({ notificationSoundCompletion: value }); },
+        setNotificationSoundQuestion: (value) => { set({ notificationSoundQuestion: value }); },
+        setNotificationSoundPermission: (value) => { set({ notificationSoundPermission: value }); },
+        setNotificationSoundError: (value) => { set({ notificationSoundError: value }); },
         setNotificationTemplates: (templates) => {
           set((state) => ({
             notificationTemplates: typeof templates === 'function'
@@ -3216,6 +3244,12 @@ export const useUIStore = create<UIStore>()(
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
+          notificationSoundsEnabled: state.notificationSoundsEnabled,
+          notificationSoundWhen: state.notificationSoundWhen,
+          notificationSoundCompletion: state.notificationSoundCompletion,
+          notificationSoundQuestion: state.notificationSoundQuestion,
+          notificationSoundPermission: state.notificationSoundPermission,
+          notificationSoundError: state.notificationSoundError,
           notificationTemplates: state.notificationTemplates,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,

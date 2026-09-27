@@ -14,6 +14,7 @@ import {
   SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { NotificationSoundSettings } from './NotificationSoundSettings';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: {
@@ -554,6 +555,12 @@ export const NotificationSettings: React.FC = () => {
                 />
               </div>
             </SettingsSection>
+
+            {/* A cue rides the same server fan-out as the notification itself
+                (`runtime.js` only broadcasts when notifications are enabled), so
+                offering this outside that gate would be a control that silently
+                does nothing. */}
+            {!isNativeApp && <NotificationSoundSettings />}
 
             {!isNativeApp && (
             <SettingsSection

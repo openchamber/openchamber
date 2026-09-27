@@ -1175,8 +1175,13 @@ const maybeShowNativeNotification = (rawInput) => {
   const notification = new Notification({
     title,
     body,
-    silent: false,
-    ...(process.platform === 'darwin' ? { sound: 'Glass' } : {}),
+    // The audio cue for this event is played by the renderer
+    // (`packages/ui/src/lib/notificationSound.ts`), which is the only place that
+    // knows the per-event sound and the user's sound settings. Letting the OS
+    // chime as well meant two sounds for one event on Windows and macOS. The
+    // consequence is deliberate: with notification sounds off, a desktop
+    // notification arrives silently.
+    silent: true,
   });
 
   activeNotifications.add(notification);

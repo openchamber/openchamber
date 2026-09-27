@@ -15,6 +15,9 @@ import type {
 } from "@/lib/opencode/model"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import type { NotificationPayload } from "@/lib/api/types"
+import { playNotificationSound } from "@/lib/notificationSound"
+import { useUIStore } from "@/stores/useUIStore"
 import { isSurfaceAttended } from "@/lib/surfaceAttention"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { reduceGlobalEvent, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
@@ -576,6 +579,22 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
     }
   }
 
+  // The cue is raised before the desktop-delivered guard on purpose: on a local
+  // desktop window the Electron main process already raised the native
+  // notification, but this frame still arrives, so cueing here is what makes
+  // sound reach Windows and macOS desktop as well as the browser.
+  const payload: NotificationPayload = {
+    title: trimmedOrUndefined(notification.title),
+    body: trimmedOrUndefined(notification.body),
+    tag: trimmedOrUndefined(notification.tag),
+    kind,
+    sessionId,
+    directory: directory || undefined,
+    requireHidden: notification.requireHidden === true,
+  };
+
+  playNotificationSound(payload, useUIStore.getState());
+
   // The local desktop shell already delivered this one natively.
   if (
     (notification.desktopNotificationDelivered === true || notification.desktopStdoutActive === true)
@@ -585,15 +604,7 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   const notifications = getRegisteredRuntimeAPIs()?.notifications
   if (!notifications?.notifyAgentCompletion) return
 
-  void notifications.notifyAgentCompletion({
-    title: trimmedOrUndefined(notification.title),
-    body: trimmedOrUndefined(notification.body),
-    tag: trimmedOrUndefined(notification.tag),
-    kind,
-    sessionId,
-    directory: directory || undefined,
-    requireHidden: notification.requireHidden === true,
-  }).catch((error) => {
+  void notifications.notifyAgentCompletion(payload).catch((error) => {
     console.warn("[notifications] failed to dispatch UI notification", error)
   })
 }

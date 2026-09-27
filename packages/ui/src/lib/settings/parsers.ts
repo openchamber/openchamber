@@ -14,6 +14,7 @@ import { z, type ZodType } from 'zod';
 import type { ProjectEntry } from '@/lib/api/types';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { normalizePath } from '@/lib/pathNormalization';
+import { isSoundId, type SoundId } from '@/lib/notificationSound';
 
 /**
  * `raw` is the whole untrusted document, for the few legacy keys whose value
@@ -418,6 +419,16 @@ export const parseTerminalShells = <T extends string>(isShell: (value: string) =
 /** A value accepted by a domain type guard (`isTerminalShell`, `isUiFontOption`, …). */
 export const parseGuarded = <T>(isValid: (value: unknown) => value is T): SettingsParser<T> => fromSchema(
   z.custom<T>(isValid),
+);
+
+/**
+ * One of the bundled notification cue ids. The value arriving here is
+ * untrusted, so the guard narrows it before `isSoundId` sees it; an id that no
+ * longer resolves is rejected rather than stored, which leaves
+ * `notificationSound.ts` defending only against a hand-edited file on disk.
+ */
+export const parseSoundId = parseGuarded(
+  (value): value is SoundId => typeof value === 'string' && isSoundId(value),
 );
 
 /** Map a parser's output; `undefined` from the mapper rejects the value. */

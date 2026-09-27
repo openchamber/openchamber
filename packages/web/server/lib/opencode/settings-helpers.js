@@ -451,6 +451,24 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.notifyOnQuestion === 'boolean') {
       result.notifyOnQuestion = candidate.notifyOnQuestion;
     }
+    if (typeof candidate.notificationSoundsEnabled === 'boolean') {
+      result.notificationSoundsEnabled = candidate.notificationSoundsEnabled;
+    }
+    if (candidate.notificationSoundWhen === 'always' || candidate.notificationSoundWhen === 'hidden-only') {
+      result.notificationSoundWhen = candidate.notificationSoundWhen;
+    }
+    // The cue ids are validated against the bundled set by the client's own
+    // registry parser; the server only has to keep them to a sane shape.
+    for (const soundKey of [
+      'notificationSoundCompletion',
+      'notificationSoundQuestion',
+      'notificationSoundPermission',
+      'notificationSoundError',
+    ]) {
+      if (typeof candidate[soundKey] === 'string' && candidate[soundKey].length > 0 && candidate[soundKey].length <= 64) {
+        result[soundKey] = candidate[soundKey];
+      }
+    }
     if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
       result.notificationTemplates = candidate.notificationTemplates;
     }
