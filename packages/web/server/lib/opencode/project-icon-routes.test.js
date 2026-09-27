@@ -104,4 +104,48 @@ describe('project icon routes', () => {
     expect(res.getHeader('Content-Type')).toBe('image/jpeg');
     expect(res.body).toBe(jpgBytes);
   });
+
+  it('discovers a favicon at a Windows project root', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const svgBytes = Buffer.from('svg-bytes');
+    const fsPromises = {
+      readFile: vi.fn(async () => svgBytes),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+
+    registerProjectIconRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir: '/tmp/openchamber-test',
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj-1', path: 'C:\\repo' }],
+      }),
+      persistSettings: async () => ({ projects: [] }),
+      createFsSearchRuntime: () => ({
+        searchFilesystemFiles: async () => [
+          {
+            name: 'favicon.svg',
+            path: 'C:\\repo\\favicon.svg',
+            relativePath: 'favicon.svg',
+            extension: 'svg',
+          },
+        ],
+      }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+      params: { projectId: 'proj-1' },
+      body: {},
+    }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.discoveredPath).toBe('C:\\repo\\favicon.svg');
+  });
 });
