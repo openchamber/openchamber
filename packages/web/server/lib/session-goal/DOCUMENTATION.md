@@ -1,8 +1,8 @@
 # Session Goal
 
 Server-side control loop that keeps a session working toward a user-defined
-objective stored under `metadata.openchamber.goal`, with the small model as
-an independent progress auditor. Built on OpenChamber's backend-driven
+objective stored under `metadata.openchamber.goal`, with Jev (the
+classification model) or the small model as an independent progress check. Built on OpenChamber's backend-driven
 architecture (session-assist is the structural template): the loop lives in
 the web server and survives UI disconnects.
 
@@ -19,12 +19,10 @@ the web server and survives UI disconnects.
   tokensBaseline,          // segment start snapshot (pre-goal turn; 0 after compaction)
   tokensCommitted,         // closed segments' total (one segment per compaction)
   turnsUsed,               // auto-continuations sent (capped at MAX_AUTO_TURNS)
-  blockedStreak,           // consecutive blocked audit verdicts
-  auditFailStreak,         // consecutive failed/unavailable audit calls
-  note,                    // latest audit progress note, <= 280 chars
+  auditFailStreak,         // consecutive progress checks that could not run
   statusReason,            // why settled; 'resumed' is a kickoff signal from UI
-  evaluationProviderID,    // provider used by the latest successful audit
-  evaluationModelID,       // model used by the latest successful audit
+  evaluationProviderID,    // provider of the latest check; '' when Jev answered
+  evaluationModelID,       // model of the latest check (Jev's model id for Jev)
   lastAccountedMessageID,  // incremental accounting cursor
   createdAt, updatedAt
 }
@@ -65,7 +63,7 @@ before touching the filesystem). Rationale: metadata rides every
   the file is unreadable — a goal never dies because a file went away.
 - UI display fetches content via the GET route
   (`useGoalObjectiveContent`); in VS Code the route is unavailable, so the
-  strip degrades to the audit note (display-only fallback by design).
+  strip shows a generic goal title (display-only fallback by design).
 - Server-created goals write the file through `create.js`, which also owns
   objective fitting, inline fallback, metadata creation, and the synthetic
   first-turn reminder shared by scheduled tasks and CLI-created sessions.
@@ -104,7 +102,10 @@ before touching the filesystem). Rationale: metadata rides every
      (`type`, `content[]`, `model`, `finish`, `tokens`); `toLoopMessage`
      projects them into the `{ info, parts }` view the rest of the tick reads,
      and a completed `compaction` record plays v1's `summary: true` assistant
-     turn. Other plumbing roles are dropped from the view;
+     turn. v2 gives a compaction only `time.created`, so the projection
+     stamps `time.completed` from it: every "finished" check in the tick reads
+     `time.completed`, and without it a compaction looks still running. Other
+     plumbing roles are dropped from the view;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
    - token accounting as a SNAPSHOT of the latest completed assistant turn:
@@ -145,19 +146,35 @@ before touching the filesystem). Rationale: metadata rides every
       one new recovery attempt over the same transcript; the continuation
       consumes that permission, so another truncation blocks again. Resume
       does not bypass assistant errors or the token budget;
-   - otherwise, small-model audit of the objective + the last assistant turn
-     only — no conversation history and no continuation prompts
-     (`restrictToPreferredProvider`, session's own provider/model preferred):
-     JSON `{verdict: continue|complete|blocked, note}`. The audit is the SOLE
-     termination authority besides the hard stops above — the working agent
-     has no channel to settle its own goal. `complete` settles; `blocked`
-     increments `blockedStreak` and settles only after 3 consecutive blocked
-     verdicts, so a one-off snag cannot end the goal. Audit failure/absence
-     tolerates ONE consecutive unaudited continuation (`auditFailStreak`); a
-     second consecutive failure settles the goal as `blocked` ("progress
-     audit unavailable") — resumable, and settling resets the streak so
-     Resume gets fresh tolerance. A dead small model can never drive the
-     loop blind to the turn cap;
+   - otherwise, a progress check of the objective + the last assistant turn
+     only — no conversation history and no continuation prompts (`audit.js`).
+     Three yes/no questions: does the report say all requested work is done
+     (`all_done`), does it name requested work the agent still has to do
+     (`remaining`), and is the agent stopped by something only the user can
+     provide (`needs_user`). `decideProgress` combines them in code:
+     `needs_user >= 0.5` → blocked, `all_done >= 0.5 && remaining < 0.5` →
+     complete, anything else → continue. Jev answers with probabilities; the
+     small model answers the same questions as JSON booleans read as 1/0, so
+     there is one format and one decision. The long turn is cut to its head
+     and, mostly, its tail, where the report sits.
+     Who answers: Jev when `sessionGoalChecker` is `classifier` (the default)
+     and a classification provider can run it (`classifierEndpoint`, owned by
+     `../routing`); the small model otherwise, and also when Jev fails this
+     time (`restrictToPreferredProvider`, session's own provider/model
+     preferred). The check is the SOLE termination authority besides the hard
+     stops above — the working agent has no channel to settle its own goal.
+     `complete` and `blocked` settle on the first such answer: a blocked turn
+     waits on the user, and another nudge would only spend a turn repeating the
+     question (`statusReason: 'waiting for user input'`). There is no note: the
+     strip shows the objective. A check that cannot run tolerates ONE
+     consecutive unchecked continuation (`auditFailStreak`); a second
+     consecutive failure settles the goal as `blocked` ("progress audit
+     unavailable") — resumable, and settling resets the streak so Resume gets
+     fresh tolerance. A dead checker can never drive the loop blind to the turn
+     cap. Measured on 144 hand-written goal-report turns plus 8 real ones (lab:
+     `~/projects/openchamber-extensions/jev-goal-lab`): Jev 142/144 with both
+     misses on the safe side, gpt-6-luna 141/144. Change the questions or the
+     threshold only with a new run of that lab;
    - continue: persist accounting + `turnsUsed` first (a crash after the
      write just waits for the next idle tick; the reverse could double-send),
      re-check the tail, then `POST /api/session/:id/prompt` with the
@@ -203,6 +220,12 @@ sees only that final turn, so the report is its evidence.
   above the composer; `SessionGoalDialog.tsx` — manage dialog
   (edit/pause/resume/complete/clear).
 - Sidebar glyph next to the date in `SessionNodeItem`.
+- `components/sections/openchamber/SessionGoalCheckerField.tsx` — Settings →
+  Chat → Goal: Jev or the small model checks progress
+  (`sessionGoalChecker`). Without a classification provider the Jev chip is
+  disabled and the small model shows as chosen, matching the server.
+  `useGoalCheckAvailable` (`hooks/useSessionGoal.ts`) gates arming a new goal
+  on either checker being able to run.
 
 ## Scheduled goals
 

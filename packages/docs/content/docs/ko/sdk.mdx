@@ -182,6 +182,63 @@ const { entries } = await host.listDir(".");
 
 페이지에서 `ctx.surface`는 `status`입니다. OpenChamber는 Work Status 패널이 보이고 섹션이 펼쳐져 있는 동안에만 페이지를 불러오고, 사용자가 섹션을 접으면 내립니다. 그러니 다시 만들 수 없는 상태는 두지 마세요. 섹션만 있는 확장은 권한, 서비스, 통합, 파일을 쓸 수 있지만 `page`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `git-graph-status` 예제가 완성된 섹션입니다.
 
+## 내 파일 형식용 편집기
+
+`contributes.fileEditors`는 파일을 텍스트 편집기 대신 내 페이지에서 엽니다. 사용자가 Files에서 일치하는 파일을 열면 OpenChamber가 그 자리에 편집기를 보여 주며, 기본 제공 뷰어와 같은 소스 전환, 전체 화면 버튼, 저장 버튼이 함께 표시됩니다.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match`는 대소문자를 구분하지 않고 파일 이름만 비교합니다. `*`는 임의 길이의 문자열과, `?`는 한 글자와 일치합니다. 패턴에는 `/`를 넣을 수 없고 와일드카드만으로 이루어질 수도 없습니다.
+- `entry`는 폴더 안의 HTML 페이지입니다. `panel.entry`가 필요 없으므로, 레일 아이콘 없이 편집기만 있는 확장도 됩니다.
+- `content`는 `"text"`(기본값) 또는 `"binary"`입니다. 아래를 참고하세요.
+- 확장당 편집기는 최대 8개, 편집기마다 패턴은 최대 16개입니다.
+
+파일은 OpenChamber가 관리합니다. 페이지는 파일을 직접 읽거나 쓰지 않으므로 그에 대한 권한도 필요 없습니다. OpenChamber가 텍스트를 넘겨주고, 저장할 때 편집된 텍스트를 요청하며, Cmd/Ctrl+S, 자동 저장, 저장하지 않은 변경 확인, 줄 끝 문자, 디스크에서 일어난 변경을 처리합니다:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // 텍스트 편집기는 항상 텍스트를 받습니다
+  load(file.content); // file.path, file.name, file.readOnly도 있습니다
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// 편집할 때마다 호출하세요. `edited`는 사용자가 멈출 때까지 자동 저장을 미룹니다.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// OpenChamber가 쓰는 동안 생긴 편집은 파일을 저장되지 않은 상태로 남깁니다.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version`은 문서가 바뀌면 함께 바뀌는 짧은 문자열이면 무엇이든 됩니다(예: 해시). 편집기가 열 수 없는 파일이면 `host.reportFileUnsupported()`를 호출하세요. OpenChamber가 안내 문구와 함께 소스를 보여 줍니다. 20 MB가 넘는 파일은 소스 보기에 머뭅니다.
+
+### 바이너리 파일
+
+스프레드시트, 문서, 이미지처럼 텍스트가 아닌 파일을 열려면 `"content": "binary"`를 설정하세요. 편집기는 파일의 바이트를 받고 바이트를 돌려줍니다. 나머지는 모두 똑같이 동작합니다.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // 디스크에 있는 그대로의 Uint8Array
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+바이너리 편집기는 패턴이 일치하는 파일이라면 무엇이든 맡을 수 있으며, 이미지나 PDF처럼 OpenChamber가 직접 미리 보여 주는 파일도 포함됩니다. 소스 보기는 없고, 저장하지 않은 변경이 있는 상태에서 사용자가 편집기를 전체 화면으로 전환하거나 전체 화면에서 나오면 OpenChamber가 먼저 저장합니다. 형식을 읽고 쓰는 일은 편집기의 몫입니다. OpenChamber는 반환한 바이트를 그대로 다시 씁니다.
+
+페이지에서 `ctx.surface`는 `file`입니다. 디스크에서 파일이 바뀌거나, 사용자가 변경을 버리거나, 편집기가 전체 화면으로 들어가거나 나올 때 OpenChamber는 페이지를 다시 불러오고 파일을 다시 넘겨줍니다. 패턴이 일치하는 활성화된 확장 중 첫 번째가 선택되며, OpenChamber 자체 미리 보기보다 우선합니다. 편집기만 있는 확장은 권한, 서비스, 통합, 파일을 쓸 수 있지만 `page`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `checklist-editor` 예제가 완성된 편집기입니다.
+
 ## 작업, 명령, 배지
 
 레일과 + 메뉴 외에도 확장은 세 곳에 더 나타날 수 있습니다. 모두 칩을 클릭했을 때와 같은 방식으로 확장에 `item`을 넘깁니다.
@@ -234,7 +291,7 @@ OpenCode 플러그인이나 MCP 서버가 도구를 추가하면 채팅은 그 �
 
 `match`는 OpenCode가 보고하는 도구 이름이며, 끝의 `*`는 접두사와 일치합니다. `icon`은 Remixicon 이름이거나 패키지 안의 `.svg` 파일이며, `panel.icon`과 같습니다. `title`과 `subtitle`은 호출의 `input`, `output`, `metadata`를 쓰는 템플릿입니다. `output`은 본문을 그리는 방식을 고릅니다. `text`, `json`(트리), `markdown`, `language`가 있는 `code`, `columns`가 있는 `table`(행은 출력 배열이나 `output.items`에서 가져옵니다), 또는 기본값인 `auto`입니다. 정확한 `match`가 와일드카드보다 우선하고, 동점이면 먼저 설치된 확장이 이깁니다. 권한은 필요 없습니다. 이미 채팅에 있는 데이터를 그리는 방식만 바꾸기 때문입니다.
 
-도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`만 선언하고 다른 것은 선언하지 않아도 됩니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션입니다(위 참고).
+도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`만 선언하고 다른 것은 선언하지 않아도 됩니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션이나 파일 편집기입니다(위 참고).
 
 ## 패널의 첫 줄
 

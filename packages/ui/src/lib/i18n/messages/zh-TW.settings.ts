@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': '全選',
   'settings.themeImport.deselectAll': '取消全選',
@@ -1993,7 +1994,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': '目標',
   'settings.openchamber.visual.goal.budgetLabel': '預設權杖預算',
   'settings.openchamber.visual.goal.budgetAria': '為新目標套用預設權杖預算',
-  'settings.openchamber.visual.goal.description': '在輸入框中啟用靶心按鈕，下一則訊息即成為目標：代理將在小型模型的稽核下自動持續工作，即使你不在電腦前。',
+  'settings.openchamber.visual.goal.description': '在輸入框中啟用靶心按鈕，下一則訊息即成為目標：即使你不在電腦前，代理也會自動持續工作，並在每一輪之後檢查進度。',
+  'settings.openchamber.visual.goal.checkerLabel': '進度檢查',
+  'settings.openchamber.visual.goal.checkerInfo': '每一輪結束後，會讀取代理的報告，判斷目標是已完成、在等你，還是應繼續。Jev 在一秒內做出判斷；小型模型在工作階段自身的提供者上執行，並在 Jev 無法回答時接手。',
+  'settings.openchamber.visual.goal.checker.smallModel': '小型模型',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': '每一輪都由小型模型檢查。',
+  'settings.openchamber.visual.goal.checker.jevMissing': '尚未為 Jev 設定分類提供者，因此每一輪由小型模型檢查。',
+  'settings.openchamber.visual.goal.checker.smallModelLink': '小型模型設定',
   'settings.openchamber.visual.field.showReasoningTracesAria': '顯示推理軌跡',
   'settings.openchamber.visual.field.showReasoningTraces': '顯示推理軌跡',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': '啟用可摺疊推理區塊',
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.modifier.label': '按 Ctrl/Cmd+Enter 傳送',
   ...linearIntegrationI18n['zh-TW'],
   ...thirdPartyIntegrationI18n['zh-TW'],
+  ...extensionCatalogI18n['zh-TW'],
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
   'settings.page.integrations.title': '整合',

@@ -182,6 +182,63 @@ Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, 
 
 Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `git-graph-status` to kompletna sekcja.
 
+## Edytor dla twojego typu pliku
+
+`contributes.fileEditors` otwiera pliki w twojej stronie zamiast w edytorze tekstu. Gdy użytkownik otworzy pasujący plik w Files, OpenChamber pokaże tam twój edytor, z tym samym przełącznikiem źródła, przyciskiem pełnego ekranu i przyciskiem zapisu, co wbudowane podglądy.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` porównuje tylko nazwy plików, bez rozróżniania wielkości liter. `*` pasuje do dowolnego ciągu znaków, a `?` do jednego znaku. Wzorzec nie może zawierać `/` ani składać się wyłącznie z symboli wieloznacznych.
+- `entry` to strona HTML w twoim folderze. Nie potrzebujesz `panel.entry`, więc rozszerzenie może być tylko edytorem, bez ikony na pasku bocznym.
+- `content` to `"text"` (domyślnie) albo `"binary"`, patrz niżej.
+- Do 8 edytorów na rozszerzenie, każdy z maksymalnie 16 wzorcami.
+
+Plikiem zarządza OpenChamber. Twoja strona nigdy go nie czyta ani nie zapisuje i nie potrzebuje do tego żadnego uprawnienia. OpenChamber przekazuje ci tekst, prosi o zmieniony tekst przy zapisie i obsługuje Cmd/Ctrl+S, automatyczny zapis, pytanie o niezapisane zmiany, końce linii oraz zmiany wprowadzone na dysku:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // edytor tekstu zawsze dostaje tekst
+  load(file.content); // a także file.path, file.name, file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Wywołuj to po każdej zmianie. `edited` wstrzymuje automatyczny zapis, dopóki użytkownik nie przestanie.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Zmiany wprowadzone w trakcie zapisu przez OpenChamber zostawiają plik niezapisany.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` to dowolny krótki ciąg znaków, który zmienia się razem z dokumentem, na przykład hash. Jeśli plik nie nadaje się do otwarcia w twoim edytorze, wywołaj `host.reportFileUnsupported()`, a OpenChamber pokaże jego źródło z komunikatem. Pliki większe niż 20 MB zostają w widoku źródła.
+
+### Pliki binarne
+
+Ustaw `"content": "binary"`, żeby otwierać pliki, które nie są tekstem, na przykład arkusze kalkulacyjne, dokumenty czy obrazy. Twój edytor dostaje bajty pliku i oddaje bajty; cała reszta działa tak samo.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // Uint8Array, dokładnie taki jak na dysku
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Edytor binarny może przejąć każdy plik pasujący do jego wzorców, także te, które OpenChamber sam pokazuje w podglądzie, jak obrazy i pliki PDF. Nie ma widoku źródła, a gdy użytkownik przełącza go na pełny ekran lub z niego wychodzi, mając niezapisane zmiany, OpenChamber najpierw je zapisuje. Odczyt i zapis formatu należy do twojego edytora: OpenChamber zapisuje dokładnie te bajty, które zwrócisz.
+
+Twoja strona widzi `ctx.surface` jako `file`. OpenChamber przeładowuje ją i ponownie przekazuje plik, gdy plik zmieni się na dysku, użytkownik odrzuci zmiany albo edytor przejdzie na pełny ekran lub z niego wyjdzie. Wygrywa pierwsze włączone rozszerzenie z pasującym wzorcem, przed własnymi podglądami OpenChamber. Rozszerzenie z samym edytorem może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `checklist-editor` to kompletny edytor.
+
 ## Akcje, polecenia i odznaka
 
 Poza paskiem bocznym i menu + rozszerzenie może pojawić się w trzech kolejnych miejscach. Wszystkie przekazują rozszerzeniu `item` tak samo jak kliknięcie chipa.
@@ -234,7 +291,7 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 
 `match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
-Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i nic więcej. Drugi wyjątek to sekcja Work Status z własnym `entry`, patrz wyżej.
+Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i nic więcej. Drugi wyjątek to sekcja Work Status lub edytor plików z własnym `entry`, patrz wyżej.
 
 ## Pierwsze linie w panelu
 

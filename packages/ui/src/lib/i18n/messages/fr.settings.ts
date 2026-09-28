@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Tout sélectionner',
   'settings.themeImport.deselectAll': 'Tout désélectionner',
@@ -1995,7 +1996,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': 'Objectif',
   'settings.openchamber.visual.goal.budgetLabel': 'Budget de tokens par défaut',
   'settings.openchamber.visual.goal.budgetAria': 'Appliquer un budget de tokens par défaut aux nouveaux objectifs',
-  'settings.openchamber.visual.goal.description': 'Armez le bouton cible du composeur et le prochain message devient un objectif : l\'agent continue d\'y travailler automatiquement, audité par le petit modèle, même en votre absence.',
+  'settings.openchamber.visual.goal.description': 'Armez le bouton cible du composeur et le prochain message devient un objectif : l\'agent continue d\'y travailler automatiquement, même en votre absence, et sa progression est vérifiée après chaque tour.',
+  'settings.openchamber.visual.goal.checkerLabel': 'Vérification de la progression',
+  'settings.openchamber.visual.goal.checkerInfo': 'Après chaque tour, le rapport de l\'agent est lu pour décider si l\'objectif est atteint, vous attend ou doit continuer. Jev décide en moins d\'une seconde ; le petit modèle tourne sur le fournisseur de la session et prend le relais quand Jev ne peut pas répondre.',
+  'settings.openchamber.visual.goal.checker.smallModel': 'Petit modèle',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': 'Chaque tour est vérifié par le petit modèle.',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'Aucun fournisseur de classification n\'est configuré pour Jev : le petit modèle vérifie donc chaque tour.',
+  'settings.openchamber.visual.goal.checker.smallModelLink': 'Paramètres du petit modèle',
   'settings.openchamber.visual.field.showReasoningTracesAria': 'Afficher les traces de raisonnement',
   'settings.openchamber.visual.field.showReasoningTraces': 'Afficher les traces de raisonnement',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': 'Activer les blocs de raisonnement pliables',
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Envoyer avec Ctrl/Cmd+Entrée',
   ...linearIntegrationI18n.fr,
   ...thirdPartyIntegrationI18n.fr,
+  ...extensionCatalogI18n.fr,
   ...guestIntegrationsI18n.fr,
   ...extensionsSettingsI18n.fr,
   'settings.page.integrations.title': 'Intégrations',

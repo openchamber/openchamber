@@ -182,6 +182,63 @@ Writes are atomic: OpenChamber writes a temporary file and renames it, so a read
 
 Your page sees `ctx.surface` as `status`. OpenChamber loads it only while the Work Status panel is visible and your section is expanded, and unloads it when the user collapses the section, so keep nothing there you can't rebuild. A section-only extension can use capabilities, a service, an integration, and files, but not `page`, `attach`, `actions`, or `commands`. Web and desktop only. The `git-graph-status` example is a complete section.
 
+## An editor for your file type
+
+`contributes.fileEditors` opens files in your page instead of the text editor. When the user opens a matching file in Files, OpenChamber shows your editor there, with the same source toggle, fullscreen button, and save button the built-in viewers have.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` compares file names only, ignoring case. `*` matches any run of characters and `?` matches one. A pattern can't contain `/` and can't be only wildcards.
+- `entry` is an HTML page in your folder. You don't need `panel.entry`, so the extension can be just the editor, with no rail icon.
+- `content` is `"text"` (the default) or `"binary"`, see below.
+- Up to 8 editors per extension, up to 16 patterns each.
+
+OpenChamber keeps the file. Your page never reads or writes it and needs no capability for it. OpenChamber hands you the text, asks for the edited text when it saves, and handles Cmd/Ctrl+S, autosave, the unsaved-changes prompt, line endings, and changes made on disk:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // a text editor always gets text
+  load(file.content); // file.path, file.name, file.readOnly too
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Call this after every edit. `edited` holds autosave back until the user stops.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Edits made while OpenChamber was writing keep the file unsaved.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` is any short string that changes when the document changes, such as a hash. If a file isn't something your editor can open, call `host.reportFileUnsupported()` and OpenChamber shows its source with a notice. Files over 20 MB stay in the source view.
+
+### Binary files
+
+Set `"content": "binary"` to open files that aren't text, such as spreadsheets, documents, or images. Your editor gets the file's bytes and hands bytes back; everything else works the same.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // a Uint8Array, exactly as on disk
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+A binary editor can claim any file its patterns match, including ones OpenChamber previews itself, like images and PDFs. It has no source view, and when the user moves it to or from fullscreen with unsaved changes, OpenChamber saves them first. Reading and writing the format is up to your editor: OpenChamber writes back exactly the bytes you return.
+
+Your page sees `ctx.surface` as `file`. OpenChamber reloads it, with the file handed over again, when the file changes on disk, the user discards changes, or the editor moves to or from fullscreen. The first enabled extension whose pattern matches wins, ahead of OpenChamber's own previews. An editor-only extension can use capabilities, a service, an integration, and files, but not `page`, `attach`, `actions`, or `commands`. Web and desktop only. The `checklist-editor` example is a complete editor.
+
 ## Actions, commands, and the badge
 
 Beyond the rail and the + menu, an extension can appear in three more places. All of them hand the extension an `item` the same way a chip click does.
@@ -234,7 +291,7 @@ When your OpenCode plugin or MCP server adds a tool, the chat shows its calls wi
 
 `match` is the tool name as OpenCode reports it; a trailing `*` matches a prefix. `icon` is a Remixicon name or an `.svg` file in your package, like `panel.icon`. `title` and `subtitle` are templates over the call's `input`, `output`, and `metadata`. `output` picks how the body renders: `text`, `json` (a tree), `markdown`, `code` with a `language`, `table` with `columns` (rows come from the output array or `output.items`), or `auto` for the default. An exact `match` beats a wildcard, and the first installed extension wins a tie. No permission is needed: this only changes how data already in the chat is drawn.
 
-An extension that only styles tools needs no page at all: leave out `panel.entry` and it has no rail icon, just a card in Settings → Extensions. Without a page it may declare `tools` and nothing else. A Work Status section with its own `entry` is the other exception, see above.
+An extension that only styles tools needs no page at all: leave out `panel.entry` and it has no rail icon, just a card in Settings → Extensions. Without a page it may declare `tools` and nothing else. A Work Status section or a file editor with its own `entry` is the other exception, see above.
 
 ## First lines in the panel
 

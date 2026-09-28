@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Selecionar tudo',
   'settings.themeImport.deselectAll': 'Desmarcar tudo',
@@ -2088,7 +2089,13 @@ export const settingsDict = {
   "settings.openchamber.visual.goal.sectionTitle": "Objetivo",
   "settings.openchamber.visual.goal.budgetLabel": "Orçamento de tokens padrão",
   "settings.openchamber.visual.goal.budgetAria": "Aplicar um orçamento de tokens padrão a novos objetivos",
-  "settings.openchamber.visual.goal.description": "Arme o botão de alvo no compositor e a próxima mensagem vira um objetivo: o agente continua trabalhando nele automaticamente, auditado pelo modelo pequeno, mesmo enquanto você está ausente.",
+  "settings.openchamber.visual.goal.description": "Arme o botão de alvo no compositor e a próxima mensagem vira um objetivo: o agente continua trabalhando nele automaticamente, mesmo enquanto você está ausente, e o progresso é verificado após cada turno.",
+  "settings.openchamber.visual.goal.checkerLabel": "Verificação de progresso",
+  "settings.openchamber.visual.goal.checkerInfo": "Após cada turno, o relatório do agente é lido para decidir se o objetivo foi concluído, está esperando por você ou deve continuar. O Jev decide em menos de um segundo; o modelo pequeno roda no provedor da própria sessão e também assume quando o Jev não consegue responder.",
+  "settings.openchamber.visual.goal.checker.smallModel": "Modelo pequeno",
+  "settings.openchamber.visual.goal.checker.viaSmallModel": "Cada turno é verificado pelo modelo pequeno.",
+  "settings.openchamber.visual.goal.checker.jevMissing": "Nenhum provedor de classificação está configurado para o Jev, então o modelo pequeno verifica cada turno.",
+  "settings.openchamber.visual.goal.checker.smallModelLink": "Configurações do modelo pequeno",
   "settings.openchamber.visual.field.showReasoningTracesAria": "Mostrar rastros de raciocínio",
   "settings.openchamber.visual.field.showReasoningTraces": "Mostrar rastros de raciocínio",
   "settings.openchamber.visual.field.collapsibleThinkingBlocksAria": "Habilitar blocos de raciocínio recolhíveis",
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.enterToSend.modifier.label": "Enviar com Ctrl/Cmd+Enter",
   ...linearIntegrationI18n['pt-BR'],
   ...thirdPartyIntegrationI18n['pt-BR'],
+  ...extensionCatalogI18n['pt-BR'],
   ...guestIntegrationsI18n['pt-BR'],
   ...extensionsSettingsI18n['pt-BR'],
   'settings.page.integrations.title': 'Integrações',

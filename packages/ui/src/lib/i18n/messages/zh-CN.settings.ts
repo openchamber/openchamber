@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': '全选',
   'settings.themeImport.deselectAll': '取消全选',
@@ -2088,7 +2089,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': '目标',
   'settings.openchamber.visual.goal.budgetLabel': '默认令牌预算',
   'settings.openchamber.visual.goal.budgetAria': '为新目标应用默认令牌预算',
-  'settings.openchamber.visual.goal.description': '在输入框中启用靶心按钮，下一条消息即成为目标：代理将在小模型的审核下自动持续工作，即使你不在电脑前。',
+  'settings.openchamber.visual.goal.description': '在输入框中启用靶心按钮，下一条消息即成为目标：即使你不在电脑前，代理也会自动持续工作，并在每一轮之后检查进度。',
+  'settings.openchamber.visual.goal.checkerLabel': '进度检查',
+  'settings.openchamber.visual.goal.checkerInfo': '每一轮结束后，会读取代理的报告，判断目标是已完成、在等你，还是应继续。Jev 在一秒内做出判断；小模型在会话自身的提供方上运行，并在 Jev 无法回答时接替。',
+  'settings.openchamber.visual.goal.checker.smallModel': '小模型',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': '每一轮都由小模型检查。',
+  'settings.openchamber.visual.goal.checker.jevMissing': '尚未为 Jev 设置分类提供方，因此每一轮由小模型检查。',
+  'settings.openchamber.visual.goal.checker.smallModelLink': '小模型设置',
   'settings.openchamber.visual.field.showReasoningTracesAria': '显示推理轨迹',
   'settings.openchamber.visual.field.showReasoningTraces': '显示推理轨迹',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': '启用可折叠推理块',
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.modifier.label': '按 Ctrl/Cmd+Enter 发送',
   ...linearIntegrationI18n['zh-CN'],
   ...thirdPartyIntegrationI18n['zh-CN'],
+  ...extensionCatalogI18n['zh-CN'],
   ...guestIntegrationsI18n['zh-CN'],
   ...extensionsSettingsI18n['zh-CN'],
   'settings.page.integrations.title': '集成',

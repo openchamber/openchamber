@@ -2490,10 +2490,22 @@ function inheritForkMetadata(sourceSessionId: string, forkedSession: Session, di
 }
 
 /**
+ * Records that start something new after a turn. OpenCode 1 carried a
+ * compaction and a shell run as user messages; OpenCode 2 gives them their own
+ * roles, so they have to be named here or a fork after an answer copies them.
+ */
+const TURN_BOUNDARY_ROLES = new Set<Message["role"]>(["user", "compaction", "shell"])
+
+const isTurnBoundary = (message: Message): boolean =>
+  TURN_BOUNDARY_ROLES.has(message.role) || readSubagentRun(message) !== undefined
+
+/**
  * Fork keeping an assistant turn: the new session holds everything through
  * `messageId`, so the agent there still sees the answer it just gave. The cut
- * is the first user message after it; with none, the whole transcript is copied.
- * The composer stays empty since there is no prompt to rewrite.
+ * is the first record after it that starts something new (a prompt, a
+ * compaction, a shell run, a background subagent run); with none, the whole
+ * transcript is copied. The composer stays empty since there is no prompt to
+ * rewrite.
  */
 export async function forkAfterMessage(sessionId: string, messageId: string): Promise<Session | null> {
   const expectedRuntimeKey = getRuntimeKey()
@@ -2501,10 +2513,10 @@ export async function forkAfterMessage(sessionId: string, messageId: string): Pr
   const messages = store.getState().message[sessionId] ?? []
   const index = messages.findIndex((message) => message.id === messageId)
   if (index < 0) throw new Error("Fork source message is not loaded")
-  const nextUserMessage = messages.slice(index + 1).find((message) => message.role === "user")
+  const boundary = messages.slice(index + 1).find(isTurnBoundary)
 
   const forkedSession = await opencodeClient.forkSession(sessionId, {
-    before: nextUserMessage ? transcriptCutForMessage(messages, nextUserMessage.id) : undefined,
+    before: boundary ? transcriptCutForMessage(messages, boundary.id) : undefined,
     directory,
   })
   if (isStaleRuntime(expectedRuntimeKey)) return null

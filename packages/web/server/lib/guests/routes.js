@@ -20,6 +20,7 @@ import {
 
 import {
   findInstalledGuest,
+  hasGuestFrame,
   isGuestPanelId,
   listInstalledGuests,
   resolveGuestServedFile,
@@ -588,7 +589,7 @@ export const registerGuestRoutes = (app, {
     try {
       const result = await runGuestStorage(persistPath, req.params.id, parsed.data, async () => {
         const guest = await loadGuest(req.params.id);
-        if (!guest || guest.enabled === false || (!guest.entry && !guest.backgroundEntry && !guest.statusEntry)) throw new Error('Extension is unavailable.');
+        if (!guest || guest.enabled === false || !hasGuestFrame(guest)) throw new Error('Extension is unavailable.');
         if (!requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability))) throw new Error('Extension needs approval.');
       });
       return res.json(result);
@@ -822,7 +823,7 @@ export const registerGuestRoutes = (app, {
         return res.status(404).end();
       }
       const served = await resolveGuestServedFile(guest.packageRoot, relativePath, {
-        hasRuntime: Boolean(guest.entry || guest.backgroundEntry || guest.statusEntry),
+        hasRuntime: hasGuestFrame(guest),
       });
       if (!served) {
         return res.status(404).end();

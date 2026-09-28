@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'すべて選択',
   'settings.themeImport.deselectAll': 'すべて選択解除',
@@ -2121,7 +2122,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': 'ゴール',
   'settings.openchamber.visual.goal.budgetLabel': 'デフォルトのトークン予算',
   'settings.openchamber.visual.goal.budgetAria': '新しいゴールにデフォルトのトークン予算を適用',
-  'settings.openchamber.visual.goal.description': 'コンポーザーのターゲットボタンを有効にすると、次のメッセージがゴールになります。エージェントは小型モデルの監査のもと、離席中でも自動的に作業を続けます。',
+  'settings.openchamber.visual.goal.description': 'コンポーザーのターゲットボタンを有効にすると、次のメッセージがゴールになります。エージェントは離席中でも自動的に作業を続け、ターンごとに進捗がチェックされます。',
+  'settings.openchamber.visual.goal.checkerLabel': '進捗チェック',
+  'settings.openchamber.visual.goal.checkerInfo': '各ターンの後、エージェントの報告を読んで、ゴールが完了したか、あなたを待っているか、続けるべきかを判断します。Jev は 1 秒未満で判断します。小型モデルはセッション自身のプロバイダーで動作し、Jev が応答できないときにも代わりを務めます。',
+  'settings.openchamber.visual.goal.checker.smallModel': '小型モデル',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': '各ターンは小型モデルがチェックします。',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'Jev 用の分類プロバイダーが設定されていないため、各ターンは小型モデルがチェックします。',
+  'settings.openchamber.visual.goal.checker.smallModelLink': '小型モデルの設定',
   'settings.openchamber.visual.field.showReasoningTracesAria': '推論トレースを表示',
   'settings.openchamber.visual.field.showReasoningTraces': '推論トレースを表示',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': '折りたたみ可能な推論ブロックを有効化',
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter で送信',
   ...linearIntegrationI18n.ja,
   ...thirdPartyIntegrationI18n.ja,
+  ...extensionCatalogI18n.ja,
   ...guestIntegrationsI18n.ja,
   ...extensionsSettingsI18n.ja,
   'settings.page.integrations.title': '連携',

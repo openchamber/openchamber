@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Alle auswählen',
   'settings.themeImport.deselectAll': 'Auswahl aufheben',
@@ -2039,7 +2040,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': 'Ziel',
   'settings.openchamber.visual.goal.budgetLabel': 'Standard-Token-Budget',
   'settings.openchamber.visual.goal.budgetAria': 'Ein Standard-Token-Budget für neue Ziele anwenden',
-  'settings.openchamber.visual.goal.description': 'Aktiviere die Ziel-Schaltfläche im Composer. Die nächste Nachricht wird zu einem Ziel: Der Agent arbeitet automatisch daran, auch wenn du weg bist, kontrolliert vom kleinen Modell.',
+  'settings.openchamber.visual.goal.description': 'Aktiviere die Ziel-Schaltfläche im Composer. Die nächste Nachricht wird zu einem Ziel: Der Agent arbeitet automatisch daran, auch wenn du weg bist, und nach jedem Zug wird der Fortschritt geprüft.',
+  'settings.openchamber.visual.goal.checkerLabel': 'Fortschrittsprüfung',
+  'settings.openchamber.visual.goal.checkerInfo': 'Nach jedem Zug wird der Bericht des Agenten gelesen, um zu entscheiden, ob das Ziel erreicht ist, auf dich wartet oder weiterlaufen soll. Jev entscheidet in unter einer Sekunde; das kleine Modell läuft beim Anbieter der Sitzung und springt ein, wenn Jev nicht antworten kann.',
+  'settings.openchamber.visual.goal.checker.smallModel': 'Kleines Modell',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': 'Jeder Zug wird vom kleinen Modell geprüft.',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'Für Jev ist kein Klassifizierungsanbieter eingerichtet, daher prüft das kleine Modell jeden Zug.',
+  'settings.openchamber.visual.goal.checker.smallModelLink': 'Einstellungen für das kleine Modell',
   'settings.openchamber.visual.field.showReasoningTracesAria': 'Denkspuren anzeigen',
   'settings.openchamber.visual.field.showReasoningTraces': 'Denkspuren anzeigen',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': 'Zusammenklappbare Denkblöcke aktivieren',
@@ -2297,6 +2304,7 @@ export const settingsDict = {
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
   ...linearIntegrationI18n.de,
   ...thirdPartyIntegrationI18n.de,
+  ...extensionCatalogI18n.de,
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
   'settings.page.integrations.title': 'Integrationen',

@@ -39,6 +39,7 @@ interface TextSelectionMenuProps {
 }
 
 interface MenuPosition {
+  // Top-left corner in whole CSS pixels (desktop).
   x: number;
   y: number;
   placement: DesktopMenuPlacement;
@@ -213,9 +214,14 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       viewportHeight: window.innerHeight,
       boundaryTop: boundary ? boundary.getBoundingClientRect().top : 0,
     });
+    const centerX = getDesktopClampedX(rect.left + rect.width / 2, window.innerWidth, menuWidthRef.current);
+    // Resolve the corner here in whole pixels instead of centering with
+    // `translate(-50%, -100%)`: a half-pixel offset puts the popup's layer
+    // between pixels and its text (the comment box above all) renders blurry
+    // on non-retina screens.
     return {
-      x: getDesktopClampedX(rect.left + rect.width / 2, window.innerWidth, menuWidthRef.current),
-      y,
+      x: Math.round(centerX - menuWidthRef.current / 2),
+      y: Math.round(placement === 'above' ? y - menuHeightRef.current : y),
       placement,
     };
   }, [containerRef]);
@@ -659,7 +665,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         'oc-glass-popover flex items-end gap-2 rounded-3xl border border-[var(--interactive-border)]',
         'pl-4 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
         'py-1 pr-1',
-        'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
+        'transition-[opacity,transform] duration-200 ease-out',
         isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
       )}
     >
@@ -816,7 +822,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         left: position.x,
         top: position.y,
         visibility: anchorVisible ? undefined : 'hidden',
-        transform: position.placement === 'above' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
       }}
     >
       {commentMode ? (<>{commentHighlightOverlay}{commentInput}</>) : (
@@ -826,7 +831,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             'oc-glass-popover rounded-full border border-[var(--interactive-border)]',
             'shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
             'p-1',
-            'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
+            'transition-[opacity,transform] duration-200 ease-out',
             isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
           )}
         >

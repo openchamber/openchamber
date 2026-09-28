@@ -245,7 +245,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.session-goal',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.sessionGoal',
-    keywords: ['goal', 'objective', 'auto continue', 'small model'],
+    keywords: ['goal', 'objective', 'auto continue'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-checker',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.checkerLabel',
+    keywords: ['goal', 'progress', 'check', 'jev', 'classification', 'small model'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -1237,6 +1244,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
     keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.extensions',
+    page: 'integrations',
+    titleKey: 'settings.integrations.extensionCatalog.title',
+    descriptionKey: 'settings.integrations.extensionCatalog.info',
+    keywords: ['extension', 'install', 'update', 'remove', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
+  {
+    id: 'integrations.extensions.excalidraw',
+    page: 'integrations',
+    titleKey: 'settings.integrations.extensionCatalog.excalidraw.name',
+    descriptionKey: 'settings.integrations.extensionCatalog.excalidraw.description',
+    keywords: ['excalidraw', 'drawing', 'diagram', 'canvas', 'whiteboard', 'obsidian', 'sketch'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
   {
     id: 'integrations.guests',

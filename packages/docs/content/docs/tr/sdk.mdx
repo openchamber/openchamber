@@ -182,6 +182,63 @@ Yazmalar atomiktir: OpenChamber geçici bir dosya yazıp yeniden adlandırır, b
 
 Sayfanız `ctx.surface` değerini `status` olarak görür. OpenChamber sayfayı yalnızca Work Status paneli görünürken ve bölümünüz açıkken yükler, kullanıcı bölümü kapatınca kaldırır. Bu yüzden orada yeniden kuramayacağınız bir şey tutmayın. Yalnızca bölümden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu ve dosyaları kullanabilir, ama `page`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `git-graph-status` örneği eksiksiz bir bölümdür.
 
+## Dosya türünüz için bir düzenleyici
+
+`contributes.fileEditors`, dosyaları metin düzenleyici yerine sayfanızda açar. Kullanıcı Files içinde eşleşen bir dosyayı açtığında OpenChamber orada düzenleyicinizi gösterir; yerleşik görüntüleyicilerdeki kaynak geçişi, tam ekran düğmesi ve kaydet düğmesi de aynen bulunur.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` yalnızca dosya adlarını karşılaştırır ve büyük/küçük harfi yok sayar. `*` herhangi bir karakter dizisiyle, `?` tek bir karakterle eşleşir. Bir desen `/` içeremez ve yalnızca joker karakterlerden oluşamaz.
+- `entry`, klasörünüzdeki bir HTML sayfasıdır. `panel.entry` gerekmez, yani eklenti şeritte simgesi olmadan yalnızca düzenleyiciden oluşabilir.
+- `content`, `"text"` (varsayılan) ya da `"binary"` olur, aşağıya bakın.
+- Eklenti başına en fazla 8 düzenleyici, her birinde en fazla 16 desen.
+
+Dosyayı OpenChamber yönetir. Sayfanız dosyayı hiçbir zaman okumaz veya yazmaz ve bunun için bir izne ihtiyaç duymaz. OpenChamber size metni verir, kaydederken düzenlenmiş metni ister ve Cmd/Ctrl+S, otomatik kaydetme, kaydedilmemiş değişiklik uyarısı, satır sonları ve diskte yapılan değişikliklerle kendisi ilgilenir:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // bir metin düzenleyici her zaman metin alır
+  load(file.content); // file.path, file.name, file.readOnly da var
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Her düzenlemeden sonra bunu çağırın. `edited`, kullanıcı durana kadar otomatik kaydetmeyi bekletir.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// OpenChamber yazarken yapılan düzenlemeler dosyayı kaydedilmemiş bırakır.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version`, belge değiştiğinde değişen herhangi bir kısa dizedir, örneğin bir hash. Bir dosya düzenleyicinizin açabileceği bir şey değilse `host.reportFileUnsupported()` çağırın; OpenChamber dosyanın kaynağını bir uyarıyla gösterir. 20 MB'tan büyük dosyalar kaynak görünümünde kalır.
+
+### İkili dosyalar
+
+Elektronik tablolar, belgeler veya görseller gibi metin olmayan dosyaları açmak için `"content": "binary"` ayarlayın. Düzenleyiciniz dosyanın baytlarını alır ve bayt geri verir; geri kalan her şey aynı şekilde çalışır.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // diskteki haliyle birebir bir Uint8Array
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+İkili bir düzenleyici, desenlerinin eşleştiği her dosyayı üstlenebilir; görseller ve PDF'ler gibi OpenChamber'ın kendisinin önizlediği dosyalar da buna dahildir. Kaynak görünümü yoktur ve kullanıcı onu kaydedilmemiş değişikliklerle tam ekrana aldığında veya tam ekrandan çıkardığında OpenChamber önce değişiklikleri kaydeder. Biçimi okumak ve yazmak düzenleyicinizin işidir: OpenChamber döndürdüğünüz baytları olduğu gibi geri yazar.
+
+Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değiştiğinde, kullanıcı değişiklikleri attığında ya da düzenleyici tam ekrana geçtiğinde veya tam ekrandan çıktığında OpenChamber sayfayı yeniden yükler ve dosyayı tekrar verir. Deseni eşleşen ilk etkin eklenti kazanır ve OpenChamber'ın kendi önizlemelerinden önce gelir. Yalnızca düzenleyiciden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu ve dosyaları kullanabilir, ama `page`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `checklist-editor` örneği eksiksiz bir düzenleyicidir.
+
 ## Eylemler, komutlar ve rozet
 
 Şerit ve + menüsünün ötesinde, bir eklenti üç yerde daha görünebilir. Hepsi eklentiye, bir etiket tıklamasının yaptığı gibi bir `item` verir.
@@ -234,7 +291,7 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 
 `match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
-Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümüdür, yukarıya bakın.
+Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü veya dosya düzenleyicisidir, yukarıya bakın.
 
 ## Paneldeki ilk satırlar
 

@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Вибрати всі',
   'settings.themeImport.deselectAll': 'Зняти вибір',
@@ -2088,7 +2089,13 @@ export const settingsDict = {
   "settings.openchamber.visual.goal.sectionTitle": "Ціль",
   "settings.openchamber.visual.goal.budgetLabel": "Типовий бюджет токенів",
   "settings.openchamber.visual.goal.budgetAria": "Застосовувати типовий бюджет токенів до нових цілей",
-  "settings.openchamber.visual.goal.description": "Увімкніть кнопку-мішень у полі вводу — і наступне повідомлення стане ціллю: агент автоматично працюватиме над нею під наглядом малої моделі, навіть поки вас немає поруч.",
+  "settings.openchamber.visual.goal.description": "Увімкніть кнопку-мішень у полі вводу — і наступне повідомлення стане ціллю: агент автоматично працюватиме над нею, навіть поки вас немає поруч, а після кожного ходу прогрес перевірятиметься.",
+  "settings.openchamber.visual.goal.checkerLabel": "Перевірка прогресу",
+  "settings.openchamber.visual.goal.checkerInfo": "Після кожного ходу звіт агента читається, щоб вирішити: ціль досягнута, чекає на вас чи роботу треба продовжувати. Jev вирішує менш ніж за секунду; мала модель працює на провайдері самої сесії й підміняє Jev, коли він не може відповісти.",
+  "settings.openchamber.visual.goal.checker.smallModel": "Мала модель",
+  "settings.openchamber.visual.goal.checker.viaSmallModel": "Кожен хід перевіряє мала модель.",
+  "settings.openchamber.visual.goal.checker.jevMissing": "Для Jev не налаштовано постачальника класифікації, тож кожен хід перевіряє мала модель.",
+  "settings.openchamber.visual.goal.checker.smallModelLink": "Налаштування малої моделі",
   "settings.openchamber.visual.field.showReasoningTracesAria": "Показати сліди міркувань",
   "settings.openchamber.visual.field.showReasoningTraces": "Показати сліди міркувань",
   "settings.openchamber.visual.field.collapsibleThinkingBlocksAria": "Увімкнути згортальні блоки міркувань",
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.enterToSend.modifier.label": "Надсилати за допомогою Ctrl/Cmd+Enter",
   ...linearIntegrationI18n.uk,
   ...thirdPartyIntegrationI18n.uk,
+  ...extensionCatalogI18n.uk,
   ...guestIntegrationsI18n.uk,
   ...extensionsSettingsI18n.uk,
   'settings.page.integrations.title': 'Інтеграції',

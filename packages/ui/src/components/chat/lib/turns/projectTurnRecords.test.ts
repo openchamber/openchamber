@@ -221,29 +221,6 @@ describe('projectTurnRecords', () => {
         expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1', 'a2', 'a3']);
     });
 
-    test('treats compaction summary text as justification activity in sorted mode', () => {
-        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        user.parts = [{ id: 'p1', type: 'text', text: 'prompt' } as Part];
-        const compaction = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
-        (compaction.info as { summary?: boolean; finish?: string }).summary = true;
-        (compaction.info as { summary?: boolean; finish?: string }).finish = 'stop';
-        compaction.parts = [{ id: 'cp1', type: 'text', text: 'compacted context summary' } as Part];
-        const assistant = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 3 });
-        (assistant.info as { finish?: string }).finish = 'stop';
-        assistant.parts = [{ id: 'ap1', type: 'text', text: 'final answer' } as Part];
-
-        const projection = projectTurnRecords([user, compaction, assistant], {
-            showTextJustificationActivity: true,
-        });
-
-        const turn = projection.turns[0];
-        expect(turn?.summaryText).toBe('final answer');
-        const compactionActivity = turn?.activityParts.find((activity) => activity.messageId === 'a1');
-        expect(compactionActivity?.kind).toBe('justification');
-        const finalActivity = turn?.activityParts.find((activity) => activity.messageId === 'a2');
-        expect(finalActivity).toBe(undefined);
-    });
-
     test('keeps text inline (not justification) when a message is blocked on a pending question', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         user.parts = [{ id: 'p1', type: 'text', text: 'prompt' } as Part];

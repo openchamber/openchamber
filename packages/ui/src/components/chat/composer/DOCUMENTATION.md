@@ -108,6 +108,10 @@ never stacks glass on glass: a CSS rule in `design-system.css` hides the
 composer's own contents while it is up, leaving the box as the single glass
 surface on desktop and the overlay itself on mobile.
 
+The box's lift shadow sits on a wrapper, never on the glass element itself.
+Chromium grows a backdrop-filter layer by the shadow's blur, and that band
+painted a flat grey strip over the bottom of the goal row stacked above.
+
 The context-chip preview stays above its chip. Its scrollable content is capped
 by the space between the chip and the chat column's top edge, so a long preview
 does not hide its entry actions behind the chat header.

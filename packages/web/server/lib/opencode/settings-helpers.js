@@ -427,6 +427,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
     }
+    if (candidate.sessionGoalChecker === 'classifier' || candidate.sessionGoalChecker === 'small-model') {
+      result.sessionGoalChecker = candidate.sessionGoalChecker;
+    }
     if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
       result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
     }

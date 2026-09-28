@@ -1,4 +1,5 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
+import type { FileEditorContribution } from './file-editor.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -408,6 +409,8 @@ export type OpenChamberContributes = {
   commands?: GuestCommandContribution[];
   /** How the extension's tool calls look in the chat. */
   tools?: GuestToolContribution[];
+  /** Editors the Files view opens matching files in. */
+  fileEditors?: FileEditorContribution[];
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -530,7 +533,8 @@ export type ParseManifestErrorCode =
   | 'invalid-filesystem'
   | 'invalid-actions'
   | 'invalid-commands'
-  | 'invalid-tools';
+  | 'invalid-tools'
+  | 'invalid-file-editors';
 
 export type ParseManifestFailure = {
   ok: false;

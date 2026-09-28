@@ -262,6 +262,19 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     if (section !== true && section?.title) guest.statusTitle = section.title;
     if (section !== true && section?.height !== undefined) guest.statusHeight = section.height;
   }
+  // File editors are frames of their own too; each entry is checked the same way.
+  const fileEditors = parsed.manifest.contributes.fileEditors ?? [];
+  for (const editor of fileEditors) {
+    if (!await resolveGuestAssetPath(packageRoot, editor.entry)) {
+      return { ok: false, code: 'invalid-manifest' };
+    }
+    if (!await guestBuiltScriptsReady(packageRoot, editor.entry)) {
+      return { ok: false, code: 'missing-build' };
+    }
+  }
+  if (fileEditors.length > 0) {
+    guest.fileEditors = fileEditors.map((editor) => ({ ...editor, match: [...editor.match] }));
+  }
   if (parsed.manifest.contributes.capabilities?.length) {
     guest.capabilities = [...parsed.manifest.contributes.capabilities];
   }
@@ -300,6 +313,11 @@ const withSource = (guest, source, displayPath) => ({
   source,
   path: displayPath,
 });
+
+/** Whether the package has any page the host loads: panel, background, status section, or file editor. */
+export const hasGuestFrame = (guest) => Boolean(
+  guest.entry || guest.backgroundEntry || guest.statusEntry || (Array.isArray(guest.fileEditors) && guest.fileEditors.length > 0),
+);
 
 /** Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest. */
 export const toPublicGuest = (guest) => {
@@ -361,6 +379,9 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.commands) && guest.commands.length > 0) {
     row.commands = guest.commands.map((command) => ({ ...command }));
+  }
+  if (Array.isArray(guest.fileEditors) && guest.fileEditors.length > 0) {
+    row.fileEditors = guest.fileEditors.map((editor) => ({ ...editor, match: [...editor.match] }));
   }
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));

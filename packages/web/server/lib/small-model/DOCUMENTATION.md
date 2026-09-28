@@ -41,10 +41,11 @@ login `generateSmallModelText` throws `404`. What happens next is per feature:
   model with the session as context and does not touch its history. Verified
   on OpenCode 2.0.2: the reply comes back and the message count stays at zero.
 - Session renaming, the session goal and the walkthrough do NOT fall back —
-  feeding a whole session into a model to write a title or audit a goal is the
+  feeding a whole session into a model to write a title or check a goal is the
   wrong cost. Their entry points read `available` from `GET /api/small-model`
   (`packages/ui/src/stores/useSmallModelStore.ts`) and show a disabled control
-  with the reason; the walkthrough uses its own readiness (`no-model`).
+  with the reason; the walkthrough uses its own readiness (`no-model`). A goal
+  is also allowed when Jev checks it instead (`../session-goal`).
 - Session assist is server-side and simply does nothing when
   `describeSmallModel` answers null.
 - Notes summarization and spoken summaries keep the original text and silence

@@ -915,6 +915,8 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
+  classifierEndpoint: () => routingRuntime.classifierEndpoint(),
+  jev: createJevClient(),
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
@@ -930,7 +932,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
       : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
     const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
       ? goal.statusReason
-      : (goal?.note || '');
+      : '';
     const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
     const notificationPayload = {
       title,

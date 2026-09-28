@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Tümünü seç',
   'settings.themeImport.deselectAll': 'Tümünün seçimini kaldır',
@@ -2037,7 +2038,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': 'Hedef',
   'settings.openchamber.visual.goal.budgetLabel': 'Varsayılan token bütçesi',
   'settings.openchamber.visual.goal.budgetAria': 'Yeni hedeflere varsayılan token bütçesi uygula',
-  'settings.openchamber.visual.goal.description': 'Composer\'daki hedef düğmesini etkinleştirin; sonraki mesaj bir hedef olur: agent, siz uzaktayken bile otomatik olarak ona doğru çalışmaya devam eder ve küçük model tarafından denetlenir.',
+  'settings.openchamber.visual.goal.description': 'Composer\'daki hedef düğmesini etkinleştirin; sonraki mesaj bir hedef olur: agent, siz uzaktayken bile otomatik olarak ona doğru çalışmaya devam eder ve ilerleme her turdan sonra kontrol edilir.',
+  'settings.openchamber.visual.goal.checkerLabel': 'İlerleme kontrolü',
+  'settings.openchamber.visual.goal.checkerInfo': 'Her turdan sonra agent\'ın raporu okunur ve hedefin tamamlanıp tamamlanmadığına, sizi bekleyip beklemediğine ya da devam etmesi gerektiğine karar verilir. Jev bir saniyeden kısa sürede karar verir; küçük model oturumun kendi sağlayıcısında çalışır ve Jev yanıt veremediğinde de devreye girer.',
+  'settings.openchamber.visual.goal.checker.smallModel': 'Küçük model',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': 'Her tur küçük model tarafından kontrol edilir.',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'Jev için sınıflandırma sağlayıcısı ayarlanmamış, bu yüzden her turu küçük model kontrol eder.',
+  'settings.openchamber.visual.goal.checker.smallModelLink': 'Küçük model ayarları',
   'settings.openchamber.visual.field.showReasoningTracesAria': 'Akıl yürütme izlerini göster',
   'settings.openchamber.visual.field.showReasoningTraces': 'Akıl Yürütme İzlerini Göster',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': 'Daraltılabilir akıl yürütme bloklarını etkinleştir',
@@ -2298,6 +2305,7 @@ export const settingsDict = {
   'settings.page.integrations.description': 'OpenChamber’ın birlikte çalıştığı hizmetleri ve abonelikleri bağlayın.',
   ...linearIntegrationI18n.tr,
   ...thirdPartyIntegrationI18n.tr,
+  ...extensionCatalogI18n.tr,
   'settings.agents.page.field.steps': 'En fazla adım',
   'settings.agents.page.field.stepsTooltip': 'Ajanın bir turda durmadan önce yapabileceği araç adımı sayısı.',
   'settings.agents.page.field.clearStepsAria': 'En fazla adımı temizle',

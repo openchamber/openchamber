@@ -182,6 +182,63 @@ const { entries } = await host.listDir(".");
 
 你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成和文件，但不能用 `page`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `git-graph-status` 就是一个完整的分区。
 
+## 为你的文件类型提供编辑器
+
+`contributes.fileEditors` 让文件在你的页面中打开，而不是在文本编辑器中。用户在 Files 中打开匹配的文件时，OpenChamber 会在那里显示你的编辑器，并带有和内置查看器相同的源码切换、全屏按钮和保存按钮。
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` 只比较文件名，不区分大小写。`*` 匹配任意长度的字符，`?` 匹配单个字符。模式不能包含 `/`，也不能只由通配符组成。
+- `entry` 是你文件夹里的 HTML 页面。不需要 `panel.entry`，扩展可以只有这个编辑器，没有侧栏图标。
+- `content` 为 `"text"`（默认）或 `"binary"`，见下文。
+- 每个扩展最多 8 个编辑器，每个编辑器最多 16 个模式。
+
+文件由 OpenChamber 管理。你的页面从不读写它，也不需要为此申请任何权限。OpenChamber 把文本交给你，保存时向你要编辑后的文本，并处理 Cmd/Ctrl+S、自动保存、未保存更改提示、换行符以及磁盘上的更改：
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // 文本编辑器拿到的总是文本
+  load(file.content); // 还有 file.path、file.name、file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// 每次编辑后调用。`edited` 会推迟自动保存，直到用户停下来。
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// OpenChamber 写入期间做出的编辑会让文件保持未保存状态。
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` 是任意一个随文档变化而变化的短字符串，例如哈希值。如果某个文件不是你的编辑器能打开的，调用 `host.reportFileUnsupported()`，OpenChamber 会显示它的源码并附带提示。超过 20 MB 的文件保持在源码视图中。
+
+### 二进制文件
+
+设置 `"content": "binary"` 即可打开非文本文件，例如电子表格、文档或图片。你的编辑器拿到文件的字节，再交回字节；其余一切照常。
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // 一个 Uint8Array，与磁盘上完全一致
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+二进制编辑器可以接管任何与其模式匹配的文件，包括 OpenChamber 自己会预览的文件，比如图片和 PDF。它没有源码视图；当用户在有未保存更改时将它切换到全屏或退出全屏，OpenChamber 会先保存这些更改。读写该格式由你的编辑器负责：OpenChamber 会原样写回你返回的字节。
+
+你的页面看到的 `ctx.surface` 是 `file`。当文件在磁盘上发生变化、用户放弃更改，或编辑器进入或退出全屏时，OpenChamber 会重新加载页面并再次交给它文件。第一个模式匹配且已启用的扩展胜出，优先于 OpenChamber 自带的预览。只有编辑器的扩展可以使用权限、服务、集成和文件，但不能用 `page`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `checklist-editor` 就是一个完整的编辑器。
+
 ## 操作、命令和徽标
 
 除了侧栏和 + 菜单，扩展还可以出现在另外三个地方。它们都以和点击标签相同的方式把 `item` 交给扩展。
@@ -234,7 +291,7 @@ host.onResolve(async ({ command, args }) => {
 
 `match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
 
-只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它可以只声明 `tools`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区，见上文。
+只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它可以只声明 `tools`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区或文件编辑器，见上文。
 
 ## 面板里的前几行代码
 

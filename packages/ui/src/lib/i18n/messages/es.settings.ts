@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Seleccionar todo',
   'settings.themeImport.deselectAll': 'Deseleccionar todo',
@@ -2088,7 +2089,13 @@ export const settingsDict = {
   "settings.openchamber.visual.goal.sectionTitle": "Objetivo",
   "settings.openchamber.visual.goal.budgetLabel": "Presupuesto de tokens predeterminado",
   "settings.openchamber.visual.goal.budgetAria": "Aplicar un presupuesto de tokens predeterminado a los nuevos objetivos",
-  "settings.openchamber.visual.goal.description": "Activa el botón de diana en el compositor y el próximo mensaje se convierte en un objetivo: el agente sigue trabajando hacia él automáticamente, auditado por el modelo pequeño, incluso mientras no estás.",
+  "settings.openchamber.visual.goal.description": "Activa el botón de diana en el compositor y el próximo mensaje se convierte en un objetivo: el agente sigue trabajando hacia él automáticamente, incluso mientras no estás, y su progreso se comprueba después de cada turno.",
+  "settings.openchamber.visual.goal.checkerLabel": "Comprobación del progreso",
+  "settings.openchamber.visual.goal.checkerInfo": "Después de cada turno se lee el informe del agente para decidir si el objetivo está cumplido, te está esperando o debe seguir. Jev decide en menos de un segundo; el modelo pequeño usa el proveedor de la propia sesión y también entra cuando Jev no puede responder.",
+  "settings.openchamber.visual.goal.checker.smallModel": "Modelo pequeño",
+  "settings.openchamber.visual.goal.checker.viaSmallModel": "El modelo pequeño comprueba cada turno.",
+  "settings.openchamber.visual.goal.checker.jevMissing": "No hay ningún proveedor de clasificación configurado para Jev, así que el modelo pequeño comprueba cada turno.",
+  "settings.openchamber.visual.goal.checker.smallModelLink": "Ajustes del modelo pequeño",
   "settings.openchamber.visual.field.showReasoningTracesAria": "Mostrar rastros de razonamiento",
   "settings.openchamber.visual.field.showReasoningTraces": "Mostrar trazas de razonamiento",
   "settings.openchamber.visual.field.collapsibleThinkingBlocksAria": "Habilitar bloques de razonamiento colapsables",
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.enterToSend.modifier.label": "Enviar con Ctrl/Cmd+Intro",
   ...linearIntegrationI18n.es,
   ...thirdPartyIntegrationI18n.es,
+  ...extensionCatalogI18n.es,
   ...guestIntegrationsI18n.es,
   ...extensionsSettingsI18n.es,
   'settings.page.integrations.title': 'Integraciones',

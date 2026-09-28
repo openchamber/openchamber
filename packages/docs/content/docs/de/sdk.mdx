@@ -182,6 +182,63 @@ Schreibvorgänge sind atomar: OpenChamber schreibt eine temporäre Datei und ben
 
 Deine Seite sieht `ctx.surface` als `status`. OpenChamber lädt sie nur, solange das Work-Status-Panel sichtbar und dein Abschnitt aufgeklappt ist, und entlädt sie, wenn der Nutzer ihn zuklappt. Halte dort also nichts, was du nicht neu aufbauen kannst. Eine Erweiterung nur mit Abschnitt darf Berechtigungen, einen Dienst, eine Integration und Dateien nutzen, aber nicht `page`, `attach`, `actions` oder `commands`. Nur Web und Desktop. Das Beispiel `git-graph-status` ist ein vollständiger Abschnitt.
 
+## Ein Editor für deinen Dateityp
+
+`contributes.fileEditors` öffnet Dateien in deiner Seite statt im Texteditor. Wenn der Nutzer in Files eine passende Datei öffnet, zeigt OpenChamber dort deinen Editor, mit demselben Quelltext-Umschalter, Vollbild-Button und Speichern-Button wie die eingebauten Viewer.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` vergleicht nur Dateinamen und ignoriert Groß- und Kleinschreibung. `*` passt auf beliebig viele Zeichen, `?` auf genau eines. Ein Muster darf kein `/` enthalten und nicht nur aus Platzhaltern bestehen.
+- `entry` ist eine HTML-Seite in deinem Ordner. Du brauchst kein `panel.entry`, die Erweiterung kann also nur aus dem Editor bestehen, ohne Icon in der Leiste.
+- `content` ist `"text"` (Standard) oder `"binary"`, siehe unten.
+- Bis zu 8 Editoren pro Erweiterung, jeweils bis zu 16 Muster.
+
+OpenChamber verwaltet die Datei. Deine Seite liest oder schreibt sie nie und braucht dafür keine Berechtigung. OpenChamber gibt dir den Text, fragt beim Speichern nach dem bearbeiteten Text und kümmert sich um Cmd/Ctrl+S, automatisches Speichern, die Nachfrage bei ungespeicherten Änderungen, Zeilenenden und Änderungen auf der Festplatte:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // ein Texteditor bekommt immer Text
+  load(file.content); // auch file.path, file.name, file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Nach jeder Änderung aufrufen. `edited` hält das automatische Speichern zurück, bis der Nutzer aufhört.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Änderungen, die entstehen, während OpenChamber schreibt, lassen die Datei ungespeichert.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` ist ein beliebiger kurzer String, der sich ändert, wenn sich das Dokument ändert, etwa ein Hash. Wenn eine Datei nichts ist, was dein Editor öffnen kann, rufe `host.reportFileUnsupported()` auf, dann zeigt OpenChamber ihren Quelltext mit einem Hinweis. Dateien über 20 MB bleiben in der Quelltextansicht.
+
+### Binärdateien
+
+Setze `"content": "binary"`, um Dateien zu öffnen, die kein Text sind, etwa Tabellen, Dokumente oder Bilder. Dein Editor bekommt die Bytes der Datei und gibt Bytes zurück; alles andere funktioniert genauso.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // ein Uint8Array, genau wie auf der Festplatte
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Ein binärer Editor kann jede Datei übernehmen, auf die seine Muster passen, auch solche, für die OpenChamber selbst eine Vorschau zeigt, wie Bilder und PDFs. Er hat keine Quelltextansicht, und wenn der Nutzer ihn mit ungespeicherten Änderungen in den Vollbildmodus bringt oder daraus holt, speichert OpenChamber sie vorher. Das Format zu lesen und zu schreiben ist Sache deines Editors: OpenChamber schreibt genau die Bytes zurück, die du zurückgibst.
+
+Deine Seite sieht `ctx.surface` als `file`. OpenChamber lädt sie neu und übergibt die Datei erneut, wenn sich die Datei auf der Festplatte ändert, der Nutzer Änderungen verwirft oder der Editor in den Vollbildmodus wechselt oder ihn verlässt. Die erste aktivierte Erweiterung mit passendem Muster gewinnt, noch vor den eigenen Vorschauen von OpenChamber. Eine Erweiterung nur mit Editor darf Berechtigungen, einen Dienst, eine Integration und Dateien nutzen, aber nicht `page`, `attach`, `actions` oder `commands`. Nur Web und Desktop. Das Beispiel `checklist-editor` ist ein vollständiger Editor.
+
 ## Aktionen, Befehle und das Badge
 
 Neben der Leiste und dem +-Menü kann eine Erweiterung an drei weiteren Stellen erscheinen. Alle übergeben der Erweiterung ein `item`, genau wie ein Klick auf einen Chip.
@@ -234,7 +291,7 @@ Wenn dein OpenCode-Plugin oder MCP-Server ein Tool hinzufügt, zeigt der Chat de
 
 `match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
 
-Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt mit eigenem `entry`, siehe oben.
+Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt oder ein Datei-Editor mit eigenem `entry`, siehe oben.
 
 ## Die ersten Zeilen im Panel
 

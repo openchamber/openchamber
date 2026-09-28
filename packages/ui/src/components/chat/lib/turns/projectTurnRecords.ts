@@ -26,16 +26,6 @@ const getMessageCompletedAt = (message: ChatMessageEntry): number | undefined =>
     return typeof completed === 'number' ? completed : undefined;
 };
 
-const getUserSummaryBody = (message: ChatMessageEntry): string | undefined => {
-    const summaryBody = (message.info as { summary?: { body?: unknown } | null | undefined })?.summary?.body;
-    if (typeof summaryBody !== 'string') {
-        return undefined;
-    }
-
-    const trimmed = summaryBody.trim();
-    return trimmed.length > 0 ? summaryBody : undefined;
-};
-
 const createTurnMessageRecord = (message: ChatMessageEntry, order: number): TurnMessageRecord => {
     const role = resolveMessageRole(message);
     return {
@@ -120,7 +110,7 @@ const hydrateTurnRecord = (
     effectiveOptions: ProjectTurnRecordsOptions,
 ): TurnRecord => {
     turn.summary = projectTurnSummary(turn.assistantMessages);
-    turn.summaryText = turn.summary.text ?? getUserSummaryBody(turn.userMessage);
+    turn.summaryText = turn.summary.text;
     // Changed files and their line counts are only shown under a finished
     // answer, so tool patches are not parsed while the turn still streams.
     const finalMessage = turn.assistantMessages[turn.assistantMessages.length - 1];

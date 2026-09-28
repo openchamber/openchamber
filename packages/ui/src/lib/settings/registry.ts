@@ -473,6 +473,14 @@ export const SETTINGS_REGISTRY = {
   // Jev runs on the OpenChamber server, which VS Code does not have.
   sessionWorkAutoOpen: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionWorkAutoOpen', (v) => useUIStore.getState().setSessionWorkAutoOpen(v)) }),
   sessionGoalEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalEnabled', (v) => useUIStore.getState().setSessionGoalEnabled(v)) }),
+  // Who checks goal progress. The goal loop runs on the OpenChamber server,
+  // which VS Code does not have.
+  sessionGoalChecker: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseOneOf(['classifier', 'small-model']),
+    ui: uiStore('sessionGoalChecker', (v) => useUIStore.getState().setSessionGoalChecker(v)),
+  }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),
   summarizeLastMessage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('summarizeLastMessage', (v) => useUIStore.getState().setSummarizeLastMessage(v)) }),

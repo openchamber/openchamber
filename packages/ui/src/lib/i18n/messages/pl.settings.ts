@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Zaznacz wszystkie',
   'settings.themeImport.deselectAll': 'Odznacz wszystkie',
@@ -1170,7 +1171,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': 'Cel',
   'settings.openchamber.visual.goal.budgetLabel': 'Domyślny budżet tokenów',
   'settings.openchamber.visual.goal.budgetAria': 'Stosuj domyślny budżet tokenów do nowych celów',
-  'settings.openchamber.visual.goal.description': 'Uzbrój przycisk celu w kompozytorze, a następna wiadomość stanie się celem: agent będzie nad nim automatycznie pracować, audytowany przez mały model, nawet pod twoją nieobecność.',
+  'settings.openchamber.visual.goal.description': 'Uzbrój przycisk celu w kompozytorze, a następna wiadomość stanie się celem: agent będzie nad nim automatycznie pracować, nawet pod twoją nieobecność, a po każdej turze postęp zostanie sprawdzony.',
+  'settings.openchamber.visual.goal.checkerLabel': 'Sprawdzanie postępu',
+  'settings.openchamber.visual.goal.checkerInfo': 'Po każdej turze raport agenta jest czytany, by zdecydować, czy cel jest osiągnięty, czeka na ciebie, czy praca ma trwać dalej. Jev decyduje w mniej niż sekundę; mały model działa u dostawcy samej sesji i zastępuje Jev, gdy ten nie może odpowiedzieć.',
+  'settings.openchamber.visual.goal.checker.smallModel': 'Mały model',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': 'Każdą turę sprawdza mały model.',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'Dla Jev nie skonfigurowano dostawcy klasyfikacji, więc każdą turę sprawdza mały model.',
+  'settings.openchamber.visual.goal.checker.smallModelLink': 'Ustawienia małego modelu',
   'settings.openchamber.visual.field.showReasoningTraces': 'Pokaż ślady rozumowania',
   'settings.openchamber.visual.field.showReasoningTracesAria': 'Pokaż ślady rozumowania',
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': 'Włącz zwijalne bloki rozumowania',
@@ -2299,6 +2306,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Wyślij klawiszami Ctrl/Cmd+Enter',
   ...linearIntegrationI18n.pl,
   ...thirdPartyIntegrationI18n.pl,
+  ...extensionCatalogI18n.pl,
   ...guestIntegrationsI18n.pl,
   ...extensionsSettingsI18n.pl,
   'settings.page.integrations.title': 'Integracje',

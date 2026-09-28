@@ -107,6 +107,28 @@ export type {
   SocketBinding,
   SocketPlatform,
 } from './manifest.ts';
+export {
+  GUEST_FILE_EDITORS_MAX,
+  GUEST_FILE_EDITOR_CONTENT_MAX,
+  GUEST_FILE_EDITOR_PATTERNS_MAX,
+  GUEST_FILE_EDITOR_PATTERN_MAX,
+  GUEST_FILE_EDITOR_TITLE_MAX,
+  GUEST_FILE_EDITOR_VERSION_MAX,
+  createFileSaveTracker,
+  fileEditorPayloadSize,
+  isFileEditorPattern,
+  matchesFileEditorPattern,
+} from './file-editor.ts';
+export type {
+  FileEditorChange,
+  FileEditorContentKind,
+  FileEditorContribution,
+  FileEditorDocument,
+  FileEditorSnapshot,
+  FileSnapshotPurpose,
+  FileSnapshotRequest,
+  FileSnapshotResultPayload,
+} from './file-editor.ts';
 export { connectHost, HostRequestError } from './host.ts';
 export type { HostClient, HostClientOptions, HostFrame } from './host.ts';
 export {
@@ -144,6 +166,13 @@ export type {
   GuestActionItem,
   GuestActionResultMessage,
   HostActionMessage,
+  HostFileOpenMessage,
+  HostFileSnapshotMessage,
+  HostFileSavedMessage,
+  GuestFileSnapshotResultMessage,
+  GuestFileChangeMessage,
+  GuestFileSaveMessage,
+  GuestFileUnsupportedMessage,
   GuestBadgeMessage,
   GuestResizeMessage,
   GuestOpenCommitMessage,

@@ -182,6 +182,63 @@ Les écritures sont atomiques : OpenChamber écrit un fichier temporaire puis le
 
 Votre page voit `ctx.surface` à `status`. OpenChamber ne la charge que tant que le panneau Work Status est visible et votre section dépliée, et la décharge quand l'utilisateur replie la section. N'y gardez donc rien que vous ne puissiez reconstruire. Une extension réduite à une section peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `git-graph-status` est une section complète.
 
+## Un éditeur pour votre type de fichier
+
+`contributes.fileEditors` ouvre les fichiers dans votre page au lieu de l'éditeur de texte. Quand l'utilisateur ouvre un fichier correspondant dans Files, OpenChamber y affiche votre éditeur, avec la même bascule vers la source, le même bouton plein écran et le même bouton d'enregistrement que les visionneuses intégrées.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` ne compare que les noms de fichiers, sans tenir compte de la casse. `*` correspond à n'importe quelle suite de caractères et `?` à un seul. Un motif ne peut pas contenir `/` ni se composer uniquement de jokers.
+- `entry` est une page HTML dans votre dossier. `panel.entry` n'est pas nécessaire, et l'extension peut n'être que l'éditeur, sans icône dans la barre latérale.
+- `content` vaut `"text"` (par défaut) ou `"binary"`, voir plus bas.
+- Jusqu'à 8 éditeurs par extension, avec jusqu'à 16 motifs chacun.
+
+OpenChamber garde la main sur le fichier. Votre page ne le lit ni ne l'écrit jamais et n'a besoin d'aucune permission pour cela. OpenChamber vous transmet le texte, vous demande le texte modifié au moment d'enregistrer, et gère Cmd/Ctrl+S, l'enregistrement automatique, l'avertissement de modifications non enregistrées, les fins de ligne et les modifications faites sur le disque :
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // un éditeur de texte reçoit toujours du texte
+  load(file.content); // et aussi file.path, file.name, file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Appelez ceci après chaque modification. `edited` retient l'enregistrement automatique jusqu'à ce que l'utilisateur s'arrête.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Les modifications faites pendant qu'OpenChamber écrivait laissent le fichier non enregistré.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` est n'importe quelle courte chaîne qui change quand le document change, comme un hash. Si un fichier n'est pas quelque chose que votre éditeur sait ouvrir, appelez `host.reportFileUnsupported()` et OpenChamber affiche sa source avec un avertissement. Les fichiers de plus de 20 MB restent dans la vue source.
+
+### Fichiers binaires
+
+Indiquez `"content": "binary"` pour ouvrir des fichiers qui ne sont pas du texte, comme des tableurs, des documents ou des images. Votre éditeur reçoit les octets du fichier et renvoie des octets ; tout le reste fonctionne de la même façon.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // un Uint8Array, exactement comme sur le disque
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Un éditeur binaire peut prendre en charge n'importe quel fichier correspondant à ses motifs, y compris ceux dont OpenChamber affiche lui-même un aperçu, comme les images et les PDF. Il n'a pas de vue source, et quand l'utilisateur le passe en plein écran ou l'en sort avec des modifications non enregistrées, OpenChamber les enregistre d'abord. Lire et écrire le format revient à votre éditeur : OpenChamber réécrit exactement les octets que vous renvoyez.
+
+Votre page voit `ctx.surface` à `file`. OpenChamber la recharge, en lui retransmettant le fichier, quand le fichier change sur le disque, que l'utilisateur annule ses modifications, ou que l'éditeur passe en plein écran ou en sort. La première extension activée dont un motif correspond l'emporte, avant les aperçus propres à OpenChamber. Une extension réduite à un éditeur peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `checklist-editor` est un éditeur complet.
+
 ## Actions, commandes et le badge
 
 Au-delà de la barre latérale et du menu +, une extension peut apparaître à trois autres endroits. Tous transmettent à l'extension un `item`, de la même façon qu'un clic sur une puce.
@@ -234,7 +291,7 @@ Quand votre plugin OpenCode ou serveur MCP ajoute un outil, le chat affiche ses 
 
 `match` est le nom de l'outil tel qu'OpenCode le rapporte ; un `*` final correspond à un préfixe. `icon` est un nom Remixicon ou un fichier `.svg` dans votre paquet, comme `panel.icon`. `title` et `subtitle` sont des gabarits sur `input`, `output` et `metadata` de l'appel. `output` choisit comment le corps est rendu : `text`, `json` (un arbre), `markdown`, `code` avec un `language`, `table` avec `columns` (les lignes viennent du tableau de sortie ou de `output.items`) ou `auto` pour le rendu par défaut. Un `match` exact l'emporte sur un joker, et en cas d'égalité la première extension installée gagne. Aucune permission n'est nécessaire : cela ne change que la façon dont des données déjà dans le chat sont dessinées.
 
-Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et rien d'autre. L'autre exception est une section Work Status avec son propre `entry`, voir plus haut.
+Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et rien d'autre. L'autre exception est une section Work Status ou un éditeur de fichiers avec son propre `entry`, voir plus haut.
 
 ## Premières lignes dans le panneau
 

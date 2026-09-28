@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': '모두 선택',
   'settings.themeImport.deselectAll': '모두 선택 해제',
@@ -2088,7 +2089,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': '목표',
   'settings.openchamber.visual.goal.budgetLabel': '기본 토큰 예산',
   'settings.openchamber.visual.goal.budgetAria': '새 목표에 기본 토큰 예산 적용',
-  'settings.openchamber.visual.goal.description': '컴포저의 타깃 버튼을 켜면 다음 메시지가 목표가 됩니다. 에이전트는 소형 모델의 감사를 받으며 자리를 비운 동안에도 자동으로 계속 작업합니다.',
+  'settings.openchamber.visual.goal.description': '컴포저의 타깃 버튼을 켜면 다음 메시지가 목표가 됩니다. 에이전트는 자리를 비운 동안에도 자동으로 계속 작업하며, 매 턴마다 진행 상황을 확인합니다.',
+  'settings.openchamber.visual.goal.checkerLabel': '진행 확인',
+  'settings.openchamber.visual.goal.checkerInfo': '매 턴이 끝나면 에이전트의 보고를 읽고 목표가 완료되었는지, 사용자를 기다리는지, 계속해야 하는지 판단합니다. Jev는 1초 안에 판단합니다. 소형 모델은 세션 자체의 제공자에서 실행되며 Jev가 응답할 수 없을 때도 대신합니다.',
+  'settings.openchamber.visual.goal.checker.smallModel': '소형 모델',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': '매 턴은 소형 모델이 확인합니다.',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'Jev용 분류 제공자가 설정되어 있지 않아 매 턴을 소형 모델이 확인합니다.',
+  'settings.openchamber.visual.goal.checker.smallModelLink': '소형 모델 설정',
   'settings.openchamber.visual.field.showReasoningTracesAria': 'Reasoning trace 표시',
   'settings.openchamber.visual.field.showReasoningTraces': 'Reasoning Trace 표시',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': '접을 수 있는 추론 블록 활성화',
@@ -2306,6 +2313,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter로 전송',
   ...linearIntegrationI18n.ko,
   ...thirdPartyIntegrationI18n.ko,
+  ...extensionCatalogI18n.ko,
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   'settings.page.integrations.title': '통합',

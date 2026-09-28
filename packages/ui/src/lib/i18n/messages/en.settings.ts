@@ -2,6 +2,7 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Select all',
   'settings.themeImport.deselectAll': 'Deselect all',
@@ -2111,7 +2112,13 @@ export const settingsDict = {
   'settings.openchamber.visual.goal.sectionTitle': 'Goal',
   'settings.openchamber.visual.goal.budgetLabel': 'Default token budget',
   'settings.openchamber.visual.goal.budgetAria': 'Apply a default token budget to new goals',
-  'settings.openchamber.visual.goal.description': 'Arm the target button in the composer and the next message becomes a goal: the agent keeps working toward it automatically, audited by the small model, even while you are away.',
+  'settings.openchamber.visual.goal.description': 'Arm the target button in the composer and the next message becomes a goal: the agent keeps working toward it automatically, even while you are away, and its progress is checked after every turn.',
+  'settings.openchamber.visual.goal.checkerLabel': 'Progress check',
+  'settings.openchamber.visual.goal.checkerInfo': 'After every turn, the agent\'s report is read to decide whether the goal is done, waiting for you, or should keep going. Jev decides in under a second; the small model runs on the session\'s own provider and also steps in when Jev can\'t answer.',
+  'settings.openchamber.visual.goal.checker.smallModel': 'Small model',
+  'settings.openchamber.visual.goal.checker.viaSmallModel': 'Each turn is checked by the Small Model.',
+  'settings.openchamber.visual.goal.checker.jevMissing': 'No classification provider is set up for Jev, so the Small Model checks each turn.',
+  'settings.openchamber.visual.goal.checker.smallModelLink': 'Small Model settings',
   'settings.openchamber.visual.field.showReasoningTracesAria': 'Show reasoning traces',
   'settings.openchamber.visual.field.showReasoningTraces': 'Show Reasoning Traces',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': 'Enable collapsible reasoning blocks',
@@ -2296,6 +2303,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitUnit': 'prompts',
   ...linearIntegrationI18n.en,
   ...thirdPartyIntegrationI18n.en,
+  ...extensionCatalogI18n.en,
   ...guestIntegrationsI18n.en,
   ...extensionsSettingsI18n.en,
   'settings.page.integrations.title': 'Integrations',

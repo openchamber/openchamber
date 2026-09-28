@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | 앱 언어 태그 |
 | `directory` | 현재 프로젝트 디렉터리, 또는 `null` |
 | `session` | `{ id, title, busy }` 또는 `null`. 제목이 없으면 세션 id를 사용합니다. `busy`는 실시간 상태입니다. 세션에 있으면 `model`과 `agent`(OpenCode 에이전트)도 포함됩니다. |
-| `surface` | 레일은 `panel`, 첨부 창은 `dialog`, 전체 화면은 `page`, Work Status 패널은 `status` |
+| `surface` | 레일은 `panel`, 첨부 창은 `dialog`, 전체 화면은 `page`, Work Status 패널은 `status`, Files의 파일 편집기는 `file` |
 | `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
 | `connection` | 여러분의 통합에 대한 `{ connected, account }` |
 | `settings` | `integration.settings`에 선언한 입력란의 값 |
@@ -67,6 +67,12 @@ const host = connectHost();
 | `setBadge(count)` | 레일 아이콘에 숫자(0부터 999까지)를 표시하고, `null`이면 지웁니다 |
 | `openCommit(sha)` | 현재 프로젝트의 해당 커밋으로 Diff 뷰를 엽니다. `sha`는 16진수 7~64자이며, 커밋은 OpenChamber가 직접 읽습니다. |
 | `setHeight(px)` | Work Status 섹션의 높이를 정합니다. OpenChamber는 24~320픽셀 사이로 유지하고, 더 긴 콘텐츠는 페이지 안에서 스크롤됩니다. 다른 곳에서는 무시됩니다. |
+| `onFileOpen(listener)` | 파일 편집기: 편집할 파일을 받습니다. `{ path, name, readOnly }`에 더해 `encoding: "text"`이면 `content`, `encoding: "binary"`이면 `bytes`가 들어 있습니다. 페이지 안에서 Cmd/Ctrl+S로도 저장되게 합니다. |
+| `onFileSnapshot(handler)` | 파일 편집기: 편집된 파일 전체를 `{ content, version }`(바이너리 편집기는 `{ bytes, version }`)으로 반환합니다. OpenChamber는 저장할 때와 소스 보기나 전체 화면으로 전환하기 전에 호출합니다. |
+| `onFileSaved(listener)` | 파일 편집기: 해당 `version`의 스냅샷이 디스크에 저장되었습니다. `reportFileChange`로 응답하세요. |
+| `reportFileChange({ dirty, edited })` | 파일 편집기: 저장하지 않은 변경이 있는지, 문서가 방금 바뀌었는지 OpenChamber에 알립니다 |
+| `requestFileSave()` | 파일 편집기: Cmd/Ctrl+S처럼 지금 저장합니다 |
+| `reportFileUnsupported()` | 파일 편집기: 이 파일은 여기서 열 수 없으니 대신 소스를 보여 줍니다 |
 
 ## attach, startSession, sessionLink
 

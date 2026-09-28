@@ -39,7 +39,7 @@ Auto. There is no env gate — the feature shipped dark behind
   plus tail. The new request is never cut.
 - `runtime.js` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
   endpoint a Jev request goes to now, or null; also used by
-  `../session-work`), `noteModelSelection`,
+  `../session-work` and `../session-goal`), `noteModelSelection`,
   `isAutoSession`, `resolveAutoSelection`, `applySessionSelection`, `routeSend`,
   `evaluatePermission`, `legacySafetyNetEnabled`, config, token and classifier
   writes, event broadcasts.

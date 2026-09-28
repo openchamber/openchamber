@@ -28,7 +28,7 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 | `locale` | la etiqueta de idioma de la app |
 | `directory` | el directorio del proyecto actual, o `null` |
 | `session` | `{ id, title, busy }` o `null`. Si no hay título, se usa el id de la sesión. `busy` es el estado en vivo. `model` y `agent` (el agente de OpenCode) aparecen cuando la sesión los tiene. |
-| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status |
+| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status, `file` como editor de archivos en Files |
 | `item` | para qué se abrió esta superficie, o `null`: el elemento adjunto en el que el usuario hizo clic (los mismos campos que pasaste a `attach`, incluido `data`), un mensaje (`kind: "message"`) o una sesión (`kind: "session"`) desde una de tus acciones declaradas. Ver [Acciones](/sdk/#acciones-comandos-y-la-insignia). |
 | `connection` | `{ connected, account }` de tu integración |
 | `settings` | los valores de los campos que declaraste en `integration.settings` |
@@ -67,6 +67,12 @@ Los tokens de acceso nunca aparecen aquí ni en el resultado de un `request`.
 | `setBadge(count)` | muestra un número (0 a 999) en tu icono de la barra lateral, o `null` para quitarlo |
 | `openCommit(sha)` | abrir la vista Diff en ese commit del proyecto actual. `sha` tiene de 7 a 64 caracteres hexadecimales; OpenChamber lee el commit por su cuenta. |
 | `setHeight(px)` | fijar la altura de tu sección de Work Status. OpenChamber la mantiene entre 24 y 320 píxeles; el contenido más alto se desplaza dentro de tu página. En otros sitios se ignora. |
+| `onFileOpen(listener)` | editores de archivos: recibir el archivo que se va a editar, `{ path, name, readOnly }` más `encoding: "text"` con `content`, o `encoding: "binary"` con `bytes`. También hace que Cmd/Ctrl+S guarde dentro de tu página. |
+| `onFileSnapshot(handler)` | editores de archivos: devolver `{ content, version }` (o `{ bytes, version }` en un editor binario), el archivo editado completo. OpenChamber lo llama para guardar y antes de cambiar a la vista de código fuente o a pantalla completa. |
+| `onFileSaved(listener)` | editores de archivos: la instantánea con esa `version` está en disco. Responde con `reportFileChange`. |
+| `reportFileChange({ dirty, edited })` | editores de archivos: indicar a OpenChamber si hay cambios sin guardar y si el documento acaba de cambiar |
+| `requestFileSave()` | editores de archivos: guardar ahora, igual que Cmd/Ctrl+S |
+| `reportFileUnsupported()` | editores de archivos: este archivo no se puede abrir aquí, mostrar su código fuente en su lugar |
 
 ## attach, startSession y sessionLink
 

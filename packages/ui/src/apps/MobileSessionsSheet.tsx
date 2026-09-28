@@ -114,6 +114,8 @@ import { useCollapsedSessionActivityState } from '@/components/session/sidebar/s
 import type { SessionNode } from '@/components/session/sidebar/types';
 import { buildMultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
+import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
+import { usePendingRequestCounts } from './usePendingRequestCounts';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -315,6 +317,9 @@ const SessionRow: React.FC<{
   work?: MobileSessionWorkAction;
   /** Pin / Unpin in the swipe actions, and the pin marker; top-level rows. */
   pin?: MobileSessionPinAction;
+  /** Subsessions of the row; while they are hidden, their waiting requests
+      count on this row. Absent: only the row's own requests count. */
+  descendantIdsOf?: (sessionId: string) => readonly string[];
 }> = ({
   session,
   active,
@@ -337,6 +342,7 @@ const SessionRow: React.FC<{
   onCancelRename,
   work,
   pin,
+  descendantIdsOf,
 }) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
@@ -352,6 +358,13 @@ const SessionRow: React.FC<{
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   // Jev thinks this work looks finished: the same quiet check the sidebar shows.
   const showDoneHint = Boolean(work?.inWork) && !isStreaming && isDoneSuggested(session);
+  // A collapsed row stands for its hidden subsessions too; an expanded one
+  // leaves their requests to their own rows.
+  const familyIds = React.useMemo(
+    () => (descendantIdsOf && !(hasChildren && expanded) ? [session.id, ...descendantIdsOf(session.id)] : [session.id]),
+    [descendantIdsOf, expanded, hasChildren, session.id],
+  );
+  const pendingRequests = usePendingRequestCounts(familyIds);
 
   const rowContent = (
     <>
@@ -440,6 +453,10 @@ const SessionRow: React.FC<{
             {showDoneHint ? (
               <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
             ) : null}
+            {/* Goal and waiting requests sit before the time, so the time
+                column stays aligned from row to row. */}
+            <MobileSessionGoalGlyph session={session} />
+            <MobileSessionPendingBadges {...pendingRequests} />
             {/* The elapsed turn takes the time slot while it matters, then
                 hands it back to the relative timestamp. */}
             {showActivityDuration ? (
@@ -960,6 +977,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
     return children;
   }, [sessions]);
+  const descendantIdsOf = React.useCallback(
+    (sessionId: string) => getDescendantIds(childrenBySessionId, sessionId),
+    [childrenBySessionId],
+  );
 
   // Managed Chats (sessions under ~/.config/openchamber/chats) are not owned
   // by any registered project; they get their own section above the project
@@ -1340,6 +1361,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onCancelRename={() => setRenamingSessionId(null)}
             work={workActionFor(session)}
             pin={pinActionFor(session)}
+            descendantIdsOf={descendantIdsOf}
           />
           {hasChildren && expanded
             ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
@@ -1679,6 +1701,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     onToggleWork: sessionWorkEnabled ? (session, inWork) => { void handleToggleWork(session, inWork); } : undefined,
     isPinned,
     onTogglePin: handleTogglePin,
+    descendantIdsOf,
   };
 
   const hasNoMatches =
