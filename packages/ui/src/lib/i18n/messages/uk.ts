@@ -1377,6 +1377,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.actions.expandPanel": "Розгорнути панель",
   "contextPanel.actions.closePanel": "Закрити панель",
   "contextPanel.actions.resizePanelAria": "Змінити розмір контекстної панелі",
+  "bottomTerminal.actions.resizePanelAria": "Змінити розмір панелі терміналу",
   "contextPanel.iframe.sessionChatTitle": "Сесійний чат {sessionID}",
   "contextPanel.preview.actions.reload": "Перезавантажити перегляд",
   "contextPanel.preview.actions.openExternal": "Відкрити в браузері",

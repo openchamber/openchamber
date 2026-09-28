@@ -1426,6 +1426,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.expandPanel': '펼치기 패널',
   'contextPanel.actions.closePanel': '패널 닫기',
   'contextPanel.actions.resizePanelAria': '컨텍스트 패널 크기 조정',
+  'bottomTerminal.actions.resizePanelAria': '터미널 패널 크기 조정',
   'contextPanel.iframe.sessionChatTitle': '세션 채팅 {sessionID}',
   'sidebarFilesTree.menu.rename': '이름 변경',
   'sidebarFilesTree.menu.copyPath': '경로 복사',

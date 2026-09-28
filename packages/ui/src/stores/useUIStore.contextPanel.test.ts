@@ -9,7 +9,13 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  useUIStore.setState({
+    contextPanelByDirectory: {},
+    contextRailOrder: [],
+    terminalPosition: 'right',
+    bottomTerminalOpen: false,
+    bottomTerminalExpanded: false,
+  });
   useTerminalStore.getState().clearAll();
 });
 
@@ -988,5 +994,73 @@ describe('useUIStore openAgentBrowserTab', () => {
     expect(agentId).not.toBe(shownId);
     expect(state?.tabs.find((tab) => tab.id === agentId)?.targetPath).toBe('https://a.test');
     expect(state?.activeTabId).toBe(shownId);
+  });
+});
+
+describe('useUIStore bottom terminal dock', () => {
+  const directory = '/repo';
+
+  test('toggles the bottom dock instead of the side panel when docked at the bottom', () => {
+    useUIStore.getState().setTerminalPosition('bottom');
+
+    useUIStore.getState().openContextSurface(directory, 'terminal');
+    expect(useUIStore.getState().bottomTerminalOpen).toBe(true);
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.isOpen ?? false).toBe(false);
+    expect(getTerminalTab(directory)).toBeDefined();
+
+    useUIStore.getState().openContextSurface(directory, 'terminal');
+    expect(useUIStore.getState().bottomTerminalOpen).toBe(false);
+  });
+
+  test('revealing a terminal tab opens the bottom dock and keeps the side panel as it was', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
+    const diffTabId = useUIStore.getState().contextPanelByDirectory[directory]?.activeTabId;
+    useUIStore.getState().setTerminalPosition('bottom');
+
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal', targetDirectory: '/repo/worktree' });
+
+    const panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(useUIStore.getState().bottomTerminalOpen).toBe(true);
+    expect(panel?.isOpen).toBe(true);
+    expect(panel?.activeTabId).toBe(diffTabId);
+    expect(getTerminalTab(directory)?.targetDirectory).toBe('/repo/worktree');
+  });
+
+  test('moving to the bottom carries an open side terminal over', () => {
+    useUIStore.getState().openContextSurface(directory, 'terminal');
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.isOpen).toBe(true);
+
+    useUIStore.getState().setTerminalPosition('bottom');
+
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.isOpen).toBe(false);
+    expect(useUIStore.getState().bottomTerminalOpen).toBe(true);
+  });
+
+  test('moving back to the side closes the bottom dock', () => {
+    useUIStore.getState().setTerminalPosition('bottom');
+    useUIStore.getState().openContextSurface(directory, 'terminal');
+    useUIStore.getState().toggleTerminalExpanded(directory);
+    expect(useUIStore.getState().bottomTerminalExpanded).toBe(true);
+
+    useUIStore.getState().setTerminalPosition('right');
+
+    expect(useUIStore.getState().bottomTerminalOpen).toBe(false);
+    expect(useUIStore.getState().bottomTerminalExpanded).toBe(false);
+  });
+
+  test('expand toggle opens a closed bottom dock expanded', () => {
+    useUIStore.getState().setTerminalPosition('bottom');
+
+    useUIStore.getState().toggleTerminalExpanded(directory);
+
+    expect(useUIStore.getState().bottomTerminalOpen).toBe(true);
+    expect(useUIStore.getState().bottomTerminalExpanded).toBe(true);
+  });
+
+  test('clamps the stored bottom dock height', () => {
+    useUIStore.getState().setBottomTerminalHeight(10);
+    expect(useUIStore.getState().bottomTerminalHeight).toBe(120);
+    useUIStore.getState().setBottomTerminalHeight(Number.NaN);
+    expect(useUIStore.getState().bottomTerminalHeight).toBe(280);
   });
 });

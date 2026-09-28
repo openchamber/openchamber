@@ -1351,6 +1351,7 @@ export const dict = {
   'contextPanel.actions.expandPanel': 'Paneli genişlet',
   'contextPanel.actions.closePanel': 'Paneli kapat',
   'contextPanel.actions.resizePanelAria': 'Bağlam panelini yeniden boyutlandır',
+  'bottomTerminal.actions.resizePanelAria': 'Terminal panelini yeniden boyutlandır',
   'contextPanel.iframe.sessionChatTitle': 'Session sohbeti {sessionID}',
   'contextPanel.preview.actions.reload': 'Önizlemeyi yeniden yükle',
   'contextPanel.preview.actions.openExternal': 'Tarayıcıda aç',

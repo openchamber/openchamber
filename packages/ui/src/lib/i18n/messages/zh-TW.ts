@@ -1389,6 +1389,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.expandPanel': '展開面板',
   'contextPanel.actions.closePanel': '關閉面板',
   'contextPanel.actions.resizePanelAria': '調整上下文面板大小',
+  'bottomTerminal.actions.resizePanelAria': '調整終端機面板大小',
   'contextPanel.iframe.sessionChatTitle': '會話聊天 {sessionID}',
   'contextPanel.preview.actions.reload': '重新整理預覽',
   'contextPanel.preview.actions.openExternal': '在瀏覽器中開啟',

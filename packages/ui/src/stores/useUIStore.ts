@@ -41,6 +41,7 @@ export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline';
+type TerminalPosition = 'right' | 'bottom';
 
 export const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 
@@ -229,6 +230,15 @@ const CONTEXT_PANEL_MAX_PERSISTED_WIDTH = 10000;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
+const BOTTOM_TERMINAL_DEFAULT_HEIGHT = 280;
+export const BOTTOM_TERMINAL_MIN_HEIGHT = 120;
+/** Persistence sanity bound only; the panel caps the height to its column. */
+const BOTTOM_TERMINAL_MAX_PERSISTED_HEIGHT = 10000;
+
+export const clampBottomTerminalHeight = (height: number): number => {
+  if (!Number.isFinite(height)) return BOTTOM_TERMINAL_DEFAULT_HEIGHT;
+  return Math.min(BOTTOM_TERMINAL_MAX_PERSISTED_HEIGHT, Math.max(BOTTOM_TERMINAL_MIN_HEIGHT, Math.round(height)));
+};
 /** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
 
@@ -801,6 +811,10 @@ interface UIStore {
   contextEditorVisible: boolean;
   contextEditorTreeWidth: number;
   notesPanelHeight: number;
+  terminalPosition: TerminalPosition;
+  bottomTerminalOpen: boolean;
+  bottomTerminalExpanded: boolean;
+  bottomTerminalHeight: number;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
   /**
@@ -1076,8 +1090,13 @@ interface UIStore {
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
+  /** Shows the terminal wherever it is docked and toggles its expanded state. */
+  toggleTerminalExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number, availableWidth?: number) => void;
   setNotesPanelHeight: (height: number) => void;
+  setTerminalPosition: (position: TerminalPosition) => void;
+  closeBottomTerminal: () => void;
+  setBottomTerminalHeight: (height: number) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
   setMessageQueueExpanded: (expanded: boolean) => void;
   setWorkStatusScrollTop: (scrollTop: number) => void;
@@ -1285,6 +1304,10 @@ export const useUIStore = create<UIStore>()(
         contextEditorVisible: true,
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
+        terminalPosition: 'right',
+        bottomTerminalOpen: false,
+        bottomTerminalExpanded: false,
+        bottomTerminalHeight: BOTTOM_TERMINAL_DEFAULT_HEIGHT,
         workStatusExpandedSections: {},
         messageQueueExpanded: true,
         workStatusScrollTop: 0,
@@ -1523,6 +1546,16 @@ export const useUIStore = create<UIStore>()(
             }
           };
 
+          // A bottom-docked terminal is one global panel under the chat; the
+          // per-directory terminal tab only carries its target directory.
+          if (mode === 'terminal' && state.terminalPosition === 'bottom') {
+            clearTerminalTarget();
+            set(state.bottomTerminalOpen
+              ? { bottomTerminalOpen: false, bottomTerminalExpanded: false }
+              : { bottomTerminalOpen: true });
+            return;
+          }
+
           if (panelState?.isOpen && activeTab?.mode === mode) {
             clearTerminalTarget();
             state.closeContextPanel(normalizedDirectory);
@@ -1572,18 +1605,23 @@ export const useUIStore = create<UIStore>()(
 
           // Revealing a real file shows it, even if the editor was hidden.
           const showsFile = nextTab.mode === 'file' && Boolean(nextTab.targetPath) && options?.reveal !== false;
+          // A bottom-docked terminal is revealed in the bottom panel, never in
+          // the side panel; the tab is still kept for its target directory.
+          const docksAtBottom = nextTab.mode === 'terminal' && get().terminalPosition === 'bottom';
+          const revealsBottomTerminal = docksAtBottom && options?.reveal !== false;
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
             const byDirectory = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: upsertContextPanelTab(current, nextTab, options),
+              [normalizedDirectory]: upsertContextPanelTab(current, nextTab, docksAtBottom ? { reveal: false } : options),
             };
 
             return {
               contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20),
               contextEditorVisible: showsFile || state.contextEditorVisible,
+              bottomTerminalOpen: revealsBottomTerminal || state.bottomTerminalOpen,
             };
           });
         },
@@ -1878,6 +1916,69 @@ export const useUIStore = create<UIStore>()(
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
           });
+        },
+
+        toggleTerminalExpanded: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          const state = get();
+          if (state.terminalPosition === 'bottom') {
+            if (!state.bottomTerminalOpen) {
+              state.openContextSurface(normalizedDirectory, 'terminal');
+            }
+            set((current) => ({ bottomTerminalExpanded: !current.bottomTerminalExpanded }));
+            return;
+          }
+
+          const panel = state.contextPanelByDirectory[normalizedDirectory];
+          const activeMode = panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
+          if (activeMode !== 'terminal') {
+            state.openContextSurface(normalizedDirectory, 'terminal');
+          }
+          state.toggleContextPanelExpanded(normalizedDirectory);
+        },
+
+        setTerminalPosition: (position) => {
+          set((state) => {
+            if (state.terminalPosition === position) {
+              return state;
+            }
+
+            if (position === 'right') {
+              return { terminalPosition: position, bottomTerminalOpen: false, bottomTerminalExpanded: false };
+            }
+
+            // A terminal showing in a side panel moves to the bottom panel.
+            let movedVisibleTerminal = false;
+            const byDirectory: Record<string, ContextPanelDirectoryState> = {};
+            for (const [key, panel] of Object.entries(state.contextPanelByDirectory)) {
+              const activeMode = panel.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
+              if (activeMode === 'terminal') {
+                movedVisibleTerminal = true;
+                byDirectory[key] = { ...panel, isOpen: false, expanded: false };
+              } else {
+                byDirectory[key] = panel;
+              }
+            }
+
+            return {
+              terminalPosition: position,
+              contextPanelByDirectory: byDirectory,
+              bottomTerminalOpen: movedVisibleTerminal,
+              bottomTerminalExpanded: false,
+            };
+          });
+        },
+
+        closeBottomTerminal: () => {
+          set({ bottomTerminalOpen: false, bottomTerminalExpanded: false });
+        },
+
+        setBottomTerminalHeight: (height) => {
+          set({ bottomTerminalHeight: clampBottomTerminalHeight(height) });
         },
 
         setContextPanelWidth: (directory, mode, width, availableWidth) => {
@@ -3182,6 +3283,9 @@ export const useUIStore = create<UIStore>()(
           contextEditorVisible: state.contextEditorVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,
+          terminalPosition: state.terminalPosition,
+          bottomTerminalOpen: state.bottomTerminalOpen,
+          bottomTerminalHeight: state.bottomTerminalHeight,
           workStatusExpandedSections: state.workStatusExpandedSections,
           messageQueueExpanded: state.messageQueueExpanded,
           workStatusScrollTop: state.workStatusScrollTop,

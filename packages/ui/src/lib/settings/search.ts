@@ -198,6 +198,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
+    id: 'appearance.terminal-position',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.terminalPosition',
+    descriptionKey: 'settings.openchamber.visual.field.terminalPositionTooltip',
+    keywords: ['terminal', 'dock', 'bottom', 'panel', 'position', 'layout'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.usage-reports',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.sendAnonymousUsageReports',

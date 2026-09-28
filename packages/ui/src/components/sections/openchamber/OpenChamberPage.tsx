@@ -156,7 +156,7 @@ const GeneralSectionContent: React.FC = () => {
                 'fileEditorKeymap',
                 ...(!isVSCode ? ['sessionTabs' as const] : []),
                 'autoSaveEnabled',
-                ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
+                ...(!isVSCode ? ['terminalQuickKeys' as const, 'terminalPosition' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),
                 'messageTransport',

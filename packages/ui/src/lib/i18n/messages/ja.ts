@@ -1373,6 +1373,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.expandPanel': 'パネルを展開',
   'contextPanel.actions.closePanel': 'パネルを閉じる',
   'contextPanel.actions.resizePanelAria': 'コンテキストパネルのサイズを変更',
+  'bottomTerminal.actions.resizePanelAria': 'ターミナルパネルのサイズを変更',
   'contextPanel.iframe.sessionChatTitle': 'セッションチャット {sessionID}',
   'contextPanel.preview.actions.reload': 'プレビューを再読み込み',
   'contextPanel.preview.actions.openExternal': 'ブラウザで開く',

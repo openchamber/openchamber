@@ -1191,6 +1191,7 @@ export const dict = {
   'contextPanel.actions.expandPanel': 'Panel ausklappen',
   'contextPanel.actions.closePanel': 'Panel schließen',
   'contextPanel.actions.resizePanelAria': 'Größe des Kontextpanels ändern',
+  'bottomTerminal.actions.resizePanelAria': 'Größe des Terminalpanels ändern',
   'contextPanel.iframe.sessionChatTitle': 'Sitzungschat {sessionID}',
   'contextPanel.preview.actions.reload': 'Vorschau neu laden',
   'contextPanel.preview.actions.openExternal': 'Im Browser öffnen',

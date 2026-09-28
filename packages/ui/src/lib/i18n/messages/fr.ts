@@ -1137,6 +1137,7 @@ export const dict = {
   'contextPanel.actions.expandPanel': 'Agrandir le panneau',
   'contextPanel.actions.closePanel': 'Fermer le panneau',
   'contextPanel.actions.resizePanelAria': 'Redimensionner le panneau contextuel',
+  'bottomTerminal.actions.resizePanelAria': 'Redimensionner le panneau du terminal',
   'contextPanel.iframe.sessionChatTitle': 'Session de discussion {sessionID}',
   'contextPanel.preview.actions.reload': 'Recharger l\'aperçu',
   'contextPanel.preview.actions.openExternal': 'Ouvrir dans le navigateur',

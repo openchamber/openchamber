@@ -83,6 +83,16 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   the session stores. A closed panel mounts no chat iframe.
   Singleton surfaces (git, pr, linear, notes, plan, context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
+- The terminal can dock under the chat instead (`terminalPosition: 'bottom'`,
+  a device-only setting). In that mode `BottomTerminalPanel.tsx` owns the one
+  mounted `TerminalView` and `ContextPanel` mounts none, because two views of
+  one directory would each attach a stream. The terminal tab record stays in
+  `contextPanelByDirectory` (its `targetDirectory` still drives the view), but
+  `openContextSurface`/`openContextPanelTab` for `terminal` toggle the global
+  `bottomTerminalOpen` flag instead of revealing the side panel, so the rail,
+  shortcuts, menu, command palette, and project actions route there without
+  their own checks. Bottom dock open state and height are global, not per
+  directory.
 - Portalled menus and dialogs handle their own Escape key. The panel's capture
   handler ignores their events so dismissing an overlay does not close the panel.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated

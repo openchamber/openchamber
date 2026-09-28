@@ -113,13 +113,7 @@ export const useKeyboardShortcuts = () => {
 
   const toggleTerminalSurfaceExpanded = () => {
     if (!currentDirectory) return;
-    const key = normalizeContextPanelDirectoryKey(currentDirectory);
-    const state = useUIStore.getState();
-    const panel = state.contextPanelByDirectory[key];
-    if (panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode !== 'terminal' : true) {
-      state.openContextSurface(key, 'terminal');
-    }
-    state.toggleContextPanelExpanded(key);
+    useUIStore.getState().toggleTerminalExpanded(normalizeContextPanelDirectoryKey(currentDirectory));
   };
 
   useKeybinds({

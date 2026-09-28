@@ -569,7 +569,8 @@ export const ContextPanel: React.FC = () => {
   React.useEffect(() => {
     if (shownBrowserTabId) setShownBrowserTab(shownBrowserTabId);
   }, [shownBrowserTabId]);
-  const isOpen = Boolean(panelState?.isOpen && activeTab);
+  const terminalDocksAtBottom = useUIStore((state) => state.terminalPosition === 'bottom');
+  const isOpen = Boolean(panelState?.isOpen && activeTab && !(terminalDocksAtBottom && activeTab.mode === 'terminal'));
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
   const hasOpenEditorFile = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
@@ -1093,9 +1094,11 @@ export const ContextPanel: React.FC = () => {
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
   );
+  // A bottom-docked terminal is mounted by BottomTerminalPanel; mounting it here
+  // too would attach a second stream to the same PTY.
   const terminalTab = React.useMemo(
-    () => tabs.find((tab) => tab.mode === 'terminal') ?? null,
-    [tabs],
+    () => (terminalDocksAtBottom ? null : tabs.find((tab) => tab.mode === 'terminal') ?? null),
+    [tabs, terminalDocksAtBottom],
   );
   // Keep-alive: the walkthrough holds reading progress and scroll position that
   // a remount would silently throw away.

@@ -651,6 +651,18 @@
       "scope": "device",
       "local": true
     },
+    "terminalPosition": {
+      "scope": "device",
+      "local": true
+    },
+    "bottomTerminalOpen": {
+      "scope": "device",
+      "local": true
+    },
+    "bottomTerminalHeight": {
+      "scope": "device",
+      "local": true
+    },
     "workStatusExpandedSections": {
       "scope": "device",
       "local": true

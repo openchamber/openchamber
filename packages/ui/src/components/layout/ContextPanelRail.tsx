@@ -38,7 +38,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
@@ -171,6 +171,8 @@ export const ContextPanelRail: React.FC = () => {
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
+  const terminalDocksAtBottom = useUIStore((state) => state.terminalPosition === 'bottom');
+  const bottomTerminalOpen = useUIStore((state) => state.bottomTerminalOpen);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const contextRailHiddenSurfaces = useUIStore((state) => state.contextRailHiddenSurfaces);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
@@ -271,6 +273,9 @@ export const ContextPanelRail: React.FC = () => {
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
   const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
+  const isSurfaceActive = (mode: ContextPanelMode): boolean => (
+    mode === 'terminal' && terminalDocksAtBottom ? bottomTerminalOpen : activeMode === mode
+  );
   const changedFilesCount = gitStatus?.files.length ?? 0;
 
   const surfaces = React.useMemo(() => {
@@ -350,7 +355,7 @@ export const ContextPanelRail: React.FC = () => {
               <ContextPanelRailItem
                 key={surface.id}
                 surface={surface}
-                isActive={activeMode === surface.mode}
+                isActive={isSurfaceActive(surface.mode)}
                 showActivityDot={false}
                 label={label}
                 description={t(surface.descriptionKey)}

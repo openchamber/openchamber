@@ -5,6 +5,7 @@ import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
+import { BottomTerminalPanel } from './BottomTerminalPanel';
 import { GuestHosts } from './GuestHosts';
 import { PluginPane } from './PluginPane';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
@@ -141,24 +142,28 @@ export const MainLayout: React.FC = () => {
                                         work-status panel measures this rather than the chat,
                                         which the context panel animates. */}
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
-                                        <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                            <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
-                                                <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
-                                            </div>
-                                            <ErrorBoundary><RunOverview /></ErrorBoundary>
-                                            <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
-                                            <ErrorBoundary><ArchiveView /></ErrorBoundary>
-                                            {isUsageStatsPageOpen && (
-                                                <div className="absolute inset-0 z-10 bg-background">
-                                                    <ErrorBoundary><UsageStatsView /></ErrorBoundary>
+                                        {/* Chat column: the bottom-docked terminal sits under the chat only, never under the context panel. */}
+                                        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-page-scroll-lock="true">
+                                            <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                                <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
+                                                    <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                                 </div>
-                                            )}
-                                            <ErrorBoundary><WorktreesView /></ErrorBoundary>
-                                            {guestPage && <div className="absolute inset-0 z-10 bg-background">
-                                                <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
-                                                    onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
-                                            </div>}
-                                        </main>
+                                                <ErrorBoundary><RunOverview /></ErrorBoundary>
+                                                <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                                                <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                                                {isUsageStatsPageOpen && (
+                                                    <div className="absolute inset-0 z-10 bg-background">
+                                                        <ErrorBoundary><UsageStatsView /></ErrorBoundary>
+                                                    </div>
+                                                )}
+                                                <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                                                {guestPage && <div className="absolute inset-0 z-10 bg-background">
+                                                    <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
+                                                        onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
+                                                </div>}
+                                            </main>
+                                            <ErrorBoundary><BottomTerminalPanel /></ErrorBoundary>
+                                        </div>
                                         <ContextPanel />
                                     </div>
                                 </div>

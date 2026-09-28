@@ -250,14 +250,7 @@ export const useMenuActions = (
         case 'toggle-terminal-expanded': {
           const directory = useDirectoryStore.getState().currentDirectory;
           if (!directory) break;
-          const key = normalizeContextPanelDirectoryKey(directory);
-          const uiState = useUIStore.getState();
-          const panel = uiState.contextPanelByDirectory[key];
-          const activeMode = panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
-          if (activeMode !== 'terminal') {
-            uiState.openContextSurface(key, 'terminal');
-          }
-          uiState.toggleContextPanelExpanded(key);
+          useUIStore.getState().toggleTerminalExpanded(normalizeContextPanelDirectoryKey(directory));
           break;
         }
 
