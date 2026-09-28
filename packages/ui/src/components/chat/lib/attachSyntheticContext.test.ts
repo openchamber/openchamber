@@ -67,6 +67,25 @@ const pluginMessage = (id: string): ChatMessageEntry => entry({
     text: 'Welcome back, here is where you left off.',
 });
 
+const labelledInjection = (id: string, description = 'quota-retry · 第 2 轮 · 内部标记(不发给模型)'): ChatMessageEntry => entry({
+    id,
+    sessionID: SESSION,
+    role: 'synthetic',
+    time: { created: 1 },
+    text: '',
+    description,
+});
+
+const subagentReport = (id: string): ChatMessageEntry => entry({
+    id,
+    sessionID: SESSION,
+    role: 'synthetic',
+    time: { created: 1 },
+    text: '<subagent sessionID="ses_child" state="completed" description="review">\nLooks good\n</subagent>',
+    description: 'review',
+    metadata: { source: 'subagent', childID: 'ses_child', agent: 'general', state: 'completed' },
+});
+
 describe('attachSyntheticContext', () => {
     test('attaches the context run to the user message it was sent with', () => {
         const user = userMessage('u1', 'fix this');
@@ -103,6 +122,39 @@ describe('attachSyntheticContext', () => {
 
         expect(result.map((message) => message.info.id)).toEqual(['sh1', 'u1']);
         expect(result[1]?.parts).toHaveLength(1);
+    });
+
+    test('keeps a subagent run report as its own entry and ends a context run at it', () => {
+        const report = subagentReport('s2');
+        const result = attachSyntheticContext([
+            userMessage('u1', 'hello'),
+            contextMessage('s1'),
+            report,
+            roleMessage('a1', 'assistant'),
+        ]);
+
+        expect(result.map((message) => message.info.id)).toEqual(['u1', 's2', 'a1']);
+        expect(result[1]).toBe(report);
+    });
+
+    test('keeps a labelled plugin injection as its own entry and ends a context run at it', () => {
+        const injection = labelledInjection('s3');
+        const result = attachSyntheticContext([
+            contextMessage('s1'),
+            injection,
+            userMessage('u1', 'hello'),
+        ]);
+
+        expect(result.map((message) => message.info.id)).toEqual(['s3', 'u1']);
+        expect(result[0]).toBe(injection);
+        expect(result[1]?.parts).toHaveLength(1);
+    });
+
+    test('drops an injection whose description is only whitespace', () => {
+        const blank = labelledInjection('s4', '   ');
+        const result = attachSyntheticContext([blank, userMessage('u1', 'hello')]);
+
+        expect(result.map((message) => message.info.id)).toEqual(['u1']);
     });
 
     test('returns the same array when there is nothing to fold', () => {

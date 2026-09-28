@@ -5,20 +5,22 @@
  * A send delivers each composer context item (an inline comment, terminal
  * output, a failed PR check, a linked issue) as its own `synthetic` message
  * right before the prompt, carrying the structured payload in its metadata.
- * Server plugins inject `synthetic` messages too, with no metadata; those are
- * prompt plumbing the user never wrote.
+ * Server plugins inject `synthetic` messages too. One with no metadata or
+ * label is prompt plumbing the user never wrote; one the plugin labelled with
+ * a `description` reports state the user should see.
  *
  * So: the contiguous run of synthetic messages immediately before a user
  * message belongs to that message. The ones carrying context metadata come
  * back as text parts on the user message, which is exactly where v1 kept them,
- * so they render as context chips inside the user bubble. Everything else the
- * timeline never shows is dropped here instead of rendering as an empty row.
+ * so they render as context chips inside the user bubble. A subagent run report
+ * or a labelled injection stays as its own entry. Everything else the timeline
+ * never shows is dropped here instead of rendering as an empty row.
  */
 
 import type { Part, TextPart } from '@/lib/opencode/model';
 import { readContextPart } from '@/lib/messages/contextParts';
 
-import { isSkippedTimelineRole } from './timelineRoles';
+import { isLabelledInjection, isSkippedTimelineRole, isSubagentRunEntry } from './timelineRoles';
 import type { ChatMessageEntry } from './turns/types';
 
 const contextPartFromSyntheticMessage = (message: ChatMessageEntry): TextPart => {
@@ -71,6 +73,12 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
     for (const message of messages) {
         const role = message.info.role;
 
+        if (isSubagentRunEntry(message.info)) {
+            pendingContext = [];
+            result.push(message);
+            continue;
+        }
+
         if (role === 'synthetic') {
             if (readContextPart({ type: 'text', metadata: message.info.metadata })) {
                 let part = contextPartBySyntheticEntry.get(message);
@@ -79,6 +87,11 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
                     contextPartBySyntheticEntry.set(message, part);
                 }
                 pendingContext.push(part);
+                continue;
+            }
+            if (isLabelledInjection(message.info)) {
+                pendingContext = [];
+                result.push(message);
             }
             continue;
         }
