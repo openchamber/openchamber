@@ -2,6 +2,17 @@ import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-vers
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { JsonValue } from './contract.ts';
 import {
+  GUEST_FILE_EDITOR_CONTENT_MAX,
+  GUEST_FILE_EDITOR_VERSION_MAX,
+  type FileEditorChange,
+  type FileEditorDocument,
+  type FileEditorSnapshot,
+  type FileSnapshotPurpose,
+  type FileSnapshotResultPayload,
+  fileEditorPayloadSize,
+  sameFileEditorDocument,
+} from './file-editor.ts';
+import {
   GUEST_FILE_CONTENT_MAX,
   GUEST_CLIPBOARD_TEXT_MAX,
   GUEST_TOAST_MAX,
@@ -176,8 +187,37 @@ export type HostClient = {
    * chrome and ignore it.
    */
   setHeight: (height: number) => Promise<void>;
+  /**
+   * The file a `file` surface edits (`contributes.fileEditors`). Replays the
+   * last file; called again when the host reconnects the frame. Registering
+   * also routes Cmd/Ctrl+S inside the frame to the host's save.
+   */
+  onFileOpen: (listener: (file: FileEditorDocument) => void) => () => void;
+  /**
+   * Answer the host when it needs the edited text: to save it (`save`) or to
+   * move it into its source view (`handoff`). Return the whole file and a
+   * version of the state it came from; a thrown error fails the save. One
+   * handler at a time.
+   */
+  onFileSnapshot: (handler: (purpose: FileSnapshotPurpose) => Promise<FileEditorSnapshot> | FileEditorSnapshot) => () => void;
+  /** The snapshot with this version is on disk; edits made since keep the file dirty. */
+  onFileSaved: (listener: (version: string) => void) => () => void;
+  /** Report the editor's state after a change. `edited` delays autosave until edits stop. */
+  reportFileChange: (change: FileEditorChange) => void;
+  /** Ask the host to save now, as Cmd/Ctrl+S does. */
+  requestFileSave: () => void;
+  /** This file cannot be opened here; the host shows its source instead. */
+  reportFileUnsupported: () => void;
   dispose: () => void;
 };
+
+// Structural, not `instanceof KeyboardEvent`: the frame's own realm owns that
+// constructor, and non-browser runtimes have none.
+const isKeyEvent = (event: Event): event is KeyboardEvent => 'key' in event && 'metaKey' in event && 'ctrlKey' in event;
+
+const isSaveShortcut = (event: KeyboardEvent): boolean => (
+  (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's'
+);
 
 export class HostRequestError extends Error {
   readonly code: HostRequestErrorCode;
@@ -227,6 +267,11 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const itemListeners = new Set<(item: GuestItem | null) => void>();
   let resolveHandler: ((request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) | null = null;
   let actionHandler: ((item: GuestActionItem) => void | Promise<void>) | null = null;
+  const fileOpenListeners = new Set<(file: FileEditorDocument) => void>();
+  const fileSavedListeners = new Set<(version: string) => void>();
+  let fileSnapshotHandler: ((purpose: FileSnapshotPurpose) => Promise<FileEditorSnapshot> | FileEditorSnapshot) | null = null;
+  let lastFile: FileEditorDocument | null = null;
+  let saveShortcutInstalled = false;
   const pending = new Map<string, Pending>();
   const workspaceListeners = new Map<string, (snapshot: GuestWorkspaceSnapshot) => void>();
   let disposed = false;
@@ -355,6 +400,51 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       return;
     }
 
+    if (message.type === 'file-open') {
+      // The host pushes on both `hello` and iframe load; the same file twice
+      // must not make the editor reload what the user may already be editing.
+      const next = message.payload;
+      if (lastFile && sameFileEditorDocument(lastFile, next)) return;
+      lastFile = next;
+      emit(fileOpenListeners, message.payload);
+      return;
+    }
+
+    if (message.type === 'file-saved') {
+      emit(fileSavedListeners, message.payload.version);
+      return;
+    }
+
+    if (message.type === 'file-snapshot') {
+      const answer = (payload: FileSnapshotResultPayload): void => {
+        if (!disposed) post({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+          type: 'file-snapshot-result', id: message.id, payload });
+      };
+      const fail = (text: string): void => answer({ error: (text.trim() || 'Could not read the edited file.').slice(0, GUEST_RESOLVE_ERROR_MAX) });
+      const handler = fileSnapshotHandler;
+      if (!handler) {
+        fail('This extension does not edit files.');
+        return;
+      }
+      Promise.resolve().then(() => handler(message.payload.purpose)).then(
+        (snapshot) => {
+          if (fileEditorPayloadSize(snapshot) > GUEST_FILE_EDITOR_CONTENT_MAX) {
+            fail(`The file is over ${GUEST_FILE_EDITOR_CONTENT_MAX} ${'bytes' in snapshot ? 'bytes' : 'characters'}.`);
+            return;
+          }
+          if (snapshot.version.length > GUEST_FILE_EDITOR_VERSION_MAX) {
+            fail(`The snapshot version is over ${GUEST_FILE_EDITOR_VERSION_MAX} characters.`);
+            return;
+          }
+          answer({ snapshot: 'bytes' in snapshot
+            ? { bytes: snapshot.bytes, version: snapshot.version }
+            : { content: snapshot.content, version: snapshot.version } });
+        },
+        (error) => fail(error instanceof Error ? error.message : String(error)),
+      );
+      return;
+    }
+
     if (message.type === 'resolve') {
       const answer = (payload: ResolveResultPayload): void => {
         post({
@@ -400,8 +490,10 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     type: 'hello',
   });
 
+  type GuestCallMessage = Extract<GuestMessage, { id: string }>;
+
   const send = (
-    message: Exclude<GuestMessage, { type: 'hello' }>,
+    message: GuestCallMessage,
     timeoutMs: number = requestTimeoutMs,
   ): Promise<HostResultPayload | undefined> => {
     if (disposed || target.parent === target) {
@@ -417,11 +509,24 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     });
   };
 
-  const request = (message: Exclude<GuestMessage, { type: 'hello' }>): Promise<void> => (
+  const request = (message: GuestCallMessage): Promise<void> => (
     send(message).then(() => undefined)
   );
 
   const envelope: Pick<GuestMessage, 'channel' | 'v'> = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION };
+  // Fire-and-forget notices: nothing to wait for, and nothing to post to
+  // without a host frame.
+  const notify = (message: Extract<GuestMessage, { type: 'file-change' | 'file-save' | 'file-unsupported' }>): void => {
+    if (!disposed && target.parent !== target) post(message);
+  };
+  const requestFileSave = (): void => notify({ ...envelope, type: 'file-save' });
+  // Capture phase, so an editor library that binds Cmd/Ctrl+S itself does not
+  // swallow the host's save.
+  const onSaveShortcut = (event: Event): void => {
+    if (!isKeyEvent(event) || !isSaveShortcut(event)) return;
+    event.preventDefault();
+    requestFileSave();
+  };
   const requireIdentity = (value: string, maximum = 1024): void => {
     if (!value.trim() || value.length > maximum) throw new HostRequestError('HOST_REJECTED', `Identity must contain 1 to ${maximum} characters.`);
   };
@@ -813,6 +918,32 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { height: clampFrameHeight(height) },
     }),
+    onFileOpen: (listener) => {
+      fileOpenListeners.add(listener);
+      if (!saveShortcutInstalled) {
+        saveShortcutInstalled = true;
+        target.addEventListener('keydown', onSaveShortcut, true);
+      }
+      if (lastFile) listener(lastFile);
+      return () => {
+        fileOpenListeners.delete(listener);
+      };
+    },
+    onFileSnapshot: (handler) => {
+      fileSnapshotHandler = handler;
+      return () => {
+        if (fileSnapshotHandler === handler) fileSnapshotHandler = null;
+      };
+    },
+    onFileSaved: (listener) => {
+      fileSavedListeners.add(listener);
+      return () => {
+        fileSavedListeners.delete(listener);
+      };
+    },
+    reportFileChange: (change) => notify({ ...envelope, type: 'file-change', payload: { dirty: change.dirty, edited: change.edited } }),
+    requestFileSave,
+    reportFileUnsupported: () => notify({ ...envelope, type: 'file-unsupported' }),
     dispose: () => {
       for (const subscriptionId of workspaceListeners.keys()) {
         post({ ...envelope, type: 'workspace-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
@@ -821,6 +952,10 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       disposed = true;
       resolveHandler = null;
       actionHandler = null;
+      fileSnapshotHandler = null;
+      fileOpenListeners.clear();
+      fileSavedListeners.clear();
+      if (saveShortcutInstalled) target.removeEventListener('keydown', onSaveShortcut, true);
       target.removeEventListener('message', onMessage);
       for (const waiter of pending.values()) {
         clearTimeout(waiter.timer);

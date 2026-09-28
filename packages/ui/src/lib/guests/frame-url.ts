@@ -15,7 +15,12 @@ export type GuestFrameUrl =
   | { kind: 'url'; url: string; expiresAt: number }
   | { kind: 'document'; html: string };
 
-export const resolveGuestFrameUrl = async (guestId: string, entry: string, signal?: AbortSignal): Promise<GuestFrameUrl> => {
+export const resolveGuestFrameUrl = async (
+  guestId: string,
+  entry: string,
+  signal?: AbortSignal,
+  origins: readonly string[] = [],
+): Promise<GuestFrameUrl> => {
   const runtimeKey = getRuntimeKey();
   const relay = getActiveRelayTunnel();
   if (relay) {
@@ -24,7 +29,7 @@ export const resolveGuestFrameUrl = async (guestId: string, entry: string, signa
         throw new DOMException('Extension frame owner changed', 'AbortError');
       }
       return runtimeFetch(path, { signal });
-    });
+    }, origins);
     if (getRuntimeKey() !== runtimeKey || getActiveRelayTunnel() !== relay || signal?.aborted) {
       throw new DOMException('Extension frame owner changed', 'AbortError');
     }

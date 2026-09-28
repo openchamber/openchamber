@@ -15,6 +15,20 @@ const SHELL_PROBE_TIMEOUT_MS = 5_000;
 // network drive in PATH) hangs the whole process with no output.
 const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
 
+// Interactive rc files may print a banner, motd or other text to stdout before
+// the shell runs the probe command. That text would otherwise fuse with the
+// first `env -0` entry, so a marker line is echoed right before `env -0` and
+// only what follows the last marker line is parsed. Electron's probe does the
+// same.
+const LOGIN_SHELL_ENV_MARKER = '__OPENCHAMBER_ENV__';
+const LOGIN_SHELL_ENV_COMMAND = `echo ${LOGIN_SHELL_ENV_MARKER}; env -0`;
+
+const stripShellStartupOutput = (text) => {
+  const markerLine = `${LOGIN_SHELL_ENV_MARKER}\n`;
+  const markerIndex = text.lastIndexOf(markerLine);
+  return markerIndex === -1 ? text : text.slice(markerIndex + markerLine.length);
+};
+
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
     state,
@@ -226,7 +240,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
 
       try {
-        const result = runSpawnSync(shellPath, ['-lic', 'env -0'], {
+        const result = runSpawnSync(shellPath, ['-lic', LOGIN_SHELL_ENV_COMMAND], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
@@ -238,7 +252,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           continue;
         }
 
-        const parsed = parseNullSeparatedEnvSnapshot(result.stdout || '');
+        const parsed = parseNullSeparatedEnvSnapshot(stripShellStartupOutput(result.stdout || ''));
         if (parsed) {
           state.cachedLoginShellEnvSnapshot = parsed;
           return parsed;

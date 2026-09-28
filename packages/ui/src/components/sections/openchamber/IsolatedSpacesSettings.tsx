@@ -1,15 +1,124 @@
 import React from 'react';
 
+import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { NumberInput } from '@/components/ui/number-input';
 import { failureOfError, spaceFailureText } from '@/components/session/spaces/spaceFailureText';
 import { useI18n } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
-import { readSpacesSwitch, setSpacesSwitch, type SpacesSwitchChange } from '@/lib/spaces/spaces-api';
+import {
+  SPACE_IDLE_STOP_MAX_HOURS,
+  SPACE_IDLE_STOP_MIN_HOURS,
+  readSpaceIdleStop,
+  readSpacesSwitch,
+  setSpaceIdleStop,
+  setSpacesSwitch,
+  type SpaceIdleStop,
+  type SpacesSwitchChange,
+} from '@/lib/spaces/spaces-api';
 import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
 import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
-import { SETTINGS_OPTION_STACK_CLASS, SettingsCheckboxRow, SettingsSection } from '../shared/SettingsSection';
+import { cn } from '@/lib/utils';
+import {
+  SETTINGS_ICON_BUTTON_CLASS,
+  SETTINGS_NUMBER_INPUT_CLASS,
+  SETTINGS_OPTION_STACK_CLASS,
+  SettingsCheckboxRow,
+  SettingsFieldRow,
+  SettingsInset,
+  SettingsSection,
+} from '../shared/SettingsSection';
+
+const DEFAULT_IDLE_HOURS = 4;
+
+/**
+ * The idle stop (decision 11): a space stops itself after this many hours with no session working,
+ * and keeps its files. The host keeps the setting and tells every running space at once; this row
+ * shows what the host answered. Rendered only while the switch is on, because the route exists
+ * only then (decision 19).
+ */
+const SpaceIdleStopSettings: React.FC = () => {
+  const { t } = useI18n();
+  const [setting, setSetting] = React.useState<SpaceIdleStop | null>(null);
+  const [loadFailed, setLoadFailed] = React.useState(false);
+  // Only the answer to the latest change may set what the row shows.
+  const latest = React.useRef(0);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    readSpaceIdleStop(controller.signal).then(setSetting, () => {
+      if (!controller.signal.aborted) setLoadFailed(true);
+    });
+    return () => controller.abort();
+  }, []);
+
+  const change = async (next: SpaceIdleStop) => {
+    const previous = setting;
+    const turn = latest.current + 1;
+    latest.current = turn;
+    setSetting(next);
+    reportSettingsSaveState('saving');
+    try {
+      const kept = await setSpaceIdleStop(next);
+      if (turn === latest.current) setSetting(kept);
+      reportSettingsSaveState('saved');
+    } catch (failure) {
+      if (!(failure instanceof Error)) throw failure;
+      if (turn === latest.current) setSetting(previous);
+      reportSettingsSaveState('error');
+    }
+  };
+
+  if (loadFailed) {
+    return <p className="pl-6 typography-ui-label text-[var(--status-error)]">{t('settings.openchamber.spaces.idleStop.loadFailed')}</p>;
+  }
+  if (!setting) return null;
+
+  return (
+    <>
+      <SettingsCheckboxRow
+        settingsItem="general.isolated-spaces-idle-stop"
+        checked={setting.enabled}
+        onChange={(enabled) => void change({ ...setting, enabled })}
+        label={t('settings.openchamber.spaces.idleStop.enabled')}
+        ariaLabel={t('settings.openchamber.spaces.idleStop.enabledAria')}
+        info={t('settings.openchamber.spaces.idleStop.enabledInfo')}
+      />
+      {setting.enabled ? (
+        <SettingsInset className="space-y-0">
+          <SettingsFieldRow label={t('settings.openchamber.spaces.idleStop.after')}>
+            <NumberInput
+              value={setting.hours}
+              onValueChange={(hours) => void change({ ...setting, hours })}
+              min={SPACE_IDLE_STOP_MIN_HOURS}
+              max={SPACE_IDLE_STOP_MAX_HOURS}
+              step={1}
+              // Typing "12" must not save 1 on the way and send it to every running space.
+              deferExternalValueWhileFocused
+              aria-label={t('settings.openchamber.spaces.idleStop.afterAria')}
+              className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
+            />
+            <span className="typography-ui-label text-muted-foreground">{t('settings.openchamber.spaces.idleStop.hours')}</span>
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() => void change({ ...setting, hours: DEFAULT_IDLE_HOURS })}
+              disabled={setting.hours === DEFAULT_IDLE_HOURS}
+              className={SETTINGS_ICON_BUTTON_CLASS}
+              aria-label={t('settings.openchamber.spaces.idleStop.resetAria')}
+              title={t('settings.common.actions.reset')}
+            >
+              <Icon name="restart" className="h-3.5 w-3.5" />
+            </Button>
+          </SettingsFieldRow>
+        </SettingsInset>
+      ) : null}
+    </>
+  );
+};
 
 // What turning the switch off would do, asked of the host before it happens (decision 18): stop
 // that many running spaces, or the list could not be read.
@@ -115,6 +224,7 @@ export const IsolatedSpacesSettings: React.FC = () => {
           </p>
         ))}
         {error ? <p className="pl-6 typography-ui-label text-[var(--status-error)]">{error}</p> : null}
+        {enabled ? <SpaceIdleStopSettings /> : null}
       </div>
     </SettingsSection>
   );

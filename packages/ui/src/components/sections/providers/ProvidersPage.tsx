@@ -42,6 +42,7 @@ import {
   type CredentialConnection,
 } from './providerAuth';
 import { ProviderGrid } from './ProviderGrid';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
@@ -221,6 +222,9 @@ export const ProvidersPage: React.FC = () => {
   // "connected" signal in v2) is refetched even when the selection is unchanged.
   const [integrationsRevision, setIntegrationsRevision] = React.useState(0);
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  // An administrator turned on enterprise mode: providers come from the
+  // OpenCode config, and the server refuses new ones and new keys.
+  const enterpriseLocked = useEnterpriseMode();
   const [authPanelDismissedForId, setAuthPanelDismissedForId] = React.useState<string | null>(null);
   const [editingCustomProviderId, setEditingCustomProviderId] = React.useState<string | null>(null);
   const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<CustomProviderFormState | null>(null);
@@ -681,7 +685,8 @@ export const ProvidersPage: React.FC = () => {
     return <ClassificationProvidersPage titleLeading={backButton} onOpenProvider={openProviderForKey} />;
   }
 
-  if (isAddMode) {
+  // Enterprise mode: the way in stays hidden and the server refuses anyway.
+  if (isAddMode && !enterpriseLocked) {
     return (
       <SettingsPageLayout
         title={t('settings.providers.page.connect.title')}
@@ -1006,7 +1011,7 @@ export const ProvidersPage: React.FC = () => {
         divider={false}
         headerAction={(
           <div className="flex items-center gap-1">
-            {isEditableCustomProvider ? (
+            {isEditableCustomProvider && !enterpriseLocked ? (
               <Button
                 variant="outline"
                 size="xs"
@@ -1024,6 +1029,7 @@ export const ProvidersPage: React.FC = () => {
                 {t('settings.providers.page.actions.edit')}
               </Button>
             ) : null}
+            {enterpriseLocked ? null : (
             <Button
               variant="outline"
               size="xs"
@@ -1045,6 +1051,7 @@ export const ProvidersPage: React.FC = () => {
                 </>
               )}
             </Button>
+            )}
           </div>
         )}
         settingsItem="providers.auth"
@@ -1068,7 +1075,11 @@ export const ProvidersPage: React.FC = () => {
           </div>
         ) : null}
 
-        {!showAuthPanel ? null : authLoading ? (
+        {enterpriseLocked ? (
+          <p className="typography-meta text-muted-foreground">{t('settings.providers.enterpriseMode')}</p>
+        ) : null}
+
+        {!showAuthPanel || enterpriseLocked ? null : authLoading ? (
           <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
         ) : (
           <div

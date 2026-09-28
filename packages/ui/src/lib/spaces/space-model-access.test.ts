@@ -14,12 +14,15 @@ const running = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   projectDirectory: '/home/me/app',
   directory: DIRECTORY,
   state: 'running',
+  stoppedIdle: false,
   step: null,
   failure: null,
   network: { mode: 'allowlist', domains: [] },
   grants: [anthropic],
   access: 'granted',
   needsAccess: [],
+  damage: null,
+  setup: null,
   ...change,
 });
 

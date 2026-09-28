@@ -815,6 +815,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               </span>
             ) : null}
             zombieIndicator={null}
+            goal={sessionGoalGlyph}
             badges={null}
             hideMetaOnHoverClass=""
           />
@@ -1489,6 +1490,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       directoryIndicator={!archivedBucket && sessionDirectory ? <DirectoryActionIndicator directory={sessionDirectory} /> : null}
       prBadge={timelinePrBadge}
       zombieIndicator={streamingIndicator}
+      goal={sessionGoalGlyph}
       badges={rowBadges}
       doneHint={doneHintBadge()}
       providerId={resolvedSession.model?.providerID ?? null}

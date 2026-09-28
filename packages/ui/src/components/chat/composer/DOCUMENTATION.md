@@ -108,6 +108,13 @@ never stacks glass on glass: a CSS rule in `design-system.css` hides the
 composer's own contents while it is up, leaving the box as the single glass
 surface on desktop and the overlay itself on mobile.
 
+A glass surface never carries its own shadow: the shadow sits on a wrapper
+(or the glass moves to an inner layer). Chromium grows a backdrop-filter
+layer by the shadow's blur, and that band painted a flat grey strip over
+whatever was stacked above: the goal row, the status pill, the queue panel.
+This holds for the box, the mobile pill and its queue button, the floating
+panels, the context-chip preview and the mobile dictation overlay.
+
 The context-chip preview stays above its chip. Its scrollable content is capped
 by the space between the chip and the chat column's top edge, so a long preview
 does not hide its entry actions behind the chat header.
@@ -173,6 +180,21 @@ copy.
   to the language means adding it here, once.
 
 ## The editor
+
+`editor/bidi.ts` gives each rendered logical line native `dir="auto"` and
+enables CodeMirror's `perLineTextDirection`, so browser layout and cursor
+movement use the same direction. The content root stays LTR; automatic
+direction there would depend on which lines virtualization has mounted.
+Only visible lines get decorations, rebuilt on document or viewport changes.
+
+`composerLanguage.ts` reuses the tokenizer's technical ranges to isolate code,
+paths and references as LTR. The same merged ranges feed `outerDecorations`
+and `bidiIsolatedRanges`: syntax colors cannot split a technical fragment, and
+CodeMirror knows the boundaries the browser draws. Shell mode isolates the
+whole input. Direction handling never inserts Unicode controls or changes the
+source string. Browser checks must cover punctuation, cursor movement across
+isolates, wrapped RTL lines and navigation through a virtualized document;
+DOM-only tests cannot verify these.
 
 `editor/` wraps CodeMirror. The document is a plain string: `getValue()` is
 exactly what gets sent, so nothing downstream serializes a rich document model

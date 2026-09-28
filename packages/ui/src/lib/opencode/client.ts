@@ -62,7 +62,7 @@ import {
   type Vcs,
 } from "./model"
 import { ascendingId } from "./ids"
-import { mergeConfigDocuments, projectAgent, projectMessages, projectProject, projectSession, projectVcs } from "./projection"
+import { deniesAnyProvider, mergeConfigDocuments, projectAgent, projectMessages, projectProject, projectSession, projectVcs } from "./projection"
 
 export type { OpenCodeClient }
 
@@ -1516,6 +1516,12 @@ class OpencodeService {
     this.configCacheGeneration += 1
     this.configInFlight.clear()
     this.configCache.clear()
+  }
+
+  /** Whether OpenCode's config for a directory restricts providers with a `provider.use` deny policy. */
+  async configDeniesAnyProvider(directory?: string | null): Promise<boolean> {
+    const entries = await call("config.get", () => this.clientFor(this.resolveDirectory(directory)).config.get())
+    return deniesAnyProvider(entries)
   }
 
   /** Effective configuration for a directory: every discovered document folded, highest priority last. */

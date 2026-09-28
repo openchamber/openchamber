@@ -12,6 +12,6 @@ test('manifests combine after partial build failures while publication stays str
     workflow.jobs['combine-electron-manifests'].if,
     "${{ !cancelled() && needs.create-release.result == 'success' }}",
   );
-  // Any failed job keeps the release a draft for a manual publish decision.
-  assert.equal(workflow.jobs['finalize-release'].if, undefined);
+  // Skipped jobs count as done; any failure still stops the release.
+  assert.equal(workflow.jobs['finalize-release'].if, "${{ !cancelled() && !failure() }}");
 });

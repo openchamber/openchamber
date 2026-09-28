@@ -53,6 +53,8 @@ const journeyOf = (overrides = {}) => {
     createSpace: record('createSpace', { id: ID, state: 'preparing' }),
     startSpace: record('startSpace', { id: ID, state: 'running' }),
     stopSpace: record('stopSpace', { id: ID, state: 'exited' }),
+    restartSpace: record('restartSpace', { id: ID, state: 'running', networkRestored: true }),
+    restartOpenCode: record('restartOpenCode', { id: ID, state: 'running' }),
     removeSpace: record('removeSpace', { id: ID, removed: true }),
     grantAccess: record('grantAccess', { grant: { id: 'open-1' } }),
     openDomain: record('openDomain', { network: { mode: 'allowlist', domains: ['registry.npmjs.org'] } }),
@@ -60,6 +62,10 @@ const journeyOf = (overrides = {}) => {
     previewApply: record('previewApply', { changedPaths: 2 }),
     applySpace: record('applySpace', { applied: { status: 'applied' } }),
     stopAllSpaces: record('stopAllSpaces', { stopped: [], stillRunning: [] }),
+    readIdleStopSetting: record('readIdleStopSetting', { enabled: true, hours: 4 }),
+    changeIdleStop: record('changeIdleStop', { enabled: false, hours: 8 }),
+    runSetup: record('runSetup', { id: ID, state: 'running', setup: { state: 'running', index: 0, total: 1, command: 'npm ci' } }),
+    readSetup: record('readSetup', { setup: null, output: null }),
     ...overrides,
   };
 };
@@ -67,7 +73,7 @@ const journeyOf = (overrides = {}) => {
 describe('space routes', () => {
   it('answers every journey route with 404 and isolated_spaces_off while the feature is off, and the switch still works', async () => {
     const { call, calls } = await serve({ journey: null, switchState: { enabled: false } });
-    for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['POST', `/${ID}/grants`], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`]]) {
+    for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['POST', `/${ID}/restart`], ['POST', `/${ID}/restart-opencode`], ['POST', `/${ID}/grants`], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`], ['GET', '/idle-stop'], ['PUT', '/idle-stop'], ['POST', `/${ID}/setup`], ['GET', `/${ID}/setup`]]) {
       expect(await call(method, `${SPACES_ROUTE}${path}`, method === 'GET' || method === 'DELETE' ? undefined : {}), `${method} ${path}`).toEqual({ status: 404, body: { code: 'isolated_spaces_off', message: 'Isolated spaces are turned off.', details: null } });
     }
     expect(await call('GET', `${SPACES_ROUTE}/switch`)).toEqual({ status: 200, body: { enabled: false, spaces: [] } });
@@ -101,15 +107,32 @@ describe('space routes', () => {
     expect(await call('POST', SPACES_ROUTE, request)).toEqual({ status: 202, body: { id: ID, state: 'preparing' } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/start`)).toEqual({ status: 200, body: { id: ID, state: 'running' } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/stop`)).toEqual({ status: 200, body: { id: ID, state: 'exited' } });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/restart`)).toEqual({ status: 200, body: { id: ID, state: 'running', networkRestored: true } });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/restart-opencode`)).toEqual({ status: 200, body: { id: ID, state: 'running' } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/grants`, { kind: 'domain', upstream: 'https://registry.example.com/' })).toEqual({ status: 200, body: { grant: { id: 'open-1' } } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/network/domains`, { domain: 'registry.npmjs.org' })).toEqual({ status: 200, body: { network: { mode: 'allowlist', domains: ['registry.npmjs.org'] } } });
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/journal`)).toEqual({ status: 200, body: { records: [], dropped: 0, since: 'now' } });
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/apply`)).toEqual({ status: 200, body: { changedPaths: 2 } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/apply`, { as: 'branch', branch: 'b' })).toEqual({ status: 200, body: { applied: { status: 'applied' } } });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/setup`, { commands: ['npm ci'] })).toEqual({ status: 200, body: { id: ID, state: 'running', setup: { state: 'running', index: 0, total: 1, command: 'npm ci' } } });
+    expect(await call('GET', `${SPACES_ROUTE}/${ID}/setup`)).toEqual({ status: 200, body: { setup: null, output: null } });
     expect(await call('DELETE', `${SPACES_ROUTE}/${ID}`)).toEqual({ status: 200, body: { id: ID, removed: true } });
     expect(journey.calls).toEqual([
-      ['listSpaces', { access: true }], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['removeSpace', ID],
+      ['listSpaces', { access: true }], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['restartSpace', ID], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID],
     ]);
+  });
+
+  it('reads and changes the idle stop setting through the journey, and refuses a body that is not an object', async () => {
+    const journey = journeyOf();
+    const { call } = await serve({ journey });
+    expect(await call('GET', `${SPACES_ROUTE}/idle-stop`)).toEqual({ status: 200, body: { enabled: true, hours: 4 } });
+    expect(await call('PUT', `${SPACES_ROUTE}/idle-stop`, { enabled: false, hours: 8 })).toEqual({ status: 200, body: { enabled: false, hours: 8 } });
+    expect(await call('PUT', `${SPACES_ROUTE}/idle-stop`, [8])).toMatchObject({ status: 400, body: { code: 'invalid_request_body' } });
+    expect(journey.calls).toEqual([['readIdleStopSetting'], ['changeIdleStop', { enabled: false, hours: 8 }]]);
+
+    const refusing = journeyOf({ changeIdleStop: async () => { throw new SpaceError('invalid_idle_stop', 'whole hours from 1 to 168'); } });
+    const second = await serve({ journey: refusing });
+    expect(await second.call('PUT', `${SPACES_ROUTE}/idle-stop`, { enabled: true, hours: 0 })).toMatchObject({ status: 400, body: { code: 'invalid_idle_stop' } });
   });
 
   it('refuses an id that is not a space id before the journey is asked, and a body that is not an object', async () => {
@@ -129,6 +152,7 @@ describe('space routes', () => {
       ['space_not_found', 404], ['isolated_spaces_off', 404], ['project_not_registered', 400], ['invalid_network', 400], ['space_preparing', 409], ['space_not_running', 409],
       ['space_busy', 409], ['space_creation_failed', 409], ['invalid_grant_request', 400], ['secret_source_missing', 409], ['space_record_unreadable', 409], ['invalid_domain', 400], ['network_is_open', 409], ['too_many_domains', 409],
       ['branch_exists', 409], ['changes_do_not_apply', 409], ['changes_route_closed', 409], ['nothing_to_apply', 409], ['place_cannot_restrict_network', 409],
+      ['invalid_setup_commands', 400], ['space_setup_running', 409],
       ['space_remove_incomplete', 502], ['docker_command_failed', 502], ['code_out_failed', 502],
     ];
     for (const [code, status] of cases) {

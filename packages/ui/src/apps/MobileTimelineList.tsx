@@ -23,6 +23,9 @@ import type { MultiRunSummary } from '@/lib/multirun/runs';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatRelativeShort, getSessionTimestamp } from './mobileSessionFields';
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
+import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
+import { usePendingRequestCounts } from './usePendingRequestCounts';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 
 export type TimelineProject = MobileProjectIconProject & { label: string };
 
@@ -59,6 +62,8 @@ export type TimelineRowHandlers = {
   onToggleWork?: (session: Session, inWork: boolean) => void;
   isPinned: (session: Session) => boolean;
   onTogglePin: (session: Session) => void;
+  /** Subsessions of a row, for the requests they are waiting on. */
+  descendantIdsOf: (sessionId: string) => readonly string[];
 };
 
 const TIMELINE_ROW_INDENT = 12;
@@ -143,6 +148,12 @@ const MobileTimelineRow: React.FC<{
   const work = onToggleWork ? { inWork, onToggle: () => onToggleWork(session, inWork) } : undefined;
   const pinned = handlers.isPinned(session);
   const pin = { pinned, onToggle: () => handlers.onTogglePin(session) };
+  // Timeline rows never expand, so their subsessions' requests count here.
+  const { descendantIdsOf } = handlers;
+  const familyIds = React.useMemo(() => [session.id, ...descendantIdsOf(session.id)], [descendantIdsOf, session.id]);
+  const pendingRequests = usePendingRequestCounts(familyIds);
+  const hasPendingRequests = pendingRequests.permissionCount > 0 || pendingRequests.formCount > 0;
+  const hasGoal = getSessionGoal(session) !== null;
 
   return (
     <MobileSwipeActionsRow
@@ -213,10 +224,20 @@ const MobileTimelineRow: React.FC<{
                 {title}
               </span>
             )}
-            {branch ? (
+            {branch || hasGoal || hasPendingRequests ? (
+              // Branch on the left; goal and waiting requests close the line,
+              // the same state cluster the desktop timeline row ends with.
               <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                <Icon name="git-branch" className="size-3.5 shrink-0" />
-                <span className="block min-w-0 truncate typography-micro">{branch}</span>
+                {branch ? (
+                  <>
+                    <Icon name="git-branch" className="size-3.5 shrink-0" />
+                    <span className="block min-w-0 truncate typography-micro">{branch}</span>
+                  </>
+                ) : null}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  <MobileSessionGoalGlyph session={session} />
+                  <MobileSessionPendingBadges {...pendingRequests} />
+                </span>
               </span>
             ) : null}
           </>

@@ -1,6 +1,7 @@
 /**
- * `/api/routing` — configuration, the Jev key and the classification provider
- * pick (`/api/routing/classifier`). Normal authenticated
+ * `/api/routing` — configuration, the Jev key, the classification provider
+ * pick (`/api/routing/classifier`) and the custom endpoint
+ * (`/api/routing/classifier/custom`). Normal authenticated
  * OpenChamber routes: do not add them to browser URL-token allowlists.
  *
  * The send-path rewrite, registered ahead of the generic OpenCode proxy. In
@@ -70,6 +71,22 @@ export function registerRoutingRoutes(app, runtime) {
   app.put('/api/routing/classifier', express.json({ limit: '4kb' }), async (req, res) => {
     try {
       res.json(await runtime.setClassifierSource(req.body?.source));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.put('/api/routing/classifier/custom', express.json({ limit: '16kb' }), async (req, res) => {
+    try {
+      res.json(await runtime.setCustomEndpoint({ url: req.body?.url, model: req.body?.model, key: req.body?.key }));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.delete('/api/routing/classifier/custom', async (_req, res) => {
+    try {
+      res.json(await runtime.clearCustomEndpoint());
     } catch (error) {
       sendError(res, error);
     }

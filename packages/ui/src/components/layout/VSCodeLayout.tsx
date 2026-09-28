@@ -41,7 +41,7 @@ import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
-import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import type { Session } from '@/lib/opencode/model';
 import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
@@ -50,7 +50,7 @@ import { useSessionListSync } from '@/components/session/sidebar/list/useSession
 import { RunOverview } from '@/components/multirun/RunOverview';
 import { RunAutoFusion } from '@/lib/multirun/autoFusion';
 
-const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
+const loadSettingsView = () => import('@/components/views/SettingsView').then(m => m.SettingsView);
 
 const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp) return '-';
@@ -509,6 +509,14 @@ export const VSCodeLayout: React.FC = () => {
   const usesMobileLayout = containerWidth > 0 && containerWidth < MOBILE_WIDTH_THRESHOLD;
   const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
 
+  const closeSettings = () => {
+    const previousView = viewBeforeSettingsRef.current;
+    viewBeforeSettingsRef.current = null;
+    setCurrentView(previousView ?? (usesExpandedLayout ? 'chat' : 'sessions'));
+  };
+  // A failed load returns to the previous view so the next open tries again.
+  const SettingsView = useOnDemandComponent(currentView === 'settings', loadSettingsView, closeSettings);
+
   const clampExpandedSidebarWidth = React.useCallback((value: number) => {
     return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
   }, []);
@@ -582,16 +590,12 @@ export const VSCodeLayout: React.FC = () => {
         </div>
       ) : currentView === 'settings' ? (
         // Settings view
-        <React.Suspense fallback={null}>
+        SettingsView ? (
           <SettingsView
-            onClose={() => {
-              const previousView = viewBeforeSettingsRef.current;
-              viewBeforeSettingsRef.current = null;
-              setCurrentView(previousView ?? (usesExpandedLayout ? 'chat' : 'sessions'));
-            }}
+            onClose={closeSettings}
             forceMobile={usesMobileLayout}
           />
-        </React.Suspense>
+        ) : null
       ) : usesExpandedLayout ? (
         // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">

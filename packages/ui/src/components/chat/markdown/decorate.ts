@@ -234,6 +234,8 @@ const decorateInlineCode = (root: HTMLElement): void => {
     if (code.getAttribute('data-markdown') !== 'inline-code') {
       code.setAttribute('data-markdown', 'inline-code');
     }
+    // Exclude technical text from a containing list item's dir=auto scan.
+    if (code.getAttribute('dir') !== 'ltr') code.setAttribute('dir', 'ltr');
     if (code.closest('table')) code.classList.add('whitespace-nowrap');
   }
 };
@@ -256,6 +258,7 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-component', 'markdown-code');
+    wrapper.setAttribute('dir', 'ltr');
     wrapper.className =
       'my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]';
 
@@ -610,6 +613,8 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
     const href = anchor.getAttribute('href') ?? '';
     if (!isExternalHttpUrl(href)) continue;
     anchor.setAttribute('data-md-link-decorated', 'true');
+    // A bare URL is technical text; a named link remains ordinary prose.
+    if (anchor.textContent === href) anchor.setAttribute('dir', 'ltr');
 
     const faviconUrl = getExternalFaviconUrl(href);
     if (faviconUrl) {
@@ -645,6 +650,12 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  // These blocks own directional layout (markers and quote borders). Paragraphs
+  // use CSS plaintext instead, so a nested paragraph cannot hide its text from
+  // the parent's native dir=auto resolution.
+  for (const block of root.querySelectorAll('li, blockquote')) {
+    if (block.getAttribute('dir') !== 'auto') block.setAttribute('dir', 'auto');
+  }
   decorateDisclosures(root);
   decorateImageLabels(root);
   decorateInlineCode(root);

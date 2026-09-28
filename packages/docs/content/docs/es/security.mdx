@@ -36,6 +36,92 @@ Los dispositivos vinculados mediante [Conectar un dispositivo](/es/connect-devic
 - Si necesitas una URL pública, prefiere un [túnel](/es/tunnels/) o una red privada (como una VPN) antes que abrir un puerto a internet.
 - Si pones OpenChamber detrás de tu propio servidor HTTPS, consulta [Proxy inverso](/es/reverse-proxy/).
 
+## Modo empresa
+
+Si tu equipo solo puede enviar el contenido de las conversaciones a los proveedores de modelos que configuraste en OpenCode, activa el modo empresa. Hay dos formas de hacerlo, y basta con una.
+
+### Un archivo de políticas en la máquina
+
+Es la opción para los portátiles que administras. Pon un archivo llamado `policy.json` en una carpeta en la que solo un administrador pueda escribir:
+
+| Sistema | Ruta |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+La ruta no depende de cómo esté instalado OpenChamber. La app de escritorio, el servidor web iniciado desde npm, la CLI y la extensión de VS Code leen el mismo archivo. Puedes distribuirlo con tu gestor de dispositivos (Jamf, Intune y similares). Para un servidor en Docker, monta el archivo en la ruta de Linux.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+Solo hace falta `enterpriseMode`. `organization` aparece en Configuración como "Gestionado por Acme", para que la gente sepa quién tomó la decisión. `relayUrl` y `jev` fijan tu propio relay y tu propio endpoint de Jev, y `allowNetworkAccess` permite que otros dispositivos lleguen a OpenChamber por la red. Los tres se describen más abajo.
+
+- Nada que configure un usuario, ni en Configuración ni en el entorno, desactiva lo que el archivo activa.
+- Cuando el archivo activa el modo empresa, solo decide el archivo. Las variables de entorno de más abajo para el relay, Jev y el acceso de red se ignoran, porque un usuario puede definirlas por su cuenta.
+- Si el archivo existe pero no se puede leer o no es JSON válido, el modo empresa sigue activado y no se fija nada. Configuración indica que no se pudo leer la política. Un archivo roto nunca levanta la protección en silencio.
+- Los cambios se aplican sin reiniciar.
+- OpenChamber se ejecuta como el usuario, así que el usuario puede leer el archivo. Tenlo en cuenta antes de poner una clave de API en él.
+
+### Una variable de entorno
+
+En un servidor o en un contenedor, donde tú controlas el entorno, basta con esto:
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+En un portátil es un bloqueo más débil: la app de escritorio la lee del perfil del shell de inicio de sesión (por ejemplo, `~/.zshrc`), y el usuario puede editarlo. Ahí usa el archivo de políticas.
+
+Con la variable, el relay, Jev y el acceso de red también salen de sus propias variables: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL` y `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`. En Docker vas a necesitar la última, porque el servidor tiene que escuchar más allá del contenedor.
+
+### Qué cambia
+
+- Los proveedores de modelos salen solo de tu configuración de OpenCode. Conectar un proveedor, iniciar sesión en uno, añadir una clave o crear un proveedor personalizado está desactivado en OpenChamber; quitar o cambiar las cuentas que ya existen sigue funcionando. Esto solo cierra la entrada a través de la app; el bloqueo en sí es la política de OpenCode que se describe más abajo.
+- Los [Proveedores de clasificación (Jev)](/es/classification-providers/) se quedan desactivados, incluido un endpoint personalizado que alguien escriba en Configuración. La red de seguridad y Auto no se ofrecen, y las sesiones solo pasan a en curso a mano. Para usar Jev a través de tu propia infraestructura, fija un endpoint con `jev` en el archivo de políticas o con `OPENCHAMBER_JEV_URL` (más `OPENCHAMBER_JEV_MODEL` y, si lo necesita, `OPENCHAMBER_JEV_API_KEY`). Pasa a ser el predeterminado, se puede seguir desactivando y no se puede elegir nada más.
+- La lectura en voz alta a través de OpenAI está desactivada. Un servidor propio de voz o de transcripción tiene que ejecutarse en la misma máquina. Las voces locales y los modelos de dictado locales siguen funcionando.
+- Las notificaciones push a teléfonos y navegadores solo llevan un título genérico como "Agent response is ready", sin el texto del mensaje ni el nombre de la sesión. Las notificaciones de escritorio se quedan en tu máquina y conservan el texto completo.
+- Las comprobaciones de actualizaciones siguen funcionando, así que las correcciones de seguridad te siguen llegando, pero nunca informan del uso, ni siquiera del ID de instalación anónimo.
+- Los [túneles externos](/es/tunnels/) (Cloudflare, ngrok) están desactivados. Un proveedor de túneles descifra el tráfico en su borde y ve cada solicitud en texto plano.
+- El [Private Relay](/es/private-relay/) solo funciona a través de tu propio relay. Ejecuta un [relay autoalojado](https://github.com/openchamber/openchamber-relay) y apunta OpenChamber hacia él con `relayUrl` en el archivo de políticas o con `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`. El relay compartido tampoco puede leer tu tráfico, ya que está cifrado de extremo a extremo, pero el tuyo mantiene los metadatos de conexión y la entrada a esta máquina dentro de tu red. Sin tu propio relay, no se puede vincular ningún dispositivo.
+- OpenChamber escucha solo en la máquina donde se ejecuta. El ajuste de escritorio que permite a otros dispositivos de la red local abrir la app está desactivado, y el servidor se niega a arrancar en una dirección de red, ya sea desde la CLI (`--host`, `--lan`) o desde el entorno. Si el archivo de políticas aparece mientras la app está en marcha, las conexiones desde otras máquinas se cortan hasta el siguiente arranque. Permite el acceso de red con `"allowNetworkAccess": true` en el archivo de políticas, o con `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` donde el entorno activa el modo empresa. Ten en cuenta que la conexión es HTTP sin cifrar, así que en una red compartida cualquiera puede leerla; pon un servidor al que accedan otros detrás de [tu propio HTTPS](/es/reverse-proxy/).
+- En la extensión de VS Code, conectar proveedores está desactivado y las comprobaciones de actualizaciones no informan del uso. De por sí no tiene Jev, relay, túneles, notificaciones push ni voz en la nube.
+
+Las tareas del modelo pequeño (títulos de sesión, resúmenes, mensajes de commit, el recorrido de cambios) no necesitan ningún modo especial. Siempre se ejecutan con el modelo pequeño que elegiste en Configuración, con un modelo pequeño del proveedor con el que estás trabajando o con el modelo predeterminado de tu configuración de OpenCode. Nunca recurren a otro proveedor que simplemente tengas conectado.
+
+Qué proveedores de modelos se pueden usar lo decide OpenCode, no OpenChamber. Fíjalo con las [políticas de OpenCode](https://opencode.ai/v2/docs/policies/): deniega todos los proveedores y luego permite los que aprobaste.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+Un proveedor denegado desaparece aunque alguien añada una clave para él. Pon las políticas en el archivo global `~/.config/opencode/opencode.jsonc`, donde un proyecto no puede levantarlas, o entrégalas desde un espacio de trabajo de OpenCode Console, que tiene la última palabra. El modo empresa cubre además lo que envía el propio OpenChamber.
+
+Las búsquedas web y las descargas de páginas del agente también pasan por OpenCode, hacia el servicio de búsqueda y hacia las propias páginas. Si no deben salir de tu red, deniégalas con el mismo tipo de política:
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## Relacionado
 
 - [Conectar un dispositivo](/es/connect-devices/) — vinculación de un solo uso y tokens por dispositivo

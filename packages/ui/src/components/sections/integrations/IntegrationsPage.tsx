@@ -11,6 +11,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { GitHubIntegration } from './GitHubIntegration';
 import { LinearSettings } from './LinearSettings';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
+import { CatalogExtensionsSection } from './CatalogExtensionsSection';
 
 export const IntegrationsPage: React.FC = () => {
   const { t } = useI18n();
@@ -45,6 +46,7 @@ export const IntegrationsPage: React.FC = () => {
         </SettingsSection>
       ) : null}
       <ThirdPartyIntegrationsSection divider={hasBuiltIn} />
+      <CatalogExtensionsSection />
       <GuestIntegrationsSection />
     </SettingsPageLayout>
   );

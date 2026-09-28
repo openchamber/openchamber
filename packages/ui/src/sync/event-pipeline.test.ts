@@ -235,6 +235,32 @@ describe("createEventPipeline", () => {
     expect(delivered.map(describeEvent)).toEqual(["updated:a"])
   })
 
+  test("hands a move of a space's setup commands to its owner and delivers no event for it", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const delivered: SyncEvent[] = []
+    const moved: string[] = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        { type: "openchamber:space-setup", properties: { spaceId: "a1b2c3d4e5f6", timestamp: 1 } as never },
+        { type: "openchamber:space-setup", properties: { spaceId: "../etc" } as never },
+        textEnded("a"),
+      ], resolveStreamFinished),
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onSpaceSetup: (spaceId) => { moved.push(spaceId) },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      await streamFinished
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    expect(moved).toEqual(["a1b2c3d4e5f6"])
+    expect(delivered.map(describeEvent)).toEqual(["updated:a"])
+  })
+
   test("reports keepalives that carry no event as stream activity", async () => {
     let resolveStreamFinished!: () => void
     const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })

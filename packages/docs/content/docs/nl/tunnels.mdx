@@ -1,0 +1,120 @@
+---
+title: Tunnels
+description: Maak OpenChamber veilig bereikbaar op afstand en vanaf uw telefoon.
+---
+
+# Tunnels
+
+Een tunnel geeft uw OpenChamber een openbare link, zodat u de app vanuit een gewone browser op een ander netwerk kunt bereiken. Gebruik `openchamber tunnel` om een tunnel voor een draaiende instantie te maken.
+
+> Voor uw **eigen apparaten**, zoals de mobiele app of een andere desktop, is meestal geen tunnel nodig. [Koppel ze](/nl/connect-devices/) en gebruik de end-to-endversleutelde [Privérelay](/nl/private-relay/) voor toegang buitenshuis, zonder extra instellingen.
+
+## Vooraf
+
+OpenChamber start de CLI van de tunnelprovider op uw computer. Installeer eerst de gewenste provider:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Snelle Cloudflare-tunnels gebruiken `cloudflared`. Ngrok vereist een ngrok-account en een authtoken uit het ngrok-dashboard:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Snel beginnen
+
+1. Start OpenChamber:
+
+```bash
+openchamber
+```
+
+Slaat u dit over, dan kan `openchamber tunnel start` zelf een CLI-server starten. Daarbij kunt u serveropties meegeven zoals `--port`, `--host`, `--lan`, `--ui-password` en `--api-only`.
+
+2. Start een Cloudflare-tunnel:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Of start een Ngrok-tunnel:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
+```
+
+3. Controleer de status:
+
+```bash
+openchamber tunnel status
+```
+
+Als de tunnel werkt, toont `status` een openbare URL. Open die of scan de QR-code om OpenChamber overal te bereiken.
+
+In interactieve TTY-sessies toont OpenChamber standaard een QR-code. Gebruik `--qr` om die altijd te tonen of `--no-qr` om haar te verbergen.
+
+## Providers
+
+- `cloudflare`: snelle tunnels en de modi managed remote en managed local
+- `ngrok`: snelle tunnels
+
+## Beheerde modi
+
+### Managed remote
+
+Gebruik een token en hostnaam die door Cloudflare worden beheerd:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Managed local
+
+Gebruik een lokale `cloudflared`-configuratie:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Profielen voor managed-remote
+
+Bewaar een herbruikbaar profiel:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Start met het opgeslagen profiel:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Handige opdrachten
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
+openchamber tunnel stop --port 3000
+```
+
+## Gedrag om rekening mee te houden
+
+- per OpenChamber-instantie, dus per poort, kan één tunnel actief zijn
+- een nieuwe modus of provider op dezelfde instantie vervangt de vorige tunnel
+- een nieuwe verbindingslink trekt de vorige ongebruikte link in
+- automatisch starten via een tunnel bewaart serveropties zoals `--ui-password` en `--api-only` in de instantie-instellingen die bij herstarts en updates worden hergebruikt
+
+## Zie ook
+
+- [Een apparaat verbinden](/nl/connect-devices/) om eigen apparaten zonder openbare URL te koppelen
+- [Beveiliging](/nl/security/) om de interface vooraf te beschermen
+- [Desktoptunnels](/nl/desktop-tunnels/) om vanuit de desktopapp zonder CLI te starten
+- [PWA en mobiel](/nl/mobile/) voor toegang vanaf uw telefoon
+- [Problemen oplossen](/nl/troubleshooting/) als de tunnellink niet werkt

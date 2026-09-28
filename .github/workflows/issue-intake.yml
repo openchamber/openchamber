@@ -15,7 +15,7 @@ jobs:
     if: |
       github.event_name == 'issues' ||
       (github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '@openchamber-bot triage' || startsWith(github.event.comment.body, '@openchamber-bot triage ') || github.event.comment.body == '@openchamber-bot reproduce' || startsWith(github.event.comment.body, '@openchamber-bot reproduce ')))
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       issues: write

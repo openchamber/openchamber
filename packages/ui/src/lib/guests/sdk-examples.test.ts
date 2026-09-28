@@ -63,6 +63,29 @@ const load = async (name: string, script = 'main', folder = 'panel') => {
 };
 
 describe('checked-in SDK examples', () => {
+  test('the checklist file editor edits the file it was handed and keeps what it does not understand', async () => {
+    const app = await load('checklist-editor', 'main', 'editor');
+    const content = '# Launch\n- [ ] Write notes\n- [X] Ship\n';
+    app.ready({ ...context, surface: 'file' });
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'file-open', payload: { path: 'launch.checklist.md', name: 'launch.checklist.md', content, readOnly: false, encoding: 'text' } });
+    const document = app.window.document;
+    const boxes = [...document.querySelectorAll('input[type="checkbox"]')].filter((node) => node instanceof app.window.HTMLInputElement);
+    expect(boxes.map((box) => box.checked)).toEqual([false, true]);
+    expect(app.messages.some((message) => message.type === 'file-change')).toBe(false);
+
+    boxes[0]?.click();
+    expect(app.request('file-change')).toMatchObject({ payload: { dirty: true, edited: true } });
+
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'file-snapshot', id: 'save-1', payload: { purpose: 'save' } });
+    await tick();
+    const answer = app.request('file-snapshot-result');
+    if (answer.type !== 'file-snapshot-result' || !('snapshot' in answer.payload) || !('content' in answer.payload.snapshot)) throw new Error('Missing snapshot');
+    expect(answer.payload.snapshot.content).toBe('# Launch\n- [x] Write notes\n- [x] Ship\n');
+
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'file-saved', payload: { version: answer.payload.snapshot.version } });
+    expect(app.request('file-change')).toMatchObject({ payload: { dirty: false, edited: false } });
+  });
+
   test('a background message action shows one toast without drawing the panel', async () => {
     const app = await load('hello-kit', 'main', 'background');
     app.ready({ ...context, surface: 'background' });

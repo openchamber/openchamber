@@ -140,6 +140,9 @@
     "isolatedSpacesEnabled": {
       "scope": "instance"
     },
+    "isolatedSpacesIdleStop": {
+      "scope": "instance"
+    },
     "agentMemoryFeatureAvailable": {
       "scope": "instance",
       "computed": true
@@ -495,6 +498,14 @@
     },
     "sessionGoalEnabled": {
       "scope": "profile"
+    },
+    "sessionGoalChecker": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
     },
     "sessionGoalDefaultBudgetEnabled": {
       "scope": "profile"

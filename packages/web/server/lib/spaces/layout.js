@@ -59,6 +59,12 @@ export const SPACE_SERVER_PORT = 27600;
 
 export const SPACE_TOKEN_DIRECTORY = `${SPACE_HOME}/.openchamber-space`;
 export const SPACE_TOKEN_PATH = `${SPACE_TOKEN_DIRECTORY}/token`;
+// The idle stop's setting, which the host writes at every start and whenever the user changes it,
+// and the exit code of a server inside that stopped itself for it. The code is how the host tells
+// an idle stop from any other: a server stopped by `docker stop` exits 143. The agent can exit
+// with it too, and all it changes then is the line under the group.
+export const SPACE_IDLE_STOP_PATH = `${SPACE_TOKEN_DIRECTORY}/idle-stop.json`;
+export const SPACE_IDLE_EXIT_CODE = 75;
 
 // The gatekeeper, the space's only way out. It sits on the space's internal network under this
 // name and on the space's own outer network, and nothing else joins either of them.
@@ -103,6 +109,8 @@ export const IMAGE_CAT = '/bin/cat';
 export const IMAGE_CHOWN = '/bin/chown';
 export const IMAGE_CURL = '/usr/bin/curl';
 export const IMAGE_NODE = '/usr/local/bin/node';
+// The setup commands of a project run in bash, as the host's worktrees run them.
+export const IMAGE_BASH = '/bin/bash';
 const IMAGE_SLEEP = '/bin/sleep';
 // Code in: the receiving side of a push runs as `timeout -s KILL <seconds> git receive-pack <path>`.
 // The image's git is 2.39.5, and it has no `pkill`.
@@ -142,6 +150,9 @@ export const SPACE_ENVIRONMENT = Object.freeze({
   // The server inside a space never hosts the relay passively. It has a way out now, and a
   // space must not become the machine that paired devices land on.
   OPENCHAMBER_RELAY_HOST: 'off',
+  // Where the server inside reads the idle stop's setting. Only a space has this variable, so the
+  // timer never runs on the host.
+  OPENCHAMBER_SPACE_IDLE_STOP_FILE: SPACE_IDLE_STOP_PATH,
 });
 
 // Waits for the token file, takes it as the server password, and becomes the server.

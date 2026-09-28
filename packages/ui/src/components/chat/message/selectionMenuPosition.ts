@@ -29,8 +29,8 @@ interface DesktopMenuYInput {
 }
 
 interface DesktopMenuY {
-  // With 'above' the anchor Y is the menu's bottom edge
-  // (`translate(-50%, -100%)`); with 'below' it is the menu's top edge.
+  // With 'above' the anchor Y is the menu's bottom edge; with 'below' it is
+  // the menu's top edge.
   y: number;
   placement: DesktopMenuPlacement;
 }

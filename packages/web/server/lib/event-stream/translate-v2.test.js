@@ -50,6 +50,12 @@ describe('translateWireEvent', () => {
     });
   });
 
+  test('a finished compaction reads as session.compacted', () => {
+    expect(translateWireEvent(wire('session.compaction.ended', { sessionID: 's1', reason: 'auto', text: 'summary', recent: '' })))
+      .toEqual([expect.objectContaining({ type: 'session.compacted', properties: { sessionID: 's1', directory: '/repo' } })]);
+    expect(translateWireEvent(wire('session.compaction.started', { sessionID: 's1', reason: 'auto' }))).toEqual([]);
+  });
+
   test('rename, move and usage all read as session.updated', () => {
     expect(translateWireEvent(wire('session.renamed', { sessionID: 's1', title: 'New' }))[0])
       .toMatchObject({ type: 'session.updated', properties: { info: { id: 's1', title: 'New' } } });

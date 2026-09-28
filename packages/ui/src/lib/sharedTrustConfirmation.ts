@@ -16,9 +16,13 @@ import { getProjectSetup, updateProjectSetup, type ProjectRef, type ProjectSetup
 
 export type SharedTrustChoice = 'trust' | 'skip';
 
+/** Where the commands would run: on this machine, or inside an isolated space. The prompt says which. */
+export type SharedTrustRunsIn = 'machine' | 'space';
+
 export type PendingSharedTrustRequest = {
   project: ProjectRef;
   sharedPath: string;
+  runsIn: SharedTrustRunsIn;
   setupCommands: string[];
   actions: Array<{ id: string; name: string; command: string }>;
   resolve: (choice: SharedTrustChoice) => void;
@@ -47,7 +51,7 @@ export const settleSharedTrustConfirmation = (choice: SharedTrustChoice): void =
   request?.resolve(choice);
 };
 
-const askForTrust = (project: ProjectRef, setup: ProjectSetup): Promise<SharedTrustChoice> => {
+const askForTrust = (project: ProjectRef, setup: ProjectSetup, runsIn: SharedTrustRunsIn): Promise<SharedTrustChoice> => {
   if (pendingRequest) {
     pendingRequest.resolve('skip');
   }
@@ -55,6 +59,7 @@ const askForTrust = (project: ProjectRef, setup: ProjectSetup): Promise<SharedTr
     pendingRequest = {
       project,
       sharedPath: setup.shared.path,
+      runsIn,
       setupCommands: setup.shared.setupWorktree,
       actions: setup.shared.projectActions.map(({ id, name, command }) => ({ id, name, command })),
       resolve,
@@ -69,11 +74,11 @@ const askForTrust = (project: ProjectRef, setup: ProjectSetup): Promise<SharedTr
  * otherwise asks, records a "trust" answer on the instance, and resolves
  * `false` when the user chose to run without the shared commands this time.
  */
-export const ensureSharedSetupTrusted = async (project: ProjectRef, setup: ProjectSetup): Promise<boolean> => {
+export const ensureSharedSetupTrusted = async (project: ProjectRef, setup: ProjectSetup, runsIn: SharedTrustRunsIn = 'machine'): Promise<boolean> => {
   if (setup.trust.trusted || setup.trust.hash === null) {
     return true;
   }
-  const choice = await askForTrust(project, setup);
+  const choice = await askForTrust(project, setup, runsIn);
   if (choice !== 'trust') {
     return false;
   }
@@ -88,14 +93,15 @@ export const ensureSharedSetupTrusted = async (project: ProjectRef, setup: Proje
 /**
  * The setup commands a new worktree should run for `project`, after the trust
  * prompt when the shared ones have not been trusted yet. A "skip" answer
- * leaves only the user's own commands.
+ * leaves only the user's own commands. An isolated space asks the same, saying that they run
+ * inside the space; the answer is remembered the same way.
  */
-export const resolveWorktreeSetupCommands = async (project: ProjectRef): Promise<string[]> => {
+export const resolveWorktreeSetupCommands = async (project: ProjectRef, runsIn: SharedTrustRunsIn = 'machine'): Promise<string[]> => {
   const setup = await getProjectSetup(project);
   if (setup.shared.setupWorktree.length === 0 || setup.personal.setupWorktreeMode === 'replace') {
     return setup.setupWorktree;
   }
-  if (await ensureSharedSetupTrusted(project, setup)) {
+  if (await ensureSharedSetupTrusted(project, setup, runsIn)) {
     return setup.setupWorktree;
   }
   return setup.personal.setupWorktree;

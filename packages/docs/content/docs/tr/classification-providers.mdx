@@ -22,11 +22,11 @@ Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, oturumlar da yalnızca siz 
 
 ## Kurulum
 
-**Ayarlar → Provider'lar → Sınıflandırma sağlayıcıları** sayfasını açın ve Jev isteklerinin nereye gideceğini seçin. Beş seçenek var.
+Jev siz açana kadar kapalıdır: Bir sınıflandırma sağlayıcısı seçmediğiniz sürece konuşmalarınızdan hiçbir şey ona gitmez. **Ayarlar → Provider'lar → Sınıflandırma sağlayıcıları** sayfasını açın ve Jev isteklerinin nereye gideceğini seçin. **Kapalı** dışında altı seçenek var.
 
 ### OpenCode Zen kampanyası
 
-Sınırlı bir süre ücretsiz, anahtar gerekmez. Kampanya sürdüğü sürece OpenCode, OpenChamber'ın Jev'i OpenCode Zen üzerinden ücretsiz kullanmasına izin veriyor. Bu sayfaya hiç dokunmadıysanız zaten bunu kullanıyorsunuz.
+Sınırlı bir süre ücretsiz, anahtar gerekmez. Kampanya sürdüğü sürece OpenCode, OpenChamber'ın Jev'i OpenCode Zen üzerinden ücretsiz kullanmasına izin veriyor.
 
 Kampanya bittiğinde bu seçenek kaybolur ve varsa OpenChamber aşağıdaki anahtarlardan birine geçer.
 
@@ -62,11 +62,35 @@ Kendi TypeSafe anahtarınız ve kotanız.
 
 Kaydedilen anahtar aynı zamanda seçilmiş olur. Anahtar OpenChamber sunucusunda kendi dosyasında durur ve asla tarayıcıya gönderilmez.
 
+### Özel uç nokta
+
+TypeSafe'in System One API'sini konuşan herhangi bir hizmet: kendi barındırdığınız bir ağ geçidi, bir şirket proxy'si veya burada listelenmeyen bir sağlayıcı.
+
+1. **Özel uç nokta** altında **Uç nokta URL'si** ve **Model** alanlarını doldurun (örneğin `jev-latest`).
+2. Hizmet gerektiriyorsa bir **API anahtarı** ekleyin. Anahtar `Bearer` token olarak gönderilir.
+3. **Kaydet**'e basın.
+
+URL olarak `/v1/systemone` ile biten tam adresi, `/v1` ile biten OpenAI tarzı bir temel URL'yi veya API kökünü (`https://api.typesafe.ai` gibi) yapıştırabilirsiniz. OpenChamber eksik kısmı tamamlar ve çağıracağı tam adresi gösterir. Yalnızca `http` ve `https` çalışır; anahtar URL'ye değil, kendi alanına girilir.
+
+Kaydetmek uç noktayı da seçer. TypeSafe anahtarı gibi uç nokta ve anahtarı da OpenChamber sunucusunda kendi dosyasında durur ve anahtar asla tarayıcıya gönderilmez.
+
+Bir sunucu uç noktasını ortam değişkenlerinden de alabilir; OpenChamber'ı bir ekip için kurarken bu işe yarar:
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # isteğe bağlı, varsayılan budur
+OPENCHAMBER_JEV_API_KEY=...             # isteğe bağlı
+```
+
+Yönettiğiniz dizüstü bilgisayarlarda aynı uç noktayı bunun yerine makinedeki [politika dosyasına](/tr/security/) `jev` altında yazın. Dosya, ortam değişkenlerinden önce gelir.
+
+Her iki durumda da bu uç nokta Ayarlar'da kayıtlı uç noktanın yerini alır ve Ayarlar onu kimsenin düzenlemesine izin vermeden gösterir. [Kurumsal modda](/tr/security/) **Kapalı** dışında izin verilen tek Jev kaynağıdır ve varsayılan olarak seçilidir.
+
 Bir sağlayıcı çalıştığında **Ayarlar → Provider'lar** sayfasındaki kart **Hazır** gösterir.
 
 ## Seçiminiz çalışmayı bıraktığında
 
-Seçtiğiniz sağlayıcı kullanılamıyorsa (kampanya bitti, bir anahtar kaldırıldı), OpenChamber çalışan ilk sağlayıcıya geçer, önce kendi anahtarlarınız: TypeSafe anahtarı, sonra OpenRouter, sonra Vercel AI Gateway, sonra Zen anahtarı, sonra kampanya. Sayfa şu anda hangisinin kullanıldığını gösterir.
+Seçtiğiniz sağlayıcı kullanılamıyorsa (kampanya bitti, bir anahtar kaldırıldı), OpenChamber kendi anahtarlarınızdan çalışan ilkine geçer: TypeSafe anahtarı, sonra özel uç noktanız, sonra OpenRouter, sonra Vercel AI Gateway, sonra Zen anahtarı. Kampanyaya asla geçmez ve **Kapalı** kapalı kalır. Sayfa şu anda hangisinin kullanıldığını gösterir.
 
 Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. Her özelliğin bu durum için güvenli bir yanıtı vardır:
 
@@ -79,7 +103,7 @@ Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. He
 
 Jev konuşmanızdan kısa alıntılar alır: son mesajınızı ve bağlam için en fazla üç önceki turu, ilk birkaç yüz karakterine kısaltılmış olarak. Güvenlik ağı için kontrol edilen eylemi de OpenCode'un tarif ettiği şekliyle alır: ajanın çalıştırmak istediği komutu ya da bir düzenlemede dosyayı ve değişikliği. Asla dosyaların tamamını veya görselleri almaz.
 
-İstekler, seçiminize göre OpenChamber sunucusundan doğrudan OpenCode Zen'e, OpenRouter'a, Vercel AI Gateway'e veya TypeSafe'e gider.
+İstekler, seçiminize göre OpenChamber sunucusundan doğrudan OpenCode Zen'e, OpenRouter'a, Vercel AI Gateway'e, TypeSafe'e veya özel uç noktanıza gider.
 
 ## Nerede çalışır
 

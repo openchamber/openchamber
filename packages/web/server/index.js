@@ -21,9 +21,11 @@ import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
   getUnauthenticatedLanErrorMessage,
+  isLoopbackBindHost,
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
 } from './lib/security/bind-host.js';
+import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR } from './lib/enterprise-mode.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -116,12 +118,14 @@ import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
 import { createSpacesHost } from './lib/spaces/host.js';
+import { readIdleStopSetting, startIdleStop } from './lib/spaces/idle-stop.js';
+import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
 import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
-import { createRelayService } from './lib/relay/service.js';
+import { createRelayService, relayBlockedByEnterprise } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
@@ -915,6 +919,8 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
+  classifierEndpoint: () => routingRuntime.classifierEndpoint(),
+  jev: createJevClient(),
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
@@ -930,7 +936,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
       : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
     const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
       ? goal.statusReason
-      : (goal?.note || '');
+      : '';
     const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
     const notificationPayload = {
       title,
@@ -1820,7 +1826,7 @@ async function main(options = {}) {
       if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') lanHost = effectiveBindHost;
     }
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
-    return { local, lan, relayAvailable: true };
+    return { local, lan, relayAvailable: !relayBlockedByEnterprise() };
   };
   // ALL direct LAN URLs this server is currently reachable on, for the
   // candidates-refresh endpoint: the address the requesting client already
@@ -1862,6 +1868,12 @@ async function main(options = {}) {
     && !isUnsafeUnauthenticatedLanAllowed(process.env)
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
+  }
+  // Enterprise mode keeps the server on this machine unless the administrator
+  // allowed network access. The server is a package anyone can install, so
+  // this holds for the CLI and --host as much as for the desktop toggle.
+  if (isNetworkExposedBindHost(effectiveBindHost) && isNetworkAccessBlocked()) {
+    throw new Error(NETWORK_ACCESS_BLOCKED_ERROR);
   }
   const tryCfTunnel = options.tryCfTunnel === true;
   const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.OPENCHAMBER_API_ONLY);
@@ -1928,6 +1940,8 @@ async function main(options = {}) {
       const settings = await readSettingsFromDiskMigrated();
       return sanitizeProjects(settings?.projects || []).map((project) => project.path);
     },
+    readIdleStop: async () => readIdleStopSetting((await readSettingsFromDiskMigrated())?.isolatedSpacesIdleStop),
+    saveIdleStop: (setting) => persistSettings({ isolatedSpacesIdleStop: setting }),
   });
   const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
   if (startupSettings?.isolatedSpacesEnabled === true) {
@@ -1990,6 +2004,13 @@ async function main(options = {}) {
   expressApp = app;
   server = http.createServer(app);
   gracefulShutdownRuntime.trackServerConnections(server);
+  // A policy placed while the server runs cannot rebind it, so connections
+  // from other machines are dropped until the next start binds loopback.
+  if (isNetworkExposedBindHost(effectiveBindHost)) {
+    server.on('connection', (socket) => {
+      if (!isLoopbackBindHost(socket.remoteAddress ?? '') && isNetworkAccessBlocked()) socket.destroy();
+    });
+  }
   // Same pattern for the tunnel runtime: created after the base routes so
   // /api/system/info resolves port + tunnel URL lazily at request time.
   let tunnelRuntimeContextHolder = null;
@@ -2373,6 +2394,22 @@ async function main(options = {}) {
     void relayService.reconcile();
   }, 60_000);
   relayReconcileTimer.unref?.();
+
+  // The server inside an isolated space stops itself after the user's idle hours, and the space's
+  // container with it (DESIGN.md, decision 11). Only a space's environment names the setting's
+  // file, so this never runs anywhere else. The exit code tells the host why it stopped.
+  const spaceIdleStopFile = process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE;
+  if (spaceIdleStopFile) {
+    startIdleStop({
+      settingsPath: spaceIdleStopFile,
+      readSessionStates: () => sessionRuntime.getSessionStateSnapshot(),
+      readPendingRequests: () => sessionRuntime.getPendingBlockingRequestsSnapshot(),
+      stopSpace: async () => {
+        await gracefulShutdown({ exitProcess: false }).catch(() => {});
+        process.exit(SPACE_IDLE_EXIT_CODE);
+      },
+    });
+  }
 
   return {
     expressApp: app,

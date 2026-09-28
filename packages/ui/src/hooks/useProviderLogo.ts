@@ -8,10 +8,21 @@ interface UseProviderLogoReturn {
     hasLogo: boolean;
 }
 
-const localLogoModules = import.meta.glob<string>('../assets/provider-logos/*.svg', {
-    eager: true,
-    import: 'default',
-});
+// Vite rewrites `import.meta.glob` at build time into the matching modules. A runtime without
+// that transform (the bun test runner) throws on the call instead, so keep it failable and let
+// the hook fall back to the remote logo URL it already supports.
+const loadLocalLogoModules = (): Record<string, string> => {
+    try {
+        return import.meta.glob<string>('../assets/provider-logos/*.svg', {
+            eager: true,
+            import: 'default',
+        });
+    } catch {
+        return {};
+    }
+};
+
+const localLogoModules = loadLocalLogoModules();
 
 const LOCAL_PROVIDER_LOGO_MAP = new Map<string, string>();
 const PRELOADED_LOGO_SRCS = new Set<string>();

@@ -26,7 +26,7 @@ describe('createSpaceManager', () => {
     });
     const { memoryBytes, ...listedFields } = space;
     expect(memoryBytes).toBeGreaterThan(0);
-    expect(await manager.listSpaces({ placeId: 'memory' })).toEqual([{ ...listedFields, state: 'running', orphans: [], damaged: false, missing: [] }]);
+    expect(await manager.listSpaces({ placeId: 'memory' })).toEqual([{ ...listedFields, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] }]);
   });
 
   it('takes the id a caller announced before the creation, and refuses one that is not a space id', async () => {

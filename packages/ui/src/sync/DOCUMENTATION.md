@@ -322,8 +322,17 @@ settles an unfinished turn is the host's, global, and never covers a space, so
 host's empty answer would otherwise mark a turn running inside as interrupted.
 A space that dies in the middle of a turn sends no settle event, so the
 session keeps the busy state it last reported until the space answers again
-or the user acts; the group's stale mark is what says the space is gone. The
-status and repair actions of a later stage own that.
+or the user acts; the group's stale mark is what says the space is gone, and
+the group's status line turns it into "not answering" with a restart of the
+container (`lib/spaces/space-repair.ts`). That module derives the line from the
+journey entry (`state`, `damage`), the mark, and the one action this window has
+under way or saw fail on the space, which `spaces-store.ts` keeps per space and
+clears on a runtime switch. After a start or restart that went through it marks
+the space reachable, because the host answers those only once the server inside
+is ready, and it reads the journey list again whatever the outcome. After a
+removal that went through it also reloads the global session list: the mark of
+the removed space goes only with the host's next complete list, and until then
+the sidebar kept an empty group for the space, about forty seconds measured.
 
 The host also announces each step of a creation as
 `openchamber:space-progress`; the pipeline hands it to `sync-context.tsx`, which

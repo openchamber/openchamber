@@ -39,6 +39,7 @@ import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
 import { guestGenerate } from '@/lib/guests/generate';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -47,6 +48,7 @@ import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/re
 import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
 import { useGuestItemStore } from '@/lib/guests/item-store';
+import { isGuestFileMessage, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
 import { loadGuestServiceStatus, proxyGuestServiceRequest } from '@/lib/guests/service';
 import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
@@ -94,6 +96,11 @@ type PluginPaneProps = {
   onSessionStarted?: () => void;
   /** The guest asked for this content height (`setHeight`). The Work Status section sizes its frame from it. */
   onResize?: (height: number) => void;
+  /**
+   * `surface="file"` only: the editor (`contributes.fileEditors[].id`) to load
+   * and the channel that hands it the file. Required together.
+   */
+  fileEditor?: { editorId: string; channel: GuestFileChannel };
 };
 
 // Sandboxed frames without allow-same-origin have an opaque origin.
@@ -132,6 +139,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onAttach,
   onSessionStarted,
   onResize,
+  fileEditor,
 }) => {
   const { t, locale } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -226,7 +234,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     item,
   }), [currentTheme, readableColors, directory, guest?.backgroundEntry, headless, item, locale, oauthStatus, sessionSnapshot, surface]);
 
-  const frameKey = `${guestId}:${guest?.version ?? ''}:${guestEnabled}:service-${guest?.service?.granted ? '1' : '0'}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}`;
+  const fileEditorEntry = surface === 'file' && fileEditor
+    ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
+    : null;
+  // Origins the user approved for this list; the frame policy opens them.
+  const approvedOrigins = guest?.capabilities.granted.includes('origins') ? guest.origins ?? [] : [];
+  const frameKey = `${guestId}:${guest?.version ?? ''}:${guestEnabled}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${fileEditorEntry ?? ''}`;
 
   // Scoped auth is minted per mount/version/grant and renewed if an existing
   // iframe navigates after expiry. Healthy documents retain their local state.
@@ -236,10 +249,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     ? headless ? guest.backgroundEntry ?? guest.entry ?? null
       : surface === 'page' ? guest.pageEntry ?? null
         : surface === 'status' ? guest.statusEntry ?? null
+        : surface === 'file' ? fileEditorEntry
         : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null
     : null;
   const { src, srcDoc, status: frameStatus, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
-    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled,
+    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins,
   });
 
   const readyRef = React.useRef(ready);
@@ -268,6 +282,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onSessionStartedRef.current = onSessionStarted;
   const onResizeRef = React.useRef(onResize);
   onResizeRef.current = onResize;
+  const fileChannel = fileEditor?.channel ?? null;
+  const fileChannelRef = React.useRef(fileChannel);
+  fileChannelRef.current = fileChannel;
   const oauthPollRef = React.useRef<number | null>(null);
   // Outstanding `resolve` requests this pane sent; answered by `resolve-result`.
   const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
@@ -288,6 +305,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     const message = backgroundAction?.takeMessage();
     if (message) postToGuest(message);
   }, [backgroundAction, postToGuest]);
+
+  // A file editor gets its file once the frame is listening (hello or load),
+  // not on every host-state push: theme or session changes are no reload.
+  const connectFileChannel = React.useCallback(() => {
+    fileChannelRef.current?.connect(postToGuest);
+  }, [postToGuest]);
+  React.useEffect(() => {
+    if (!fileChannel) return;
+    return () => fileChannel.disconnect();
+  }, [fileChannel, frameKey, src, srcDoc]);
 
   // Registered once the guest has connected (hello or iframe load), so a
   // resolve is never posted into a frame that is not listening yet. An explicit
@@ -389,6 +416,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         acknowledgeHandshake();
         clearSubscriptions();
         pushHostState();
+        connectFileChannel();
         registerResolver();
         sendBackgroundAction();
         return;
@@ -396,6 +424,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
       if (message.type === 'action-result') {
         if (message.id === backgroundAction?.id) backgroundAction.complete(message.payload);
+        return;
+      }
+
+      if (isGuestFileMessage(message)) {
+        fileChannelRef.current?.receive(message);
         return;
       }
 
@@ -576,7 +609,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           if (!guestMay(guestRef.current, 'model')) {
             return Promise.resolve({ ok: false as const, code: 'NOT_GRANTED' as const, message: NOT_GRANTED_MESSAGE });
           }
-          return guestGenerate(guestIdRef.current, request, directoryRef.current || null);
+          return guestGenerate(
+            guestIdRef.current,
+            request,
+            directoryRef.current || null,
+            useConfigStore.getState().currentProviderId || null,
+          );
         },
         setBadge: (count) => {
           if (!guestEnabledRef.current) return;
@@ -617,7 +655,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [acknowledgeHandshake, backgroundAction, frameKey, guestEnabled, postToGuest, pushHostState, refreshOauth, registerResolver, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll]);
+  }, [acknowledgeHandshake, backgroundAction, connectFileChannel, frameKey, guestEnabled, postToGuest, pushHostState, refreshOauth, registerResolver, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll]);
 
   React.useEffect(() => {
     if (backgroundAction && (frameStatus === 'error' || !guestEnabled)) {
@@ -648,8 +686,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [pushHostState, ready, directory]);
 
   React.useEffect(() => {
-    // A Work Status section is not a rail tab and may be the package's only frame.
-    if (headless || surface === 'status' || catalogStatus !== 'ready' || guest?.entry) {
+    // A Work Status section or a file editor is not a rail tab and may be the package's only frame.
+    if (headless || surface === 'status' || surface === 'file' || catalogStatus !== 'ready' || guest?.entry) {
       return;
     }
     closeGuestTabsEverywhere(mode);
@@ -703,6 +741,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         // healthy extension and discarding its in-memory state.
         if (recoverExpiredNavigation()) return;
         pushHostState();
+        connectFileChannel();
         registerResolver();
         sendBackgroundAction();
       }}

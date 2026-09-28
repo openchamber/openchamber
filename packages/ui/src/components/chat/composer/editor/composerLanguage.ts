@@ -14,9 +14,9 @@
  */
 
 import { RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import { Decoration, Direction, EditorView, type DecorationSet } from '@codemirror/view';
 
-import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS } from '../../composerHighlight';
+import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
 import { tokenizeComposer, type ComposerLanguageContext } from '../language/tokenize';
 
 /**
@@ -50,24 +50,60 @@ const EMPTY_CONTEXT: ComposerLanguageContext = {
     attachmentFilenames: [],
 };
 
-/**
- * Decorations for the whole document. The composer holds a prompt, not a
- * source file: it is short enough that a full retokenize per change is
- * cheaper and far simpler than incremental mapping, and it keeps the editor
- * and the send path reading the exact same grammar.
- */
-function buildDecorations(text: string, context: ComposerLanguageContext): DecorationSet {
+const technicalStyles = new Set<HighlightRange['style']>([
+    'code', 'codeFence', 'path', 'linkUrl',
+    'mentionFile', 'mentionAgent', 'mentionCommand', 'mentionSnippet',
+]);
+
+const ltrIsolate = Decoration.mark({
+    attributes: { dir: 'ltr', style: 'unicode-bidi: isolate' },
+    bidiIsolate: Direction.LTR,
+});
+
+function technicalIsolates(ranges: HighlightRange[]): DecorationSet {
+    const technical = ranges
+        .filter((range) => range.start < range.end && technicalStyles.has(range.style))
+        .sort((a, b) => a.start - b.start || b.end - a.end);
     const builder = new RangeSetBuilder<Decoration>();
-    for (const segment of resolveHighlightSegments(text, tokenizeComposer(text, context))) {
+    let start = -1;
+    let end = -1;
+    // One isolation boundary per technical fragment, outside syntax colors.
+    // Overlapping highlights must not split paths or code into separate runs.
+    for (const range of technical) {
+        if (range.start <= end) {
+            end = Math.max(end, range.end);
+        } else {
+            if (start >= 0) builder.add(start, end, ltrIsolate);
+            start = range.start;
+            end = range.end;
+        }
+    }
+    if (start >= 0) builder.add(start, end, ltrIsolate);
+    return builder.finish();
+}
+
+/**
+ * Reuse the prompt's existing tokenization for both color and direction.
+ * The composer already retokenizes on edits; bidi adds no second text scan.
+ */
+function buildDecorations(text: string, context: ComposerLanguageContext) {
+    const ranges = tokenizeComposer(text, context);
+    const builder = new RangeSetBuilder<Decoration>();
+    for (const segment of resolveHighlightSegments(text, ranges)) {
         // Unstyled stretches need no decoration — the editor's own base text
         // color already renders them.
         if (segment.className === DEFAULT_HIGHLIGHT_CLASS) continue;
         builder.add(segment.start, segment.end, Decoration.mark({ class: segment.className }));
     }
-    return builder.finish();
+    return {
+        highlights: builder.finish(),
+        isolates: context.inputMode === 'shell' && text.length > 0
+            ? Decoration.set([ltrIsolate.range(0, text.length)])
+            : technicalIsolates(ranges),
+    };
 }
 
-const decorationField = StateField.define<DecorationSet>({
+const decorationField = StateField.define<ReturnType<typeof buildDecorations>>({
     create: (state) => buildDecorations(state.doc.toString(), state.field(languageContextField)),
     update(value, transaction) {
         const contextChanged = transaction.effects.some((effect) => effect.is(setLanguageContext));
@@ -77,7 +113,11 @@ const decorationField = StateField.define<DecorationSet>({
             transaction.state.field(languageContextField),
         );
     },
-    provide: (field) => EditorView.decorations.from(field),
+    provide: (field) => [
+        EditorView.decorations.from(field, (value) => value.highlights),
+        EditorView.outerDecorations.from(field, (value) => value.isolates),
+        EditorView.bidiIsolatedRanges.from(field, (value) => value.isolates),
+    ],
 });
 
 /**

@@ -25,7 +25,8 @@ import { setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getGuestSourceUrl } from '@/lib/guests/source-url';
-import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, uploadGuestZip, type InstallGuestErrorCode } from '@/lib/guests/install';
+import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, uploadGuestZip } from '@/lib/guests/install';
+import { errorToastKey, updateErrorToastKey } from './extensionToasts';
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
@@ -33,7 +34,7 @@ import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
-import { checkGuestUpdates, updateGuest, type UpdateGuestErrorCode } from '@/lib/guests/updates';
+import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -43,21 +44,6 @@ import { openExternalUrl } from '@/lib/url';
 import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
 import type { PublicSocketBinding } from '@openchamber/sdk';
 
-const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
-  if (code === 'invalid-path') return 'settings.extensions.toast.invalidPath';
-  if (code === 'invalid-url') return 'settings.extensions.toast.invalidUrl';
-  if (code === 'not-found') return 'settings.extensions.toast.notFound';
-  if (code === 'invalid-manifest') return 'settings.extensions.toast.invalidManifest';
-  if (code === 'reserved-id') return 'settings.extensions.toast.reservedId';
-  if (code === 'id-taken') return 'settings.extensions.toast.idTaken';
-  if (code === 'already-installed') return 'settings.extensions.toast.alreadyInstalled';
-  if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
-  if (code === 'host-too-old') return 'settings.extensions.toast.hostTooOld';
-  if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
-  if (code === 'extract-failed') return 'settings.extensions.toast.extractFailed';
-  if (code === 'too-large') return 'settings.extensions.toast.zipTooLarge';
-  return 'settings.extensions.toast.failed';
-};
 
 /**
  * What the user handed us to install: a typed path or URL (also what the
@@ -70,15 +56,6 @@ type InstallSource =
 
 const isZipFile = (file: File): boolean => file.name.toLowerCase().endsWith('.zip');
 
-const updateErrorToastKey = (code: UpdateGuestErrorCode): I18nKey => {
-  if (code === 'not-git') return 'settings.extensions.toast.notGit';
-  if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
-  if (code === 'invalid-manifest') return 'settings.extensions.toast.invalidManifest';
-  if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
-  if (code === 'swap-failed') return 'settings.extensions.toast.swapFailed';
-  if (code === 'not-found') return 'settings.extensions.toast.notFound';
-  return 'settings.extensions.toast.updateFailed';
-};
 
 const sourceKey = (source?: GuestSource): I18nKey => {
   if (source === 'path') return 'settings.extensions.source.path';

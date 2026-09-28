@@ -81,6 +81,8 @@ export type EventPipelineInput = {
    * failure of the step that stopped it.
    */
   onSpaceProgress?: (details: SpaceProgress) => void
+  /** Called when the setup commands of an isolated space moved on: began, the next one, or ended. */
+  onSpaceSetup?: (spaceId: string) => void
   /**
    * Called whenever the stream receives anything: an event, a WebSocket frame, or a keepalive
    * that carries no event. Starting an attempt that has received nothing yet does not count.
@@ -170,6 +172,12 @@ const openchamberSpaceProgressSchema = z.object({
 })
 
 export type SpaceProgress = z.infer<typeof openchamberSpaceProgressSchema>["properties"]
+
+// The setup commands of a space moved on: the list says how.
+const openchamberSpaceSetupSchema = z.object({
+  type: z.literal("openchamber:space-setup"),
+  properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/) }),
+})
 
 const openchamberAutoAcceptSchema = z.object({
   type: z.literal("openchamber:permission-auto-accept.updated"),
@@ -330,6 +338,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onTransportSwitch,
     onSpaceStream,
     onSpaceProgress,
+    onSpaceSetup,
     onStreamActivity,
     routeDirectory,
     transport = "auto",
@@ -580,6 +589,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     const spaceProgress = openchamberSpaceProgressSchema.safeParse(payload)
     if (spaceProgress.success) {
       onSpaceProgress?.(spaceProgress.data.properties)
+      return
+    }
+    const spaceSetup = openchamberSpaceSetupSchema.safeParse(payload)
+    if (spaceSetup.success) {
+      onSpaceSetup?.(spaceSetup.data.properties.spaceId)
       return
     }
     for (const { directory, event } of translatePayload(payload, frameDirectory)) {

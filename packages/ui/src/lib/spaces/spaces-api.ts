@@ -88,12 +88,27 @@ export type SpaceCreationStep = (typeof SPACE_CREATION_STEPS)[number];
 
 export const spaceCreationStepSchema = z.enum(SPACE_CREATION_STEPS);
 
+// The project's setup commands in the space (5d-4): queued until the code arrived, the command
+// running now, how the last run ended, or a run the host did not live to see end. `command` is the
+// project's text, to show only.
+const setupSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('queued'), total: z.number().int().min(1) }),
+  z.object({ state: z.literal('running'), index: z.number().int().min(0), total: z.number().int().min(1), command: z.string() }),
+  z.object({ state: z.literal('done'), total: z.number().int().min(1) }),
+  z.object({ state: z.literal('failed'), index: z.number().int().min(0), total: z.number().int().min(1), command: z.string(), exitCode: z.number().int().nullable(), timedOut: z.boolean() }),
+  z.object({ state: z.literal('interrupted'), total: z.number().int().min(1) }),
+]);
+
+export type SpaceSetup = z.infer<typeof setupSchema>;
+
 const spaceEntrySchema = z.object({
   id: spaceIdSchema,
   name: z.string(),
   projectDirectory: z.string().nullable(),
   directory: z.string().nullable(),
   state: z.enum(['preparing', 'running', 'exited', 'missing', 'failed']),
+  // A stopped space that stopped itself after the idle hours, rather than by a hand or a crash.
+  stoppedIdle: z.boolean().default(false),
   step: spaceCreationStepSchema.nullable(),
   failure: failureSchema.nullable(),
   // Null when the host could not read what the user chose: unknown, never "open".
@@ -101,6 +116,11 @@ const spaceEntrySchema = z.object({
   grants: z.array(grantSchema),
   access: z.enum(['granted', 'needs_access', 'unknown']).nullable(),
   needsAccess: z.array(z.string()),
+  // What is broken in a damaged space: `repairable` comes back with a restart of the container,
+  // `gatekeeper_gone` never does. Null for a space that is whole.
+  damage: z.enum(['repairable', 'gatekeeper_gone']).nullable().default(null),
+  // Null before any run of the setup commands, and from a host before 5d-4.
+  setup: setupSchema.nullable().default(null),
 });
 
 export type SpaceEntry = z.infer<typeof spaceEntrySchema>;
@@ -119,6 +139,8 @@ export type CreateSpaceRequest = {
   name: string;
   start: SpaceStart;
   network: SpaceNetwork;
+  /** The project's setup commands, resolved as for a new worktree, trust included. */
+  setupCommands: string[];
 };
 
 export type GrantRequest =
@@ -197,6 +219,52 @@ export const readSpaceJournal = (spaceId: string, signal?: AbortSignal): Promise
 const removalSchema = z.object({ id: spaceIdSchema, removed: z.boolean(), failures: z.array(failureSchema) });
 
 type SpaceRemoval = z.infer<typeof removalSchema>;
+
+/** Starts a stopped space; its network and the grants the host can say again come back with it. */
+export const startSpace = (spaceId: string): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/start`, spaceEntrySchema, { method: 'POST' });
+
+/** Stops a running space and its gatekeeper; its files stay. */
+export const stopSpace = (spaceId: string): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/stop`, spaceEntrySchema, { method: 'POST' });
+
+/** Restarts the container of a running space, with a fresh token for the server inside. */
+export const restartSpace = (spaceId: string): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/restart`, spaceEntrySchema, { method: 'POST' });
+
+/** Restarts OpenCode inside a running space and answers once it is ready again. */
+export const restartSpaceOpenCode = (spaceId: string): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/restart-opencode`, spaceEntrySchema, { method: 'POST' });
+
+// The idle stop (decision 11): on or off, and after how many whole hours with no session working.
+export const SPACE_IDLE_STOP_MIN_HOURS = 1;
+export const SPACE_IDLE_STOP_MAX_HOURS = 168;
+
+const idleStopSchema = z.object({
+  enabled: z.boolean(),
+  hours: z.number().int().min(SPACE_IDLE_STOP_MIN_HOURS).max(SPACE_IDLE_STOP_MAX_HOURS),
+});
+
+export type SpaceIdleStop = z.infer<typeof idleStopSchema>;
+
+export const readSpaceIdleStop = (signal?: AbortSignal): Promise<SpaceIdleStop> =>
+  request(`${SPACES_ROUTE}/idle-stop`, idleStopSchema, { signal });
+
+/** Keeps the setting and tells every running space; answers the setting as kept. */
+export const setSpaceIdleStop = (setting: SpaceIdleStop): Promise<SpaceIdleStop> =>
+  request(`${SPACES_ROUTE}/idle-stop`, idleStopSchema, { method: 'PUT', body: JSON.stringify(setting) });
+
+/** Runs the setup commands again in a running space; answers once they began. */
+export const runSpaceSetup = (spaceId: string, commands: readonly string[]): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/setup`, spaceEntrySchema, { method: 'POST', body: JSON.stringify({ commands }) });
+
+// The end of the failed command's output: printed by the project's code, so plain text to show.
+const setupOutputSchema = z.object({ setup: setupSchema.nullable(), output: z.string().nullable() });
+
+export type SpaceSetupOutput = z.infer<typeof setupOutputSchema>;
+
+export const readSpaceSetup = (spaceId: string, signal?: AbortSignal): Promise<SpaceSetupOutput> =>
+  request(`${SPACES_ROUTE}/${spaceId}/setup`, setupOutputSchema, { signal });
 
 export const removeSpace = (spaceId: string): Promise<SpaceRemoval> =>
   request(`${SPACES_ROUTE}/${spaceId}`, removalSchema, { method: 'DELETE' });

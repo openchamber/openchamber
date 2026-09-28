@@ -22,11 +22,11 @@ Sin proveedor, la red de seguridad y Auto quedan ocultos, y las sesiones solo pa
 
 ## Configuración
 
-Abre **Configuración → Proveedores → Proveedores de clasificación** y elige a dónde van las solicitudes a Jev. Hay cinco opciones.
+Jev está desactivado hasta que lo actives: nada de tus conversaciones va a un proveedor de clasificación a menos que elijas uno. Abre **Configuración → Proveedores → Proveedores de clasificación** y elige a dónde van las solicitudes a Jev. Además de **Desactivado**, hay seis opciones.
 
 ### Promoción de OpenCode Zen
 
-Gratis por tiempo limitado, sin clave. Mientras dure la promoción, OpenCode deja que OpenChamber use Jev a través de OpenCode Zen sin costo. Si nunca tocaste esta página, esto es lo que ya estás usando.
+Gratis por tiempo limitado, sin clave. Mientras dure la promoción, OpenCode deja que OpenChamber use Jev a través de OpenCode Zen sin costo.
 
 Cuando la promoción termine, la opción desaparece y OpenChamber cambia a una de las claves de abajo, si tienes alguna.
 
@@ -62,11 +62,35 @@ Tu propia clave y tu propia cuota de TypeSafe.
 
 Al guardar una clave, también queda seleccionada. La clave se queda en el servidor de OpenChamber, en su propio archivo, y nunca se envía al navegador.
 
+### Endpoint personalizado
+
+Cualquier servicio que hable la API System One de TypeSafe: un gateway autoalojado, un proxy de empresa o un proveedor que no aparece aquí.
+
+1. En **Endpoint personalizado**, rellena la **URL del endpoint** y el **Modelo** (por ejemplo, `jev-latest`).
+2. Añade una **Clave de API** si el servicio la necesita. Se envía como token `Bearer`.
+3. Pulsa **Guardar**.
+
+Como URL puedes pegar la dirección completa que termina en `/v1/systemone`, una URL base al estilo de OpenAI que termina en `/v1` o la raíz de la API (como `https://api.typesafe.ai`). OpenChamber añade la parte que falta y muestra la dirección exacta a la que llamará. Solo funcionan `http` y `https`, y la clave va en su propio campo, nunca en la URL.
+
+Al guardar, el endpoint también queda seleccionado. Igual que la clave de TypeSafe, el endpoint y su clave se quedan en el servidor de OpenChamber, en su propio archivo, y la clave nunca se envía al navegador.
+
+Un servidor también puede tomar su endpoint del entorno, algo útil cuando configuras OpenChamber para un equipo:
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # opcional, este es el valor predeterminado
+OPENCHAMBER_JEV_API_KEY=...             # opcional
+```
+
+En los portátiles que administras, pon el mismo endpoint bajo `jev` en el [archivo de políticas](/es/security/) de la máquina. Tiene prioridad sobre el entorno.
+
+En ambos casos, reemplaza el endpoint guardado en Configuración, y Configuración lo muestra sin que nadie pueda editarlo. En el [modo empresa](/es/security/) es la única fuente de Jev permitida además de **Desactivado**, y viene seleccionada por defecto.
+
 En cuanto un proveedor funciona, la tarjeta en **Configuración → Proveedores** muestra **Listo**.
 
 ## Cuando tu elección deja de funcionar
 
-Si el proveedor que elegiste no se puede usar (terminó la promoción, se quitó una clave), OpenChamber recurre al primero que funcione, primero tus propias claves: clave de TypeSafe, luego OpenRouter, luego Vercel AI Gateway, luego clave de Zen, luego la promoción. La página te dice cuál está usando ahora.
+Si el proveedor que elegiste no se puede usar (terminó la promoción, se quitó una clave), OpenChamber recurre a la primera de tus propias claves que funcione: clave de TypeSafe, luego tu endpoint personalizado, luego OpenRouter, luego Vercel AI Gateway, luego clave de Zen. Nunca recurre a la promoción, y **Desactivado** sigue desactivado. La página te dice cuál está usando ahora.
 
 Si Jev va lento o falla en una solicitud, no se rompe nada. Cada función tiene una respuesta segura para ese caso:
 
@@ -79,7 +103,7 @@ Si Jev va lento o falla en una solicitud, no se rompe nada. Cada función tiene 
 
 Jev recibe fragmentos breves de tu conversación: tu último mensaje y, como contexto, hasta tres turnos anteriores, recortados a sus primeros cientos de caracteres. Para la red de seguridad también recibe la acción que se comprueba, tal como la describe OpenCode: el comando que el agente quiere ejecutar, o el archivo y el cambio en una edición. Nunca recibe archivos completos ni imágenes.
 
-Las solicitudes van del servidor de OpenChamber directamente a OpenCode Zen, OpenRouter, Vercel AI Gateway o TypeSafe, según tu elección.
+Las solicitudes van del servidor de OpenChamber directamente a OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe o tu endpoint personalizado, según tu elección.
 
 ## Dónde funciona
 

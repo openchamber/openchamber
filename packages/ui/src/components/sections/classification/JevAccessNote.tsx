@@ -1,6 +1,7 @@
 import React from 'react';
 import { SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { openClassificationProviders, useClassifierSourceName } from './classifierSources';
 
@@ -18,7 +19,9 @@ export const SettingsInlineLink: React.FC<{ onClick: () => void; children: React
 /**
  * One line next to a feature that decides through Jev (the safety net, Auto):
  * which classification provider answers, or that none does, with a link to
- * Settings → Providers → Classification providers. Nothing without an
+ * Settings → Providers → Classification providers. In enterprise mode
+ * without an administrator's endpoint there is nothing to set up, so it says
+ * so instead of linking to a page that offers only Off. Nothing without an
  * OpenChamber server (VS Code), where these features do not exist.
  */
 export const JevAccessNote: React.FC = () => {
@@ -27,8 +30,12 @@ export const JevAccessNote: React.FC = () => {
   const jevAvailable = useRoutingStore((state) => state.jevAvailable);
   const effective = useRoutingStore((state) => state.classifier?.effective ?? null);
   const sourceName = useClassifierSourceName(effective);
+  const enterpriseMode = useEnterpriseMode();
 
   if (!available) return null;
+  if (enterpriseMode && !jevAvailable) {
+    return <p className={SETTINGS_HELPER_CLASS}>{t('settings.jevAccess.enterprise')}</p>;
+  }
 
   return (
     <p className={SETTINGS_HELPER_CLASS}>

@@ -246,8 +246,14 @@ export const answerGuestMessage = async (
     case 'workspace-unsubscribe': effects.workspaceUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);
+    // No answer: the pane handles these itself. File editor traffic belongs to
+    // its file channel, not to a request/result pair.
     case 'hello':
     case 'action-result':
+    case 'file-snapshot-result':
+    case 'file-change':
+    case 'file-save':
+    case 'file-unsupported':
       return null;
     case 'toast':
       effects.toast(message.payload);
@@ -372,7 +378,7 @@ export const answerGuestMessage = async (
       return null;
   }
   } catch (error) {
-    if (message.type === 'hello') return null;
+    if (!('id' in message)) return null;
     return errorResult(message.id, error instanceof HostRequestError ? error.message : 'Extension operation failed.', error instanceof HostRequestError ? error.code : 'HOST_REJECTED');
   }
 };

@@ -22,11 +22,11 @@ Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判�
 
 ## 设置
 
-打开 **设置 → 提供商 → 分类提供方**，选择 Jev 请求发往哪里。共有五个选项。
+在你开启之前，Jev 一直是关闭的：除非你选了一个分类提供方，否则你的对话内容不会发给任何分类提供方。打开 **设置 → 提供商 → 分类提供方**，选择 Jev 请求发往哪里。除了 **关闭**，共有六个选项。
 
 ### OpenCode Zen 促销
 
-限时免费，不需要密钥。促销期间，OpenCode 允许 OpenChamber 通过 OpenCode Zen 免费使用 Jev。如果你从没动过这个页面，现在用的就是它。
+限时免费，不需要密钥。促销期间，OpenCode 允许 OpenChamber 通过 OpenCode Zen 免费使用 Jev。
 
 促销结束后，这个选项会消失；如果你有下面的某个密钥，OpenChamber 会切换过去。
 
@@ -62,11 +62,35 @@ Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判�
 
 保存密钥的同时也会选中它。密钥单独存放在 OpenChamber 服务器上的一个文件里，从不发送到浏览器。
 
+### 自定义端点
+
+任何支持 TypeSafe System One API 的服务都可以：自托管的网关、公司代理，或这里没有列出的提供方。
+
+1. 在 **自定义端点** 下填写 **端点 URL** 和 **模型**（例如 `jev-latest`）。
+2. 如果服务需要，添加 **API 密钥**。它会作为 `Bearer` 令牌发送。
+3. 点 **保存**。
+
+URL 可以填以 `/v1/systemone` 结尾的完整地址、以 `/v1` 结尾的 OpenAI 风格基础 URL，或 API 根地址（比如 `https://api.typesafe.ai`）。OpenChamber 会补上缺少的部分，并显示它实际要调用的地址。只支持 `http` 和 `https`，密钥要填在单独的输入框里，不要写进 URL。
+
+保存的同时也会选中这个端点。和 TypeSafe 密钥一样，端点和它的密钥单独存放在 OpenChamber 服务器上的一个文件里，密钥从不发送到浏览器。
+
+服务器也可以从环境变量获取端点，为团队部署 OpenChamber 时很方便：
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # 可选，这是默认值
+OPENCHAMBER_JEV_API_KEY=...             # 可选
+```
+
+在你管理的笔记本电脑上，请改为把同一个端点写进机器[策略文件](/zh-cn/security/)的 `jev` 中。策略文件优先于环境变量。
+
+无论哪种方式，这个端点都会替换设置里保存的端点，设置中会显示它，但任何人都不能编辑。在[企业模式](/zh-cn/security/)下，它是除 **关闭** 之外唯一允许的 Jev 来源，并且默认选中。
+
 提供方可用后，**设置 → 提供商** 里的卡片会显示 **就绪**。
 
 ## 当你选的提供方不能用时
 
-如果你选的提供方无法使用（促销结束了、密钥被删了），OpenChamber 会改用第一个可用的，优先使用你自己的密钥：先 TypeSafe 密钥，再 OpenRouter，再 Vercel AI Gateway，再 Zen 密钥，最后是促销。页面会显示当前用的是哪一个。
+如果你选的提供方无法使用（促销结束了、密钥被删了），OpenChamber 会改用你自己的密钥中第一个可用的：先 TypeSafe 密钥，再你的自定义端点，再 OpenRouter，再 Vercel AI Gateway，再 Zen 密钥。它绝不会退回到促销，**关闭** 也会保持关闭。页面会显示当前用的是哪一个。
 
 即使 Jev 在某次请求中响应慢或出错，也不会有东西坏掉。每个功能都为这种情况准备了安全的处理方式：
 
@@ -79,7 +103,7 @@ Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判�
 
 Jev 只拿到对话的简短摘录：你最新的一条消息，以及作为上下文的最多前三轮，每段都截取开头的几百个字符。对于安全网，它还会拿到被检查的操作，也就是 OpenCode 描述的样子：智能体想运行的命令，或者编辑时的文件和改动。它永远拿不到完整文件或图片。
 
-请求会根据你的选择，从 OpenChamber 服务器直接发往 OpenCode Zen、OpenRouter、Vercel AI Gateway 或 TypeSafe。
+请求会根据你的选择，从 OpenChamber 服务器直接发往 OpenCode Zen、OpenRouter、Vercel AI Gateway、TypeSafe 或你的自定义端点。
 
 ## 在哪里可用
 

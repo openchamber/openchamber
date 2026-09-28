@@ -57,6 +57,25 @@ const FR_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `Chargement des données (${providersText}, ${agentsText})…`,
 };
 
+const NL_MESSAGES: BootstrapMessages = {
+  startingApi: 'OpenCode API wordt gestart…',
+  initializing: 'Initialiseren…',
+  connecting: 'Verbinden…',
+  connected: 'Verbonden!',
+  connectionError: 'Verbindingsfout',
+  disconnected: 'Verbinding verbroken',
+  reconnecting: 'Opnieuw verbinden…',
+  initialDataLoadFailed: 'OpenCode is verbonden, maar het laden van de begingegevens is mislukt.',
+  cliNotFound: 'OpenCode CLI niet gevonden. Installeer die eerst.',
+  providersReady: '✓ Providers',
+  providersLoading: '… Providers',
+  agentsReady: '✓ Agents',
+  agentsLoading: '… Agents',
+  startingDevServer: (hostLabel) => `Dev-server voor de webview wordt gestart (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `Wachten op de dev-server voor de webview (${hostLabel})... poging ${attempt}`,
+  loadingData: (providersText, agentsText) => `Gegevens laden (${providersText}, ${agentsText})…`,
+};
+
 const ZH_CN_MESSAGES: BootstrapMessages = {
   startingApi: '正在启动 OpenCode API…',
   initializing: '正在初始化…',
@@ -255,6 +274,7 @@ const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   en: EN_MESSAGES,
   de: DE_MESSAGES,
   fr: FR_MESSAGES,
+  nl: NL_MESSAGES,
   'zh-CN': ZH_CN_MESSAGES,
   'zh-TW': ZH_TW_MESSAGES,
   uk: UK_MESSAGES,

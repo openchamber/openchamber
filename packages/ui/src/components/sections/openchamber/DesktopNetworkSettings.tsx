@@ -23,6 +23,7 @@ import {
   SETTINGS_OPTION_STACK_CLASS,
   SettingsStackedField,
 } from '@/components/sections/shared/SettingsSection';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
@@ -207,6 +208,10 @@ export const DesktopNetworkSettings: React.FC = () => {
   const passwordWillBeSet = nextPassword.length > 0 || (hasSavedPassword && !removePassword);
   const lanRequiresPassword = draftValue && !passwordWillBeSet;
   const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
+  // Enterprise mode without the administrator's allowance: the desktop binds
+  // loopback and the server refuses a network address, so there is no choice here.
+  const lanBlockedByEnterprise = useEnterprisePolicyStore((state) => state.networkAccessBlocked)
+    || lanAccessBlockedReason === 'enterprise-mode';
   const saveDisabled = isLoading || isSaving || !isDirty || lanRequiresPassword;
 
   const handlePasswordChange = React.useCallback((value: string) => {
@@ -444,12 +449,14 @@ export const DesktopNetworkSettings: React.FC = () => {
         <div className={SETTINGS_OPTION_STACK_CLASS}>
           <SettingsCheckboxRow
             settingsItem="sessions.desktop-lan-access"
-            checked={draftValue}
+            checked={draftValue && !lanBlockedByEnterprise}
             onChange={setDraftValue}
-            disabled={isLoading || isSaving}
+            disabled={isLoading || isSaving || lanBlockedByEnterprise}
             label={t('settings.openchamber.desktopNetwork.field.allowLanAccess')}
             info={t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}
-            description={(
+            description={lanBlockedByEnterprise ? (
+              <span className="block">{t('settings.openchamber.desktopNetwork.field.enterpriseBlocked')}</span>
+            ) : (
               <>
                 <span className="block text-[var(--status-warning)]/85">
                   {t('settings.openchamber.desktopNetwork.field.warning')}
@@ -469,7 +476,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           <div className="typography-micro text-[var(--status-error)]">{error}</div>
         ) : null}
 
-        {lanUrl ? (
+        {lanUrl && !lanBlockedByEnterprise ? (
           <div className="typography-micro text-muted-foreground/80">
             {isDirty && !savedValue
               ? t('settings.openchamber.desktopNetwork.hint.openAfterRestart')

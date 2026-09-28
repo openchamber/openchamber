@@ -10,6 +10,7 @@ import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
+import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { useRouter } from '@/hooks/useRouter';
@@ -52,6 +53,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   useRootScrollLock();
   useRouter();
   useGlobalSessionsPolling(true);
+  useEnterprisePolicySync();
 
   // Same as the window-focus effect in App.tsx: when the user can see this
   // webview again, the selected session counts as seen. VS Code learns that from

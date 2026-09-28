@@ -127,6 +127,51 @@ describe('ready notification while background subagents run', () => {
   });
 });
 
+describe('push content in enterprise mode', () => {
+  const makePushRuntime = () => {
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: async () => ({ session_name: 'Fix the billing export' }),
+      extractLastMessageText: () => 'The customer table is migrated',
+      fetchLastAssistantMessageText: async () => 'The customer table is migrated',
+      resolveNotificationTemplate: (template, variables) => template.replace('{last_message}', variables.last_message ?? ''),
+      shouldApplyResolvedTemplateMessage: () => true,
+      emitDesktopNotification: vi.fn(() => true),
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions,
+      isAnyInteractiveClientVisible: () => false,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSessionMetadata: async () => ({}),
+    });
+    return { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions };
+  };
+
+  it('sends only the scenario title and the deep link, on both channels', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = 'true';
+    try {
+      const { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makePushRuntime();
+      await runtime.maybeSendPushForTrigger(stepStarted('ses_e', 'msg_e'));
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_e'));
+
+      const web = sendPushToAllUiSessions.mock.calls[0][0];
+      expect(web).toMatchObject({ title: 'Agent response is ready', body: '', data: { sessionId: 'ses_e', type: 'ready' } });
+      expect(web.data.sessionName).toBeUndefined();
+      expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ title: 'Agent response is ready', body: '' });
+      expect(JSON.stringify([web, sendApnsToAllUiSessions.mock.calls[0][0]])).not.toMatch(/billing|customer/);
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('subagent finish with subagent notifications off', () => {
   const makeSubtaskRuntime = () => {
     const emitDesktopNotification = vi.fn(() => true);

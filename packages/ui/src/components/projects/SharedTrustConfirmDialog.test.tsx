@@ -102,3 +102,24 @@ test('shared command confirmation layers above an open mobile worktree sheet', a
     await pending;
   });
 });
+
+test('says the commands run inside the space when a space asks, and on this machine otherwise', async () => {
+  const { SharedTrustConfirmDialog } = await import('./SharedTrustConfirmDialog');
+  const forSpace = ensureSharedSetupTrusted({ id: 'fixture', path: '/repo' }, setup, 'space');
+  await act(async () => root.render(<I18nProvider><SharedTrustConfirmDialog /></I18nProvider>));
+  const description = () => document.querySelector<HTMLElement>('[data-slot="dialog-content"]')?.textContent ?? '';
+  expect(description()).toContain('run in the isolated space');
+  expect(description()).not.toContain('on this machine');
+  await act(async () => {
+    settleSharedTrustConfirmation('skip');
+    await forSpace;
+  });
+
+  const forMachine = ensureSharedSetupTrusted({ id: 'fixture', path: '/repo' }, setup);
+  await act(async () => { await Promise.resolve(); });
+  expect(description()).toContain('on this machine');
+  await act(async () => {
+    settleSharedTrustConfirmation('skip');
+    await forMachine;
+  });
+});

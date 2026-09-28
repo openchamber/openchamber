@@ -24,6 +24,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getCurrentIntlLocale } from '@/lib/i18n/intl';
 import { blockedAttemptsOf, isDomainName, providerAccessOf, type BlockReason } from '@/lib/spaces/space-access';
 import { grantSpaceAccess, openSpaceDomain, readSpaceJournal, type SpaceEntry, type SpaceFailure, type SpaceJournal } from '@/lib/spaces/spaces-api';
+import { runSpaceAction, spaceMenuActionsOf } from '@/lib/spaces/space-repair';
 import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelKeySource } from './ModelKeySource';
@@ -264,6 +265,29 @@ const BlockedSection: React.FC<{ entry: SpaceEntry; journal: ReturnType<typeof u
   );
 };
 
+/** A stopped space can be given nothing; it can be started from here, as from its group. */
+const StoppedNotice: React.FC<{ spaceId: string }> = ({ spaceId }) => {
+  const { t } = useI18n();
+  const action = useSpacesStore((state) => state.actions.get(spaceId));
+  const canStart = useSpacesStore((state) => spaceMenuActionsOf(state.journey?.get(spaceId)).includes('start'));
+  const starting = action?.kind === 'running';
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="typography-meta text-status-warning">{t('spaces.access.notRunning')}</p>
+        {canStart ? (
+          <Button variant="outline" size="xs" className="shrink-0" disabled={starting} onClick={() => void runSpaceAction(spaceId, 'start')}>
+            {starting ? t('spaces.group.busy.start') : t('spaces.actions.start')}
+          </Button>
+        ) : null}
+      </div>
+      {action?.kind === 'failed' && action.action === 'start' ? (
+        <p className="typography-meta text-status-error">{t('spaces.group.actionFailed.start', { reason: spaceFailureText(t, action.failure) })}</p>
+      ) : null}
+    </div>
+  );
+};
+
 const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | null }> = ({ entry, focusProviderId }) => {
   const { t } = useI18n();
   const providers = useSpaceModelProviders(entry.projectDirectory);
@@ -273,7 +297,7 @@ const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | n
   return (
     <div className="space-y-5 pr-3">
       <p className="typography-meta text-muted-foreground">{t('spaces.access.intro')}</p>
-      {!running ? <p className="typography-meta text-status-warning">{t('spaces.access.notRunning')}</p> : null}
+      {!running ? <StoppedNotice spaceId={entry.id} /> : null}
       <Section title={t('spaces.access.models.label')}>
         {providers.length === 0 ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.noneAvailable')}</p> : (
           <div className="space-y-3">

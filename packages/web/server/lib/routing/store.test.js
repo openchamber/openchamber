@@ -102,5 +102,32 @@ describe('routing store', () => {
     expect(await store.readClassifierSource()).toBe('zen-key');
     await fs.writeFile(path.join(dir, 'classification.json'), '{"version":1,"source":"cloudflare"}');
     expect(await store.readClassifierSource()).toBeNull();
+    await store.writeClassifierSource('custom');
+    expect(await store.readClassifierSource()).toBe('custom');
+  });
+
+  it('keeps the custom endpoint in its own 0600 file, round-trips it and clears it', async () => {
+    const dir = await tempDir();
+    const store = createRoutingStore({ dataDir: dir });
+    expect(await store.readCustomEndpoint()).toBeNull();
+    const endpoint = { url: 'https://jev.example.com/v1/systemone', model: 'jev-latest', key: 'own-secret' };
+    await store.writeCustomEndpoint(endpoint);
+    await store.writeToken('ts-secret');
+    expect(await store.readCustomEndpoint()).toEqual(endpoint);
+    expect(await store.readToken()).toBe('ts-secret');
+    const stat = await fs.stat(path.join(dir, 'classifier-endpoint.json'));
+    if (process.platform !== 'win32') expect(stat.mode & 0o777).toBe(0o600);
+    await store.writeCustomEndpoint({ url: endpoint.url, model: 'jev-1.13' });
+    expect(await store.readCustomEndpoint()).toEqual({ url: endpoint.url, model: 'jev-1.13' });
+    await store.clearCustomEndpoint();
+    expect(await store.readCustomEndpoint()).toBeNull();
+    expect(await store.readToken()).toBe('ts-secret');
+  });
+
+  it('reads a hand-edited custom endpoint with an unsafe URL as none', async () => {
+    const dir = await tempDir();
+    const store = createRoutingStore({ dataDir: dir });
+    await fs.writeFile(path.join(dir, 'classifier-endpoint.json'), JSON.stringify({ version: 1, endpoint: { url: 'file:///etc/hosts', model: 'jev-latest' } }));
+    expect(await store.readCustomEndpoint()).toBeNull();
   });
 });

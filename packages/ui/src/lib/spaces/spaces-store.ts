@@ -6,7 +6,7 @@ import React from 'react';
 import { create } from 'zustand';
 import { z } from 'zod';
 
-import { listSpaces, type SpaceEntry, type SpaceGrant } from './spaces-api';
+import { listSpaces, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
 import type { SpaceProgress } from '@/sync/event-pipeline';
 
 /**
@@ -38,6 +38,14 @@ export type SpaceAccessFailure = { provider: string; code: string; message: stri
 
 /** The model access a creation in this window gives once the space is ready, while and after it does. */
 type SpaceCreationAccess = { kind: 'giving' } | { kind: 'failed'; failures: readonly SpaceAccessFailure[] };
+
+/** The actions on a space the user can take from its group, from soft to hard; `setup` runs the project's setup commands again. */
+export type SpaceAction = 'start' | 'stop' | 'restart_opencode' | 'restart' | 'setup' | 'remove';
+
+/** An action this window started on a space: under way, or failed with the server's reason. */
+export type SpaceActionState =
+  | { kind: 'running'; action: SpaceAction }
+  | { kind: 'failed'; action: SpaceAction; failure: SpaceFailure };
 
 type SpacesState = {
   spaces: ReadonlyMap<string, SpaceMark>;
@@ -73,6 +81,21 @@ type SpacesState = {
   accessDialog: { spaceId: string; providerId: string | null } | null;
   openAccessDialog: (spaceId: string, providerId?: string | null) => void;
   closeAccessDialog: () => void;
+  /** The action under way or failed per space, in this window, for the group's status line and menu. */
+  actions: ReadonlyMap<string, SpaceActionState>;
+  noteAction: (spaceId: string, state: SpaceActionState | null) => void;
+  /** The confirmation before a space is deleted, open on one space. */
+  deleteDialog: string | null;
+  openDeleteDialog: (spaceId: string) => void;
+  closeDeleteDialog: () => void;
+  /** The window with the end of a failed setup command's output, open on one space. */
+  setupOutputDialog: string | null;
+  openSetupOutputDialog: (spaceId: string) => void;
+  closeSetupOutputDialog: () => void;
+  /** The phone's sheet of a space's actions, where the desktop has the group's menu. */
+  actionsSheet: string | null;
+  openActionsSheet: (spaceId: string) => void;
+  closeActionsSheet: () => void;
   /** Replaces the marks with those of a complete global list. */
   applyMarks: (marks: readonly SpaceMark[]) => void;
   /** The space's event connection came or went; a gap shows the space as stale until the next list. */
@@ -154,6 +177,22 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   accessDialog: null,
   openAccessDialog: (spaceId, providerId = null) => set({ accessDialog: { spaceId, providerId } }),
   closeAccessDialog: () => set({ accessDialog: null }),
+  actions: new Map(),
+  noteAction: (spaceId, state) => set((current) => {
+    const actions = new Map(current.actions);
+    if (state) actions.set(spaceId, state);
+    else actions.delete(spaceId);
+    return { actions };
+  }),
+  deleteDialog: null,
+  openDeleteDialog: (spaceId) => set({ deleteDialog: spaceId }),
+  closeDeleteDialog: () => set({ deleteDialog: null }),
+  setupOutputDialog: null,
+  openSetupOutputDialog: (spaceId) => set({ setupOutputDialog: spaceId }),
+  closeSetupOutputDialog: () => set({ setupOutputDialog: null }),
+  actionsSheet: null,
+  openActionsSheet: (spaceId) => set({ actionsSheet: spaceId }),
+  closeActionsSheet: () => set({ actionsSheet: null }),
   noteProgress: (progress) => {
     const revision = get().progressRevision + 1;
     progressAt.set(progress.spaceId, revision);
@@ -181,12 +220,15 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   resetForRuntimeSwitch: () => {
     progressAt.clear();
     journeyGeneration += 1;
-    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), accessDialog: null });
+    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), accessDialog: null, actions: new Map(), deleteDialog: null, setupOutputDialog: null, actionsSheet: null });
   },
   forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
 }));
 
 let journeyGeneration = 0;
+
+/** Counts runtime switches, so work started before one can tell that its answer is no longer wanted. */
+export const spacesRuntimeGeneration = (): number => journeyGeneration;
 
 /**
  * Reads the journey list again and keeps it. A read that fails leaves the last list in place and

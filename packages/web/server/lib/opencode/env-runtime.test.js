@@ -240,6 +240,32 @@ describe('OpenCode env runtime', () => {
     expect(probes).toBe(0);
   });
 
+  it('keeps shell startup output out of the login-shell snapshot', () => {
+    setPlatform('darwin');
+    const previousShell = process.env.SHELL;
+    const shell = path.join(createTempDir('openchamber-shell-'), 'zsh');
+    fs.writeFileSync(shell, '#!/bin/sh\n', { mode: 0o755 });
+    process.env.SHELL = shell;
+    try {
+      const { runtime, state } = createRuntime({}, {
+        // Stands in for a shell whose interactive rc file prints a banner to
+        // stdout before it runs the probe command: only the `echo` part of the
+        // command and `env -0` are emulated.
+        spawnSync: (_command, args) => {
+          const echoed = args[1].match(/^echo (\S+); /);
+          const stdout = `Welcome to test-host\n${echoed ? `${echoed[1]}\n` : ''}HOME=/home/test-user\0PATH=/shell/bin\0`;
+          return { status: 0, stdout, stderr: '' };
+        },
+      });
+      state.cachedLoginShellEnvSnapshot = undefined;
+
+      expect(runtime.getLoginShellEnvSnapshot()).toEqual({ HOME: '/home/test-user', PATH: '/shell/bin' });
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+    }
+  });
+
   it('does not probe the shell when the host provided an empty snapshot', () => {
     let probes = 0;
     const spawnSyncSpy = () => { probes += 1; return { status: 0, stdout: 'PATH=/from/probe\0' }; };

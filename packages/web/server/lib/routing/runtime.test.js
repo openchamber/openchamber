@@ -3,7 +3,7 @@ import { createRoutingRuntime, readOpenCodeKeys, requestTextOf } from './runtime
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
 import { createJevClient, decidePermission, decideRouting } from './jev.js';
-import { classifierEndpoint, resolveClassifier } from './classifier.js';
+import { classifierEndpoint, normalizeCustomEndpointUrl, resolveClassifier } from './classifier.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
 const FALLBACK = { model: { providerID: 'anthropic', modelID: 'claude-sonnet-5' }, variant: 'medium' };
@@ -19,7 +19,7 @@ const readyConfig = () => {
   return config;
 };
 
-const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource = null, providerKeys = {}, zenPromotionActive = true, answers, askError } = {}) => {
+const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true, enterprise = false, pinned = null, answers, askError } = {}) => {
   const events = [];
   const store = {
     readConfig: vi.fn(async () => config),
@@ -29,6 +29,9 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource =
     clearToken: vi.fn(async () => undefined),
     readClassifierSource: vi.fn(async () => classifierSource),
     writeClassifierSource: vi.fn(async () => undefined),
+    readCustomEndpoint: vi.fn(async () => customEndpoint),
+    writeCustomEndpoint: vi.fn(async () => undefined),
+    clearCustomEndpoint: vi.fn(async () => undefined),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
   const runtime = createRoutingRuntime({
@@ -40,6 +43,8 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource =
     jev,
     readProviderKeys: () => ({ zenKey: null, openrouterKey: null, vercelKey: null, ...providerKeys }),
     zenPromotionActive,
+    enterpriseMode: () => enterprise,
+    readPinnedEndpoint: () => pinned,
   });
   return { runtime, store, jev, events };
 };
@@ -183,17 +188,49 @@ describe('jev endpoint', () => {
     expect(vercel.headers['x-opencode-client']).toBeUndefined();
     expect(vercel.body.model).toBe('typesafe-ai/jev');
   });
+
+  it('sends a custom endpoint its own URL and model, with the key as a bearer only when one is saved', async () => {
+    const url = 'https://jev.example.com/v1/systemone';
+    const keyed = await capture('custom', { customEndpoint: { url, model: 'jev-1.13', key: 'own-secret' } });
+    expect(keyed.url).toBe(url);
+    expect(keyed.body.model).toBe('jev-1.13');
+    expect(keyed.headers.authorization).toBe('Bearer own-secret');
+    expect(keyed.headers['x-opencode-client']).toBeUndefined();
+
+    const keyless = await capture('custom', { customEndpoint: { url, model: 'jev-latest' } });
+    expect(keyless.headers.authorization).toBeUndefined();
+  });
+});
+
+describe('normalizeCustomEndpointUrl', () => {
+  it('takes the full System One URL, an OpenAI-style /v1 base, or an API root', () => {
+    expect(normalizeCustomEndpointUrl(' https://openrouter.ai/api/v1/systemone/ ')).toBe('https://openrouter.ai/api/v1/systemone');
+    expect(normalizeCustomEndpointUrl('https://openrouter.ai/api/v1')).toBe('https://openrouter.ai/api/v1/systemone');
+    expect(normalizeCustomEndpointUrl('https://api.typesafe.ai')).toBe('https://api.typesafe.ai/v1/systemone');
+    expect(normalizeCustomEndpointUrl('http://127.0.0.1:8080/jev/')).toBe('http://127.0.0.1:8080/jev/v1/systemone');
+  });
+
+  it('refuses other schemes, credentials in the URL and non-URLs', () => {
+    expect(() => normalizeCustomEndpointUrl('ftp://example.com')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => normalizeCustomEndpointUrl('file:///etc/passwd')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => normalizeCustomEndpointUrl('https://user:secret@example.com/v1')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => normalizeCustomEndpointUrl('example.com/v1')).toThrow(expect.objectContaining({ status: 400 }));
+  });
 });
 
 describe('resolveClassifier', () => {
-  it('defaults to a saved TypeSafe key, else the promotion', () => {
+  it('defaults to a saved TypeSafe key, else off', () => {
     expect(resolveClassifier({ selected: null, typesafeKey: 'k', zenKey: null, zenPromotionActive: true })).toMatchObject({ selected: 'typesafe', effective: 'typesafe' });
-    expect(resolveClassifier({ selected: null, typesafeKey: null, zenKey: null, zenPromotionActive: true })).toMatchObject({ selected: 'zen-promo', effective: 'zen-promo' });
+    expect(resolveClassifier({ selected: null, typesafeKey: null, zenKey: 'z', openrouterKey: 'o', zenPromotionActive: true })).toMatchObject({ selected: 'off', effective: null });
   });
 
-  it('falls back to the first usable source, own keys first, when the pick cannot be used', () => {
+  it('keeps off off, whatever is usable', () => {
+    expect(resolveClassifier({ selected: 'off', typesafeKey: 'k', zenKey: 'z', zenPromotionActive: true }).effective).toBeNull();
+  });
+
+  it('falls back to the first usable key when the pick cannot be used, never to the promotion', () => {
     expect(resolveClassifier({ selected: 'zen-promo', typesafeKey: null, zenKey: 'z', zenPromotionActive: false }).effective).toBe('zen-key');
-    expect(resolveClassifier({ selected: 'typesafe', typesafeKey: null, zenKey: null, zenPromotionActive: true }).effective).toBe('zen-promo');
+    expect(resolveClassifier({ selected: 'typesafe', typesafeKey: null, zenKey: null, zenPromotionActive: true }).effective).toBeNull();
     expect(resolveClassifier({ selected: 'zen-promo', typesafeKey: null, zenKey: null, zenPromotionActive: false }).effective).toBeNull();
     expect(resolveClassifier({ selected: 'zen-promo', typesafeKey: null, zenKey: 'z', vercelKey: 'v', zenPromotionActive: false }).effective).toBe('vercel');
     expect(resolveClassifier({ selected: 'vercel', typesafeKey: null, openrouterKey: 'o', zenPromotionActive: true }).effective).toBe('openrouter');
@@ -202,6 +239,16 @@ describe('resolveClassifier', () => {
   it('keeps a usable OpenRouter or Vercel pick', () => {
     expect(resolveClassifier({ selected: 'openrouter', typesafeKey: 'k', openrouterKey: 'o', zenPromotionActive: true }).effective).toBe('openrouter');
     expect(resolveClassifier({ selected: 'vercel', vercelKey: 'v', zenPromotionActive: true }).effective).toBe('vercel');
+  });
+
+  it('uses a saved custom endpoint when picked, and falls back to it after TypeSafe and before OpenCode keys', () => {
+    const customEndpoint = { url: 'https://jev.example.com/v1/systemone', model: 'jev-latest' };
+    expect(resolveClassifier({ selected: 'custom', customEndpoint, openrouterKey: 'o', zenPromotionActive: true }).effective).toBe('custom');
+    expect(resolveClassifier({ selected: 'custom', customEndpoint: null, vercelKey: 'v', zenPromotionActive: true }).effective).toBe('vercel');
+    expect(resolveClassifier({ selected: 'custom', customEndpoint: null, zenPromotionActive: true }).effective).toBeNull();
+    expect(resolveClassifier({ selected: 'openrouter', customEndpoint, vercelKey: 'v', zenPromotionActive: true }).effective).toBe('custom');
+    expect(resolveClassifier({ selected: 'zen-key', typesafeKey: 'k', customEndpoint, zenPromotionActive: true }).effective).toBe('typesafe');
+    expect(resolveClassifier({ selected: 'off', customEndpoint, zenPromotionActive: true }).effective).toBeNull();
   });
 });
 
@@ -294,7 +341,49 @@ describe('classifier pick', () => {
     expect(store.writeClassifierSource).toHaveBeenCalledWith('zen-key');
     await runtime.setClassifierSource('openrouter');
     expect(store.writeClassifierSource).toHaveBeenCalledWith('openrouter');
+    await runtime.setClassifierSource('off');
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('off');
     await expect(runtime.setClassifierSource('cloudflare')).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('keeps Jev off in enterprise mode, whatever is picked or saved', async () => {
+    const { runtime, store, jev } = makeRuntime({ enterprise: true, classifierSource: 'typesafe', answers: { ask: { noul: 0.1 } } });
+    expect(await runtime.describe()).toMatchObject({ enterpriseMode: true, jevAvailable: false, autoReady: false, classification: { selected: 'off', effective: null } });
+    expect(await runtime.classifierEndpoint()).toBeNull();
+    await expect(runtime.setClassifierSource('zen-promo')).rejects.toMatchObject({ status: 403 });
+    await expect(runtime.setToken('secret')).rejects.toMatchObject({ status: 403 });
+    await runtime.setClassifierSource('off');
+    expect(store.writeClassifierSource).toHaveBeenCalledTimes(1);
+    expect(store.writeToken).not.toHaveBeenCalled();
+    expect(jev.ask).not.toHaveBeenCalled();
+  });
+
+  describe('an endpoint pinned in the server environment', () => {
+    const pinned = { url: 'https://jev.company.test/v1/systemone', model: 'jev-latest', key: 'org-secret' };
+    const saved = { url: 'https://mine.example.com/v1/systemone', model: 'jev-latest' };
+
+    it('replaces the saved one, cannot be edited, and never shows its key', async () => {
+      const { runtime, store } = makeRuntime({ pinned, customEndpoint: saved, classifierSource: 'custom', answers: {} });
+      const state = await runtime.describe();
+      expect(state.customEndpoint).toEqual({ url: pinned.url, model: 'jev-latest', keyPresent: true, pinned: true });
+      expect(JSON.stringify(state)).not.toContain('org-secret');
+      expect(await runtime.classifierEndpoint()).toMatchObject({ url: pinned.url, headers: { authorization: 'Bearer org-secret' } });
+      await expect(runtime.setCustomEndpoint({ url: saved.url, model: 'x' })).rejects.toMatchObject({ status: 409 });
+      await expect(runtime.clearCustomEndpoint()).rejects.toMatchObject({ status: 409 });
+      expect(store.writeCustomEndpoint).not.toHaveBeenCalled();
+    });
+
+    it('is the enterprise default, with Off as the only other choice', async () => {
+      const { runtime, store } = makeRuntime({ enterprise: true, pinned, classifierSource: 'typesafe', answers: {} });
+      expect(await runtime.describe()).toMatchObject({ jevAvailable: true, classification: { selected: 'custom', effective: 'custom' } });
+      await runtime.setClassifierSource('custom');
+      await runtime.setClassifierSource('off');
+      await expect(runtime.setClassifierSource('typesafe')).rejects.toMatchObject({ status: 403 });
+      expect(store.writeClassifierSource.mock.calls.map(([source]) => source)).toEqual(['custom', 'off']);
+
+      const off = makeRuntime({ enterprise: true, pinned, classifierSource: 'off', answers: {} });
+      expect(await off.runtime.describe()).toMatchObject({ jevAvailable: false, classification: { selected: 'off' } });
+    });
   });
 
   it('picks TypeSafe when a key is saved', async () => {
@@ -302,15 +391,67 @@ describe('classifier pick', () => {
     await runtime.setToken('secret');
     expect(store.writeClassifierSource).toHaveBeenCalledWith('typesafe');
   });
+
+  it('saves a custom endpoint with its URL normalized and picks it', async () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    await runtime.setCustomEndpoint({ url: 'https://jev.example.com/v1/', model: ' jev-latest ', key: ' own-secret ' });
+    expect(store.writeCustomEndpoint).toHaveBeenCalledWith({ url: 'https://jev.example.com/v1/systemone', model: 'jev-latest', key: 'own-secret' });
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('custom');
+  });
+
+  it('keeps the saved custom key when none is sent, and removes it on null', async () => {
+    const saved = { url: 'https://jev.example.com/v1/systemone', model: 'jev-latest', key: 'own-secret' };
+    const { runtime, store } = makeRuntime({ customEndpoint: saved, answers: {} });
+    await runtime.setCustomEndpoint({ url: saved.url, model: 'jev-1.13', key: '' });
+    expect(store.writeCustomEndpoint).toHaveBeenLastCalledWith({ ...saved, model: 'jev-1.13' });
+    await runtime.setCustomEndpoint({ url: saved.url, model: 'jev-1.13' });
+    expect(store.writeCustomEndpoint).toHaveBeenLastCalledWith({ ...saved, model: 'jev-1.13' });
+    const picksBefore = store.writeClassifierSource.mock.calls.length;
+    await runtime.setCustomEndpoint({ url: saved.url, model: 'jev-1.13', key: null });
+    expect(store.writeCustomEndpoint).toHaveBeenLastCalledWith({ url: saved.url, model: 'jev-1.13' });
+    // Removing the key alone leaves whatever provider the user picked.
+    expect(store.writeClassifierSource).toHaveBeenCalledTimes(picksBefore);
+  });
+
+  it('refuses a custom endpoint without a URL or model, or with an unsafe URL, and saves nothing', async () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    await expect(runtime.setCustomEndpoint({ url: 'https://jev.example.com', model: '' })).rejects.toMatchObject({ status: 400 });
+    await expect(runtime.setCustomEndpoint({ model: 'jev-latest' })).rejects.toMatchObject({ status: 400 });
+    await expect(runtime.setCustomEndpoint({ url: 'file:///etc/hosts', model: 'jev-latest' })).rejects.toMatchObject({ status: 400 });
+    await expect(runtime.setCustomEndpoint({ url: 'https://me:pw@jev.example.com', model: 'jev-latest' })).rejects.toMatchObject({ status: 400 });
+    expect(store.writeCustomEndpoint).not.toHaveBeenCalled();
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+  });
+
+  it('refuses a custom endpoint in enterprise mode', async () => {
+    const { runtime, store } = makeRuntime({ enterprise: true, answers: {} });
+    await expect(runtime.setCustomEndpoint({ url: 'https://jev.example.com', model: 'jev-latest', key: 'k' })).rejects.toMatchObject({ status: 403 });
+    await expect(runtime.setClassifierSource('custom')).rejects.toMatchObject({ status: 403 });
+    expect(store.writeCustomEndpoint).not.toHaveBeenCalled();
+    await runtime.clearCustomEndpoint();
+    expect(store.clearCustomEndpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Jev off in enterprise mode even with a custom endpoint picked', async () => {
+    const customEndpoint = { url: 'https://jev.example.com/v1/systemone', model: 'jev-latest' };
+    const { runtime } = makeRuntime({ enterprise: true, token: null, classifierSource: 'custom', customEndpoint, answers: {} });
+    expect(await runtime.classifierEndpoint()).toBeNull();
+  });
 });
 
 describe('describe', () => {
   it('reports Auto ready with an enabled config, a fallback and two categories, key or no key', async () => {
     expect((await makeRuntime({ answers: {} }).runtime.describe())).toMatchObject({ autoReady: true, tokenPresent: true, jevSource: 'typesafe' });
-    // Without a key the free Jev model on zen answers, so Auto stays available.
-    expect((await makeRuntime({ token: null, answers: {} }).runtime.describe())).toMatchObject({ autoReady: true, jevAvailable: true, tokenPresent: false, jevSource: 'zen-free' });
+    // Without a key, a picked promotion answers, so Auto stays available.
+    expect((await makeRuntime({ token: null, classifierSource: 'zen-promo', answers: {} }).runtime.describe())).toMatchObject({ autoReady: true, jevAvailable: true, tokenPresent: false, jevSource: 'zen-free' });
+    // Nothing picked and no key: off, so no Jev and no Auto.
+    expect((await makeRuntime({ token: null, answers: {} }).runtime.describe())).toMatchObject({
+      autoReady: false,
+      jevAvailable: false,
+      classification: { selected: 'off', effective: null },
+    });
     // No usable classification provider: no Jev, so no Auto.
-    expect((await makeRuntime({ token: null, zenPromotionActive: false, answers: {} }).runtime.describe())).toMatchObject({
+    expect((await makeRuntime({ token: null, classifierSource: 'zen-promo', zenPromotionActive: false, answers: {} }).runtime.describe())).toMatchObject({
       autoReady: false,
       jevAvailable: false,
       classifier: { selected: 'zen-promo', effective: null },
@@ -321,13 +462,35 @@ describe('describe', () => {
   });
 
   it('keeps `classifier` parseable for v2.0.2 clients and puts the full picture in `classification`', async () => {
-    const zen = await makeRuntime({ token: null, answers: {} }).runtime.describe();
+    const zen = await makeRuntime({ token: null, classifierSource: 'zen-promo', answers: {} }).runtime.describe();
     expect(zen.classifier.sources.map((s) => s.id)).toEqual(['zen-promo', 'zen-key', 'typesafe']);
-    expect(zen.classification.sources.map((s) => s.id)).toEqual(['zen-promo', 'zen-key', 'openrouter', 'vercel', 'typesafe']);
+    expect(zen.classification.sources.map((s) => s.id)).toEqual(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'typesafe', 'custom']);
+
+    const off = await makeRuntime({ token: null, answers: {} }).runtime.describe();
+    expect(off.classifier).toBeNull();
 
     const routed = await makeRuntime({ classifierSource: 'openrouter', providerKeys: { openrouterKey: 'o' }, answers: {} }).runtime.describe();
     expect(routed.classifier).toBeNull();
     expect(routed.classification).toMatchObject({ selected: 'openrouter', effective: 'openrouter' });
     expect(routed.jevAvailable).toBe(true);
+  });
+
+  it('describes a custom endpoint without its key and hides it from v2.0.2 clients', async () => {
+    const customEndpoint = { url: 'https://jev.example.com/v1/systemone', model: 'jev-latest', key: 'own-secret' };
+    const state = await makeRuntime({ token: null, classifierSource: 'custom', customEndpoint, answers: {} }).runtime.describe();
+    expect(state.customEndpoint).toEqual({ url: customEndpoint.url, model: 'jev-latest', keyPresent: true, pinned: false });
+    expect(JSON.stringify(state)).not.toContain('own-secret');
+    expect(state.classifier).toBeNull();
+    expect(state.classification).toMatchObject({ selected: 'custom', effective: 'custom' });
+    expect(state.jevAvailable).toBe(true);
+
+    // Falling back onto the custom endpoint hides the legacy view too.
+    const fallback = await makeRuntime({ token: null, classifierSource: 'zen-key', customEndpoint, answers: {} }).runtime.describe();
+    expect(fallback.classification.effective).toBe('custom');
+    expect(fallback.classifier).toBeNull();
+
+    const none = await makeRuntime({ token: null, answers: {} }).runtime.describe();
+    expect(none.customEndpoint).toBeNull();
+    expect(none.classification.sources.find((s) => s.id === 'custom')).toEqual({ id: 'custom', usable: false });
   });
 });

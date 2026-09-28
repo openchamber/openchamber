@@ -10,6 +10,7 @@ export const useClassifierSourceName = (source: ClassifierSource | null): string
   if (source === 'openrouter') return t('settings.classification.source.openrouter.name');
   if (source === 'vercel') return t('settings.classification.source.vercel.name');
   if (source === 'typesafe') return t('settings.classification.source.typesafe.name');
+  if (source === 'custom') return t('settings.classification.source.custom.name');
   return null;
 };
 

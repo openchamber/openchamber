@@ -142,7 +142,7 @@ The host always drives. Exact command sequences, timings, and the hostile-contai
 - Two things of the agent's do not arrive whole, and neither is refused: a repository it made inside its project travels as a gitlink with no commits behind it, and a conflicted merge travels as content with its markers. Code out reports both to the caller, which warns before the user applies.
 - The host builds the patch from the two fetched trees, with git's plumbing, which ignores the user's diff settings such as `diff.noprefix` and `diff.relative`. The space never supplies patch text. Apply at the top level of the work tree with a plain dry run followed by a plain apply, both with binary support and whitespace checks off, so a user's `apply.whitespace=fix` cannot change what is written. Never three-way, never with the index, never with unsafe paths. The three-way mode fails on a working tree with unstaged edits.
 - What gets applied is what the host fetched, whatever the screen in the space showed.
-- The project's existing worktree setup commands run in the space after code arrives; stage 5 runs them.
+- The project's existing worktree setup commands run in the space after code arrives, in the background, behind the same trust prompt as on the host; stage 5d-4 runs them.
 - First release limits, each with a warning at creation: submodules stay empty, Git LFS files arrive as pointers.
 
 ### Gatekeeper

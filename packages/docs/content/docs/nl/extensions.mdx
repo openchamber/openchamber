@@ -1,0 +1,81 @@
+---
+title: Extensies
+description: Installeer extensies, keur hun rechten goed, verbind accounts en verwijder ze weer.
+---
+
+# Extensies
+
+Voeg via **Instellingen → Extensies** panelen van andere makers toe aan OpenChamber. Een extensie is een kleine pagina in de rechterbalk, naast de ingebouwde panelen. Ze kan gegevens uit een dienst tonen, een taak aan de chat koppelen en, met uw toestemming, sessies starten, prompts versturen of bestanden lezen.
+
+Extensies werken op OpenChamber web en desktop. VS Code en de mobiele app laden ze nog niet. Het zijn andere uitbreidingen dan OpenCode-plugins.
+
+## Een extensie installeren
+
+Extensies met het label **Ingebouwd** worden met de gekozen OpenChamber-instantie meegeleverd. Ze staan vanaf het begin aan en krijgen hun opgegeven rechten zonder apart toestemmingsvenster. Gebruik **Uitschakelen** of **Inschakelen** op de kaart. Ingebouwde extensies kunnen niet los van de app worden verwijderd of bijgewerkt. Uitschakelen bewaart gegevens en verbonden accounts en blijft ook na app-updates van kracht.
+
+Hun accountinstellingen staan bij **Instellingen → Integraties → Ingebouwde integraties**. Een dienst kan nog steeds een API-token of aanmelding nodig hebben om uw account te bereiken.
+
+1. Open **Instellingen → Extensies**.
+2. Plak een van de volgende waarden in **Map, ZIP of URL** en kies **Toevoegen**:
+   - het absolute pad naar een map op deze computer
+   - het pad naar een `.zip`-bestand
+   - een https-link naar een Git-repository of ZIP-bestand
+   - een SSH Git-adres, zoals `git@github.com:owner/extension.git`
+3. Als de extensie rechten vraagt, verschijnt een overzicht. Kies **Toestaan en inschakelen** of **Verwijderen** om de installatie weer weg te halen.
+
+U kunt ook een `.zip` op het veld slepen of kiezen met de archiefknop ernaast. Het archief wordt naar de OpenChamber-server geüpload, dus dat werkt ook voor een remote-instantie. Op de desktop opent de mapknop een systeemeigen bestandskiezer. Een gesleepte map wordt vanaf haar pad geïnstalleerd.
+
+Het extensiepictogram verschijnt in de balk. Gebeurt dat niet, zie [Problemen oplossen](/nl/troubleshooting/).
+
+Een mapinstallatie draait rechtstreeks vanuit die map. Een ontwikkelaar kan dus bewerken en herladen. Een ZIP of URL wordt eerst naar de eigen gegevensmap van OpenChamber gekopieerd. Het origineel blijft intact.
+
+## Privérepositories en Git-identiteiten
+
+SSH-installaties accepteren `git@github.com:owner/extension.git` en `ssh://git@github.com/owner/extension.git`, eventueel met `#branch-or-tag`. Kies de algemene identiteit of een opgeslagen Git-identiteit in het vingerafdrukmenu naast het installatieveld. Deze keuze blijft gelden voor updatecontroles en updates. Een gewijzigde sleutel van die identiteit wordt bij de volgende bewerking gebruikt.
+
+De algemene identiteit gebruikt de Git-/SSH-configuratie en SSH-agent van de gebruiker die de gekozen OpenChamber-server draait. Bij een remote-instantie moet de sleutel dus daar beschikbaar zijn. Ontgrendel sleutels met een wachtzin eerst in de SSH-agent van dat serverproces. HTTPS-URL's gebruiken de HTTPS-aanmeldgegevens van Git en schakelen niet automatisch over naar SSH. Git-hostnamen moeten naar openbare adressen verwijzen. Lokale SSH-hostaliassen en doelen op privénetwerken worden niet ondersteund.
+
+## Wat mag een extensie doen?
+
+Een paneel tonen en lezen welk project en welke sessie geopend zijn, vereist geen toestemming. Voor handelingen namens u is die wel nodig. U ziet bij installatie de volledige lijst:
+
+- **Berichten in uw sessies versturen:** prompts schrijven en naar het model sturen. Dit verbruikt tokens en kan tools uitvoeren.
+- **Projecten en sessies benaderen:** geregistreerde projecten, worktrees en sessiestatussen opvragen en daarin sessies aanmaken en openen. Gespreksinhoud wordt niet toegankelijk gemaakt.
+- **Projectbestanden lezen en schrijven:** elk bestand in het geopende project.
+- **Bestanden buiten het project lezen en schrijven:** alleen de locaties in het toestemmingsvenster.
+- **Uw Small Model gebruiken:** eenmalige tekstgeneratie buiten uw sessies, met het model uit Instellingen → Sessies → Small Model. Dit verbruikt tokens.
+- **Verbinding maken met een externe dienst:** met het account dat u bij Instellingen → Integraties verbindt.
+- **Een sessiegesprek lezen:** alleen wanneer u de extensieactie op die sessie uitvoert.
+- **Een lokale service uitvoeren:** een apart programma met uw volledige gebruikerstoegang. Sta dit alleen toe als u de maker vertrouwt.
+
+Vraagt een nieuwe versie om meer rechten dan u eerder toestond, dan toont de kaart **Goedkeuring nodig** en **Rechten bekijken**. De extensie blijft uit totdat u de nieuwe lijst goedkeurt.
+
+## Waar verschijnt een extensie?
+
+Een extensie kan ook een schermvullende pagina aanbieden, bijvoorbeeld een takenbord. Open die via **Extensiepagina's** boven de sessielijst. Het menu verschijnt alleen als een ingeschakelde, goedgekeurde extensie een pagina aanbiedt. Een chat selecteren brengt u terug. Herladen, pauzeren, verwijderen of van server wisselen sluit de pagina ook. Een extensie kan zelf geen schermvullende pagina openen.
+
+Extensies kunnen eigen gegevens op de verbonden OpenChamber-server opslaan, buiten uw projectbestanden. Die gegevens blijven na herladen behouden en worden bij het verwijderen van de extensie gewist. Een bord kan agents in meerdere projecten of worktrees volgen en daarbij eigen taakstatussen gebruiken.
+
+Naast het paneel kan een extensie onderdelen toevoegen aan bestaande menu's: acties bij chatberichten, het sessiemenu, het +-menu naast het invoerveld en slash-opdrachten zoals `/task ABC-12`, die iets koppelen zonder een venster te openen. Ze kan ook eigen tools in de chat een pictogram, titel en uitvoeropmaak geven, zoals de ingebouwde tools. De extensie bepaalt welke mogelijkheden ze aanbiedt. Alles blijft uit totdat u de extensie toestaat.
+
+Sommige extensies tonen een livebeeld van wat de agent op de server gebruikt, zoals een browser of simulator. Klik of typ in het beeld om de bediening over te nemen. De statusregel toont **U heeft de controle**. Browseracties van de agent worden dan geweigerd totdat u op **Teruggeven aan de agent** klikt. Kopiëren en plakken werken normaal. Een ander verbonden apparaat ziet wie bedient en kan de controle niet overnemen. Zo'n extensie kan eigen bediening naast het beeld plaatsen, bijvoorbeeld een adresbalk erboven of een kolom met tools ernaast.
+
+## Het account verbinden
+
+Een extensie die met een dienst communiceert, krijgt bij **Instellingen → Integraties** een kaart onder **Extensieaccounts**. Afhankelijk van de dienst vraagt die om een API-token, gebruikersnaam en token of client-ID voor een aanmeldprocedure. Kies **Verbinden**. **Verbinding verbreken** wist het opgeslagen token. Extra velden van de extensie worden automatisch opgeslagen wanneer u het veld verlaat.
+
+Het token blijft op de OpenChamber-server. De extensiepagina krijgt het nooit te zien.
+
+## Bijwerken
+
+Extensies die via een Git-URL zijn geïnstalleerd, kunnen worden bijgewerkt. Bij het openen van **Instellingen → Extensies** wordt elke extensie maximaal eenmaal per uur gecontroleerd. **Controleren op updates** controleert meteen. Bij een nieuwe versie verschijnen **Update beschikbaar** en **Bijwerken**. Rechten, accounts en instellingen blijven behouden. Als de nieuwe versie meer rechten vraagt, verschijnt het toestemmingsvenster opnieuw. Map- en ZIP-installaties worden niet automatisch bijgewerkt; vervang ze zelf.
+
+Voeg bij installatie `#v1.2.0` of `#stable` aan de Git-URL toe om een tag of branch te volgen in plaats van de standaardbranch.
+
+## Pauzeren of verwijderen
+
+Elke kaart heeft een schakelaar **Ingeschakeld**. Uitschakelen behoudt de installatie, maar verbergt het paneel en blokkeert de aanroepen. **Verwijderen** wist een ZIP- of URL-installatie uit de gegevensmap van OpenChamber. Bij een mapinstallatie wordt alleen het pad vergeten; uw map blijft bestaan.
+
+## Zelf een extensie bouwen
+
+Alle mogelijkheden en bouwinstructies staan bij [Een extensie bouwen](/nl/sdk/).

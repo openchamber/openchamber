@@ -13,10 +13,8 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
-import { cn } from '@/lib/utils';
 import {
   usePluginsStore,
   type PluginMutationResult,
@@ -32,6 +30,7 @@ import {
   THIRD_PARTY_PLUGINS,
   type ThirdPartyPluginDefinition,
 } from './thirdPartyPlugins';
+import { IntegrationCatalogCard, type IntegrationCatalogStatusTone } from './IntegrationCatalogCard';
 
 type PendingAction = 'install' | 'update' | 'setup' | 'remove';
 
@@ -298,15 +297,15 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
         status = t('settings.integrations.thirdParty.status.providerUnavailable');
         break;
     }
-    const statusClassName = presentation.status === 'installed-version'
-      ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
+    const statusTone: IntegrationCatalogStatusTone = presentation.status === 'installed-version'
+      ? 'success'
       : presentation.status === 'update-available'
         || presentation.status === 'ambiguous'
         || presentation.status === 'restart-required'
         || presentation.status === 'registry-unavailable'
         || presentation.status === 'provider-unavailable'
-        ? 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]'
-        : 'bg-[var(--surface-muted)] text-muted-foreground';
+        ? 'warning'
+        : 'neutral';
 
     const primaryLabel = {
       install: t('settings.integrations.thirdParty.actions.install'),
@@ -318,92 +317,62 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
     const open = openPluginIds.has(plugin.id);
 
     return (
-      <Collapsible
+      <IntegrationCatalogCard
         key={plugin.id}
+        settingsItem={`integrations.third-party.${plugin.id}`}
+        logo={<ProviderLogo providerId={plugin.providerId} alt="" className="size-5" />}
+        name={t(plugin.nameKey)}
+        description={t(plugin.descriptionKey)}
+        status={status}
+        statusTone={statusTone}
         open={open}
         onOpenChange={(nextOpen) => setPluginOpen(plugin.id, nextOpen)}
       >
-        <div
-          data-settings-item={`integrations.third-party.${plugin.id}`}
-          className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
-        >
-          <CollapsibleTrigger
-            className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
-          >
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-              <ProviderLogo providerId={plugin.providerId} alt="" className="size-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-foreground">{t(plugin.nameKey)}</div>
-              <p className="mt-0.5 line-clamp-1 text-xs leading-snug text-muted-foreground">
-                {t(plugin.descriptionKey)}
-              </p>
-            </div>
-            <span
-              aria-live="polite"
-              className={cn(
-                'max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium',
-                statusClassName,
-              )}
+        <div className="space-y-3">
+          {state.projectEntries.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t('settings.integrations.thirdParty.status.projectInstalled')}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={primaryAction === 'manage' ? 'outline' : 'default'}
+              onClick={() => void handlePrimaryAction(plugin)}
+              disabled={actionDisabled}
             >
-              {status}
-            </span>
-            <Icon
-              name="arrow-down-s"
-              className={cn(
-                'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-                open && 'rotate-180',
-              )}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
-            <div className="space-y-3">
-              {state.projectEntries.length > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {t('settings.integrations.thirdParty.status.projectInstalled')}
-                </p>
+              {isPending ? (
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
+              ) : primaryAction === 'setup' ? (
+                <Icon name="plug-2" className="size-3.5" />
               ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={primaryAction === 'manage' ? 'outline' : 'default'}
-                  onClick={() => void handlePrimaryAction(plugin)}
-                  disabled={actionDisabled}
-                >
-                  {isPending ? (
-                    <Icon name="loader-4" className="size-3.5 animate-spin" />
-                  ) : primaryAction === 'setup' ? (
-                    <Icon name="plug-2" className="size-3.5" />
-                  ) : null}
-                  {primaryLabel}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void openExternalUrl(plugin.homepage)}
-                >
-                  <Icon name="external-link" className="size-3.5" />
-                  {t('settings.integrations.thirdParty.actions.docs')}
-                </Button>
-                {state.userEntry && !state.userEntryIsAmbiguous ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => setRemoveTarget(plugin)}
-                    disabled={isPending}
-                  >
-                    <Icon name="delete-bin" className="size-3.5" />
-                    {t('settings.integrations.thirdParty.actions.remove')}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </CollapsibleContent>
+              {primaryLabel}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void openExternalUrl(plugin.homepage)}
+            >
+              <Icon name="external-link" className="size-3.5" />
+              {t('settings.integrations.thirdParty.actions.docs')}
+            </Button>
+            {state.userEntry && !state.userEntryIsAmbiguous ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={() => setRemoveTarget(plugin)}
+                disabled={isPending}
+              >
+                <Icon name="delete-bin" className="size-3.5" />
+                {t('settings.integrations.thirdParty.actions.remove')}
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </Collapsible>
+      </IntegrationCatalogCard>
     );
   };
 

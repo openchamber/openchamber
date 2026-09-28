@@ -33,6 +33,9 @@ type Props = {
   directoryIndicator: React.ReactNode;
   prBadge: React.ReactNode;
   zombieIndicator: React.ReactNode;
+  /** Goal status glyph; opens the third line's state cluster, so it stays
+      visible while a turn runs and while the hover actions cover line one. */
+  goal?: React.ReactNode;
   badges: React.ReactNode;
   /** Jev's "looks done" check: it sits in the time cluster, where the hover
       Done action appears, left of the status dot so the dot stays by the time. */
@@ -90,17 +93,19 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   directoryIndicator,
   prBadge,
   zombieIndicator,
+  goal = null,
   badges,
   doneHint = null,
   providerId,
   metaPaddingClass,
   hideMetaOnHoverClass,
 }) => {
-  const hasThirdLine = !compact && (Boolean(branchLabel) || Boolean(thirdLineLead) || Boolean(prBadge) || Boolean(zombieIndicator) || Boolean(badges) || Boolean(providerId));
+  const hasThirdLine = !compact && (Boolean(branchLabel) || Boolean(thirdLineLead) || Boolean(prBadge) || Boolean(zombieIndicator) || Boolean(goal) || Boolean(badges) || Boolean(providerId));
   // Compact rows have no third line, so their badges ride in the meta
   // cluster: the hover actions overlay that cluster, and anything placed
   // after it would sit underneath them.
   const meta = <span className={cn('ml-auto flex flex-shrink-0 items-center gap-1 transition-opacity', metaPaddingClass, hideMetaOnHoverClass)}>
+    {compact ? goal : null}
     {compact ? badges : null}
     {directoryIndicator}
     {pinnedMarker}
@@ -134,6 +139,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
           </>
         ) : null)}
         <span className="ml-auto flex flex-shrink-0 items-center gap-1">
+          {goal}
           {zombieIndicator ?? prBadge}
           {badges}
           {providerId ? <ProviderLogo providerId={providerId} className="h-4 w-4 flex-shrink-0 opacity-45" /> : null}

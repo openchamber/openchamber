@@ -24,6 +24,7 @@ import { SPACE_MODEL_PROVIDERS } from '@/lib/spaces/model-access';
 import { isDomainName } from '@/lib/spaces/space-access';
 import { listSpacePlaces, type SpaceFailure, type SpacePlace, type SpaceStart } from '@/lib/spaces/spaces-api';
 import { startSpaceCreation, type SpaceModelAccess } from '@/lib/spaces/space-creation';
+import { resolveSpaceSetupPlan } from '@/lib/spaces/space-setup';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
@@ -143,8 +144,11 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     setSubmitError(null);
     const grants: SpaceModelAccess[] = chosenAccess.map((provider) => modelGrantOf(provider, access[provider.id]));
     try {
+      // Before the space is asked for: the trust prompt for shared commands opens over this dialog.
+      const setup = await resolveSpaceSetupPlan(project.path);
       await startSpaceCreation({
         projectId: project.id,
+        setup,
         request: { projectDirectory: project.path, name: name.trim(), start: effectiveStart, network: { mode: effectiveMode, domains: effectiveMode === 'allowlist' ? domains : [] } },
         access: grants,
         refusalMessage: t('spaces.create.queueRefused'),

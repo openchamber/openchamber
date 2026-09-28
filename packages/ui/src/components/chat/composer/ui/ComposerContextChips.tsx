@@ -398,10 +398,15 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         <div className="relative" ref={containerRef}>
             {openGroup ? (
                 <div
-                    className="oc-glass-popover absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
-                    style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
+                    // Shadow on the wrapper, never on the glass: see "Floating
+                    // composer" in composer/DOCUMENTATION.md.
+                    className="absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                     onMouseEnter={cancelClose}
                     onMouseLeave={scheduleClose}
+                >
+                <div
+                    className="oc-glass-popover overflow-hidden rounded-xl border border-[var(--interactive-border)]"
+                    style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
                 >
                     <div
                         className="divide-y divide-[var(--interactive-border)] overflow-y-auto"
@@ -429,6 +434,7 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                             />
                         ))}
                     </div>
+                </div>
                 </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 pb-2">

@@ -36,6 +36,92 @@ Urządzenia sparowane przez [Połącz urządzenie](/pl/connect-devices/) uwierzy
 - Jeśli potrzebujesz publicznego adresu URL, preferuj [tunel](/pl/tunnels/) lub sieć prywatną (jak VPN) zamiast otwierania portu do internetu.
 - Jeśli umieszczasz OpenChamber za własnym serwerem HTTPS, zobacz [Reverse Proxy](/pl/reverse-proxy/).
 
+## Tryb enterprise
+
+Jeśli Twój zespół może wysyłać treść rozmów tylko do dostawców modeli skonfigurowanych w OpenCode, włącz tryb enterprise. Są na to dwa sposoby i wystarczy jeden z nich.
+
+### Plik polityki na maszynie
+
+Tego sposobu używaj na laptopach, którymi zarządzasz. Umieść plik o nazwie `policy.json` w folderze, do którego może zapisywać tylko administrator:
+
+| System | Ścieżka |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+Ścieżka nie zależy od tego, jak zainstalowano OpenChamber. Aplikacja desktopowa, serwer webowy uruchomiony z npm, CLI i rozszerzenie VS Code czytają ten sam plik. Możesz go rozesłać narzędziem do zarządzania urządzeniami (Jamf, Intune i podobne). Dla serwera w Dockerze zamontuj plik pod ścieżką z Linuksa.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+Wymagane jest tylko `enterpriseMode`. `organization` pojawia się w Ustawieniach jako "Zarządzane przez Acme", żeby wszyscy wiedzieli, kto o tym zdecydował. `relayUrl` i `jev` przypinają Twój własny relay i Twój własny endpoint Jev, a `allowNetworkAccess` pozwala innym urządzeniom łączyć się z OpenChamber przez sieć. Wszystkie trzy są opisane niżej.
+
+- Nic, co ustawi użytkownik, ani w Ustawieniach, ani w środowisku, nie wyłączy tego, co włącza plik.
+- Gdy plik włącza tryb enterprise, decyduje tylko plik. Opisane niżej zmienne środowiskowe dla relaya, Jev i dostępu sieciowego są ignorowane, bo użytkownik może je ustawić sam.
+- Jeśli plik istnieje, ale nie da się go odczytać albo nie jest poprawnym JSON-em, tryb enterprise zostaje włączony i nic nie jest przypięte. Ustawienia pokazują, że nie udało się odczytać polityki. Uszkodzony plik nigdy po cichu nie zdejmuje ochrony.
+- Zmiany działają bez restartu.
+- OpenChamber działa jako użytkownik, więc użytkownik może odczytać plik. Pamiętaj o tym, zanim wpiszesz do niego klucz API.
+
+### Zmienna środowiskowa
+
+Na serwerze albo w kontenerze, gdzie to Ty kontrolujesz środowisko, wystarczy to:
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+Na laptopie to słabsza blokada: aplikacja desktopowa odczytuje zmienną z profilu powłoki logowania (na przykład `~/.zshrc`), a ten użytkownik może edytować. Tam użyj pliku polityki.
+
+Przy zmiennej relay, Jev i dostęp sieciowy też pochodzą z własnych zmiennych: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL` i `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`. W Dockerze będziesz potrzebować tej ostatniej, bo serwer musi nasłuchiwać poza kontenerem.
+
+### Co się zmienia
+
+- Dostawcy modeli pochodzą wyłącznie z Twojej konfiguracji OpenCode. Podłączanie dostawcy, logowanie się do niego, dodawanie klucza i tworzenie własnego dostawcy są w OpenChamber wyłączone; usuwanie i przełączanie istniejących kont działa dalej. To zamyka tylko drogę przez aplikację; właściwą blokadą jest polityka OpenCode opisana niżej.
+- [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/) pozostają wyłączeni, łącznie z własnym endpointem wpisanym przez kogoś w Ustawieniach. Siatka bezpieczeństwa i Auto nie są oferowane, a sesje trafiają do toku tylko ręcznie. Aby korzystać z Jev przez własną infrastrukturę, przypnij endpoint kluczem `jev` w pliku polityki albo zmienną `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` i, jeśli jest potrzebny, `OPENCHAMBER_JEV_API_KEY`). Staje się on domyślny, nadal można go wyłączyć, a niczego innego nie da się wybrać.
+- Odczytywanie na głos przez OpenAI jest wyłączone. Własny serwer syntezy mowy lub transkrypcji musi działać na tej samej maszynie. Lokalne głosy i lokalne modele dyktowania działają dalej.
+- Powiadomienia push na telefony i do przeglądarek niosą tylko ogólny tytuł, taki jak "Agent response is ready", bez treści wiadomości i nazwy sesji. Powiadomienia na desktopie zostają na Twojej maszynie i zachowują pełny tekst.
+- Sprawdzanie aktualizacji działa dalej, więc poprawki bezpieczeństwa nadal do Ciebie trafiają, ale nigdy nie raportuje użycia, nawet anonimowego identyfikatora instalacji.
+- [Zewnętrzne tunele](/pl/tunnels/) (Cloudflare, ngrok) są wyłączone. Dostawca tunelu odszyfrowuje ruch na swoim brzegu sieci i widzi każde żądanie otwartym tekstem.
+- [Private Relay](/pl/private-relay/) działa tylko przez Twój własny relay. Uruchom [self-hosted relay](https://github.com/openchamber/openchamber-relay) i wskaż go OpenChamber przez `relayUrl` w pliku polityki albo `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`. Wspólny relay też nie może odczytać Twojego ruchu, bo jest szyfrowany end-to-end, ale własny trzyma metadane połączeń i drogę do tej maszyny wewnątrz Twojej sieci. Bez własnego relaya w ogóle nie da się sparować urządzeń.
+- OpenChamber nasłuchuje tylko na maszynie, na której działa. Ustawienie desktopowe, które pozwala innym urządzeniom w sieci lokalnej otwierać aplikację, jest wyłączone, a serwer odmawia startu na adresie sieciowym, czy to przez CLI (`--host`, `--lan`), czy przez środowisko. Jeśli plik polityki pojawi się w trakcie działania aplikacji, połączenia z innych maszyn są zrywane do następnego uruchomienia. Dostęp sieciowy włączysz przez `"allowNetworkAccess": true` w pliku polityki albo `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` tam, gdzie tryb enterprise włącza środowisko. Pamiętaj, że połączenie to zwykłe HTTP, więc we współdzielonej sieci każdy może je odczytać; serwer, do którego łączą się inni, postaw za [własnym HTTPS](/pl/reverse-proxy/).
+- W rozszerzeniu VS Code podłączanie dostawców jest wyłączone, a sprawdzanie aktualizacji nie raportuje użycia. Jev, relaya, tuneli, powiadomień push ani mowy w chmurze i tak w nim nie ma.
+
+Zadania małego modelu (tytuły sesji, podsumowania, wiadomości commitów, omówienie zmian) nie wymagają żadnego specjalnego trybu. Zawsze działają na małym modelu wybranym w Ustawieniach, na małym modelu dostawcy, z którym akurat pracujesz, albo na domyślnym modelu z Twojej konfiguracji OpenCode. Nigdy nie przełączają się na innego dostawcę tylko dlatego, że akurat jest podłączony.
+
+O tym, z jakich dostawców modeli w ogóle można korzystać, decyduje OpenCode, nie OpenChamber. Zablokuj to [politykami OpenCode](https://opencode.ai/v2/docs/policies/): zabroń wszystkich dostawców, a potem zezwól na zatwierdzonych.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+Zabroniony dostawca znika, nawet jeśli ktoś doda do niego klucz. Umieść polityki w globalnym `~/.config/opencode/opencode.jsonc`, gdzie projekt nie może ich znieść, albo dostarczaj je z workspace’u OpenCode Console, który ma ostatnie słowo. Tryb enterprise obejmuje ponad to, co wysyła sam OpenChamber.
+
+Wyszukiwania w sieci i pobieranie stron przez agenta też idą przez OpenCode, do usługi wyszukiwania i do samych stron. Jeśli nie powinny wychodzić poza Twoją sieć, zabroń ich tym samym rodzajem polityki:
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## Powiązane
 
 - [Połącz urządzenie](/pl/connect-devices/) — jednorazowe parowanie i tokeny per urządzenie

@@ -15,7 +15,7 @@ test('concurrent callers await one complete environment and later calls reuse it
     execute: (file, args, options) => {
       calls++;
       assert.equal(file, '/bin/zsh');
-      assert.deepEqual(args, ['-il', '-c', 'env -0']);
+      assert.deepEqual(args, ['-il', '-c', 'echo __OPENCHAMBER_ENV__; env -0']);
       assert.equal(options.timeout, 5000);
       assert.equal(options.windowsHide, true);
       return new Promise(resolve => { complete = resolve; });
@@ -30,6 +30,33 @@ test('concurrent callers await one complete environment and later calls reuse it
   assert.equal(await second, result);
   assert.equal(await load(), result);
   assert.equal(calls, 1);
+});
+
+// Stands in for a shell whose interactive rc file prints a banner to stdout
+// before it runs the probe command: only the `echo` part of the command and
+// `env -0` are emulated.
+const shellWithBanner = (banner, environment) => async (_file, args) => {
+  const command = args[2];
+  const echoed = command.match(/^echo (\S+); /);
+  return { stdout: Buffer.from(banner + (echoed ? `${echoed[1]}\n` : '') + environment) };
+};
+
+test('keeps shell startup output out of the environment', async () => {
+  const load = createShellEnvironmentLoader({
+    platform: 'darwin',
+    env: { SHELL: '/bin/zsh' },
+    execute: shellWithBanner('Welcome to test-host\n', 'HOME=/home/test-user\0PATH=/shell/bin\0'),
+  });
+  assert.deepEqual(await load(), { HOME: '/home/test-user', PATH: '/shell/bin' });
+});
+
+test('keeps startup output that has no trailing newline out of the environment', async () => {
+  const load = createShellEnvironmentLoader({
+    platform: 'linux',
+    env: { SHELL: '/bin/bash' },
+    execute: shellWithBanner('mode=banner', 'HOME=/home/test-user\0'),
+  });
+  assert.deepEqual(await load(), { HOME: '/home/test-user' });
 });
 
 for (const failure of ['error', 'empty']) {

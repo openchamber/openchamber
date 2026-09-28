@@ -1987,7 +1987,7 @@ describe("forkAfterMessage", () => {
   }
   const forkedSession: Session = { ...sourceSession, id: "session-fork", title: "Forked session" }
   // SAFETY: forkAfterMessage reads only id and role; the rest of the message shape is irrelevant here.
-  const message = (id: string, role: "user" | "assistant") => ({ id, role, sessionID: sourceSession.id, time: { created: 1 } }) as Message
+  const message = (id: string, role: "user" | "assistant" | "compaction") => ({ id, role, sessionID: sourceSession.id, time: { created: 1 } }) as Message
   const transcript = [
     message("msg-user-1", "user"),
     message("msg-answer-1", "assistant"),
@@ -2019,6 +2019,20 @@ describe("forkAfterMessage", () => {
     expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
     expect(source.getState().session).toEqual([sourceSession, forkedSession])
     expect(inputState.pendingComposerRestore).toBeNull()
+  })
+
+  test("leaves a compaction that followed the answer out of the fork", async () => {
+    const compacted = [...transcript.slice(0, 2), message("msg-compaction", "compaction"), ...transcript.slice(2)]
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: compacted } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+
+    await forkAfterMessage(sourceSession.id, "msg-answer-1")
+
+    expect(replyCalls).toEqual([{
+      method: "session.fork",
+      params: { sessionID: sourceSession.id, messageID: "msg-compaction", directory: sourceSession.directory },
+    }])
   })
 
   test("copies the whole transcript when the answer is the last message", async () => {

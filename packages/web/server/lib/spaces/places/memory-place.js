@@ -54,7 +54,7 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
       if (spaces.has(requireSpaceId(spaceId))) {
         throw new SpaceError('space_name_taken', `Space ${spaceId} already exists`);
       }
-      spaces.set(spaceId, { id: spaceId, name, project, created, state: 'running', orphans: [], damaged: false, missing: [] });
+      spaces.set(spaceId, { id: spaceId, name, project, created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] });
       for (const target of TARGETS) {
         // A container has a hostname of its own, as a real one does, so a caller can tell them apart.
         containers.set(`${spaceId}:${target}`, { hostname: crypto.randomBytes(6).toString('hex') });
@@ -103,8 +103,8 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
       }
       return net.connect({ host: '127.0.0.1', port: server.address().port });
     },
-    stop: async (spaceId) => { requireSpace(spaceId).state = 'exited'; },
-    start: async (spaceId) => { requireSpace(spaceId).state = 'running'; },
+    stop: async (spaceId) => { Object.assign(requireSpace(spaceId), { state: 'exited', gatekeeperRunning: false }); },
+    start: async (spaceId) => { Object.assign(requireSpace(spaceId), { state: 'running', stoppedIdle: false, gatekeeperRunning: true }); },
     remove: async (spaceId) => {
       const removed = [];
       for (const target of TARGETS) {

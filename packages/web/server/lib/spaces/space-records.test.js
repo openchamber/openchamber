@@ -26,7 +26,7 @@ describe('space records', () => {
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
 
     const written = records.write(ID, { network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project' });
-    expect(written).toEqual({ version: 1, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [] });
+    expect(written).toEqual({ version: 1, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
     const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(path.dirname(file))).toEqual([`${ID}.json`]);
@@ -91,6 +91,23 @@ describe('space records', () => {
     fs.mkdirSync(path.join(dataDir, 'spaces', 'records'), { recursive: true });
     fs.writeFileSync(path.join(dataDir, 'spaces', 'records', `${ID}.json`), JSON.stringify({ version: 1, network: { mode: 'open', domains: [] } }));
     expect(older.read(ID)).toEqual({ status: 'ok', record: expect.objectContaining({ grants: [] }) });
+  });
+
+  it('keeps the last run of the setup commands, and forgets only a setup it cannot read', () => {
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir, logger: quiet });
+    records.write(ID, { network: { mode: 'open' }, grants: [] });
+    const failed = { state: 'failed', total: 2, index: 1, command: 'npm install', exitCode: 1, timedOut: false, output: 'npm ERR! 403', finishedAt: '2026-09-28T10:00:00.000Z' };
+    expect(records.update(ID, { setup: failed }).record.setup).toEqual(failed);
+    expect(records.read(ID).record.setup).toEqual(failed);
+    // A value the host never writes is refused rather than kept.
+    expect(() => records.update(ID, { setup: { ...failed, secret: 'x' } })).toThrow();
+    expect(() => records.update(ID, { setup: { ...failed, output: 'x'.repeat(40 * 1024) } })).toThrow();
+
+    // A setup from a later version leaves the network and the grants readable.
+    const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
+    fs.writeFileSync(file, JSON.stringify({ version: 1, network: { mode: 'allowlist', domains: ['a.example.com'] }, setup: { state: 'paused' } }));
+    expect(records.read(ID)).toEqual({ status: 'ok', record: expect.objectContaining({ network: { mode: 'allowlist', domains: ['a.example.com'] }, setup: null }) });
   });
 
   it('refuses a record that is not one, and an id that is not a space id', () => {

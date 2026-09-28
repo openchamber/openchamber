@@ -14,15 +14,30 @@
 // opened domain the window forwards to with no credential. The host keeps the grant without its
 // value (decision 5) and says it again to the gatekeeper after every start; a value it cannot
 // find again leaves the space "needs access" until the user grants once more.
+//
+// Repair, since 5d-2 (DESIGN.md, journey step 8 and decision 10): restart OpenCode inside, and
+// restart the container with a fresh token for the server inside. A space whose gatekeeper is gone
+// is listed as such, because no restart brings it back.
+//
+// Idle stop, since 5d-3 (decision 11): the server inside stops itself after the user's idle hours.
+// The host tells it the setting at every start and whenever the user changes it, lists a space
+// that stopped that way as such, and stops the gatekeeper it finds running beside a stopped space,
+// which is what an idle stop leaves while OpenChamber is closed.
+//
+// Setup commands, since 5d-4 (DESIGN.md, "Code in and out"): the project's worktree setup commands
+// run inside the space once its code arrived, in the background, and again when the user asks.
 
 import crypto from 'node:crypto';
 
 import { z } from 'zod';
 
 import { SpaceError } from './errors.js';
-import { createSpaceId, hashProjectDirectory } from './labels.js';
+import { DEFAULT_IDLE_STOP, idleStopSchema } from './idle-stop.js';
+import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
 import { domainSchema, grantSchema, networkSchema, secretSourceSchema } from './space-records.js';
+import { createSpaceToken } from './space-server.js';
+import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 
 // The four choices of the create dialog, parsed at the boundary. Each field refuses with a code
 // of its own, so the dialog can point at the field.
@@ -31,13 +46,18 @@ const createRequestSchema = z.object({
   name: z.string().trim().min(1),
   start: z.enum(['clean', 'uncommitted']).default('uncommitted'),
   network: networkSchema.default({ mode: 'allowlist', domains: [] }),
+  // The project's worktree setup commands as the client resolved them, the shared ones only when
+  // the user trusted them; they run once the code arrived (5d-4).
+  setupCommands: setupCommandsSchema.default([]),
 });
 const CREATE_REFUSALS = {
   projectDirectory: ['project_not_registered', 'A space is made for a project this OpenChamber knows. Add the project first, then create the space.'],
   name: ['invalid_space_name', 'A space needs a name.'],
   start: ['invalid_snapshot_mode', 'A space starts from a clean commit or with the uncommitted changes.'],
   network: ['invalid_network', 'The network of a space is allowlist or open, with a list of domain names for the allowlist.'],
+  setupCommands: ['invalid_setup_commands', 'The setup commands are a list of at most 100 commands of at most 4000 characters each.'],
 };
+const setupRequestSchema = z.object({ commands: setupCommandsSchema }).strict();
 // The grant dialog's request, parsed at the boundary. A model grant names the provider as the
 // host's catalog does, the provider's API as the upstream, and where the key comes from: typed
 // once, or an environment variable of the host's by name. The value of a typed key is used now
@@ -87,6 +107,10 @@ const failureOf = (error) => ({
  * host's hub, `onSpacesChanged()` tells the host to read its list again at once. `spaceOpenCode`
  * writes OpenCode's files inside a space, and `readHostSecret(name)` is how a key named by an
  * environment variable of the host's is found again: its value or undefined, never stored.
+ * `serverInside.writeToken(spaceId, token)` replaces the token the server inside reads when it
+ * starts, and `restartOpenCodeInside(spaceId)` asks the server inside to restart its OpenCode.
+ * `readIdleStop()` and `saveIdleStop(setting)` read and keep the user's idle stop setting, and
+ * `serverInside.writeIdleStop(spaceId, setting)` tells it to the server inside.
  */
 export function createSpaceJourney({
   manager,
@@ -96,8 +120,12 @@ export function createSpaceJourney({
   codeOut,
   records,
   spaceOpenCode,
+  serverInside,
+  restartOpenCodeInside,
   listProjectDirectories,
   readHostSecret = () => undefined,
+  readIdleStop = async () => ({ ...DEFAULT_IDLE_STOP }),
+  saveIdleStop = async () => {},
   announce = () => {},
   onSpacesChanged = () => {},
   logger = console,
@@ -111,6 +139,20 @@ export function createSpaceJourney({
   // Set while the switch is being turned off: no creation may slip in between the stop of the
   // spaces and the moment the feature is gone.
   let closing = false;
+  // Every write of the idle stop setting, a change's and a start's, one after the other, so a
+  // space never ends up with an older one.
+  let idleStopTurn = Promise.resolve();
+  // Stops of a gatekeeper left beside a stopped space, under way, by space id; a start waits for one.
+  const strayStops = new Map();
+  // The project's setup commands inside a space, since 5d-4; each step is announced so the
+  // clients read the list again.
+  const setup = createSpaceSetup({
+    exec: place.exec,
+    records,
+    announce: (spaceId) => announce(spaceId, { type: 'openchamber:space-setup', properties: { spaceId, timestamp: now().getTime() } }),
+    logger,
+    now,
+  });
 
   const exclusive = async (spaceId, work) => {
     if (busy.has(spaceId)) throw new SpaceError('space_busy', 'Another action on this space is still running. Wait for it to finish.');
@@ -172,6 +214,28 @@ export function createSpaceJourney({
     return outcome;
   };
 
+  /**
+   * Tells the server inside the idle stop setting. It saves memory and guards nothing, so a write
+   * that fails is logged and the space runs with what it had: the setting of its last start, or
+   * none, which stops nothing.
+   */
+  const writeIdleStop = async (spaceId, setting) => {
+    try {
+      await serverInside.writeIdleStop(spaceId, setting);
+    } catch (error) {
+      logger.warn?.(`[spaces] space ${spaceId} keeps its idle stop setting: ${error?.code ?? error?.message ?? error}`);
+    }
+  };
+
+  /** The setting as kept now, told to a space that was made or started, in turn with the changes. */
+  const deliverIdleStop = (spaceId) => {
+    const delivery = idleStopTurn.then(async () => writeIdleStop(spaceId, await readIdleStop()));
+    idleStopTurn = delivery.catch(() => {});
+    return delivery.catch((error) => {
+      logger.warn?.(`[spaces] space ${spaceId} keeps its idle stop setting: ${error?.code ?? error?.message ?? error}`);
+    });
+  };
+
   const sendHistoryInBackground = ({ repository, spaceId, spacePath, base }) => {
     codeIn.sendHistory({ repository, spaceId, spacePath, base })
       .then((result) => { records.update(spaceId, { history: result.status }); })
@@ -181,7 +245,7 @@ export function createSpaceJourney({
       });
   };
 
-  const prepare = async (entry, { projectDirectory, name, start, network }) => {
+  const prepare = async (entry, { projectDirectory, name, start, network, setupCommands }) => {
     let created = false;
     try {
       progress(entry, 'checking_place');
@@ -200,9 +264,12 @@ export function createSpaceJourney({
       const arrived = await codeIn.bringCodeIn({ repository: projectDirectory, spaceId: entry.id, mode: start });
       records.update(entry.id, { spacePath: arrived.spacePath, base: arrived.base });
       entry.identityCopied = arrived.identityCopied;
+      await deliverIdleStop(entry.id);
       pending.delete(entry.id);
       progress(entry, 'ready');
       onSpacesChanged();
+      // In the background, while the agent can already start (DESIGN.md, journey step 2).
+      if (setupCommands.length > 0) setup.start(entry.id, { projectPath: arrived.spacePath, commands: setupCommands });
       sendHistoryInBackground({ repository: projectDirectory, spaceId: entry.id, spacePath: arrived.spacePath, base: arrived.base });
     } catch (error) {
       const failure = failureOf(error);
@@ -228,7 +295,7 @@ export function createSpaceJourney({
       const [code, message] = CREATE_REFUSALS[parsed.error.issues[0]?.path?.[0]] ?? CREATE_REFUSALS.network;
       throw new SpaceError(code, message);
     }
-    const { name, start, network } = parsed.data;
+    const { name, start, network, setupCommands } = parsed.data;
     const projectDirectory = await requireRegisteredProject(parsed.data.projectDirectory);
     const id = createSpaceId();
     const entry = {
@@ -242,9 +309,10 @@ export function createSpaceJourney({
       step: 'checking_place',
       failure: null,
       network,
+      setupTotal: setupCommands.length,
     };
     pending.set(entry.id, entry);
-    void prepare(entry, { projectDirectory, name, start, network });
+    void prepare(entry, { projectDirectory, name, start, network, setupCommands });
     return describePending(entry);
   };
 
@@ -316,6 +384,28 @@ export function createSpaceJourney({
     }
   };
 
+  /**
+   * What is broken in a damaged space, for the group's status line: `gatekeeper_gone` when its
+   * gatekeeper container no longer exists, which no start makes again (STAGES.md, "Things stage 2
+   * leaves"), and `repairable` for the rest, a gatekeeper that stopped while the space runs among
+   * them, which the next start brings back. The place's list names the gatekeeper as missing in
+   * both cases; its verification tells them apart, and is asked only for a space that is damaged
+   * that way. A verification that cannot answer leaves it `repairable`, so the user is offered
+   * the restart rather than told the space is lost on a guess.
+   */
+  const readDamage = async (space) => {
+    if (!space.damaged) return null;
+    if (!space.missing.includes(spaceResourceName(space.id, ROLE_GATEKEEPER))) return 'repairable';
+    try {
+      const violations = await place.verify(space.id);
+      return violations.some((violation) => violation.check === 'gatekeeper_missing') ? 'gatekeeper_gone' : 'repairable';
+    } catch (error) {
+      if (error instanceof SpaceError && error.code === 'gatekeeper_missing') return 'gatekeeper_gone';
+      logger.warn?.(`[spaces] space ${space.id} could not be verified: ${error?.code ?? error?.message ?? error}`);
+      return 'repairable';
+    }
+  };
+
   const describePending = (entry) => ({
     id: entry.id,
     name: entry.name,
@@ -324,14 +414,18 @@ export function createSpaceJourney({
     directory: entry.directory,
     created: entry.created,
     state: entry.state,
+    stoppedIdle: false,
     step: entry.step,
     failure: entry.failure,
     network: entry.network,
     history: 'pending',
+    // The client waits for the setup only when the host said it will run one; a host before 5d-4 never says so.
+    setup: entry.setupTotal > 0 ? { state: 'queued', total: entry.setupTotal } : null,
     grants: [],
     access: null,
     needsAccess: [],
     damaged: false,
+    damage: null,
     missing: [],
     orphans: [],
   });
@@ -357,22 +451,46 @@ export function createSpaceJourney({
         directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
         created: space.created,
         state: space.state,
+        stoppedIdle: space.stoppedIdle === true,
         step: null,
         failure: null,
         network: record?.network ?? null,
         history: record?.history ?? 'unknown',
+        setup: setup.describe(space.id, record),
         grants: grants.map(describeGrant),
         ...(access ? await readAccess(space, grants) : { access: null, needsAccess: [] }),
         damaged: space.damaged,
+        damage: await readDamage(space),
         missing: space.missing,
         orphans: space.orphans,
       };
     }));
+    for (const space of spaces) {
+      if (space.state === 'exited' && space.gatekeeperRunning === true && !pending.has(space.id)) stopStrayGatekeeper(space.id);
+    }
     // A creation under way wins over the place's view of it: the containers run before the code is there.
     const waiting = new Map(Array.from(pending.values(), (entry) => [entry.id, describePending(entry)]));
     const merged = listed.map((space) => waiting.get(space.id) ?? space);
     const known = new Set(listed.map((space) => space.id));
     return [...merged, ...Array.from(waiting.values()).filter((entry) => !known.has(entry.id))];
+  };
+
+  /**
+   * Stops the gatekeeper found running beside a stopped space: a space that stopped itself for the
+   * idle stop leaves it running, because it cannot reach it (the maintainer's call of 2026-09-28).
+   * It serves nobody then, and a key typed into it goes with it, as with a stop by hand. The place's
+   * stop of a stopped space stops only what still runs. A space that another action holds is left
+   * for the next look, since a start is what brings a gatekeeper up before its space; a start that
+   * comes while this runs waits for it, rather than being refused as busy.
+   */
+  const stopStrayGatekeeper = (spaceId) => {
+    if (busy.has(spaceId) || strayStops.has(spaceId)) return;
+    const stopping = manager.stopSpace({ placeId: place.id, spaceId })
+      .catch((error) => {
+        logger.warn?.(`[spaces] the gatekeeper beside stopped space ${spaceId} still runs: ${error?.code ?? error?.message ?? error}`);
+      })
+      .finally(() => { strayStops.delete(spaceId); });
+    strayStops.set(spaceId, stopping);
   };
 
   const requireListed = async (spaceId) => {
@@ -386,10 +504,11 @@ export function createSpaceJourney({
    * chose is said again from the record; without a readable record the space stays closed, and
    * the answer says so with `networkRestored` false.
    */
-  const startSpace = (spaceId) => exclusive(spaceId, async () => {
+  const startUnlocked = async (spaceId) => {
     // As for a creation: no start may slip in while the switch is stopping the spaces one by one.
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     requireNotPending(spaceId);
+    await strayStops.get(spaceId);
     await manager.startSpace({ placeId: place.id, spaceId });
     const { record } = records.read(spaceId);
     let networkRestored = false;
@@ -405,8 +524,46 @@ export function createSpaceJourney({
         sendHistoryInBackground({ repository: record.repository, spaceId, spacePath: record.spacePath, base: record.base });
       }
     }
+    await deliverIdleStop(spaceId);
     onSpacesChanged();
     return { ...(await requireListed(spaceId)), networkRestored, grantsRestored: grants.restored, needsAccess: grants.needsAccess };
+  };
+  const startSpace = (spaceId) => exclusive(spaceId, () => startUnlocked(spaceId));
+
+  /**
+   * Restarts the container of a running space, the second of the repair actions, and gives the
+   * server inside a fresh token on the way (DESIGN.md, "Dispatcher, sessions, events"): the new
+   * token is written while the space runs, and the server reads it when it starts again. The
+   * token is not a secret from the agent, so one that cannot be written is logged and the restart
+   * goes on; the dispatcher reads the token again when the server inside refuses the old one.
+   * A stop, then a start with the network and the grants said again, exactly as the two apart.
+   */
+  const restartSpace = (spaceId) => exclusive(spaceId, async () => {
+    if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
+    requireNotPending(spaceId);
+    const space = await requireListed(spaceId);
+    if (space.state !== 'running') throw new SpaceError('space_not_running', 'This space is stopped. Start it instead.');
+    try {
+      await serverInside.writeToken(spaceId, createSpaceToken());
+    } catch (error) {
+      logger.warn?.(`[spaces] the server inside space ${spaceId} keeps its token: ${error?.code ?? error?.message ?? error}`);
+    }
+    await manager.stopSpace({ placeId: place.id, spaceId });
+    return startUnlocked(spaceId);
+  });
+
+  /**
+   * Restarts OpenCode inside a running space, the softest of the repair actions: the server inside
+   * restarts the OpenCode it manages and answers once it is ready again. The container, its
+   * gatekeeper and the grants stay as they are.
+   */
+  const restartOpenCode = (spaceId) => exclusive(spaceId, async () => {
+    requireNotPending(spaceId);
+    const space = await requireListed(spaceId);
+    if (space.state !== 'running') throw new SpaceError('space_not_running', 'OpenCode runs inside a running space. Start the space.');
+    await restartOpenCodeInside(spaceId);
+    onSpacesChanged();
+    return requireListed(spaceId);
   });
 
   /**
@@ -427,7 +584,7 @@ export function createSpaceJourney({
 
     const asked = parsed.data;
     if (asked.kind === 'model' && !HEADER_BY_PROVIDER.has(asked.provider)) {
-      throw new SpaceError('provider_not_supported', `A key for ${asked.provider} cannot be given through the gatekeeper yet: it reads its key in a way the gatekeeper does not know.`);
+      throw new SpaceError('provider_not_supported', `A key for ${asked.provider} cannot be given through the network filter yet: it reads its key in a way the network filter does not know.`);
     }
     let grant;
     let secret = null;
@@ -444,7 +601,7 @@ export function createSpaceJourney({
     await gatekeeper.addGrant(spaceId, { id: grant.id, upstream: grant.upstream, header: grant.kind === 'model' ? grant.header : null, secret });
     const grants = [...current.record.grants.filter((entry) => entry.id !== grant.id), grant];
     if (records.update(spaceId, { grants }).status !== 'ok') {
-      throw new SpaceError('space_record_unreadable', 'The grant reached the gatekeeper and could not be remembered, so it is gone at the next start. Remove the space and create it again.');
+      throw new SpaceError('space_record_unreadable', 'The grant reached the network filter and could not be remembered, so it is gone at the next start. Remove the space and create it again.');
     }
     // A failure here answers the grant with it; the key is in the gatekeeper and the record, and
     // the next start writes the configuration again.
@@ -479,6 +636,29 @@ export function createSpaceJourney({
     }
     return { network: next.data };
   });
+
+  /**
+   * Runs the project's setup commands again in a running space, from the "⋯" menu or after a run
+   * that failed or was interrupted. The client resolves them as for a new space, trust included.
+   * Answers the listed entry once the run began; the run goes on in the background.
+   */
+  const runSetup = (spaceId, request) => exclusive(spaceId, async () => {
+    requireNotPending(spaceId);
+    const parsed = setupRequestSchema.safeParse(request ?? {});
+    if (!parsed.success) throw new SpaceError(...CREATE_REFUSALS.setupCommands);
+    const space = await requireListed(spaceId);
+    if (space.state !== 'running') throw new SpaceError('space_not_running', 'The setup commands run inside a running space. Start the space.');
+    const { record } = records.read(spaceId);
+    if (!record?.spacePath) throw new SpaceError('space_record_unreadable', 'The host\'s record of this space cannot be read, so it does not know where the project is inside. Remove the space and create it again.');
+    setup.start(spaceId, { projectPath: record.spacePath, commands: parsed.data.commands });
+    return requireListed(spaceId);
+  });
+
+  /** The setup as the list carries it, with the end of the failed command's output. */
+  const readSetup = async (spaceId) => {
+    const space = await requireListed(spaceId);
+    return { setup: space.setup, output: setup.outputOf(records.read(spaceId).record) };
+  };
 
   const stopSpace = (spaceId) => exclusive(spaceId, async () => {
     requireNotPending(spaceId);
@@ -532,7 +712,11 @@ export function createSpaceJourney({
     const stopped = [];
     const stillRunning = [];
     for (const space of spaces) {
-      if (space.state !== 'running') continue;
+      if (space.state !== 'running') {
+        // A gatekeeper left by an idle stop goes too, and the space is not counted: it was stopped.
+        if (space.gatekeeperRunning === true && !busy.has(space.id)) await manager.stopSpace({ placeId: place.id, spaceId: space.id }).catch(() => {});
+        continue;
+      }
       try {
         await manager.stopSpace({ placeId: place.id, spaceId: space.id });
         stopped.push({ id: space.id, name: space.name });
@@ -541,6 +725,30 @@ export function createSpaceJourney({
       }
     }
     return { stopped, stillRunning };
+  };
+
+  /** The user's idle stop setting, as the settings screen shows it. */
+  const readIdleStopSetting = () => readIdleStop();
+
+  /**
+   * Keeps a new idle stop setting and tells every running space, one change after the other. A
+   * space that cannot be told keeps its old setting until its next start, which says the new one;
+   * a stopped space hears it at its start. Answers the setting as kept.
+   */
+  const changeIdleStop = (request) => {
+    const parsed = idleStopSchema.safeParse(request ?? {});
+    if (!parsed.success) return Promise.reject(new SpaceError('invalid_idle_stop', 'The idle stop is on or off, with a whole number of hours from 1 to 168.'));
+    const setting = parsed.data;
+    const change = idleStopTurn.then(async () => {
+      await saveIdleStop(setting);
+      const spaces = await manager.listSpaces({ placeId: place.id });
+      for (const space of spaces) {
+        if (space.state === 'running' && !pending.has(space.id)) await writeIdleStop(space.id, setting);
+      }
+      return setting;
+    });
+    idleStopTurn = change.catch(() => {});
+    return change;
   };
 
   /** For a turn-off that did not go through after the spaces were stopped: creations are taken again. */
@@ -591,5 +799,5 @@ export function createSpaceJourney({
     return { brought, applied, removal };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup };
 }

@@ -6,7 +6,9 @@
  * `routing-auth.json` holds the Jev API key alone, mode 0600, so the config
  * file can be read, shown and exported without carrying a secret.
  * `classification.json` holds which classification provider answers Jev
- * requests (see `classifier.js`).
+ * requests (see `classifier.js`). `classifier-endpoint.json` holds the custom
+ * System One endpoint (URL, model, optional key), mode 0600 like the key file;
+ * a file of its own so saving one never rewrites the other.
  *
  * Reads never throw on a missing file (a fresh install is the defaults); a
  * malformed file is an error, not an empty config, so a bad write cannot
@@ -22,7 +24,7 @@ import {
   THINKING_LEVELS,
   isAutoModel,
 } from './defaults.js';
-import { CLASSIFIER_SOURCES } from './classifier.js';
+import { CLASSIFIER_SOURCES, normalizeCustomEndpointUrl } from './classifier.js';
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -92,9 +94,27 @@ const authSchema = z.object({ token: z.string().min(1).max(4000) }).strict();
 
 const classifierSchema = z.object({ version: z.literal(FILE_VERSION), source: z.enum(CLASSIFIER_SOURCES) }).strict();
 
+const isNormalizedEndpointUrl = (url) => {
+  try {
+    return normalizeCustomEndpointUrl(url) === url;
+  } catch {
+    return false;
+  }
+};
+
+// A hand-edited URL that the setter would not have produced is not an endpoint.
+const customEndpointSchema = z.object({
+  url: z.string().max(2000).refine(isNormalizedEndpointUrl, { message: 'Invalid endpoint URL' }),
+  model: z.string().trim().min(1).max(200),
+  key: z.string().min(1).max(4000).optional(),
+}).strict();
+
+const customEndpointFileSchema = z.object({ version: z.literal(FILE_VERSION), endpoint: customEndpointSchema }).strict();
+
 const routingConfigPath = (dataDir) => path.join(dataDir, 'routing.json');
 const routingAuthPath = (dataDir) => path.join(dataDir, 'routing-auth.json');
 const classifierPath = (dataDir) => path.join(dataDir, 'classification.json');
+const customEndpointPath = (dataDir) => path.join(dataDir, 'classifier-endpoint.json');
 
 const readJsonFile = async (file, schema) => {
   let raw;
@@ -226,6 +246,7 @@ export const createRoutingStore = ({ dataDir }) => {
   const configFile = routingConfigPath(dataDir);
   const authFile = routingAuthPath(dataDir);
   const classifierFile = classifierPath(dataDir);
+  const customEndpointFile = customEndpointPath(dataDir);
   let writeChain = Promise.resolve();
   const serialize = (run) => {
     const next = writeChain.catch(() => undefined).then(run);
@@ -266,5 +287,20 @@ export const createRoutingStore = ({ dataDir }) => {
       }
     },
     writeClassifierSource: (source) => serialize(() => writeJsonFile(classifierFile, { version: FILE_VERSION, source })),
+    /** The custom endpoint, or null when none is saved. Unreadable reads as none, like the key file. */
+    readCustomEndpoint: async () => {
+      try {
+        return (await readJsonFile(customEndpointFile, customEndpointFileSchema))?.endpoint ?? null;
+      } catch (error) {
+        // V8 quotes the broken text in a JSON syntax error, and this file holds a key.
+        const reason = error instanceof SyntaxError ? 'malformed JSON' : error?.message ?? error;
+        console.warn('[routing] classifier-endpoint.json is unreadable:', reason);
+        return null;
+      }
+    },
+    writeCustomEndpoint: (endpoint) => serialize(() => writeJsonFile(customEndpointFile, { version: FILE_VERSION, endpoint }, 0o600)),
+    clearCustomEndpoint: () => serialize(async () => {
+      await fs.rm(customEndpointFile, { force: true });
+    }),
   };
 };

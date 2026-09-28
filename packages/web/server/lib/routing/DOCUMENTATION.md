@@ -23,12 +23,15 @@ Auto. There is no env gate — the feature shipped dark behind
   for routing and for the safety net, history excerpt limits.
 - `classifier.js` — the classification providers: `resolveClassifier` (the
   user's pick, what is usable, and the source that actually answers) and
-  `classifierEndpoint` (where a request for a source goes), and
-  `legacyClassifier` (the view older clients parse).
+  `classifierEndpoint` (where a request for a source goes),
+  `legacyClassifier` (the view older clients parse) and
+  `normalizeCustomEndpointUrl` (the custom endpoint's request URL).
 - `store.js` — `routing.json` (only deviations from the built-ins),
-  `routing-auth.json` (the TypeSafe key alone, mode 0600) and
-  `classification.json` (the classification provider pick) in the OpenChamber
-  data dir. An unreadable pick file reads as no pick. `resolveEffectiveConfig` merges built-ins with stored overrides;
+  `routing-auth.json` (the TypeSafe key alone, mode 0600),
+  `classification.json` (the classification provider pick) and
+  `classifier-endpoint.json` (the custom endpoint, mode 0600) in the
+  OpenChamber data dir. An unreadable pick file reads as no pick, an
+  unreadable endpoint file as no endpoint. `resolveEffectiveConfig` merges built-ins with stored overrides;
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
 - `jev.js` — request builders, answer parsing, and the HTTP call with a
@@ -39,12 +42,13 @@ Auto. There is no env gate — the feature shipped dark behind
   plus tail. The new request is never cut.
 - `runtime.js` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
   endpoint a Jev request goes to now, or null; also used by
-  `../session-work`), `noteModelSelection`,
+  `../session-work` and `../session-goal`), `noteModelSelection`,
   `isAutoSession`, `resolveAutoSelection`, `applySessionSelection`, `routeSend`,
-  `evaluatePermission`, `legacySafetyNetEnabled`, config, token and classifier
-  writes, event broadcasts.
+  `evaluatePermission`, `legacySafetyNetEnabled`, config, token, classifier and
+  custom endpoint writes, event broadcasts.
 - `routes.js` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
-  `/api/routing/classifier` (PUT) and `registerRoutingPromptRewrite`.
+  `/api/routing/classifier` (PUT), `/api/routing/classifier/custom` (PUT,
+  DELETE) and `registerRoutingPromptRewrite`.
 
 ## Invariants
 
@@ -94,6 +98,7 @@ Auto. There is no env gate — the feature shipped dark behind
 The user picks a classification provider in Settings → Providers →
 Classification providers:
 
+- `off`: no Jev at all. Every Jev feature takes its no-provider path.
 - `zen-promo`: `opencode.ai/zen/v1/systemone` as `jev-1.13-free`, which OpenCode
   Zen answers with no credential at all. Usable while
   `ZEN_JEV_PROMOTION_ACTIVE` is true; flip it when OpenCode ends the promotion.
@@ -112,11 +117,45 @@ Classification providers:
   (checked 2026-09-27); a paid call is not verified live yet.
 - `typesafe`: `api.typesafe.ai/v1/systemone` as `jev-latest` with the key saved
   in `routing-auth.json`. Saving a key also picks it.
+- `custom`: any endpoint that speaks the System One API, with the URL, model
+  and optional key the user saved (`classifier-endpoint.json`, mode 0600, its
+  own file so a token write never rewrites it). The key goes as a bearer when
+  present; `describe` returns `customEndpoint` as URL, model and `keyPresent`,
+  never the key. `setCustomEndpoint` accepts the full `.../systemone` URL, an
+  OpenAI-style base ending in `/v1` (what "base URL" means to most users), or
+  an API root the way TypeSafe's SDKs take `baseURL`, and stores the resolved
+  request URL, which the page shows back. Only http(s), no credentials in the
+  URL. It does not go through the TTS remote-URL gate: a remote classifier is
+  the user's explicit choice, the same as the hosted sources. Saving picks it;
+  a missing `key` keeps the saved one, null removes it without changing the
+  pick.
+  An administrator can pin the endpoint (`readPinnedCustomEndpoint`): `jev` in
+  the machine policy file, else `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_JEV_MODEL`
+  defaulting to `jev-latest`, optional `OPENCHAMBER_JEV_API_KEY` (source rules
+  in `../enterprise-mode.js`). The pin
+  replaces the saved endpoint, `customEndpoint.pinned` tells the page to show
+  it read-only, and `setCustomEndpoint` / `clearCustomEndpoint` answer 409.
 
-Without a stored pick the default is `typesafe` when a key is saved (it always
-won before the pick existed) and `zen-promo` otherwise. A pick that cannot be
-used falls back to the first usable source, own keys first (`typesafe`,
-`openrouter`, `vercel`, `zen-key`, `zen-promo`); none usable means no Jev.
+In enterprise mode (policy file or `OPENCHAMBER_ENTERPRISE_MODE`, `../enterprise-mode.js`)
+`resolveAccess` treats the pick as `off` whatever is stored (the stored pick is
+kept for when the mode is lifted), `setClassifierSource` refuses anything but
+`off` and `setToken` and `setCustomEndpoint` refuse every write with 403, and `describe` reports
+`enterpriseMode` so the page shows why only Off is offered. With a pinned
+endpoint it is the administrator's own infrastructure, so it becomes the
+default (`custom` unless the stored pick is `off`) and `custom` is the one
+other pick allowed.
+
+Jev reads conversation excerpts, so it is opt-in. Without a stored pick the
+default is `typesafe` when a key is saved (saving a key is choosing it, and it
+always won before the pick existed) and `off` otherwise. Until v2.0.3 the
+default was `zen-promo`, which sent every message of users who never opened
+this page to zen (#4109); an install without a stored pick now reads as `off`
+with no conversion. A pick that cannot be used falls back to the first usable
+key (`typesafe`, `custom`, `openrouter`, `vercel`, `zen-key`: what the user set
+up in OpenChamber for Jev before keys borrowed from OpenCode); none usable
+means no Jev.
+`zen-promo` needs no credential, so it is never a fallback: only an explicit
+pick sends anything there, and `off` never falls back.
 The OpenCode keys are read on every request, so a key added or removed in
 OpenCode counts from the next request on.
 
@@ -152,8 +191,8 @@ before the classifier pick and adds `jevAvailable`, `classifier` and
 `classification` (both `selected`, `effective`, `sources`). `classification`
 is the full picture. `classifier` is what v2.0.2 clients parse: their schema
 knows only `zen-promo`, `zen-key` and `typesafe` and rejects the whole state
-on any other id, so it lists only those and is null while OpenRouter or
-Vercel is picked or answering (`legacyClassifier`). Current clients read
+on any other id, so it lists only those and is null while OpenRouter,
+Vercel or a custom endpoint is picked or answering (`legacyClassifier`). Current clients read
 `classification` and drop source ids they do not know.
 
 ## UI
@@ -168,14 +207,16 @@ while Auto is selected. `PermissionCard` shows the hold reason. Settings →
 Routing (`components/sections/routing/RoutingPage.tsx`) edits the config with
 debounced saves. Settings → Providers → Classification providers
 (`components/sections/classification/ClassificationProvidersPage.tsx`) picks
-the source and manages the TypeSafe key; `JevAccessNote` links there from the
+the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
+the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
 ## Tests
 
 `store.test.js` (defaults, deviation round-trip, deleted built-ins, malformed
-file, token file mode, classifier pick), `runtime.test.js` (request text,
-excerpts, decisions, endpoints, classifier fallback, rewrite and fallback
+file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
+excerpts, decisions, endpoints, custom URL normalization and setter,
+classifier fallback, rewrite and fallback
 paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
 ahead of a stand-in proxy, the routes). The queue and auto-accept tests cover

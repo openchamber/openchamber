@@ -12,6 +12,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { requireSpaceId } from './labels.js';
+import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
 
@@ -66,6 +67,24 @@ export const grantSchema = z.discriminatedUnion('kind', [
 ]);
 const MAX_GRANTS = 100;
 
+// The setup commands' last run (5d-4): begun, finished, or failed with the end of its output,
+// which came from inside the space and is text to show. `space-setup.js` keeps it within these.
+const setupCountSchema = z.number().int().min(1).max(MAX_SETUP_COMMANDS);
+const setupSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('running'), total: setupCountSchema, startedAt: z.string() }).strict(),
+  z.object({ state: z.literal('done'), total: setupCountSchema, finishedAt: z.string() }).strict(),
+  z.object({
+    state: z.literal('failed'),
+    total: setupCountSchema,
+    index: z.number().int().min(0).max(MAX_SETUP_COMMANDS - 1),
+    command: z.string().max(MAX_SETUP_COMMAND_LENGTH),
+    exitCode: z.number().int().nullable(),
+    timedOut: z.boolean(),
+    output: z.string().max(MAX_KEPT_OUTPUT_CHARACTERS),
+    finishedAt: z.string(),
+  }).strict(),
+]);
+
 const recordSchema = z.object({
   version: z.literal(1),
   network: networkSchema,
@@ -78,6 +97,8 @@ const recordSchema = z.object({
   history: historySchema.default('pending'),
   /** The grants the user gave, said again to the gatekeeper after every start. */
   grants: z.array(grantSchema).max(MAX_GRANTS).default([]),
+  /** The setup commands' last run, or null before any. */
+  setup: setupSchema.nullable().default(null),
 });
 
 /**
@@ -103,6 +124,18 @@ export function createSpaceRecords({ dataDir, logger = console }) {
     return { ...raw, grants };
   };
 
+  /**
+   * A setup the host cannot read, from a later version among the reasons, is forgotten with a
+   * warning: it only says how the last run of the setup commands went, and must not make the
+   * network and the grants unreadable with it.
+   */
+  const withReadableSetup = (spaceId, raw) => {
+    if (!(raw instanceof Object) || raw.setup === undefined || raw.setup === null) return raw;
+    if (setupSchema.safeParse(raw.setup).success) return raw;
+    logger.warn?.(`[spaces] the record of space ${spaceId} holds a setup this host cannot read; it is left out`);
+    return { ...raw, setup: null };
+  };
+
   const read = (spaceId) => {
     const file = fileOf(spaceId);
     let text;
@@ -114,7 +147,7 @@ export function createSpaceRecords({ dataDir, logger = console }) {
       return { status: 'unreadable', record: null };
     }
     try {
-      const parsed = recordSchema.safeParse(withReadableGrants(spaceId, JSON.parse(text)));
+      const parsed = recordSchema.safeParse(withReadableSetup(spaceId, withReadableGrants(spaceId, JSON.parse(text))));
       if (parsed.success) return { status: 'ok', record: parsed.data };
     } catch {
       // Reported below.

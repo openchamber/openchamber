@@ -697,7 +697,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
             messageID: `shell:${event.data.shell.id}`,
             patch: {
               time: { completed: event.created },
-              shell: compact({ status: event.data.shell.status, exit: finiteExit(event.data.shell.exit), signal: event.data.shell.signal, output: event.data.output }),
+              shell: compact({ status: event.data.shell.status, exit: finiteExit(event.data.shell.exit), output: event.data.output }),
             },
           },
         },

@@ -40,6 +40,7 @@ import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityS
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { FolderDeleteConfirmDialog } from '../shell/ConfirmDialogs';
 import { getSessionFolderOwnerKey } from '../sessions/sessionFolderIdentity';
+import { SpaceActionsMenu } from '@/components/session/spaces/SpaceActions';
 import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 
@@ -801,11 +802,14 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       <Icon name="alert" className="h-3 w-3" />
     </span>
   ) : null;
-  // A space's group carries the grant dialog's key beside its new-draft button.
+  // A space's group carries the grant dialog's key and its actions menu beside its new-draft button.
   const hasSecondHeaderAction = hasWorktreeDeleteAction || Boolean(group.space);
+  const hasThirdHeaderAction = Boolean(group.space);
   const groupHeaderRightPadding = alwaysShowActions
-    ? (hasSecondHeaderAction ? 'pr-14' : 'pr-7')
-    : (hasSecondHeaderAction
+    ? (hasThirdHeaderAction ? 'pr-20' : hasSecondHeaderAction ? 'pr-14' : 'pr-7')
+    : (hasThirdHeaderAction
+        ? 'pr-2 group-hover/gh:pr-20 group-focus-within/gh:pr-20'
+        : hasSecondHeaderAction
         ? 'pr-2 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
         : 'pr-2 group-hover/gh:pr-7 group-focus-within/gh:pr-7');
 
@@ -1129,6 +1133,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('spaces.group.access.give')}</p></TooltipContent>
             </Tooltip>
+          </div>
+        ) : null}
+        {group.space ? (
+          <div className={cn('absolute right-[3.25rem] top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100 has-[[data-popup-open]]:opacity-100')}>
+            <SpaceActionsMenu spaceId={group.space.id} label={group.label} />
           </div>
         ) : null}
         {group.directory ? (

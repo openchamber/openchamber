@@ -144,14 +144,6 @@ export const familyOf = (model) => {
  */
 export const pickSmallModelInProvider = (models, providerID) => pickSmallModel(models, (model) => model.providerID === providerID);
 
-/**
- * The small model across every provider OpenCode can call: same family
- * order, newest release first within a family. What v1 did after the
- * session provider came up empty; for callers without a session (commit
- * messages, spoken summaries) it is the first place to look.
- */
-export const pickSmallModelAnywhere = (models) => pickSmallModel(models, () => true);
-
 const pickSmallModel = (models, accept) => {
   const candidates = models
     .filter((model) => model && accept(model)
@@ -172,15 +164,17 @@ const pickSmallModel = (models, accept) => {
  *
  * 1. An explicit request model.
  * 2. OpenChamber's settings override (Settings → Sessions → Small Model).
- * 3. The small model of the session's provider (family scan above) —
- *    `session-provider-small`. A caller that must not leave that provider
- *    then falls back to the session's own model (`session-model`): costlier
- *    than a small model elsewhere, but never someone else's subscription.
- * 4. The small model of any provider OpenCode can call, newest first —
- *    `small`.
- * 5. `GET /api/model/default`: OpenCode's default model — `default`. This is
+ * 3. The small model of the caller's provider — the session's, or the one
+ *    in the composer (family scan above) — `session-provider-small`. A caller
+ *    that must not leave that provider then takes its own model
+ *    (`session-model`): costlier, but never someone else's subscription.
+ * 4. `GET /api/model/default`: OpenCode's default model — `default`. This is
  *    the chat default, not a small model; OpenCode's own small-model chain is
- *    not reachable over HTTP, which is why steps 3 and 4 live here.
+ *    not reachable over HTTP, which is why step 3 lives here.
+ *
+ * There is no step that picks a small model from whichever other provider
+ * happens to be connected: the content (diffs, replies, session text) goes
+ * only where the user sent their own work or configured on purpose.
  */
 const resolveSmallModel = async ({ client, directory, model, preferredProviderID, preferredModelID, restrictToPreferredProvider }) => {
   const explicit = parseModelRef(model);
@@ -189,17 +183,13 @@ const resolveSmallModel = async ({ client, directory, model, preferredProviderID
   const fromSettings = parseModelRef(readSmallModelSettingsOverride());
   if (fromSettings) return { ...fromSettings, source: 'settings' };
 
-  const models = await listModelInfos(client, directory);
   if (preferredProviderID) {
-    const small = pickSmallModelInProvider(models, preferredProviderID);
+    const small = pickSmallModelInProvider(await listModelInfos(client, directory), preferredProviderID);
     if (small) return { ...small, source: 'session-provider-small' };
   }
   if (restrictToPreferredProvider && preferredProviderID && preferredModelID) {
     return { providerID: preferredProviderID, modelID: preferredModelID, source: 'session-model' };
   }
-
-  const anywhere = pickSmallModelAnywhere(models);
-  if (anywhere) return { ...anywhere, source: 'small' };
 
   const fallback = await getDefaultModelInfo(client);
   if (!fallback) return null;

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 describe('isolated space translations', () => {
   test('provides every key in every supported locale, translated', () => {

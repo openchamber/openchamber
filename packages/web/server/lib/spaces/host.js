@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { createCodeIn } from './code-in.js';
 import { createCodeOut } from './code-out.js';
 import { createSpaceDispatcher } from './dispatcher.js';
+import { SpaceError } from './errors.js';
 import { createGatekeeperChannel } from './gatekeeper-channel.js';
 import { createHostGit } from './host-git.js';
 import { createSpaceJourney } from './journey.js';
@@ -43,8 +44,51 @@ const SESSION_PAGE_LIMIT = 100;
 const SESSION_MAX_PAGES = 10;
 const SESSION_LIST_TIMEOUT_MS = 10_000;
 const MAX_SESSION_LIST_BYTES = 8 * 1024 * 1024;
+// The server inside restarts its OpenCode and answers once it is ready again, which on a slow
+// machine takes a while; past this the restart is reported as not answered.
+const RESTART_OPENCODE_TIMEOUT_MS = 180_000;
+const MAX_RESTART_ANSWER_BYTES = 64 * 1024;
+// A managed OpenCode that restarted; an external one answers `success` with no restart at all.
+const restartedSchema = z.object({ success: z.literal(true), requiresReload: z.literal(true) });
 // The cursor of a next page, as the server inside names it; anything else ends the read.
 const nextCursorSchema = z.string().min(1);
+
+// A body from inside, read up to a cap and never past it.
+const readBody = (response, cap) => new Promise((resolve, reject) => {
+  const chunks = [];
+  let size = 0;
+  response.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > cap) { response.destroy(); reject(new Error(`the answer exceeds ${cap} bytes`)); return; }
+    chunks.push(chunk);
+  });
+  response.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  response.on('error', reject);
+});
+
+/**
+ * Asks the server inside a space to restart the OpenCode it manages, the route its own settings
+ * use for that, over the dispatcher's `requestInside`. The answer comes from inside and is
+ * data: anything but a 200 that says OpenCode was restarted is a failure, and its text never
+ * travels further than a code.
+ */
+export const restartOpenCodeInside = async (requestInside, spaceId) => {
+  const response = await requestInside(spaceId, {
+    method: 'POST',
+    path: '/api/config/reload',
+    headers: { accept: 'application/json', 'content-length': '0' },
+    timeoutMs: RESTART_OPENCODE_TIMEOUT_MS,
+  });
+  let succeeded = false;
+  try {
+    succeeded = response.statusCode === 200 && restartedSchema.safeParse(JSON.parse(await readBody(response, MAX_RESTART_ANSWER_BYTES))).success;
+  } catch {
+    succeeded = false;
+  } finally {
+    response.destroy();
+  }
+  if (!succeeded) throw new SpaceError('opencode_restart_failed', `OpenCode inside the space did not restart (status ${response.statusCode}).`);
+};
 
 /**
  * The installation id that labels this host's spaces, so two installations that share a Docker
@@ -72,7 +116,8 @@ export function readOrCreateOwner(dataDir) {
  * for the tests; `runCommand` and `openCommandStream` are the two ways this module starts a
  * process, injectable for the same reason. `listProjectDirectories` answers the host's registered
  * project paths, so a space's project label can be resolved to the project it was made for;
- * without it every space is marked as of an unknown project.
+ * without it every space is marked as of an unknown project. `readIdleStop` and `saveIdleStop`
+ * read and keep the user's idle stop setting in the host's settings.
  */
 export function createSpacesHost({
   dataDir,
@@ -80,6 +125,8 @@ export function createSpacesHost({
   gitPath = 'git',
   hostEnvironment = process.env,
   listProjectDirectories = async () => [],
+  readIdleStop,
+  saveIdleStop,
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
   place = null,
@@ -191,25 +238,17 @@ export function createSpacesHost({
     codeOut,
     records,
     spaceOpenCode,
+    serverInside,
+    restartOpenCodeInside: (spaceId) => restartOpenCodeInside(dispatcher.requestInside, spaceId),
     listProjectDirectories,
     // A key named by an environment variable is read from the host's own environment, now, and
     // its value is kept nowhere (decision 5).
     readHostSecret: (name) => hostEnvironment[name],
+    readIdleStop,
+    saveIdleStop,
     announce: (spaceId, payload) => { hub?.injectEvent({ payload, directory: 'global', spaceId }); },
     onSpacesChanged: () => { void refresh().catch(() => {}); },
     logger,
-  });
-
-  const readBody = (response, cap) => new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    response.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > cap) { response.destroy(); reject(new Error(`the list exceeds ${cap} bytes`)); return; }
-      chunks.push(chunk);
-    });
-    response.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    response.on('error', reject);
   });
 
   /** One space's whole session list, page by page, or as much of it as the page cap allows. */

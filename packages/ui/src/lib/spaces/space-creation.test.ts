@@ -18,20 +18,24 @@ const entry: SpaceEntry = {
   projectDirectory: PROJECT,
   directory: DIRECTORY,
   state: 'preparing',
+  stoppedIdle: false,
   step: 'checking_place',
   failure: null,
   network: { mode: 'allowlist', domains: [] },
   grants: [],
   access: null,
   needsAccess: [],
+  damage: null,
+  setup: null,
 };
 
 const openai: SpaceModelAccess = { kind: 'model', provider: 'openai', upstream: 'https://api.openai.com/v1', secret: { kind: 'env', name: 'OPENAI_API_KEY' } };
 
 // The host: the creation answers the entry, a grant answers what `grantAnswer` says, and the list
 // answers the space running with the grants that went through.
-const host = (grantAnswer: { status: number; body: { grant?: unknown; code?: string; message?: string } }) => {
+const host = (grantAnswer: { status: number; body: { grant?: unknown; code?: string; message?: string } }, listedSetup: SpaceEntry['setup'] = null, createdSetup: SpaceEntry['setup'] = null) => {
   const grants: unknown[] = [];
+  const created: unknown[] = [];
   const given: unknown[] = [];
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://127.0.0.1');
@@ -41,17 +45,19 @@ const host = (grantAnswer: { status: number; body: { grant?: unknown; code?: str
       return new Response(JSON.stringify(grantAnswer.body), { status: grantAnswer.status });
     }
     if ((init?.method ?? 'GET') === 'GET') {
-      const listed = { ...entry, state: 'running', step: null, grants: given, access: given.length > 0 ? 'granted' : null };
+      const listed = { ...entry, state: 'running', step: null, grants: given, access: given.length > 0 ? 'granted' : null, setup: listedSetup };
       return new Response(JSON.stringify({ spaces: [listed] }), { status: 200 });
     }
-    return new Response(JSON.stringify(entry), { status: 202 });
+    created.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ ...entry, setup: createdSetup }), { status: 202 });
   }, originalFetch);
-  return grants;
+  return Object.assign(grants, { created });
 };
 
-const start = (access: readonly SpaceModelAccess[] = []) => startSpaceCreation({
+const start = (access: readonly SpaceModelAccess[] = [], setup = { commands: [] as string[], waitBeforeSending: false }) => startSpaceCreation({
   projectId: 'project-1',
   request: { projectDirectory: PROJECT, name: 'Fix login', start: 'clean', network: { mode: 'allowlist', domains: [] } },
+  setup,
   access,
   refusalMessage: 'refused',
 });
@@ -159,5 +165,38 @@ describe('startSpaceCreation', () => {
     useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
     expect(await outcome).toEqual({ error: 'refused' });
     expect(useSpacesStore.getState().creationAccess.get(ID)).toEqual({ kind: 'failed', failures: [{ provider: 'openai', code: 'secret_source_missing', message: 'OPENAI_API_KEY is not set' }] });
+  });
+
+  test('the setup commands travel with the request, and the message does not wait for them by default', async () => {
+    const { created } = host({ status: 200, body: {} }, { state: 'running', index: 0, total: 1, command: 'npm ci' });
+    await start([], { commands: ['npm ci'], waitBeforeSending: false });
+    expect(created).toEqual([{ projectDirectory: PROJECT, name: 'Fix login', start: 'clean', network: { mode: 'allowlist', domains: [] }, setupCommands: ['npm ci'] }]);
+    const { outcome } = waitingMessage();
+    useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
+    expect(await outcome).toEqual({ directory: DIRECTORY });
+  });
+
+  test('with the project\'s wait setting the message waits for the setup commands, and goes when they ended, failed or not', async () => {
+    host({ status: 200, body: {} }, null, { state: 'queued', total: 1 });
+    await start([], { commands: ['npm ci'], waitBeforeSending: true });
+    const { requestId, outcome } = waitingMessage();
+    let settled = false;
+    void outcome.then(() => { settled = true; });
+    const running = { ...entry, state: 'running' as const, step: null, setup: { state: 'running' as const, index: 0, total: 1, command: 'npm ci' } };
+    useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
+    useSpacesStore.getState().applyJourney([running], useSpacesStore.getState().progressRevision);
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    expect(settled).toBe(false);
+    useSpacesStore.getState().applyJourney([{ ...running, setup: { state: 'failed', index: 0, total: 1, command: 'npm ci', exitCode: 1, timedOut: false } }], useSpacesStore.getState().progressRevision);
+    expect(await outcome).toEqual({ directory: DIRECTORY });
+    expect(isSpaceCreationRequest(requestId)).toBe(true);
+  });
+
+  test('a host that did not say it will run the setup commands is not waited for, whatever the wait setting', async () => {
+    host({ status: 200, body: {} });
+    await start([], { commands: ['npm ci'], waitBeforeSending: true });
+    const { outcome } = waitingMessage();
+    useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
+    expect(await outcome).toEqual({ directory: DIRECTORY });
   });
 });

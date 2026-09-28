@@ -1,0 +1,57 @@
+---
+title: Toestemmingen en vangnet
+description: Bepaal per sessie hoeveel de agent mag doen zonder het te vragen.
+---
+
+# Toestemmingen en vangnet
+
+Elke actie van de agent wordt eerst getoetst aan de toestemmingsregels: een opdracht uitvoeren, een bestand bewerken, een MCP-tool aanroepen of een pagina ophalen. De toestemmingsmodus van OpenChamber bepaalt wat er gebeurt als een regel 'vragen' voorschrijft.
+
+## Toestaan, vragen en weigeren
+
+De toestemmingsregels staan in OpenCode. Elke regel geeft een actie een van drie uitkomsten:
+
+- **allow:** de agent mag doorgaan
+- **deny:** de actie wordt geblokkeerd
+- **ask:** de agent stopt en wacht op een antwoord
+
+Standaard zijn de meeste acties toegestaan. OpenCode vraagt alleen toestemming voordat de agent mappen buiten het project benadert of `.env`-bestanden leest. U kunt eigen regels toevoegen om bijvoorbeeld elke shell-opdracht eerst te laten vragen. Het regelformaat staat bij [Toestemmingen in de OpenCode-documentatie](https://opencode.ai/v2/docs/permissions/). In OpenChamber vindt u de rechten van een agent bij **Instellingen → Agents**.
+
+Toestemmingsmodi veranderen alleen wie de vraag bij `ask` beantwoordt. Een `deny` blijft geblokkeerd en bij `allow` wordt sowieso niets gevraagd.
+
+## De drie modi
+
+| Modus | Wie beantwoordt `ask`? |
+| --- | --- |
+| **Telkens vragen** | U. Elk verzoek wacht op uw antwoord. |
+| **Vangnet** | Jev laat routineacties door en houdt riskante acties voor u tegen. |
+| **Alles accepteren** | OpenChamber antwoordt altijd ja. Elk verzoek wordt direct toegestaan, zonder controle. |
+
+**Alles accepteren** heeft niets extra nodig. Het behandelt elk `ask` eenvoudigweg als toegestaan. Gebruik dit als u de taak vertrouwt en geen onderbrekingen wilt.
+
+## Van modus wisselen
+
+- **Voor één sessie:** klik op de schildknop in het invoerveld. Elke klik schakelt naar de volgende modus.
+- **Voor nieuwe sessies:** kies de standaard bij **Instellingen → Sessies → Toestemmingen**. Bestaande sessies behouden hun modus.
+
+Subagents volgen de sessie die ze heeft gestart.
+
+## Het vangnet
+
+In deze modus vraagt OpenChamber [Jev](/nl/classification-providers/) bij elk verzoek of het om een routineactie gaat of om iets waarover u moet beslissen. Lezen, bouwen, tests uitvoeren, projectbestanden bewerken en gewone commits gaan door. Git-geschiedenis herschrijven, gegevens verwijderen, het systeem wijzigen, uitrollen, iets publiceren of bestanden naar buiten versturen wacht op u. Dat geldt ook voor onduidelijke acties.
+
+Een tegengehouden verzoek toont de gebruikelijke toestemmingskaart, met de extra regel **Het vangnet heeft deze actie tegengehouden zodat u kunt beslissen** en het soort actie. Als Jev niet binnen vier seconden kan antwoorden, wacht de actie ook op u. Een mislukte controle is nooit reden om een actie toe te staan.
+
+Het vangnet vereist een [classificatieprovider](/nl/classification-providers/). Zonder provider slaat de schildknop deze modus over en is de optie uitgeschakeld in de instellingen.
+
+## Blijft werken als u weg bent
+
+De modus wordt op de OpenChamber-server bijgehouden. Verzoeken blijven dus beantwoord worden als u het tabblad sluit of uw telefoon vergrendelt. De instelling blijft ook na een herstart behouden.
+
+> VS Code heeft geen vangnet. De extensie biedt Telkens vragen en Alles accepteren en beantwoordt verzoeken alleen zolang een OpenChamber-paneel openstaat.
+
+## Zie ook
+
+- [Toestemmingen in de OpenCode-documentatie](https://opencode.ai/v2/docs/permissions/) om eigen `allow`-, `ask`- en `deny`-regels te schrijven
+- [Classificatieproviders en Jev](/nl/classification-providers/) om het model achter het vangnet in te stellen
+- [Meldingen](/nl/notifications/) om te horen wanneer een verzoek op u wacht

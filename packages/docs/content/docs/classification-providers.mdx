@@ -22,11 +22,11 @@ Without a provider, the safety net and Auto are hidden, and sessions move into w
 
 ## Set it up
 
-Open **Settings → Providers → Classification providers** and pick where Jev requests go. There are five options.
+Jev is off until you turn it on: nothing from your conversations goes to a classification provider unless you pick one. Open **Settings → Providers → Classification providers** and pick where Jev requests go. Besides **Off**, there are six options.
 
 ### OpenCode Zen promotion
 
-Free for a limited time, no key needed. OpenCode lets OpenChamber use Jev through OpenCode Zen at no cost while the promotion runs. If you never touched this page, this is what you are already using.
+Free for a limited time, no key needed. OpenCode lets OpenChamber use Jev through OpenCode Zen at no cost while the promotion runs.
 
 When the promotion ends, the option disappears and OpenChamber switches to one of the keys below if you have one.
 
@@ -62,11 +62,35 @@ Your own TypeSafe key and quota.
 
 Saving a key also selects it. The key stays on the OpenChamber server in its own file and is never sent to the browser.
 
+### Custom endpoint
+
+Any service that speaks TypeSafe's System One API: a self-hosted gateway, a company proxy, or a provider that isn't listed here.
+
+1. Under **Custom endpoint**, fill in the **Endpoint URL** and the **Model** (for example `jev-latest`).
+2. Add an **API key** if the service needs one. It's sent as a `Bearer` token.
+3. Press **Save**.
+
+For the URL you can paste the full address ending in `/v1/systemone`, an OpenAI-style base URL ending in `/v1`, or the API root (like `https://api.typesafe.ai`). OpenChamber adds the missing part and shows the exact address it will call. Only `http` and `https` work, and the key goes in its own field, never in the URL.
+
+Saving also selects the endpoint. Like the TypeSafe key, the endpoint and its key stay on the OpenChamber server in their own file, and the key is never sent to the browser.
+
+A server can also get its endpoint from the environment, which is handy when you set up OpenChamber for a team:
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # optional, this is the default
+OPENCHAMBER_JEV_API_KEY=...             # optional
+```
+
+On laptops you manage, put the same endpoint under `jev` in the machine [policy file](/security/#a-policy-file-on-the-machine) instead. It wins over the environment.
+
+Either way, it replaces the endpoint saved in Settings, and Settings shows it without letting anyone edit it. In [enterprise mode](/security/#enterprise-mode) it's the one Jev source allowed besides **Off**, and it's selected by default.
+
 The card on **Settings → Providers** shows **Ready** once a provider works.
 
 ## When your pick stops working
 
-If the provider you picked can't be used (the promotion ended, a key was removed), OpenChamber falls back to the first one that works, your own keys first: TypeSafe key, then OpenRouter, then Vercel AI Gateway, then Zen key, then the promotion. The page tells you which one it uses right now.
+If the provider you picked can't be used (the promotion ended, a key was removed), OpenChamber falls back to the first of your own keys that works: TypeSafe key, then your custom endpoint, then OpenRouter, then Vercel AI Gateway, then Zen key. It never falls back to the promotion, and **Off** stays off. The page tells you which one it uses right now.
 
 If Jev is slow or fails on a single request, nothing breaks. Each feature has a safe answer for that case:
 
@@ -79,7 +103,7 @@ If Jev is slow or fails on a single request, nothing breaks. Each feature has a 
 
 Jev gets short excerpts of your conversation: your latest message, and for context up to three previous turns, cut down to their first few hundred characters. For the safety net it also gets the action being checked, the way OpenCode describes it: the command the agent wants to run, or the file and the change for an edit. It never gets whole files or images.
 
-Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Vercel AI Gateway or TypeSafe, depending on your pick.
+Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe or your custom endpoint, depending on your pick.
 
 ## Where it works
 

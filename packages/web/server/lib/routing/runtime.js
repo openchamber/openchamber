@@ -17,9 +17,17 @@ import { z } from 'zod';
 import { AUTO_MODEL_REF, BUILTIN_CATEGORIES, ZEN_JEV_PROMOTION_ACTIVE, isAutoModel } from './defaults.js';
 import { createRoutingStore, parseEffectiveConfig } from './store.js';
 import { buildPermissionRequest, buildRoutingRequest, createJevClient, decidePermission, decideRouting } from './jev.js';
-import { CLASSIFIER_SOURCES, classifierEndpoint, legacyClassifier, resolveClassifier } from './classifier.js';
+import {
+  CLASSIFIER_SOURCES,
+  classifierEndpoint,
+  legacyClassifier,
+  normalizeCustomEndpointUrl,
+  readPinnedCustomEndpoint,
+  resolveClassifier,
+} from './classifier.js';
 import { loadRoutingHistory } from './history.js';
 import { readAuthFile } from '../opencode/auth.js';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
 /** A held permission is remembered so reconnect reconciliation does not re-ask Jev. */
@@ -46,6 +54,12 @@ export const requestTextOf = (body) => {
 };
 
 const agentBodySchema = z.object({ agent: z.string().trim().min(1) });
+
+const customEndpointInputSchema = z.object({
+  url: z.string().trim().min(1).max(2000),
+  model: z.string().trim().min(1).max(200),
+  key: z.string().trim().max(4000).nullable().optional(),
+});
 
 /** OpenChamber stores a model as `{ providerID, modelID }`; v2 wants a `Model.Ref`. */
 const toModelRef = (model, variant) => {
@@ -96,6 +110,8 @@ export function createRoutingRuntime({
   jev = createJevClient({ fetchImpl }),
   readProviderKeys = () => readOpenCodeKeys(),
   zenPromotionActive = ZEN_JEV_PROMOTION_ACTIVE,
+  enterpriseMode = isEnterpriseMode,
+  readPinnedEndpoint = readPinnedCustomEndpoint,
   now = Date.now,
 }) {
   const permissionDecisions = new Map();
@@ -120,12 +136,33 @@ export function createRoutingRuntime({
 
   /** Which classification provider answers now, and where its requests go (null endpoint: no Jev). */
   const resolveAccess = async () => {
-    const [typesafeKey, selected] = await Promise.all([store.readToken(), store.readClassifierSource()]);
-    const keys = { typesafeKey, ...readProviderKeys() };
+    const [typesafeKey, stored, savedEndpoint] = await Promise.all([
+      store.readToken(),
+      store.readClassifierSource(),
+      store.readCustomEndpoint(),
+    ]);
+    // An endpoint the administrator pinned replaces the one saved in Settings.
+    const pinned = readPinnedEndpoint();
+    const customEndpoint = pinned ?? savedEndpoint;
+    const keys = { typesafeKey, customEndpoint, ...readProviderKeys() };
+    // Enterprise mode overrides whatever was picked; the pick itself is kept.
+    // The pinned endpoint is the administrator's own, so there it is the
+    // default and Off the only other choice.
+    const selected = !enterpriseMode() ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
     const classifier = resolveClassifier({ selected, ...keys, zenPromotionActive });
     const endpoint = classifier.effective ? classifierEndpoint(classifier.effective, keys) : null;
-    return { classifier, endpoint, tokenPresent: Boolean(typesafeKey) };
+    return { classifier, endpoint, tokenPresent: Boolean(typesafeKey), customEndpoint, pinned: pinned !== null };
   };
+
+  // What Settings shows of the custom endpoint: never the key itself.
+  const describeCustomEndpoint = (endpoint, pinned) => (endpoint
+    ? { url: endpoint.url, model: endpoint.model, keyPresent: Boolean(endpoint.key), pinned }
+    : null);
+
+  const pinnedEndpointError = () => Object.assign(
+    new Error('The custom endpoint is set by your administrator and cannot be changed here'),
+    { status: 409 },
+  );
 
   /** What the client needs to decide whether to offer Auto and the safety net, and what Settings shows. */
   const describe = async () => {
@@ -143,6 +180,8 @@ export function createRoutingRuntime({
       autoReady,
       jevAvailable,
       tokenPresent: access.tokenPresent,
+      customEndpoint: describeCustomEndpoint(access.customEndpoint, access.pinned),
+      enterpriseMode: enterpriseMode(),
       jevSource: access.classifier.effective === 'typesafe' ? 'typesafe' : 'zen-free',
       classifier: legacyClassifier(access.classifier),
       classification: access.classifier,
@@ -357,6 +396,7 @@ export function createRoutingRuntime({
   const setToken = async (token) => {
     const parsed = z.string().trim().min(1).max(4000).safeParse(token);
     if (!parsed.success) throw Object.assign(new Error('A Jev API key is required'), { status: 400 });
+    if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
     await store.writeToken(parsed.data);
     // Pasting a key is choosing it.
     await store.writeClassifierSource('typesafe');
@@ -371,7 +411,38 @@ export function createRoutingRuntime({
   const setClassifierSource = async (source) => {
     const parsed = z.enum(CLASSIFIER_SOURCES).safeParse(source);
     if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
+    const allowedInEnterprise = parsed.data === 'off' || (parsed.data === 'custom' && readPinnedEndpoint() !== null);
+    if (enterpriseMode() && !allowedInEnterprise) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
     await store.writeClassifierSource(parsed.data);
+    return publishUpdated();
+  };
+
+  /**
+   * Saves the custom System One endpoint and picks it, the way saving a
+   * TypeSafe key does. `key`: a string replaces the saved one, null removes
+   * it, absent keeps it, so the URL or model can change without retyping it.
+   */
+  const setCustomEndpoint = async (input) => {
+    if (readPinnedEndpoint()) throw pinnedEndpointError();
+    if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    const parsed = customEndpointInputSchema.safeParse(input);
+    if (!parsed.success) throw Object.assign(new Error('A URL and a model are required'), { status: 400 });
+    const { model, key } = parsed.data;
+    const url = normalizeCustomEndpointUrl(parsed.data.url);
+    // An empty key field is the same as leaving it out.
+    const keepKey = key === undefined || key === '';
+    const savedKey = keepKey ? (await store.readCustomEndpoint())?.key : key;
+    const endpoint = { url, model };
+    if (savedKey) endpoint.key = savedKey;
+    await store.writeCustomEndpoint(endpoint);
+    // Saving is choosing it; removing only the key is not a choice of anything.
+    if (key !== null) await store.writeClassifierSource('custom');
+    return publishUpdated();
+  };
+
+  const clearCustomEndpoint = async () => {
+    if (readPinnedEndpoint()) throw pinnedEndpointError();
+    await store.clearCustomEndpoint();
     return publishUpdated();
   };
 
@@ -403,5 +474,7 @@ export function createRoutingRuntime({
     setToken,
     clearToken,
     setClassifierSource,
+    setCustomEndpoint,
+    clearCustomEndpoint,
   };
 }

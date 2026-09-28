@@ -184,12 +184,6 @@ export default defineConfig({
             return undefined;
           }
 
-          // Excalidraw imports its 50+ UI locales on demand; one vendor chunk
-          // would make the first canvas download all of them (1.65 MB raw).
-          if (packageName === '@excalidraw/excalidraw') {
-            return undefined;
-          }
-
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react';
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand';
 

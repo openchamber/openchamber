@@ -202,7 +202,13 @@ phone, because a short drag exposes the leftmost first: archive, pin (top-level
 rows), Track / Done (top-level rows, feature on), delete, rename; AI rename sits
 inside the rename editor. Top-level rows also show a pin marker beside the
 time; pins are the same device-local `useSessionPinnedStore` the desktop menu
-writes, so a pin set on one device does not appear on another. Row memoization
+writes, so a pin set on one device does not appear on another. Mobile rows
+also show the goal glyph and the permission/question badges
+(`apps/MobileSessionStateBadges.tsx`): before the time on grouped rows, at the
+end of the branch line on timeline rows. Counts come from the cross-directory
+request index (`sync/global-blocking-requests.ts`), not directory stores, so a
+never-opened project still shows them; a collapsed or timeline row also counts
+its subsessions' requests. Row memoization
 compares `metadata` by reference and `time.idle`, so metadata-only changes
 (work, goal, recap) re-render the row.
 
@@ -216,7 +222,8 @@ renders `projects`.
   the usual Chats limit. Pinned chats are always shown and never spend that
   limit, so Show more/Show fewer count only unpinned rows. Chats rows render
   with `renderContext: 'timeline-chat'`: one line, no left gutter, pin marker
-  and status dot on the right beside the time. Collapsing a zone header resets its
+  and status dot on the right beside the time; the goal glyph and badges ride
+  in the same cluster. Collapsing a zone header resets its
   Show more state.
 - Zone headers are sticky in the projects view and never in the timeline; there
   is no user toggle. Timeline zone headers drop the leading icon and use a
@@ -251,6 +258,10 @@ renders `projects`.
   branch, preserving the resolver's deliberate branch suppression. The full
   subtree remains available to archive/delete actions, and managed Chats keep
   their separate projection.
+- A timeline row's third line ends with its state cluster: goal glyph, PR (or
+  the zombie warning), permission/question badges, provider logo. The goal
+  sits there rather than in the first-line meta because hover actions cover
+  that meta and the running counter owns it during a turn.
 - Search filters Timeline with the same rule as Recent (exact `ses_` id, else
   title contains) and counts one match per listed row.
 

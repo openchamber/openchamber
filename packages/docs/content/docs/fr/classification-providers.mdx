@@ -22,11 +22,11 @@ Sans fournisseur, le filet de sécurité et Auto sont masqués, et les sessions 
 
 ## Configuration
 
-Ouvrez **Paramètres → Fournisseurs → Fournisseurs de classification** et choisissez où partent les requêtes vers Jev. Il y a cinq options.
+Jev reste désactivé tant que vous ne l’activez pas : rien de vos conversations ne part vers un fournisseur de classification si vous n’en choisissez pas un. Ouvrez **Paramètres → Fournisseurs → Fournisseurs de classification** et choisissez où partent les requêtes vers Jev. En plus de **Désactivé**, il y a six options.
 
 ### Promotion OpenCode Zen
 
-Gratuit pendant une durée limitée, sans clé. Tant que la promotion dure, OpenCode laisse OpenChamber utiliser Jev gratuitement via OpenCode Zen. Si vous n’avez jamais touché à cette page, c’est ce que vous utilisez déjà.
+Gratuit pendant une durée limitée, sans clé. Tant que la promotion dure, OpenCode laisse OpenChamber utiliser Jev gratuitement via OpenCode Zen.
 
 À la fin de la promotion, l’option disparaît et OpenChamber passe à l’une des clés ci-dessous si vous en avez une.
 
@@ -62,11 +62,35 @@ Votre propre clé et votre propre quota TypeSafe.
 
 Enregistrer une clé la sélectionne aussi. Elle reste sur le serveur OpenChamber, dans son propre fichier, et n’est jamais envoyée au navigateur.
 
+### Point de terminaison personnalisé
+
+N’importe quel service qui parle l’API System One de TypeSafe : une passerelle auto-hébergée, un proxy d’entreprise ou un fournisseur absent de cette liste.
+
+1. Sous **Point de terminaison personnalisé**, remplissez les champs **URL du point de terminaison** et **Modèle** (par exemple `jev-latest`).
+2. Ajoutez une **Clé API** si le service en demande une. Elle est envoyée comme jeton `Bearer`.
+3. Cliquez sur **Enregistrer**.
+
+Pour l’URL, vous pouvez coller l’adresse complète qui se termine par `/v1/systemone`, une URL de base de style OpenAI qui se termine par `/v1`, ou la racine de l’API (comme `https://api.typesafe.ai`). OpenChamber ajoute la partie manquante et affiche l’adresse exacte qu’il appellera. Seuls `http` et `https` fonctionnent, et la clé va dans son propre champ, jamais dans l’URL.
+
+Enregistrer sélectionne aussi le point de terminaison. Comme la clé TypeSafe, le point de terminaison et sa clé restent sur le serveur OpenChamber, dans leur propre fichier, et la clé n’est jamais envoyée au navigateur.
+
+Un serveur peut aussi recevoir son point de terminaison depuis l’environnement, ce qui est pratique quand vous configurez OpenChamber pour une équipe :
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # facultatif, c’est la valeur par défaut
+OPENCHAMBER_JEV_API_KEY=...             # facultatif
+```
+
+Sur les portables que vous gérez, placez plutôt le même point de terminaison sous `jev` dans le [fichier de politique](/fr/security/) de la machine. Il l’emporte sur l’environnement.
+
+Dans les deux cas, ce point de terminaison remplace celui enregistré dans les Paramètres, et les Paramètres l’affichent sans que personne puisse le modifier. En [mode entreprise](/fr/security/), c’est la seule source Jev autorisée en plus de **Désactivé**, et elle est sélectionnée par défaut.
+
 Dès qu’un fournisseur fonctionne, la carte dans **Paramètres → Fournisseurs** affiche **Prêt**.
 
 ## Quand votre choix ne fonctionne plus
 
-Si le fournisseur choisi n’est plus utilisable (la promotion est terminée, une clé a été supprimée), OpenChamber se rabat sur le premier qui fonctionne, vos propres clés d’abord : clé TypeSafe, puis OpenRouter, puis Vercel AI Gateway, puis clé Zen, puis la promotion. La page indique lequel est utilisé en ce moment.
+Si le fournisseur choisi n’est plus utilisable (la promotion est terminée, une clé a été supprimée), OpenChamber se rabat sur la première de vos propres clés qui fonctionne : clé TypeSafe, puis votre point de terminaison personnalisé, puis OpenRouter, puis Vercel AI Gateway, puis clé Zen. Il ne se rabat jamais sur la promotion, et **Désactivé** reste désactivé. La page indique lequel est utilisé en ce moment.
 
 Si Jev est lent ou échoue sur une requête, rien ne casse. Chaque fonction a une réponse sûre pour ce cas :
 
@@ -79,7 +103,7 @@ Si Jev est lent ou échoue sur une requête, rien ne casse. Chaque fonction a un
 
 Jev reçoit de courts extraits de votre conversation : votre dernier message et, pour le contexte, jusqu’à trois tours précédents, coupés à leurs quelques centaines de premiers caractères. Pour le filet de sécurité, il reçoit aussi l’action vérifiée, telle qu’OpenCode la décrit : la commande que l’agent veut lancer, ou le fichier et la modification pour une édition. Il ne reçoit jamais de fichiers entiers ni d’images.
 
-Les requêtes partent du serveur OpenChamber directement vers OpenCode Zen, OpenRouter, Vercel AI Gateway ou TypeSafe, selon votre choix.
+Les requêtes partent du serveur OpenChamber directement vers OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe ou votre point de terminaison personnalisé, selon votre choix.
 
 ## Où ça fonctionne
 

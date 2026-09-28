@@ -3,6 +3,7 @@
     {
       "label": "Start here",
       "translations": {
+        "nl": "Begin hier",
         "uk": "Почніть тут",
         "zh-CN": "从这里开始",
         "es": "Empieza aquí",
@@ -19,6 +20,7 @@
           "label": "Overview",
           "link": "/",
           "translations": {
+            "nl": "Overzicht",
             "uk": "Огляд",
             "zh-CN": "概览",
             "es": "Visión general",
@@ -35,6 +37,7 @@
           "label": "Install",
           "link": "/install/",
           "translations": {
+            "nl": "Installeren",
             "uk": "Встановлення",
             "zh-CN": "安装",
             "es": "Instalación",
@@ -51,6 +54,7 @@
           "label": "Quickstart",
           "link": "/quickstart/",
           "translations": {
+            "nl": "Snel aan de slag",
             "uk": "Швидкий старт",
             "zh-CN": "快速开始",
             "es": "Inicio rápido",
@@ -67,6 +71,7 @@
           "label": "OpenCode Server",
           "link": "/opencode-server/",
           "translations": {
+            "nl": "OpenCode-server",
             "uk": "Сервер OpenCode",
             "zh-CN": "OpenCode 服务器",
             "es": "Servidor OpenCode",
@@ -83,6 +88,7 @@
           "label": "Environment Variables",
           "link": "/environment/",
           "translations": {
+            "nl": "Omgevingsvariabelen",
             "uk": "Змінні середовища",
             "zh-CN": "环境变量",
             "es": "Variables de entorno",
@@ -100,6 +106,7 @@
     {
       "label": "Workflows",
       "translations": {
+        "nl": "Werkwijzen",
         "uk": "Робочі процеси",
         "zh-CN": "工作流",
         "es": "Flujos de trabajo",
@@ -116,6 +123,7 @@
           "label": "Projects",
           "link": "/projects/",
           "translations": {
+            "nl": "Projecten",
             "uk": "Проєкти",
             "zh-CN": "项目",
             "es": "Proyectos",
@@ -132,6 +140,7 @@
           "label": "Chats",
           "link": "/chats/",
           "translations": {
+            "nl": "Chats",
             "uk": "Чати",
             "zh-CN": "聊天",
             "es": "Chats",
@@ -148,6 +157,7 @@
           "label": "Context",
           "link": "/context/",
           "translations": {
+            "nl": "Context",
             "uk": "Контекст",
             "zh-CN": "上下文",
             "es": "Contexto",
@@ -164,6 +174,7 @@
           "label": "Notes, Todos & Plans",
           "link": "/notes-todos-plans/",
           "translations": {
+            "nl": "Notities, taken en plannen",
             "uk": "Нотатки, справи та плани",
             "zh-CN": "笔记、待办与计划",
             "es": "Notas, tareas y planes",
@@ -180,6 +191,7 @@
           "label": "Scheduled Tasks",
           "link": "/scheduled-tasks/",
           "translations": {
+            "nl": "Geplande taken",
             "uk": "Заплановані задачі",
             "zh-CN": "计划任务",
             "es": "Tareas programadas",
@@ -196,6 +208,7 @@
           "label": "Agent Control Tool",
           "link": "/agent-control-tool/",
           "translations": {
+            "nl": "Besturingstool voor agents",
             "uk": "Інструмент керування для агентів",
             "zh-CN": "智能体控制工具",
             "es": "Herramienta de control para agentes",
@@ -212,6 +225,7 @@
           "label": "Session Goals",
           "link": "/session-goals/",
           "translations": {
+            "nl": "Sessiedoelen",
             "uk": "Цілі сесії",
             "zh-CN": "会话目标",
             "es": "Objetivos de sesión",
@@ -228,6 +242,7 @@
           "label": "Sessions in Work",
           "link": "/sessions-in-work/",
           "translations": {
+            "nl": "Sessies in uitvoering",
             "uk": "Сесії в роботі",
             "zh-CN": "进行中的会话",
             "es": "Sesiones en curso",
@@ -244,6 +259,7 @@
           "label": "Permissions & Safety Net",
           "link": "/permissions/",
           "translations": {
+            "nl": "Toestemmingen en vangnet",
             "uk": "Дозволи та запобіжник",
             "zh-CN": "权限与安全网",
             "es": "Permisos y red de seguridad",
@@ -260,6 +276,7 @@
           "label": "Auto Model Routing",
           "link": "/auto-model-routing/",
           "translations": {
+            "nl": "Automatische modelkeuze",
             "uk": "Автоматичний вибір моделі",
             "zh-CN": "自动模型路由",
             "es": "Enrutamiento automático de modelos",
@@ -276,6 +293,7 @@
           "label": "Project Actions",
           "link": "/project-actions/",
           "translations": {
+            "nl": "Projectacties",
             "uk": "Дії проєкту",
             "zh-CN": "项目操作",
             "es": "Acciones del proyecto",
@@ -292,6 +310,7 @@
           "label": "Repository config",
           "link": "/repository-config/",
           "translations": {
+            "nl": "Repositoryconfiguratie",
             "uk": "Конфіг у репозиторії",
             "zh-CN": "仓库配置",
             "es": "Configuración en el repositorio",
@@ -308,6 +327,7 @@
           "label": "Preview & Dev Servers",
           "link": "/preview/",
           "translations": {
+            "nl": "Voorbeeldweergave en ontwikkelservers",
             "uk": "Перегляд і dev-сервери",
             "zh-CN": "预览与开发服务器",
             "es": "Vista previa y servidores de desarrollo",
@@ -324,6 +344,7 @@
           "label": "Worktree Sessions",
           "link": "/worktrees/",
           "translations": {
+            "nl": "Worktree-sessies",
             "uk": "Сесії worktree",
             "zh-CN": "Worktree 会话",
             "es": "Sesiones de worktree",
@@ -340,6 +361,7 @@
           "label": "Multi-run",
           "link": "/multi-run/",
           "translations": {
+            "nl": "Parallelle runs",
             "fr": "Multi-run",
             "ja": "Multi-run",
             "de": "Mehrfachausführung",
@@ -350,6 +372,7 @@
           "label": "Git & GitHub",
           "link": "/git/",
           "translations": {
+            "nl": "Git en GitHub",
             "fr": "Git et GitHub",
             "ja": "Git と GitHub",
             "de": "Git und GitHub",
@@ -360,6 +383,7 @@
           "label": "Changes Walkthrough",
           "link": "/walkthrough/",
           "translations": {
+            "nl": "Rondleiding door wijzigingen",
             "uk": "Розбір змін",
             "zh-CN": "改动导读",
             "es": "Recorrido por los cambios",
@@ -376,6 +400,7 @@
           "label": "GitHub Issues & PRs",
           "link": "/github/",
           "translations": {
+            "nl": "GitHub-issues en PR's",
             "uk": "Завдання та PR GitHub",
             "zh-CN": "GitHub 工单与 PR",
             "es": "Issues y PRs de GitHub",
@@ -392,6 +417,7 @@
           "label": "Magic Prompts",
           "link": "/magic-prompts/",
           "translations": {
+            "nl": "Magische prompts",
             "uk": "Магічні підказки",
             "zh-CN": "魔法提示词",
             "es": "Prompts mágicos",
@@ -408,6 +434,7 @@
           "label": "Git Identities",
           "link": "/git-identities/",
           "translations": {
+            "nl": "Git-identiteiten",
             "uk": "Git-ідентичності",
             "zh-CN": "Git 身份",
             "es": "Identidades de Git",
@@ -425,6 +452,7 @@
     {
       "label": "OpenCode setup",
       "translations": {
+        "nl": "OpenCode instellen",
         "uk": "Налаштування OpenCode",
         "zh-CN": "OpenCode 设置",
         "es": "Configuración de OpenCode",
@@ -441,6 +469,7 @@
           "label": "Providers, Models & Agents",
           "link": "/providers/",
           "translations": {
+            "nl": "Providers, modellen en agents",
             "uk": "Провайдери, моделі та агенти",
             "zh-CN": "提供商、模型与智能体",
             "es": "Proveedores, modelos y agentes",
@@ -457,6 +486,7 @@
           "label": "Classification Providers (Jev)",
           "link": "/classification-providers/",
           "translations": {
+            "nl": "Classificatieproviders en Jev",
             "uk": "Постачальники класифікації (Jev)",
             "zh-CN": "分类提供方（Jev）",
             "es": "Proveedores de clasificación (Jev)",
@@ -473,6 +503,7 @@
           "label": "Integrations",
           "link": "/integrations/",
           "translations": {
+            "nl": "Integraties",
             "uk": "Інтеграції",
             "zh-CN": "集成",
             "es": "Integraciones",
@@ -489,6 +520,7 @@
           "label": "MCP Servers",
           "link": "/mcp/",
           "translations": {
+            "nl": "MCP-servers",
             "uk": "Сервери MCP",
             "zh-CN": "MCP 服务器",
             "es": "Servidores MCP",
@@ -505,6 +537,7 @@
           "label": "Skills",
           "link": "/skills/",
           "translations": {
+            "nl": "Skills",
             "uk": "Навички",
             "zh-CN": "技能",
             "es": "Habilidades",
@@ -521,6 +554,7 @@
           "label": "Skills Catalog",
           "link": "/skills-catalog/",
           "translations": {
+            "nl": "Skillcatalogus",
             "uk": "Каталог навичок",
             "zh-CN": "技能目录",
             "es": "Catálogo de habilidades",
@@ -537,6 +571,7 @@
           "label": "Commands & Snippets",
           "link": "/commands-snippets/",
           "translations": {
+            "nl": "Opdrachten en snippets",
             "uk": "Команди та сніпети",
             "zh-CN": "命令与代码片段",
             "es": "Comandos y fragmentos",
@@ -553,6 +588,7 @@
           "label": "Usage & Quotas",
           "link": "/usage/",
           "translations": {
+            "nl": "Gebruik en limieten",
             "uk": "Використання та квоти",
             "zh-CN": "用量与配额",
             "es": "Uso y cuotas",
@@ -570,6 +606,7 @@
     {
       "label": "Remote access",
       "translations": {
+        "nl": "Toegang op afstand",
         "uk": "Віддалений доступ",
         "zh-CN": "远程访问",
         "es": "Acceso remoto",
@@ -586,6 +623,7 @@
           "label": "Connect a Device",
           "link": "/connect-devices/",
           "translations": {
+            "nl": "Een apparaat verbinden",
             "uk": "Підключення пристрою",
             "zh-CN": "连接设备",
             "es": "Conectar un dispositivo",
@@ -602,6 +640,7 @@
           "label": "Private Relay",
           "link": "/private-relay/",
           "translations": {
+            "nl": "Privérelay",
             "uk": "Приватний Relay",
             "zh-CN": "私密中继",
             "es": "Relay privado",
@@ -618,6 +657,7 @@
           "label": "Tunnels",
           "link": "/tunnels/",
           "translations": {
+            "nl": "Tunnels",
             "uk": "Тунелі",
             "zh-CN": "隧道",
             "es": "Túneles",
@@ -634,6 +674,7 @@
           "label": "Reverse Proxy",
           "link": "/reverse-proxy/",
           "translations": {
+            "nl": "Reverse proxy",
             "uk": "Зворотний проксі",
             "zh-CN": "反向代理",
             "es": "Proxy inverso",
@@ -650,6 +691,7 @@
           "label": "Mobile Apps & PWA",
           "link": "/mobile/",
           "translations": {
+            "nl": "Mobiele apps en PWA",
             "uk": "Мобільні застосунки та PWA",
             "zh-CN": "移动应用与 PWA",
             "es": "Apps móviles y PWA",
@@ -666,6 +708,7 @@
           "label": "Security",
           "link": "/security/",
           "translations": {
+            "nl": "Beveiliging",
             "uk": "Безпека",
             "zh-CN": "安全",
             "es": "Seguridad",
@@ -683,6 +726,7 @@
     {
       "label": "Customize",
       "translations": {
+        "nl": "Aanpassen",
         "uk": "Налаштування",
         "zh-CN": "自定义",
         "es": "Personalizar",
@@ -699,6 +743,7 @@
           "label": "Themes",
           "link": "/themes/",
           "translations": {
+            "nl": "Thema's",
             "uk": "Теми",
             "zh-CN": "主题",
             "es": "Temas",
@@ -715,6 +760,7 @@
           "label": "Notifications",
           "link": "/notifications/",
           "translations": {
+            "nl": "Meldingen",
             "uk": "Сповіщення",
             "zh-CN": "通知",
             "es": "Notificaciones",
@@ -731,6 +777,7 @@
           "label": "Voice Mode",
           "link": "/voice/",
           "translations": {
+            "nl": "Spraakmodus",
             "uk": "Голосовий режим",
             "zh-CN": "语音模式",
             "es": "Modo de voz",
@@ -747,6 +794,7 @@
           "label": "Project Icons",
           "link": "/project-icons/",
           "translations": {
+            "nl": "Projectpictogrammen",
             "uk": "Іконки проєктів",
             "zh-CN": "项目图标",
             "es": "Iconos de proyecto",
@@ -764,6 +812,7 @@
     {
       "label": "Extensions",
       "translations": {
+        "nl": "Extensies",
         "uk": "Розширення",
         "zh-CN": "扩展",
         "es": "Extensiones",
@@ -780,6 +829,7 @@
           "label": "Use extensions",
           "link": "/extensions/",
           "translations": {
+            "nl": "Extensies gebruiken",
             "uk": "Користування розширеннями",
             "zh-CN": "使用扩展",
             "es": "Usar extensiones",
@@ -796,6 +846,7 @@
           "label": "Build an extension",
           "link": "/sdk/",
           "translations": {
+            "nl": "Een extensie bouwen",
             "uk": "Зробити розширення",
             "zh-CN": "构建扩展",
             "es": "Crear una extensión",
@@ -812,6 +863,7 @@
           "label": "Host API",
           "link": "/sdk/host/",
           "translations": {
+            "nl": "Host-API",
             "uk": "API хоста",
             "zh-CN": "宿主 API",
             "es": "API del host",
@@ -828,6 +880,7 @@
           "label": "UI kit",
           "link": "/sdk/ui/",
           "translations": {
+            "nl": "UI-kit",
             "uk": "UI-набір",
             "zh-CN": "UI 套件",
             "es": "Kit de UI",
@@ -844,6 +897,7 @@
           "label": "Example",
           "link": "/sdk/example/",
           "translations": {
+            "nl": "Voorbeeld",
             "uk": "Приклад",
             "zh-CN": "示例",
             "es": "Ejemplo",
@@ -861,6 +915,7 @@
     {
       "label": "Desktop",
       "translations": {
+        "nl": "Desktop",
         "uk": "Десктоп",
         "zh-CN": "桌面端",
         "es": "Escritorio",
@@ -877,6 +932,7 @@
           "label": "Remote Instances",
           "link": "/remote-instances/",
           "translations": {
+            "nl": "Remote-instanties",
             "uk": "Віддалені інстанси",
             "zh-CN": "远程实例",
             "es": "Instancias remotas",
@@ -893,6 +949,7 @@
           "label": "Browser Panel",
           "link": "/desktop-browser/",
           "translations": {
+            "nl": "Browserpaneel",
             "uk": "Панель браузера",
             "zh-CN": "浏览器面板",
             "es": "Panel del navegador",
@@ -909,6 +966,7 @@
           "label": "Desktop Tunnels",
           "link": "/desktop-tunnels/",
           "translations": {
+            "nl": "Desktoptunnels",
             "uk": "Десктопні тунелі",
             "zh-CN": "桌面端隧道",
             "es": "Túneles de escritorio",
@@ -925,6 +983,7 @@
           "label": "SSH Hosts & Proxying",
           "link": "/ssh-hosts-proxying/",
           "translations": {
+            "nl": "SSH-hosts en poortdoorsturing",
             "uk": "SSH-хости та проксі",
             "zh-CN": "SSH 主机与代理",
             "es": "Hosts SSH y proxy",
@@ -941,6 +1000,7 @@
           "label": "Updates",
           "link": "/updates/",
           "translations": {
+            "nl": "Updates",
             "uk": "Оновлення",
             "zh-CN": "更新",
             "es": "Actualizaciones",
@@ -958,6 +1018,7 @@
     {
       "label": "Help",
       "translations": {
+        "nl": "Hulp",
         "uk": "Допомога",
         "zh-CN": "帮助",
         "es": "Ayuda",
@@ -974,6 +1035,7 @@
           "label": "Troubleshooting",
           "link": "/troubleshooting/",
           "translations": {
+            "nl": "Problemen oplossen",
             "uk": "Усунення несправностей",
             "zh-CN": "问题排查",
             "es": "Resolución de problemas",
@@ -990,6 +1052,7 @@
           "label": "OpenCode Connection",
           "link": "/troubleshooting/opencode-connection/",
           "translations": {
+            "nl": "Verbinding met OpenCode",
             "uk": "Підключення до OpenCode",
             "zh-CN": "OpenCode 连接",
             "es": "Conexión con OpenCode",
@@ -1006,6 +1069,7 @@
           "label": "Worktrees & Git",
           "link": "/troubleshooting/worktrees-git/",
           "translations": {
+            "nl": "Worktrees en Git",
             "uk": "Worktree та Git",
             "zh-CN": "Worktree 与 Git",
             "es": "Worktrees y Git",
@@ -1022,6 +1086,7 @@
           "label": "Remote Access",
           "link": "/troubleshooting/remote-access/",
           "translations": {
+            "nl": "Toegang op afstand",
             "uk": "Віддалений доступ",
             "zh-CN": "远程访问",
             "es": "Acceso remoto",

@@ -7,10 +7,30 @@ import request from 'supertest';
 import { GUEST_SCROLLBAR_CSS, GUEST_SCROLLBAR_SCRIPT } from '@openchamber/sdk';
 import { injectGuestDocumentStyles } from './html-styles.js';
 import { registerGuestRoutes } from './routes.js';
-import { writeExtensionStore } from './persist.js';
+import { setCapabilityGrants, writeExtensionStore } from './persist.js';
 
 const roots = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
+
+describe('approved origins in the frame policy', () => {
+  test('open only once the user approved exactly the declared list', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-origins-')); roots.push(root);
+    const packageRoot = path.join(root, 'guest'); await fs.mkdir(packageRoot);
+    await fs.writeFile(path.join(packageRoot, 'index.html'), '<!doctype html><html><head></head><body></body></html>');
+    await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'guest', version: '1.0.0', openchamber: { apiVersion: 1, contributes: { panel: { id: 'fonts-guest', name: 'Fonts', icon: 'apps', entry: 'index.html' }, origins: ['https://fonts.example.com'] } } }));
+    const persistPath = path.join(root, 'extensions.json');
+    await writeExtensionStore(persistPath, { paths: [packageRoot], sources: { [packageRoot]: 'path' } });
+    const app = express(); registerGuestRoutes(app, { openchamberDataDir: root });
+    const policy = async () => (await request(app).get('/api/guests/fonts-guest/index.html').set('Host', 'oc.test').expect(200)).headers['content-security-policy'];
+
+    expect(await policy()).not.toContain('https://fonts.example.com');
+    await setCapabilityGrants('fonts-guest', persistPath, ['origins'], { origins: ['https://fonts.example.com'] });
+    const approved = await policy();
+    expect(approved).toContain('font-src \'self\' data: blob: https://fonts.example.com');
+    expect(approved).toContain('connect-src oc.test/api/guests/fonts-guest/ https://fonts.example.com');
+    expect(approved).not.toMatch(/script-src[^;]*fonts\.example\.com/);
+  });
+});
 
 describe('guest document styles', () => {
   test('preserves doctypes, CSP, and tag-like text inside authored scripts', () => {
@@ -42,8 +62,13 @@ describe('guest document styles', () => {
     await writeExtensionStore(path.join(root, 'extensions.json'), { paths: [packageRoot], sources: { [packageRoot]: 'path' } });
     const app = express(); registerGuestRoutes(app, { openchamberDataDir: root });
     for (const suffix of ['', '?oc_url_token=fixture-scope']) {
-      const response = await request(app).get(`/api/guests/old-guest/index.html${suffix}`).expect(200);
-      expect(response.headers['content-security-policy']).toBe('sandbox allow-scripts');
+      const response = await request(app).get(`/api/guests/old-guest/index.html${suffix}`).set('Host', 'oc.example:3000').expect(200);
+      // Sandboxed and off the network: its own package path is the one place it may connect.
+      const csp = response.headers['content-security-policy'];
+      expect(csp).toMatch(/^sandbox allow-scripts; default-src 'none';/);
+      expect(csp).toContain('connect-src oc.example:3000/api/guests/old-guest/;');
+      // Fonts and fetch from the null-origin frame are CORS requests.
+      expect(response.headers['access-control-allow-origin']).toBe('null');
       expect(response.headers['cache-control']).toBe('no-store');
       expect(response.text).toContain(GUEST_SCROLLBAR_CSS);
       expect(response.text).toContain(GUEST_SCROLLBAR_SCRIPT);
@@ -51,6 +76,9 @@ describe('guest document styles', () => {
       expect(response.text).toContain(suffix ? 'main.js?oc_url_token=fixture-scope' : 'src="main.js"');
     }
     expect((await request(app).get('/api/guests/old-guest/main.js').expect(200)).text).toBe(script);
+    // A Host that is not a plain host[:port] never reaches the policy: no connections at all.
+    const forged = await request(app).get('/api/guests/old-guest/index.html').set('Host', "evil.test; connect-src *").expect(200);
+    expect(forged.headers['content-security-policy']).toContain("connect-src 'none';");
     expect(await fs.readFile(path.join(packageRoot, 'index.html'), 'utf8')).toBe(html);
   });
 });
