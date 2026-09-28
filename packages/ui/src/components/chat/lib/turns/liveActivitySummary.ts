@@ -7,6 +7,7 @@ import {
     isShellTool,
     isSubagentTool,
     isWebTool,
+    normalizeToolName,
 } from '@/lib/opencode/tools';
 import type { ChatMessageEntry } from './types';
 
@@ -44,6 +45,8 @@ const inputSchema = z.object({
     path: optionalText,
     filePath: optionalText,
     file_path: optionalText,
+    /** `write` calls carry the whole new body here. */
+    content: z.string().optional().catch(undefined),
 });
 
 interface TurnFileChange {
@@ -54,10 +57,29 @@ interface TurnFileChange {
     deletions?: number;
 }
 
+export type SessionFileChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+/**
+ * A file the session touched, with everything needed to review it without a
+ * repository: the recorded patches, and the body a `write` produced.
+ */
+export interface SessionFileChangeDetail {
+    path: string;
+    status: SessionFileChangeStatus;
+    additions: number;
+    deletions: number;
+    /** Unified diffs the edit/patch calls recorded, oldest first. */
+    patches: string[];
+    /** Whole new body when a `write` call produced the file. */
+    writtenContent?: string;
+}
+
 export interface LiveActivitySummary {
     files: number;
     /** Files the turn's own edit/write/patch calls touched, in first-touch order. */
     changedFiles: TurnFileChange[];
+    /** The same files with their patches and status, for a non-Git review. */
+    changedFileDetails: SessionFileChangeDetail[];
     additions: number;
     deletions: number;
     hasCompleteDiff: boolean;
@@ -106,11 +128,33 @@ interface FileChangeRecord {
     additions: number;
     deletions: number;
     complete: boolean;
+    status: SessionFileChangeStatus;
+    patches: string[];
+    writtenContent?: string;
 }
+
+type ParsedFile = z.infer<typeof fileSchema>;
+
+const fileChangeStatus = (file: ParsedFile): SessionFileChangeStatus => {
+    const raw = (file.type ?? file.status ?? '').toLowerCase();
+    if (file.movePath || raw === 'move' || raw === 'rename' || raw === 'renamed') return 'renamed';
+    if (raw === 'add' || raw === 'added') return 'added';
+    if (raw === 'delete' || raw === 'deleted') return 'deleted';
+    return 'modified';
+};
+
+/** A rename only matters until the file is edited again; later edits keep it "modified". */
+const mergeFileChangeStatus = (
+    previous: SessionFileChangeStatus,
+    next: SessionFileChangeStatus,
+): SessionFileChangeStatus => {
+    if (previous === 'modified' || previous === next) return next;
+    return next === 'modified' ? previous : next;
+};
 
 export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): LiveActivitySummary {
     const summary: LiveActivitySummary = {
-        files: 0, changedFiles: [], additions: 0, deletions: 0, hasCompleteDiff: true,
+        files: 0, changedFiles: [], changedFileDetails: [], additions: 0, deletions: 0, hasCompleteDiff: true,
         explored: false, commands: 0, researched: false, subagents: 0,
     };
     // Keyed by comparable absolute path; insertion order is first-touch order.
@@ -157,6 +201,7 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
             if (!isFileChangeTool(tool)) continue;
 
             const input = inputSchema.safeParse(state.input).data;
+            const writtenContent = normalizeToolName(tool) === 'write' ? input?.content : undefined;
             if (metadata?.files?.some((file) => file === null)) summary.hasCompleteDiff = false;
             const entries = metadata?.files?.filter((file) => file !== null);
             const files = entries?.length ? entries : [metadata?.filediff ?? {}];
@@ -204,10 +249,21 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
                     }
                 }
                 if (!record) {
-                    record = { path: getRelativeFilePath(canonical, root), additions: 0, deletions: 0, complete: true };
+                    record = {
+                        path: getRelativeFilePath(canonical, root),
+                        additions: 0, deletions: 0, complete: true,
+                        status: fileChangeStatus(file), patches: [],
+                    };
                 } else if (file.movePath) {
                     record.path = getRelativeFilePath(canonical, root);
                 }
+                record.status = mergeFileChangeStatus(record.status, fileChangeStatus(file));
+                // A single-file call's whole patch is that file's patch; with
+                // several files it cannot be attributed, so it is skipped here.
+                const filePatch = file.patch ?? file.diff
+                    ?? (files.length === 1 ? metadata?.patch ?? metadata?.diff : undefined);
+                if (filePatch) record.patches.push(filePatch);
+                if (writtenContent !== undefined) record.writtenContent = writtenContent;
                 changedFiles.set(key, record);
                 callRecords.push(record);
                 if (!stats) {
@@ -247,6 +303,14 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
     summary.changedFiles = Array.from(changedFiles.values(), (record) => record.complete
         ? { path: record.path, additions: record.additions, deletions: record.deletions }
         : { path: record.path });
+    summary.changedFileDetails = Array.from(changedFiles.values(), (record) => ({
+        path: record.path,
+        status: record.status,
+        additions: record.additions,
+        deletions: record.deletions,
+        patches: record.patches,
+        writtenContent: record.writtenContent,
+    }));
     summary.subagents = subagents.size;
     return summary;
 }
