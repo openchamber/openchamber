@@ -174,6 +174,7 @@ const getModeLabel = (
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
+  if (mode === 'session-diff') return t('contextPanel.mode.sessionDiff');
   if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'browser') return t('contextPanel.mode.browser');
@@ -270,6 +271,10 @@ const getTabIcon = (
 
   if (tab.mode === 'diff') {
     return <DiffViewIcon className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'session-diff') {
+    return <Icon name="file-list-2" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'walkthrough') {
@@ -1090,7 +1095,7 @@ export const ContextPanel: React.FC = () => {
     [tabs],
   );
   const diffTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'diff'),
+    () => tabs.filter((tab) => tab.mode === 'diff' || tab.mode === 'session-diff'),
     [tabs],
   );
   const terminalTab = React.useMemo(
@@ -1436,9 +1441,10 @@ export const ContextPanel: React.FC = () => {
                 stackedDefaultCollapsedAll
                 pinSelectedFileHeaderToTopOnNavigate
                 showOpenInEditorAction
-                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-                onDiffScopeChange={handleDiffScopeChange}
-                targetFilePath={tab.targetPath}
+                diffScope={tab.mode === 'session-diff' ? 'session' : (tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working'))}
+                onDiffScopeChange={tab.mode === 'session-diff' ? undefined : handleDiffScopeChange}
+                showScopeSelector={tab.mode !== 'session-diff'}
+                targetFilePath={tab.mode === 'session-diff' ? null : tab.targetPath}
                 flushContent
               />
             </React.Suspense>
@@ -1491,7 +1497,7 @@ export const ContextPanel: React.FC = () => {
             </div>
           );
         })}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' && !(activeTab && isPluginContextPanelMode(activeTab.mode)) ? activeNonChatContent : null}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'session-diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' && !(activeTab && isPluginContextPanelMode(activeTab.mode)) ? activeNonChatContent : null}
       </div>
       </div>
     </aside>

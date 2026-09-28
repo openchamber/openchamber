@@ -18,14 +18,14 @@ import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes'
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
 
-export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
+export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'session' | 'branch' | 'commit' | 'pr';
 export type { ContextPanelMode };
 
 // The docked column and the tree-only panel share one pixel width.
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
-const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
+const contextPanelModeSchema = z.enum(['diff', 'session-diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
 const persistedPanelWidthsSchema = z.object({
   widthByMode: z.record(z.string(), z.number().finite().optional().catch(undefined)).catch({}),
   widthFractionByMode: z.record(z.string(), z.number().positive().max(1).optional().catch(undefined)).catch({}),
@@ -300,7 +300,7 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
 };
 
 const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
-  return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr' ? value : null;
+  return value === 'working' || value === 'staged' || value === 'turn' || value === 'session' || value === 'branch' || value === 'commit' || value === 'pr' ? value : null;
 };
 
 /** A plan tab's owner must be a complete project reference or nothing; a
@@ -374,7 +374,8 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
-    diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
+    diffScope: normalizePendingDiffScope(descriptor.diffScope)
+      ?? (descriptor.mode === 'session-diff' ? 'session' : descriptor.stagedDiff === true ? 'staged' : 'working'),
     touchedAt: Date.now(),
   };
 };
@@ -493,7 +494,8 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
-      diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
+      diffScope: normalizePendingDiffScope(candidate.diffScope)
+        ?? (candidate.mode === 'session-diff' ? 'session' : candidate.stagedDiff === true ? 'staged' : 'working'),
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),

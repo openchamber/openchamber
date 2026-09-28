@@ -11,6 +11,7 @@ export type BuiltInContextSurfaceId =
   | 'pr'
   | 'linear'
   | 'diff'
+  | 'session-diff'
   | 'walkthrough'
   | 'terminal'
   | 'plan'
@@ -82,6 +83,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'diff',
     icon: 'arrow-left-right',
     labelKey: 'contextPanel.mode.diff',
+    availability: 'always',
+  },
+  {
+    id: 'session-diff',
+    descriptionKey: 'contextRail.surface.sessionDiff.description',
+    defaultWidthFraction: 3 / 5,
+    mode: 'session-diff',
+    icon: 'file-list-2',
+    labelKey: 'contextPanel.mode.sessionDiff',
     availability: 'always',
   },
   {

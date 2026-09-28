@@ -1,5 +1,6 @@
 const BUILT_IN_CONTEXT_PANEL_MODES = [
   'diff',
+  'session-diff',
   'walkthrough',
   'file',
   'context',

@@ -1198,6 +1198,8 @@ interface DiffViewProps {
     showOpenInEditorAction?: boolean;
     diffScope?: DiffScope;
     onDiffScopeChange?: (scope: PendingDiffScope) => void;
+    /** Hide the scope dropdown; the view is pinned to `diffScope` (session review). */
+    showScopeSelector?: boolean;
     targetFilePath?: string | null;
     /** Render diff content flush with the container edges (no outer padding). */
     flushContent?: boolean;
@@ -1211,6 +1213,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     showOpenInEditorAction = false,
     diffScope = 'all',
     onDiffScopeChange,
+    showScopeSelector = true,
     targetFilePath = null,
     flushContent = false,
 }) => {
@@ -1269,14 +1272,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const sessionMessages = useSessionMessages(activeDiffScope === 'turn' ? currentSessionId ?? '' : '', rootDirectory ?? undefined);
-    // A directory without a Git repository has no `git status` and no OpenCode
-    // snapshots, so the "Changed" scope reads the session's own edit/write/patch
-    // calls, subagent sessions included (see useSessionReviewChanges).
-    const sessionReviewActive = isGitRepo === false;
+    // The "Session" scope reviews the files this session changed (parent and
+    // subagent sessions), with no Git repository involved.
+    const sessionScope = activeDiffScope === 'session';
     const sessionChanges = useSessionReviewChanges(
         currentSessionId,
         rootDirectory,
-        visible && sessionReviewActive,
+        visible && sessionScope,
     );
     const sessionDiffData = React.useMemo(() => {
         const map = new Map<string, DiffData>();
@@ -1297,10 +1299,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
 
     const isMobileLayout = isMobile || screenWidth <= 768;
-    const showReviewAction = Boolean(currentSessionId) && !sessionReviewActive && activeDiffScope !== 'turn' && activeDiffScope !== 'commit' && activeDiffScope !== 'pr' && !isMobileLayout && !isVSCodeRuntime();
+    const showReviewAction = Boolean(currentSessionId) && activeDiffScope !== 'turn' && activeDiffScope !== 'session' && activeDiffScope !== 'commit' && activeDiffScope !== 'pr' && !isMobileLayout && !isVSCodeRuntime();
     // Same runtime and width rules as the rail surface: no point offering an
     // entry point to a surface that cannot open here.
-    const showWalkthroughAction = activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
+    const showWalkthroughAction = activeDiffScope !== 'turn' && activeDiffScope !== 'session' && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
@@ -1394,16 +1396,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
     }, [lastTurnDiffs]);
 
     const workingFileCount = React.useMemo(() => {
-        if (sessionReviewActive) return sessionChanges.length;
         if (!status?.files) return 0;
         return status.files.filter(isWorkingStatusFile).length;
-    }, [sessionReviewActive, sessionChanges, status]);
+    }, [status]);
 
     const stagedFileCount = React.useMemo(() => {
-        if (sessionReviewActive) return 0;
         if (!status?.files) return 0;
         return status.files.filter(isStagedStatusFile).length;
-    }, [sessionReviewActive, status]);
+    }, [status]);
 
     const turnFileCount = lastTurnDiffs.length;
 
@@ -1419,17 +1419,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
             onDiffScopeChange?.('working');
         }
     }, [activeDiffScope, onDiffScopeChange]);
-    // Without a repository only the session-backed "Changed" scope has content;
-    // a persisted staged/branch/commit/pr selection lands there instead of on an
-    // empty or erroring view.
-    React.useEffect(() => {
-        if (!sessionReviewActive) return;
-        if (activeDiffScope === 'staged' || activeDiffScope === 'commit'
-            || activeDiffScope === 'pr' || activeDiffScope === 'branch') {
-            setActiveDiffScope('working');
-            onDiffScopeChange?.('working');
-        }
-    }, [activeDiffScope, onDiffScopeChange, sessionReviewActive]);
     const branches = useGitStore((state) => (effectiveDirectory ? state.directories.get(effectiveDirectory)?.branches ?? null : null));
     const isLoadingBranches = useGitStore((state) => (effectiveDirectory ? state.directories.get(effectiveDirectory)?.isLoadingBranches ?? false : false));
 
@@ -1582,9 +1571,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const branchFileCount = branchFiles?.length ?? null;
 
     const changedFiles: FileEntry[] = React.useMemo(() => {
-        // No repository: the session transcript is the change set.
-        if (sessionReviewActive && activeDiffScope !== 'turn' && activeDiffScope !== 'branch'
-            && activeDiffScope !== 'commit' && activeDiffScope !== 'pr') {
+        // Session scope: the transcript (parent and subagents) is the change set.
+        if (activeDiffScope === 'session') {
             return sessionChanges.map((change) => ({
                 path: change.path,
                 index: '',
@@ -1664,7 +1652,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 };
             })
             .sort((a, b) => a.path.localeCompare(b.path));
-    }, [activeDiffScope, branchFiles, comparison.files, lastTurnDiffs, sessionChanges, sessionReviewActive, status]);
+    }, [activeDiffScope, branchFiles, comparison.files, lastTurnDiffs, sessionChanges, status]);
 
     const changedFilePathsKey = React.useMemo(
         () => changedFiles.map((file) => file.path).join('\0'),
@@ -2301,7 +2289,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 }}
                 staged={getFileStaged(file.path)}
                 readOnlyActions={activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'}
-                hunkActionsEnabled={!sessionReviewActive && (activeDiffScope === 'all' || activeDiffScope === 'working' || activeDiffScope === 'staged')}
+                hunkActionsEnabled={activeDiffScope === 'all' || activeDiffScope === 'working' || activeDiffScope === 'staged'}
                 contentRevision={workingTreeRevision}
                 comparisonDiff={activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
                     ? comparisonDiffData.get(file.path) ?? EMPTY_COMPARISON_DIFF
@@ -2309,10 +2297,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 onRetryComparisonDiff={() => setComparisonRetryRevision((revision) => revision + 1)}
                 loadFullComparisonDiff={loadFullComparisonDiff}
                 initialDiffData={
-                    activeDiffScope === 'turn'
-                        ? lastTurnDiffData.get(file.path) ?? null
-                        : sessionReviewActive
-                            ? sessionDiffData.get(file.path) ?? null
+                    activeDiffScope === 'session'
+                        ? sessionDiffData.get(file.path) ?? null
+                        : activeDiffScope === 'turn'
+                            ? lastTurnDiffData.get(file.path) ?? null
                             : null
                 }
             />
@@ -2401,7 +2389,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             );
         }
 
-        if (activeDiffScope !== 'turn' && !sessionReviewActive && isLoadingStatus && !status) {
+        if (activeDiffScope !== 'turn' && activeDiffScope !== 'session' && isLoadingStatus && !status) {
             return (
                 <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Icon name="loader-4" className="size-4 animate-spin" />
@@ -2410,7 +2398,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             );
         }
 
-        if (activeDiffScope !== 'turn' && isGitRepo === false && sessionChanges.length === 0) {
+        if (activeDiffScope !== 'session' && isGitRepo === false) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                     {t('diffView.state.notGitRepository')}
@@ -2503,7 +2491,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (changedFiles.length === 0) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    {activeDiffScope === 'turn' ? t('diffView.state.noLastTurnChanges')
+                    {activeDiffScope === 'session' ? t('diffView.state.noSessionChanges')
+                        : activeDiffScope === 'turn' ? t('diffView.state.noLastTurnChanges')
                         : activeDiffScope === 'pr' ? t('walkthrough.blocked.emptyDiff.description')
                         : activeDiffScope === 'commit' ? t('commitComparison.emptyDiff')
                         : activeDiffScope === 'branch' && branchBase ? t('diffView.branch.empty', { base: branchRefLabel(branchBase) })
@@ -2529,7 +2518,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     />
                 ) : null}
                 {!isMobile && (
-                    activeDiffScope !== 'all' ? (
+                    showScopeSelector && activeDiffScope !== 'all' ? (
                         <ChangeScopeSelector
                             scope={activeDiffScope}
                             workingCount={workingFileCount}
@@ -2538,7 +2527,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             branchCount={branchFileCount}
                             commitCount={activeDiffScope === 'commit' ? commitFiles?.length ?? null : null}
                             prCount={activeDiffScope === 'pr' ? comparison.files?.length ?? null : null}
-                            showCommitOption={!isVSCodeRuntime() && !sessionReviewActive}
+                            showCommitOption={!isVSCodeRuntime() && isGitRepo !== false}
                             showBranchOption={showBranchOption}
                             onScopeChange={(scope) => {
                                 setActiveDiffScope(scope);
@@ -2548,7 +2537,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     ) : (
                         <div className="flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground shrink-0">
                             <span className="typography-ui-label font-semibold text-foreground">
-                                {isLoadingStatus && !status
+                                {isLoadingStatus && !status && activeDiffScope !== 'session'
                                     ? t('diffView.state.loadingChanges')
                                     : (changedFiles.length === 1
                                         ? t('diffView.summary.changedFilesSingle', { count: changedFiles.length })
