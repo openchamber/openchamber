@@ -54,8 +54,9 @@ import { startReviewFlow } from '@/lib/reviewFlow';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessageRecords, useSessionMessages } from '@/sync/sync-context';
-import { collectSessionFileChanges, sessionChangePatch } from '@/components/chat/lib/turns/sessionChanges';
+import { useSessionMessages } from '@/sync/sync-context';
+import { sessionChangePatch } from '@/components/chat/lib/turns/sessionChanges';
+import { useSessionReviewChanges } from '@/hooks/useSessionReviewChanges';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
@@ -1269,19 +1270,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const sessionMessages = useSessionMessages(activeDiffScope === 'turn' ? currentSessionId ?? '' : '', rootDirectory ?? undefined);
     // A directory without a Git repository has no `git status` and no OpenCode
-    // snapshots, so the "Changed" scope reads the session's own
-    // edit/write/patch calls instead (see sessionChanges.ts).
+    // snapshots, so the "Changed" scope reads the session's own edit/write/patch
+    // calls, subagent sessions included (see useSessionReviewChanges).
     const sessionReviewActive = isGitRepo === false;
-    const sessionRecords = useSessionMessageRecords(
-        currentSessionId ?? '',
-        rootDirectory ?? undefined,
-        { enabled: visible && sessionReviewActive },
-    );
-    const sessionChanges = React.useMemo(
-        () => (sessionReviewActive
-            ? collectSessionFileChanges(sessionRecords, rootDirectory ?? '')
-            : []),
-        [sessionReviewActive, sessionRecords, rootDirectory],
+    const sessionChanges = useSessionReviewChanges(
+        currentSessionId,
+        rootDirectory,
+        visible && sessionReviewActive,
     );
     const sessionDiffData = React.useMemo(() => {
         const map = new Map<string, DiffData>();

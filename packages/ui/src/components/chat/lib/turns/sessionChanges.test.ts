@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Part, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
-import { collectSessionFileChanges, sessionChangePatch } from './sessionChanges';
+import type { AssistantMessage, Part, Session, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
+import { collectDescendantSessionIds, collectSessionFileChanges, sessionChangePatch } from './sessionChanges';
 import type { ChatMessageEntry } from './types';
 
 function assistant(id: string, parts: Part[], options: Partial<AssistantMessage> = {}): ChatMessageEntry {
@@ -92,6 +92,43 @@ describe('session file changes', () => {
         ], '/project');
 
         expect(changes).toEqual([]);
+    });
+
+    test('merges a parent and its subagent child into one review', () => {
+        const parent = assistant('p', [tool('spawn', 'subagent', { metadata: { sessionID: 'child' } })]);
+        const child = assistant('c', [tool('edit', 'edit', {
+            input: { path: '/project/src/a.ts' },
+            metadata: { files: [{ file: '/project/src/a.ts', patch: diff }] },
+        })]);
+        const changes = collectSessionFileChanges([parent, child], '/project');
+
+        expect(changes).toHaveLength(1);
+        expect(changes[0]).toMatchObject({ path: 'src/a.ts', additions: 2, deletions: 1 });
+        expect(changes[0]?.patches).toEqual([diff]);
+    });
+});
+
+const session = (id: string, parentID?: string): Session => ({ id, parentID } as Session);
+
+describe('descendant sessions', () => {
+    test('walks children and grandchildren breadth-first', () => {
+        const sessions = [
+            session('root'),
+            session('child-a', 'root'),
+            session('child-b', 'root'),
+            session('grandchild', 'child-a'),
+        ];
+        expect(collectDescendantSessionIds(sessions, 'root')).toEqual(['child-a', 'child-b', 'grandchild']);
+    });
+
+    test('ignores unrelated sessions and cannot loop on a cycle', () => {
+        const sessions = [
+            session('other'),
+            session('root'),
+            session('child', 'root'),
+            session('root', 'child'),
+        ];
+        expect(collectDescendantSessionIds(sessions, 'root')).toEqual(['child']);
     });
 });
 

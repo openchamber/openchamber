@@ -17,10 +17,13 @@
  *   review show line changes.
  * - `write` results carry no diff, only the written body, so those files show
  *   the body as their "after" side.
- * - Edits a subagent made in a child session are not in this transcript.
+ * - Subagent edits live in child sessions, not in one session's transcript.
+ *   Pass the whole session tree (see `collectDescendantSessionIds`) to include
+ *   them.
  */
 
 import { getRelativeFilePath, normalizeFilePath } from '@/lib/path-utils';
+import type { Session } from '@/lib/opencode/model';
 import { summarizeLiveActivity, type SessionFileChangeDetail } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
 
@@ -113,4 +116,38 @@ export function collectSessionFileChanges(
     }
 
     return Array.from(merged.values()).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Every descendant session of `rootId`, breadth-first.
+ *
+ * A subagent runs in a child session (`session.parentID`) and edits the same
+ * working tree, so a complete review has to include its transcript and any
+ * descendants of its own.
+ */
+export function collectDescendantSessionIds(
+    sessions: readonly Session[],
+    rootId: string,
+): string[] {
+    const childrenByParent = new Map<string, string[]>();
+    for (const session of sessions) {
+        if (!session.parentID) continue;
+        const siblings = childrenByParent.get(session.parentID);
+        if (siblings) siblings.push(session.id);
+        else childrenByParent.set(session.parentID, [session.id]);
+    }
+
+    const descendants: string[] = [];
+    const seen = new Set([rootId]);
+    const queue = [rootId];
+    while (queue.length > 0) {
+        const parent = queue.shift() as string;
+        for (const child of childrenByParent.get(parent) ?? []) {
+            if (seen.has(child)) continue;
+            seen.add(child);
+            descendants.push(child);
+            queue.push(child);
+        }
+    }
+    return descendants;
 }
