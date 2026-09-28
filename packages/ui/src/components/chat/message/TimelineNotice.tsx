@@ -141,12 +141,33 @@ const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }> }> = 
  * The timeline row for a message, or `null` when the caller should render the
  * message itself.
  */
+/**
+ * A labelled plugin injection. A synthetic message with a `description` is
+ * state the plugin chose to surface ("retry round 3 · internal marker"); one
+ * without is prompt plumbing and stays hidden (the composer attachments are
+ * re-attached to their user message by `attachSyntheticContext`).
+ */
+const SyntheticNotice: React.FC<{ message: Extract<Message, { role: 'synthetic' }> }> = ({ message }) => {
+    const label = (message.description ?? '').trim();
+    if (!label) return null;
+    return (
+        <NoticeRow>
+            <div className="my-1 flex items-center gap-1.5 rounded-lg border border-border/30 bg-muted/10 px-2 py-1.5 text-xs text-muted-foreground">
+                <Icon name="information" className="h-3 w-3 shrink-0" />
+                <span className="truncate" title={label}>{label}</span>
+            </div>
+        </NoticeRow>
+    );
+};
+
 export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
     switch (message.role) {
         case 'compaction':
             return <CompactionNotice message={message} />;
         case 'shell':
             return <ShellNotice message={message} />;
+        case 'synthetic':
+            return <SyntheticNotice message={message} />;
         default:
             return null;
     }
