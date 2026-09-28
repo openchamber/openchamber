@@ -73,6 +73,34 @@ describe('translateWireEvent', () => {
     expect(succeeded[0].properties.status).toEqual({ type: 'idle' });
   });
 
+  test('retry.scheduled synthesizes the v1 retry status with attempt and next-at', () => {
+    const [event] = translateWireEvent(wire('session.retry.scheduled', {
+      sessionID: 's1',
+      attempt: 3,
+      at: 1790870409003,
+      error: { type: 'provider.quota', message: 'You have exceeded the monthly usage quota.' },
+    }));
+    expect(event).toMatchObject({
+      type: 'session.status',
+      properties: {
+        sessionID: 's1',
+        status: {
+          type: 'retry',
+          attempt: 3,
+          message: 'You have exceeded the monthly usage quota.',
+          next: 1790870409003,
+        },
+      },
+    });
+  });
+
+  test('retry.scheduled with no sessionID or partial fields still yields a usable status', () => {
+    expect(translateWireEvent(wire('session.retry.scheduled', {}))).toEqual([]);
+    const [event] = translateWireEvent(wire('session.retry.scheduled', { sessionID: 's2' }));
+    expect(event).toMatchObject({ type: 'session.status', properties: { sessionID: 's2', status: { type: 'retry' } } });
+    expect(event.properties.status.attempt).toBeUndefined();
+  });
+
   test('an interruption ends the turn without reporting a failure', () => {
     const events = translateWireEvent(wire('session.execution.interrupted', { sessionID: 's1', reason: 'user' }));
     expect(events.map((entry) => entry.type)).toEqual(['session.status', 'session.idle']);

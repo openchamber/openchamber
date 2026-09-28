@@ -150,6 +150,22 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [status({ type: 'busy' })];
 
+    // v1 surfaced retries as `session.status {type:'retry'}` and the UI still
+    // renders that status (attempt + next-at countdown in the status chip).
+    // v2 replaced it with `session.retry.scheduled`, emitted between execution
+    // events while the turn is still running, so translate it back onto the
+    // status vocabulary instead of leaving the retry state invisible.
+    case 'session.retry.scheduled': {
+      if (!sessionID) return [];
+      const error = isRecord(data.error) ? data.error : {};
+      return [status(compact({
+        type: 'retry',
+        attempt: typeof data.attempt === 'number' ? data.attempt : undefined,
+        message: typeof error.message === 'string' ? error.message : undefined,
+        next: typeof data.at === 'number' ? data.at : undefined,
+      }))];
+    }
+
     case 'session.execution.succeeded':
       if (!sessionID) return [];
       return [status({ type: 'idle' }), event('session.idle', { sessionID })];
