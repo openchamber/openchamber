@@ -26,7 +26,7 @@ mock.module('@/lib/openchamberEvents', () => ({
   },
 }));
 
-const { registerBrowserController, registerBrowserOpener } = await import('./controlClient');
+const { registerBrowserController, registerBrowserOpener, setShownBrowserTab } = await import('./controlClient');
 
 /** Registrations are module-global, so every test unwinds its own. */
 const cleanups: Array<() => void> = [];
@@ -57,12 +57,15 @@ describe('opening a page before any view exists', () => {
       // The pane mounts a moment after the tab is created, as it does in the app.
       setTimeout(() => {
         cleanups.push(registerBrowserController({
+          tabId: 'tab-new',
+          describe: () => ({ title: '', url: '' }),
           run: async (action, parameters) => {
             ran.push({ action, parameters });
             return { viewport: { mode: 'mobile', width: 390, height: 844 } };
           },
         }));
       }, 120);
+      return 'tab-new';
     }));
 
     emitOpen({ url: 'https://example.test', viewport: 'mobile' });
@@ -73,6 +76,7 @@ describe('opening a page before any view exists', () => {
     expect(posted[0]?.data).toEqual({
       url: 'https://example.test',
       opened: true,
+      tabId: 'tab-new',
       viewportApplied: true,
       viewport: { mode: 'mobile', width: 390, height: 844 },
     });
@@ -82,8 +86,10 @@ describe('opening a page before any view exists', () => {
     grantClaims = false;
     const opened: string[] = [];
     const ran: string[] = [];
-    cleanups.push(registerBrowserOpener((url) => { opened.push(url); }));
+    cleanups.push(registerBrowserOpener((url) => { opened.push(url); return 'tab-new'; }));
     cleanups.push(registerBrowserController({
+      tabId: 'tab-1',
+      describe: () => ({ title: '', url: '' }),
       run: async (action) => { ran.push(action); return {}; },
     }));
 
@@ -100,6 +106,8 @@ describe('opening a page before any view exists', () => {
   test('claims the request before touching a page', async () => {
     const ran: string[] = [];
     cleanups.push(registerBrowserController({
+      tabId: 'tab-1',
+      describe: () => ({ title: '', url: '' }),
       run: async (action) => { ran.push(action); return {}; },
     }));
 
@@ -111,16 +119,16 @@ describe('opening a page before any view exists', () => {
   });
 
   test('does not wait for a view when no layout was requested', async () => {
-    cleanups.push(registerBrowserOpener(() => {}));
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
 
     emitOpen({ url: 'https://example.test' });
     await wait(20);
 
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new' });
   });
 
   test('says the layout was not applied when no view ever appears', async () => {
-    cleanups.push(registerBrowserOpener(() => {}));
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
 
     emitOpen({ url: 'https://example.test', viewport: 'mobile' });
     // Past the client's own attach deadline.
@@ -129,5 +137,112 @@ describe('opening a page before any view exists', () => {
     const data = posted[0]?.data as { viewportApplied?: boolean; note?: string };
     expect(data.viewportApplied).toBe(false);
     expect(typeof data.note).toBe('string');
+  });
+});
+
+describe('choosing the tab an action runs in', () => {
+  beforeEach(() => {
+    posted.length = 0;
+    claims.length = 0;
+    grantClaims = true;
+  });
+
+  afterEach(() => {
+    while (cleanups.length > 0) cleanups.pop()?.();
+  });
+
+  const tab = (tabId: string, ran: string[]) => registerBrowserController({
+    tabId,
+    describe: () => ({ title: `Title ${tabId}`, url: `https://${tabId}.test/` }),
+    run: async (action) => { ran.push(`${tabId}:${action}`); return { url: `https://${tabId}.test/` }; },
+  });
+
+  const emit = (action: string, parameters: Record<string, unknown>): void => {
+    listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters });
+  };
+
+  test('runs in the tab the user sees, not the one that registered last', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('shown', ran));
+    cleanups.push(tab('background', ran));
+    setShownBrowserTab('shown');
+
+    emit('browser.click', { selector: 'button' });
+    await wait(50);
+
+    expect(ran).toEqual(['shown:browser.click']);
+  });
+
+  test('runs in the named tab and passes the rest of the parameters without tabId', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    cleanups.push(tab('shown', []));
+    cleanups.push(registerBrowserController({
+      tabId: 'background',
+      describe: () => ({ title: '', url: '' }),
+      run: async (_action, parameters) => { seen.push(parameters); return {}; },
+    }));
+    setShownBrowserTab('shown');
+
+    emit('browser.click', { selector: 'button', tabId: 'background' });
+    await wait(50);
+
+    expect(seen).toEqual([{ selector: 'button' }]);
+  });
+
+  test('lists every tab in a snapshot, marking the one the user sees', async () => {
+    cleanups.push(tab('shown', []));
+    cleanups.push(tab('background', []));
+    setShownBrowserTab('shown');
+
+    emit('browser.snapshot', {});
+    await wait(50);
+
+    expect(posted[0]?.data).toEqual({
+      url: 'https://shown.test/',
+      tabs: [
+        { id: 'shown', title: 'Title shown', url: 'https://shown.test/', active: true },
+        { id: 'background', title: 'Title background', url: 'https://background.test/', active: false },
+      ],
+    });
+  });
+
+  test('refuses an unknown tab instead of acting on another one', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('shown', ran));
+
+    emit('browser.click', { selector: 'button', tabId: 'gone' });
+    await wait(600);
+
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+    expect(posted[0]?.error).toContain('no browser tab with id gone');
+  });
+
+  test('opens a page in a new background tab instead of replacing the one the user sees', async () => {
+    const ran: string[] = [];
+    const opened: string[] = [];
+    cleanups.push(tab('shown', ran));
+    setShownBrowserTab('shown');
+    cleanups.push(registerBrowserOpener((url) => { opened.push(url); return 'agent-tab'; }));
+
+    emit('browser.open', { url: 'https://example.test' });
+    await wait(50);
+
+    expect(ran).toEqual([]);
+    expect(opened).toEqual(['https://example.test']);
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'agent-tab' });
+  });
+
+  test('navigates the named tab when browser.open gives one', async () => {
+    const ran: string[] = [];
+    const opened: string[] = [];
+    cleanups.push(tab('agent-tab', ran));
+    cleanups.push(registerBrowserOpener((url) => { opened.push(url); return 'other'; }));
+
+    emit('browser.open', { url: 'https://example.test', tabId: 'agent-tab' });
+    await wait(50);
+
+    expect(opened).toEqual([]);
+    expect(ran).toEqual(['agent-tab:browser.open']);
   });
 });

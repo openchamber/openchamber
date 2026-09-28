@@ -7,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { useGuestsStore } from '@/lib/guests/store';
+import { clearSurfaceViewerId, setSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, type SurfaceFrame } from '@/lib/guests/surface-client';
 import { pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
 import { cn } from '@/lib/utils';
@@ -95,7 +96,13 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
 
   React.useEffect(() => {
     if (!active) return undefined;
+    let viewerId: string | null = null;
     const client = new SurfaceClient(guestId, {
+      onViewer: (id) => {
+        if (viewerId) clearSurfaceViewerId(guestId, viewerId);
+        viewerId = id;
+        setSurfaceViewerId(guestId, id);
+      },
       onFrame: (frame) => { void drawFrame(frame); },
       onControl: setControl,
       onConnection: setConnection,
@@ -104,6 +111,7 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     clientRef.current = client;
     client.start();
     return () => {
+      if (viewerId) clearSurfaceViewerId(guestId, viewerId);
       client.dispose();
       if (clientRef.current === client) clientRef.current = null;
       if (flushRef.current !== null) cancelAnimationFrame(flushRef.current);

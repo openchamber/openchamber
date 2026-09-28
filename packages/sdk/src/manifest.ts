@@ -12,7 +12,25 @@ export type PanelContribution = {
   name: string;
   icon: string;
   entry?: string;
+  /**
+   * Beside a shared surface (`service.surface`), the panel page is docked to
+   * one edge of the host-drawn picture: a toolbar above it, an inspector
+   * below, a tool column beside it. `dock` is the edge (default
+   * `GUEST_SURFACE_DOCK_DEFAULT`) and `size` the page's thickness in CSS
+   * pixels across that edge (default `GUEST_SURFACE_DOCK_SIZE_DEFAULT`).
+   * Both only make sense with `entry` and `service.surface` together.
+   */
+  dock?: GuestSurfaceDock;
+  size?: number;
 };
+
+export const GUEST_SURFACE_DOCKS = ['top', 'bottom', 'left', 'right'] as const;
+export type GuestSurfaceDock = (typeof GUEST_SURFACE_DOCKS)[number];
+export const GUEST_SURFACE_DOCK_DEFAULT: GuestSurfaceDock = 'top';
+/** Thickness in CSS px of a docked `panel.entry` when the manifest names none. */
+export const GUEST_SURFACE_DOCK_SIZE_DEFAULT = 40;
+export const GUEST_SURFACE_DOCK_SIZE_MIN = 24;
+export const GUEST_SURFACE_DOCK_SIZE_MAX = 480;
 
 /** Sandboxed HTML loaded on demand for background actions and slash commands. */
 export type BackgroundContribution = {
@@ -35,6 +53,24 @@ export type AttachContribution = boolean | AttachMode | AttachContributionObject
 
 /** A user-opened full-screen page, optionally with its own HTML and title. */
 export type PageContribution = true | { entry: string; title?: string };
+
+/**
+ * A section inside the chat's Work Status panel. `true` reuses `panel.entry`;
+ * the object form names its own package HTML, so an extension can ship only
+ * this section and no rail panel. `title` replaces `panel.name` on the section
+ * header; `height` is the starting frame height in CSS px before the guest
+ * reports its own through `setHeight`.
+ */
+export type StatusSectionContribution = true | { entry: string; title?: string; height?: number };
+
+/** Characters in a status section title. */
+export const GUEST_STATUS_SECTION_TITLE_MAX = 60;
+/** Smallest frame height the host gives a status section, in CSS px. */
+export const GUEST_STATUS_SECTION_HEIGHT_MIN = 24;
+/** Tallest frame height the host gives a status section; taller content scrolls inside the frame. */
+export const GUEST_STATUS_SECTION_HEIGHT_MAX = 320;
+/** Frame height before the manifest or the guest says otherwise. */
+export const GUEST_STATUS_SECTION_HEIGHT_DEFAULT = 120;
 
 export type GuestActionWhere = 'message' | 'session';
 export type GuestActionRole = 'user' | 'assistant';
@@ -290,8 +326,9 @@ export type ServiceContribution = {
   provides?: GuestServiceProvides[];
   /**
    * The service shows a live surface (frames out, input in) that the host
-   * draws in this extension's rail panel; see `service-surface.ts`. Excludes
-   * `panel.entry`: the panel is the surface.
+   * draws in this extension's rail panel; see `service-surface.ts`. With
+   * `panel.entry` too, that page is docked to one edge of the picture (see
+   * `PanelContribution.dock`); without it, the panel is the surface alone.
    */
   surface?: true;
 };
@@ -358,6 +395,8 @@ export type OpenChamberContributes = {
   background?: BackgroundContribution;
   attach?: AttachContribution;
   page?: PageContribution;
+  /** A section in the chat's Work Status panel. */
+  statusSection?: StatusSectionContribution;
   capabilities?: DeclaredGuestCapability[];
   integration?: IntegrationContribution;
   service?: ServiceContribution;
@@ -440,6 +479,25 @@ export const resolvePageEntry = (contributes: Pick<OpenChamberContributes, 'pane
   return contributes.page === true ? contributes.panel.entry : contributes.page.entry;
 };
 
+/**
+ * The HTML the Work Status section loads: `panel.entry` for `true`, the
+ * object's own `entry` otherwise, `null` when nothing is declared or `true`
+ * has no panel page to reuse.
+ */
+export const resolveStatusSectionEntry = (
+  contributes: Pick<OpenChamberContributes, 'panel' | 'statusSection'>,
+): string | null => {
+  const section = contributes.statusSection;
+  if (!section) return null;
+  return section === true ? contributes.panel.entry ?? null : section.entry;
+};
+
+/** Clamp a requested status section height to what the host allows. */
+export const clampStatusSectionHeight = (height: number): number => {
+  if (!Number.isFinite(height)) return GUEST_STATUS_SECTION_HEIGHT_DEFAULT;
+  return Math.min(GUEST_STATUS_SECTION_HEIGHT_MAX, Math.max(GUEST_STATUS_SECTION_HEIGHT_MIN, Math.round(height)));
+};
+
 export type OpenChamberEngines = {
   openchamber: string;
 };
@@ -465,6 +523,7 @@ export type ParseManifestErrorCode =
   | 'invalid-background'
   | 'invalid-attach'
   | 'invalid-page'
+  | 'invalid-status-section'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'

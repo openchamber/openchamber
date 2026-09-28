@@ -653,7 +653,7 @@ export function ScheduledTasksDialog() {
         // Master-detail: a scrollable project filter panel at the left, the
         // selected project's tasks at the right. The app Header shows the
         // surface title, so the page itself only carries the close affordance.
-        <div className="absolute inset-0 z-10 flex flex-col bg-surface-elevated">
+        <div className="absolute inset-0 z-10 flex flex-col bg-background">
           <div className="flex min-h-0 flex-1">
             <div className="flex w-60 flex-shrink-0 flex-col border-r border-border/50">
               <div className="flex-1 space-y-0.5 overflow-y-auto p-2">

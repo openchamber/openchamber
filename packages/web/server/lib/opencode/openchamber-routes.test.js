@@ -203,6 +203,24 @@ describe('OpenChamber desktop host update route', () => {
 });
 
 describe('OpenChamber foreground update route', () => {
+  it('marks an available update as blocked when the foreground server has no service manager', async () => {
+    const { app } = createApp();
+
+    const response = await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
+
+    expect(response.body).toMatchObject({ available: true, installBlocked: 'service-manager' });
+  });
+
+  it('leaves the update installable for a systemd-owned or daemon server', async () => {
+    const systemd = createApp({ environment: { INVOCATION_ID: 'systemd-invocation' } });
+    const daemon = createApp({ storedOptions: { launchMode: 'daemon' } });
+
+    for (const { app } of [systemd, daemon]) {
+      const response = await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
+      expect(response.body.installBlocked).toBeUndefined();
+    }
+  });
+
   it('rejects a foreground update when the server is not owned by systemd', async () => {
     const { app } = createApp();
 
@@ -333,4 +351,3 @@ describe('OpenChamber web update route on Windows', () => {
     expect(logError).toHaveBeenCalledOnce();
   });
 });
-

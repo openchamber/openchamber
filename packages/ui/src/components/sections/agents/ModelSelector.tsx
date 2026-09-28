@@ -72,14 +72,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     React.useEffect(() => {
         if (directory !== undefined) void loadProviders({ directory });
     }, [directory, loadProviders]);
-    const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore((state) => state.isMobile);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const providerOrder = useUIStore((state) => state.providerOrder);
-    const { favoriteModelsList, recentModelsList } = useModelLists();
+    const { favoriteModelsList, recentModelsList } = useModelLists(directory);
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const isActuallyMobile = isMobile || deviceIsMobile;
 
@@ -141,7 +140,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             providerOrder={providerOrder}
             favoriteModels={favoriteModelsList}
             recentModels={recentModelsList}
-            modelsMetadata={modelsMetadata}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
             onSelect={handleSelect}

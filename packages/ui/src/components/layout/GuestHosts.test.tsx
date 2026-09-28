@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { OpenCode } from '@opencode/client';
 import { Window } from 'happy-dom';
 import { hostMessageSchema } from '@openchamber/sdk/schemas';
 import type { GuestMessage, HostMessage } from '@openchamber/sdk';
@@ -43,17 +43,27 @@ test(`${variant.name}: actions and commands use the execution entry and clean up
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-    if (String(input).includes('/auth/url-token')) return Response.json({ token: 'scoped-test', expiresAt: Date.now() + 60_000 });
-    return Response.json({});
+    const target = String(input instanceof Request ? input.url : input);
+    if (target.includes('/auth/url-token')) return Response.json({ token: 'scoped-test', expiresAt: Date.now() + 60_000 });
+    // The sync bootstrap runs on the shared `opencodeClient`, not the provider's
+    // sdk prop, so its v2 list routes are answered here.
+    if (target.includes('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    if (target.includes('/session/active')) return Response.json({});
+    if (target.includes('/location')) return Response.json({ directory: '/visible', project: { id: 'project', directory: '/visible', canonical: '/visible' } });
+    return Response.json({ data: [] });
   });
   const notice = spyOn(toast, 'info').mockImplementation(() => 'toast');
   const error = spyOn(toast, 'error').mockImplementation(() => 'error');
   const clipboard = spyOn(dom.navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   const dismiss = spyOn(toast, 'dismiss').mockImplementation(() => 'dismissed');
-  const sdk = createOpencodeClient({ baseUrl: 'http://sync.test', fetch: async (request) => {
-    const url = new URL(request instanceof Request ? request.url : request.toString());
-    if (url.pathname.endsWith('/global/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
-    return Response.json(url.pathname.endsWith('/session/status') ? {} : []);
+  const sdk = OpenCode.make({ baseUrl: 'http://sync.test', fetch: async (request) => {
+    const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
+    if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const body = path.endsWith('/location')
+      ? { directory: '/visible', project: { id: 'project', directory: '/visible', canonical: '/visible' } }
+      : path.endsWith('/session/active') ? {}
+      : { data: [] };
+    return Response.json(body);
   } });
   const theme = getDefaultTheme(false);
   const themeContext: ThemeContextValue = {

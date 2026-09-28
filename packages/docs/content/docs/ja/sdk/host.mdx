@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | アプリの言語タグ |
 | `directory` | 現在のプロジェクトディレクトリ、または `null` |
 | `session` | `{ id, title, busy }` または `null`。タイトルがなければセッション ID になります。`busy` はライブの状態です。セッションが持っていれば `model` と `agent`(OpenCode のエージェント)も含まれます。 |
-| `surface` | レールは `panel`、添付ウィンドウは `dialog`、全画面は `page` |
+| `surface` | レールは `panel`、添付ウィンドウは `dialog`、全画面は `page`、Work Status パネルは `status` |
 | `item` | この画面が何のために開かれたか、または `null`。ユーザーがクリックした添付済みの項目(`attach` に渡したのと同じフィールド、`data` を含む)、または宣言したアクションから来たメッセージ(`kind: "message"`)かセッション(`kind: "session"`)。[アクション](/sdk/#アクションコマンドバッジ) を参照。 |
 | `connection` | あなたの連携の `{ connected, account }` |
 | `settings` | `integration.settings` で宣言した入力欄の値 |
@@ -65,6 +65,8 @@ const host = connectHost();
 | `generate({ prompt, system?, maxOutputTokens? })` | ユーザーの Small Model による一回限りのテキスト。`{ text }` を返す。`model` 権限が必要。 |
 | `onResolve(handler)` | スラッシュコマンドのハンドラーを登録する。`{ command, args }` を受け取り、添付する項目または `null` を返す。 |
 | `setBadge(count)` | レールのアイコンに数字(0 から 999)を表示する。`null` で消す |
+| `openCommit(sha)` | 現在のプロジェクトのそのコミットで Diff ビューを開く。`sha` は 7〜64 文字の 16 進数で、コミットは OpenChamber 自身が読み込みます。 |
+| `setHeight(px)` | Work Status セクションの高さを設定する。OpenChamber は 24〜320 ピクセルに収め、それより高い内容はページ内でスクロールします。他の場所では無視されます。 |
 
 ## attach、startSession、sessionLink
 
@@ -217,12 +219,13 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `NO_SERVICE` | ローカルサービスが未宣言、未承認、または未起動 |
 | `NOT_GRANTED` | この呼び出しに必要な権限をユーザーが承認していない |
 | `SERVICE_FAILED` | ローカルサービスがクラッシュした、または ready にならなかった |
-| `NO_DIRECTORY` | 開いているプロジェクトがない状態で相対ファイルパスを使った |
-| `NOT_FOUND` | 存在しないファイルに対する `readFile` |
+| `NO_DIRECTORY` | 開いているプロジェクトがない状態で相対ファイルパスを使った、または開いているプロジェクトがない状態で `openCommit` を呼んだ |
+| `NOT_FOUND` | 存在しないファイルに対する `readFile`、またはプロジェクトにないコミットへの `openCommit` |
 | `FILE_TOO_LARGE` | 読み込みまたは書き込み時にファイル内容が上限を超えた |
 | `DENIED` | オペレーティングシステムがファイル操作を拒否した |
 | `NO_MODEL` | 利用できる Small Model がない状態での `generate` |
 | `MODEL_FAILED` | Small Model がエラーを返した |
+| `UNSUPPORTED` | この OpenChamber では実行できない呼び出し。例: Diff ビューがない場所での `openCommit` |
 
 ## 関連
 

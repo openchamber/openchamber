@@ -28,6 +28,7 @@ import {
   observeWorktreeTopology,
   populateWorktreeWithLockRecovery,
   removeWorktree,
+  snapshotWorktree,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
   resetToCommit,
@@ -1689,11 +1690,14 @@ describe('removeWorktree', () => {
       runGit(repo, ['commit', '-m', 'Initial commit']);
       fs.writeFileSync(canary, 'sentinel');
 
+      const disposeInstance = vi.fn();
       await expect(removeWorktree(repo, {
         directory: sentinel,
         deleteLocalBranch: false,
+        disposeInstance,
       })).resolves.toBe(true);
       expect(fs.existsSync(canary)).toBe(true);
+      expect(disposeInstance).not.toHaveBeenCalled();
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;
@@ -1702,6 +1706,197 @@ describe('removeWorktree', () => {
       }
     }
   });
+
+  it('disposes the registered worktree instance before git removes the directory', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/dispose-order',
+        worktreeName: 'dispose-order',
+      });
+      const targetRealPath = fs.realpathSync(created.path);
+
+      let observed = null;
+      const disposeInstance = vi.fn(async (worktreeDirectory) => {
+        observed = {
+          realPath: fs.realpathSync(worktreeDirectory),
+          directoryExists: fs.existsSync(worktreeDirectory),
+        };
+      });
+
+      await expect(removeWorktree(repo, {
+        directory: created.path,
+        disposeInstance,
+      })).resolves.toBe(true);
+
+      expect(disposeInstance).toHaveBeenCalledTimes(1);
+      expect(observed).toEqual({ realPath: targetRealPath, directoryExists: true });
+      expect(fs.existsSync(created.path)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('warns about a failed instance disposal and still removes the worktree', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/dispose-failure',
+        worktreeName: 'dispose-failure',
+      });
+
+      const disposeInstance = vi.fn(async () => {
+        throw new Error('OpenCode API URL is not available');
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await expect(removeWorktree(repo, {
+          directory: created.path,
+          disposeInstance,
+        })).resolves.toBe(true);
+
+        expect(disposeInstance).toHaveBeenCalledTimes(1);
+        expect(fs.existsSync(created.path)).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(created.path),
+          'OpenCode API URL is not available'
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('never disposes the primary workspace', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+
+      const disposeInstance = vi.fn();
+      await expect(removeWorktree(repo, {
+        directory: repo,
+        disposeInstance,
+      })).rejects.toThrow('Cannot remove the primary workspace');
+      expect(disposeInstance).not.toHaveBeenCalled();
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('prunes the metadata a half-finished removal left behind', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'half-removed');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'half', worktree]);
+    // What a Windows lock leaves: git deleted these files, then stopped.
+    const metadata = path.join(repo, '.git', 'worktrees', 'half-removed');
+    for (const name of ['gitdir', 'HEAD', 'index']) fs.rmSync(path.join(metadata, name), { force: true });
+
+    await expect(removeWorktree(repo, { directory: worktree })).resolves.toBe(true);
+    expect(fs.existsSync(metadata)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// snapshotWorktree
+// ---------------------------------------------------------------------------
+
+describe('snapshotWorktree', () => {
+  const createSnapshotRepo = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'secret.env\n');
+    runGit(repo, ['add', 'README.md', '.gitignore']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    return repo;
+  };
+
+  it('captures staged, unstaged and untracked changes without touching the worktree', async () => {
+    if (!canRunGit()) return;
+    const repo = createSnapshotRepo();
+    const head = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Changed\n');
+    fs.writeFileSync(path.join(repo, 'staged.txt'), 'staged\n');
+    runGit(repo, ['add', 'staged.txt']);
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'untracked\n');
+    fs.writeFileSync(path.join(repo, 'secret.env'), 'TOKEN=1\n');
+    const statusBefore = runGit(repo, ['status', '--porcelain']);
+
+    const ref = 'refs/openchamber/runs/group-1/ses_abc';
+    const result = await snapshotWorktree(repo, { ref });
+
+    expect(result).toMatchObject({ ref, head });
+    expect(runGit(repo, ['rev-parse', ref]).trim()).toBe(result.commit);
+    expect(runGit(repo, ['rev-parse', `${result.commit}^`]).trim()).toBe(head);
+    const files = runGit(repo, ['ls-tree', '-r', '--name-only', result.commit]).trim().split('\n').sort();
+    expect(files).toEqual(['.gitignore', 'README.md', 'new.txt', 'staged.txt']);
+    expect(runGit(repo, ['show', `${result.commit}:README.md`])).toBe('# Changed\n');
+
+    expect(runGit(repo, ['rev-parse', 'HEAD']).trim()).toBe(head);
+    expect(runGit(repo, ['status', '--porcelain'])).toBe(statusBefore);
+    expect(runGit(repo, ['branch', '--list']).trim()).toBe('* main');
+  });
+
+  it('rejects refs outside the private namespace', async () => {
+    if (!canRunGit()) return;
+    const repo = createSnapshotRepo();
+    await expect(snapshotWorktree(repo, { ref: 'refs/heads/main' })).rejects.toThrow('Invalid snapshot ref');
+    await expect(snapshotWorktree(repo, { ref: 'refs/openchamber/runs/../heads' })).rejects.toThrow('Invalid snapshot ref');
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -2410,6 +2605,14 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
       if (endpoint === 'range-diff') expect(body.diff).toContain('+current local work');
       else expect(body.files).toEqual([{ path: 'local.txt', status: 'A' }]);
     }
+  });
+
+  it('does not treat a branch checked out from its own remote copy as its base', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['checkout', '-b', 'react', '--track', 'origin/react']);
+    expect(await getBranchBase(repository, 'react')).toEqual({ base: null });
+    runGit(repository, ['checkout', '--no-track', '-b', 'loose', 'origin/react']);
+    expect(await getBranchBase(repository, 'loose')).toEqual({ base: 'origin/react' });
   });
 
   it('asks for a new base after restacking and compares against the selected parent', async () => {

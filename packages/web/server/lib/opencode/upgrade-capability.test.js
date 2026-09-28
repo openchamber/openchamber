@@ -42,7 +42,7 @@ describe('OpenCode upgrade capability', () => {
     });
   });
 
-  it('allows OpenCode to upgrade a managed non-bundled binary', () => {
+  it('offers CLI upgrades for a managed non-bundled binary', () => {
     expect(resolveOpenCodeUpgradeCapability({
       isExternal: false,
       hasManagedProcess: true,

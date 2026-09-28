@@ -1561,9 +1561,14 @@ export const useGitBranchLabel = (directory: string | null) => {
 const allBranchesCacheRef = { current: new Map<string, string | null>() };
 const EMPTY_BRANCHES = new Map<string, string | null>();
 
+// While disabled the hook hands back the last map it returned while enabled,
+// not an empty one: a surface animating out (the mobile sessions drawer) keeps
+// its branch lines through the exit instead of dropping them mid-slide, and
+// the stable reference means a closed surface never re-renders on git changes.
 export const useGitAllBranches = (enabled = true) => {
+  const heldRef = React.useRef(EMPTY_BRANCHES);
   return useGitStore((state) => {
-    if (!enabled) return EMPTY_BRANCHES;
+    if (!enabled) return heldRef.current;
     const prev = allBranchesCacheRef.current;
     let same = prev.size === state.directories.size;
     if (same) {
@@ -1571,12 +1576,16 @@ export const useGitAllBranches = (enabled = true) => {
         if (prev.get(dir) !== (dirState.status?.current ?? null)) { same = false; break; }
       }
     }
-    if (same) return prev;
+    if (same) {
+      heldRef.current = prev;
+      return prev;
+    }
     const result = new Map<string, string | null>();
     for (const [dir, dirState] of state.directories) {
       result.set(dir, dirState.status?.current ?? null);
     }
     allBranchesCacheRef.current = result;
+    heldRef.current = result;
     return result;
   });
 };

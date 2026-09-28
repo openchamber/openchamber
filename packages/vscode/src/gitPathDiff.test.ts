@@ -12,6 +12,10 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// The submodule cases spawn about twenty git commands. Each takes a few hundred
+// milliseconds on Windows, which alone passes Bun's 5 s default.
+const SUBMODULE_TIMEOUT = { timeout: 60_000 };
+
 const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 const createRepository = () => {
@@ -52,7 +56,7 @@ test('a nested repository listed as a directory is unavailable', async () => {
   assert.equal(target.kind === 'unavailable' ? target.reason : target.kind, 'nested_repository');
 });
 
-test('a submodule with only untracked files reports them although its patch is empty', async () => {
+test('a submodule with only untracked files reports them although its patch is empty', SUBMODULE_TIMEOUT, async () => {
   const repository = createRepository();
   const library = createRepository();
   git(repository, ['-c', 'protocol.file.allow=always', 'submodule', 'add', library, 'sub']);
@@ -83,7 +87,7 @@ test('a submodule with only untracked files reports them although its patch is e
   assert.equal((await readSubmoduleState(execGit, subfolder, nestedTarget)).headCommit, recorded);
 });
 
-test('a submodule in a merge conflict reports the conflict instead of an unchanged commit', async () => {
+test('a submodule in a merge conflict reports the conflict instead of an unchanged commit', SUBMODULE_TIMEOUT, async () => {
   const repository = createRepository();
   const library = createRepository();
   const libraryHead = git(library, ['rev-parse', 'HEAD']).trim();

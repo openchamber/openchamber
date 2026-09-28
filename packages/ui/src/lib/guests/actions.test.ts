@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { GUEST_ITEM_MESSAGE_TEXT_MAX, GUEST_ITEM_SESSION_MAX } from '@openchamber/sdk';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part, SyntheticMessage } from '@/lib/opencode/model';
 
 import {
   buildGuestMessageItem,
@@ -13,12 +13,39 @@ import type { InstalledGuest } from './types.ts';
 import { enabledGuestSurfaces } from './surfaces.ts';
 import { parseGuestCatalogJson } from './parse.ts';
 
-// SAFETY: the builders under test read only id, role, time.created, and the
-// text parts; the rest of an OpenCode message record never enters the item.
-const record = (id: string, role: 'user' | 'assistant', text: string, created = 1) => ({
-  info: { id, role, sessionID: 'ses-1', time: { created } } as Message,
-  parts: [{ id: `${id}-p`, sessionID: 'ses-1', messageID: id, type: 'text', text } as Part],
+const assistant = (id: string, created: number): Message => ({
+  id, role: 'assistant', sessionID: 'ses-1', time: { created },
+  agent: 'build', providerID: 'anthropic', modelID: 'sonnet',
 });
+
+const record = (id: string, role: 'user' | 'assistant', text: string, created = 1) => ({
+  info: role === 'user'
+    ? { id, role, sessionID: 'ses-1', time: { created } }
+    : assistant(id, created),
+  parts: [{ id: `${id}-p`, sessionID: 'ses-1', messageID: id, type: 'text' as const, text } satisfies Part],
+});
+
+const NO_PARTS: readonly Part[] = [];
+
+/** A plumbing role v2 interleaves with the conversation; it carries no parts. */
+const plumbing = (id: string, created: number) => ({
+  info: { id, role: 'system' as const, sessionID: 'ses-1', time: { created }, text: 'instructions changed' },
+  parts: [...NO_PARTS],
+});
+
+/** Context the user attached — v2 delivers it as its own synthetic message. */
+const attachedContext = (id: string, created: number) => {
+  const info: SyntheticMessage = {
+    id, role: 'synthetic', sessionID: 'ses-1', time: { created },
+    text: 'Quoted from a.ts',
+    metadata: {
+      openchamberContext: {
+        kind: 'file-quote', fileLabel: 'a.ts', quote: 'const a = 1;', text: 'look at this',
+      },
+    },
+  };
+  return { info, parts: [...NO_PARTS] };
+};
 
 const session = { sessionId: 'ses-1', sessionTitle: '  Hello  ', directory: '/repo' };
 
@@ -98,6 +125,19 @@ describe('buildGuestSessionItem', () => {
       { id: 'm3', role: 'assistant', text: 'Hello back', createdAt: 30 },
     ]);
     expect(item.truncated).toBeUndefined();
+  });
+
+  test('keeps attached context on the user side and drops plumbing roles', () => {
+    const item = buildGuestSessionItem('summarize', session, [
+      attachedContext('c1', 5),
+      plumbing('s1', 6),
+      record('m1', 'user', 'Hi', 10),
+    ]);
+    expect(item.messages?.map((message) => ({ id: message.id, role: message.role }))).toEqual([
+      { id: 'c1', role: 'user' },
+      { id: 'm1', role: 'user' },
+    ]);
+    expect(item.messages?.[0].text).toContain('const a = 1;');
   });
 
   test('drops the oldest messages until the item fits and marks it truncated', () => {

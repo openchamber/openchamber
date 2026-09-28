@@ -1,262 +1,355 @@
-import { describe, expect, test } from "bun:test"
-import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
+import type { SyncEvent } from "@/lib/opencode/events"
+import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
+import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
+import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { createEventPipeline } from "./event-pipeline"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
   setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
 })
 
-function partUpdatedEvent(text: string): Event {
-  return {
-    type: "message.part.updated",
-    properties: {
-      part: {
-        id: "prt_1",
-        messageID: "msg_1",
-        sessionID: "ses_1",
-        type: "text",
-        text,
-      },
-    },
-  } as Event
+const base = { id: "evt_1", created: 1000, location: { directory: "/repo" } }
+const durable = { aggregateID: "ses_1", seq: 1, version: 1 as const }
+
+function textEnded(text: string): OpenCodeEvent {
+  return { ...base, type: "session.text.ended", durable, data: { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text } }
 }
 
-function deltaEvent(delta: string): Event {
-  return {
-    type: "message.part.delta",
-    properties: {
-      messageID: "msg_1",
-      partID: "prt_1",
-      field: "text",
-      delta,
-    },
-  } as Event
+function textDelta(delta: string): OpenCodeEvent {
+  return { ...base, type: "session.text.delta", data: { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, delta } }
 }
 
-function statusEvent(type: "busy" | "retry"): Event {
+function statusEvent(type: "busy" | "retry"): OpenCodeEvent {
   return {
+    ...base,
     type: "session.status",
-    properties: {
+    data: {
       sessionID: "ses_1",
-      status: type === "busy"
-        ? { type }
-        : { type, attempt: 1, message: "retrying", next: 1 },
+      status: type === "busy" ? { type } : { type, attempt: 1, message: "retrying", next: 1 },
     },
-  } as Event
+  }
 }
 
-function createSdk(events: Event[], streamFinished: () => void): OpencodeClient {
-  return {
-    global: {
-      event: async ({ signal }: { signal: AbortSignal }) => ({
-        stream: (async function* () {
-          for (const payload of events) {
-            yield { directory: "/repo", payload }
-          }
-          streamFinished()
-          await new Promise<void>((resolve) => {
-            if (signal.aborted) {
-              resolve()
-              return
-            }
-            signal.addEventListener("abort", () => resolve(), { once: true })
-          })
-        })(),
-      }),
+/** A raw stream payload: wire events, or OpenChamber's own bridge events. */
+type StreamPayload = OpenCodeEvent | { type: string; properties: Record<string, string> }
+
+/** `keepalives` counts SSE comments sent before the events. They are activity without an event. */
+function createSdk(events: StreamPayload[], streamFinished: () => void, keepalives = 0): OpenCodeClient {
+  const subscribe = ({ signal, onActivity }: { signal?: AbortSignal; onActivity?: () => void }) => ({
+    async *[Symbol.asyncIterator]() {
+      for (let sent = 0; sent < keepalives; sent += 1) {
+        onActivity?.()
+      }
+      for (const payload of events) {
+        yield payload as OpenCodeEvent
+      }
+      streamFinished()
+      await new Promise<void>((resolve) => {
+        if (!signal || signal.aborted) {
+          resolve()
+          return
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true })
+      })
     },
-  } as unknown as OpencodeClient
+  })
+  // SAFETY: the pipeline only touches `event.subscribe` on the client.
+  return { event: { subscribe } } as unknown as OpenCodeClient
+}
+
+const describeEvent = (event: SyncEvent): string => {
+  if (event.type === "message.part.delta") return `delta:${event.properties.delta}`
+  if (event.type === "message.part.updated" && event.properties.part.type === "text") return `updated:${event.properties.part.text}`
+  return event.type
+}
+
+async function collect(events: StreamPayload[], expected: number): Promise<{ directory: string; events: SyncEvent[] }> {
+  let resolveStreamFinished!: () => void
+  const streamFinished = new Promise<void>((resolve) => {
+    resolveStreamFinished = resolve
+  })
+  let resolveDelivered!: () => void
+  const deliveredAll = new Promise<void>((resolve) => {
+    resolveDelivered = resolve
+  })
+  const delivered: SyncEvent[] = []
+  let deliveredDirectory = ""
+  const pipeline = createEventPipeline({
+    sdk: createSdk(events, resolveStreamFinished),
+    onEvents: (directory, batch) => {
+      deliveredDirectory = directory
+      delivered.push(...batch)
+      if (delivered.length >= expected) resolveDelivered()
+    },
+    transport: "sse",
+    heartbeatTimeoutMs: 1_000,
+  })
+  try {
+    await streamFinished
+    await Promise.race([deliveredAll, failAfter(500)])
+  } finally {
+    pipeline.cleanup()
+  }
+  return { directory: deliveredDirectory, events: delivered }
 }
 
 describe("createEventPipeline", () => {
-  test("delivers one ordered batch per directory flush", async () => {
-    let resolveStreamFinished!: () => void
-    const streamFinished = new Promise<void>((resolve) => {
-      resolveStreamFinished = resolve
-    })
-    let resolveDelivered!: (events: readonly Event[]) => void
-    const deliveredBatch = new Promise<readonly Event[]>((resolve) => {
-      resolveDelivered = resolve
-    })
-    const pipeline = createEventPipeline({
-      sdk: createSdk([
-        partUpdatedEvent("a"),
-        deltaEvent("b"),
-        partUpdatedEvent("ab"),
-      ], resolveStreamFinished),
-      onEvents: (_directory, events) => resolveDelivered([...events]),
-      transport: "sse",
-      heartbeatTimeoutMs: 1_000,
-    })
-
-    try {
-      await streamFinished
-      const delivered = await Promise.race([deliveredBatch, failAfter(500)])
-      expect(delivered.map((event) => event.type)).toEqual([
-        "message.part.updated",
-        "message.part.delta",
-        "message.part.updated",
-      ])
-    } finally {
-      pipeline.cleanup()
-    }
+  test("translates wire events, routes them by location, and delivers one ordered batch", async () => {
+    const { directory, events } = await collect([textEnded("a"), textDelta("b"), textEnded("ab")], 3)
+    expect(directory).toBe("/repo")
+    expect(events.map(describeEvent)).toEqual(["updated:a", "delta:b", "updated:ab"])
   })
 
-  test("does not coalesce session status across an idle barrier", async () => {
-    let resolveStreamFinished!: () => void
-    const streamFinished = new Promise<void>((resolve) => {
-      resolveStreamFinished = resolve
-    })
-    let resolveDelivered!: (events: readonly Event[]) => void
-    const deliveredBatch = new Promise<readonly Event[]>((resolve) => {
-      resolveDelivered = resolve
-    })
-    const pipeline = createEventPipeline({
-      sdk: createSdk([
-        statusEvent("busy"),
-        { type: "session.idle", properties: { sessionID: "ses_1" } } as Event,
-        statusEvent("retry"),
-      ], resolveStreamFinished),
-      onEvents: (_directory, events) => resolveDelivered([...events]),
-      transport: "sse",
-      heartbeatTimeoutMs: 1_000,
-    })
-
-    try {
-      await streamFinished
-      const delivered = await Promise.race([deliveredBatch, failAfter(500)])
-      expect(delivered.map((event) => event.type)).toEqual([
-        "session.status",
-        "session.idle",
-        "session.status",
-      ])
-      expect((delivered[2]?.properties as { status?: { type?: string } }).status?.type).toBe("retry")
-    } finally {
-      pipeline.cleanup()
-    }
-  })
-
-  test("preserves part update order around text deltas", async () => {
-    let resolveStreamFinished!: () => void
-    const streamFinished = new Promise<void>((resolve) => {
-      resolveStreamFinished = resolve
-    })
-    let resolveDelivered!: () => void
-    const deliveredAll = new Promise<void>((resolve) => {
-      resolveDelivered = resolve
-    })
-    const delivered: Event[] = []
-    const pipeline = createEventPipeline({
-      sdk: createSdk([
-        partUpdatedEvent("a"),
-        deltaEvent("b"),
-        partUpdatedEvent("ab"),
-      ], resolveStreamFinished),
-      onEvent: (_directory, payload) => {
-        delivered.push(payload)
-        if (delivered.length === 3) {
-          resolveDelivered()
-        }
-      },
-      transport: "sse",
-      heartbeatTimeoutMs: 1_000,
-    })
-
-    try {
-      await streamFinished
-      await Promise.race([deliveredAll, failAfter(500)])
-    } finally {
-      pipeline.cleanup()
-    }
-
-    expect(delivered.map((event) => {
-      if (event.type === "message.part.delta") {
-        return `delta:${(event.properties as { delta: string }).delta}`
-      }
-      return `updated:${((event.properties as { part: { text: string } }).part).text}`
-    })).toEqual(["updated:a", "delta:b", "updated:ab"])
+  test("merges consecutive deltas for one part", async () => {
+    const { events } = await collect([textEnded(""), textDelta("b"), textDelta("c")], 2)
+    expect(events.map(describeEvent)).toEqual(["updated:", "delta:bc"])
   })
 
   test("does not merge deltas across an intervening part snapshot", async () => {
-    let resolveStreamFinished!: () => void
-    const streamFinished = new Promise<void>((resolve) => {
-      resolveStreamFinished = resolve
-    })
-    let resolveDelivered!: () => void
-    const deliveredAll = new Promise<void>((resolve) => {
-      resolveDelivered = resolve
-    })
-    const delivered: Event[] = []
-    const pipeline = createEventPipeline({
-      sdk: createSdk([
-        partUpdatedEvent("a"),
-        deltaEvent("b"),
-        partUpdatedEvent("ab"),
-        deltaEvent("c"),
-      ], resolveStreamFinished),
-      onEvent: (_directory, payload) => {
-        delivered.push(payload)
-        if (delivered.length === 4) {
-          resolveDelivered()
-        }
-      },
-      transport: "sse",
-      heartbeatTimeoutMs: 1_000,
-    })
-
-    try {
-      await streamFinished
-      await Promise.race([deliveredAll, new Promise<void>((resolve) => setTimeout(resolve, 300))])
-    } finally {
-      pipeline.cleanup()
-    }
-
     // The "ab" snapshot is a coalescing barrier: the trailing "c" delta must
     // stay a separate event after it, not merge into the "b" delta queued
     // before the snapshot (which the snapshot would then overwrite).
-    expect(delivered.map((event) => {
-      if (event.type === "message.part.delta") {
-        return `delta:${(event.properties as { delta: string }).delta}`
-      }
-      return `updated:${((event.properties as { part: { text: string } }).part).text}`
-    })).toEqual(["updated:a", "delta:b", "updated:ab", "delta:c"])
+    const { events } = await collect([textEnded("a"), textDelta("b"), textEnded("ab"), textDelta("c")], 4)
+    expect(events.map(describeEvent)).toEqual(["updated:a", "delta:b", "updated:ab", "delta:c"])
   })
 
-  test("normalizes openchamber session status events", async () => {
+  test("does not coalesce session status across an idle barrier", async () => {
+    const { events } = await collect(
+      [statusEvent("busy"), { ...base, type: "session.idle", data: { sessionID: "ses_1" } }, statusEvent("retry")],
+      3,
+    )
+    expect(events.map((event) => event.type)).toEqual(["session.status", "session.idle", "session.status"])
+    const last = events[2]
+    expect(last.type === "session.status" && last.properties.status.type).toBe("retry")
+  })
+
+  test("folds successive session patches into one", async () => {
+    const { events } = await collect(
+      [
+        { ...base, type: "session.renamed", durable, data: { sessionID: "ses_1", title: "New" } },
+        { ...base, type: "session.usage.updated", data: { sessionID: "ses_1", cost: 1, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } } },
+      ],
+      1,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: "session.patched", properties: { patch: { title: "New", cost: 1, time: { updated: 1000 } } } })
+  })
+
+  test("bridges openchamber session status events into session.status", async () => {
+    const { directory, events } = await collect(
+      [{ type: "openchamber:session-status", properties: { sessionID: "ses_1", status: "idle" } }],
+      1,
+    )
+    expect(directory).toBe("global")
+    expect(events[0]).toEqual({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } })
+  })
+
+  test("bridges openchamber archive announcements into session patches", async () => {
+    const { events } = await collect(
+      [{ type: "openchamber:session-archived", properties: { sessionID: "ses_1", archivedAt: 42 } as never }],
+      1,
+    )
+    expect(events[0]).toEqual({ type: "session.patched", properties: { sessionID: "ses_1", patch: { time: { archived: 42 } } } })
+  })
+
+  test("bridges openchamber metadata announcements into session patches", async () => {
+    const { events } = await collect(
+      [{ type: "openchamber:session-metadata", properties: { sessionID: "ses_1", metadata: { pinned: true } } as never }],
+      1,
+    )
+    expect(events[0]).toEqual({ type: "session.patched", properties: { sessionID: "ses_1", patch: { metadata: { pinned: true } } } })
+  })
+
+  test("passes OpenChamber notification and auto-accept frames through typed", async () => {
+    const { events } = await collect(
+      [
+        { type: "openchamber:notification", properties: { kind: "agent-complete", sessionId: "ses_1", title: "Done" } },
+        { type: "openchamber:permission-auto-accept.updated", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } as never },
+      ],
+      2,
+    )
+    expect(events[0]).toEqual({ type: "openchamber.notification", properties: { kind: "agent-complete", sessionId: "ses_1", title: "Done" } })
+    expect(events[1]).toEqual({ type: "openchamber.permission-auto-accept", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } })
+  })
+
+  test("ignores payloads that are neither wire events nor bridge events", async () => {
+    const { events } = await collect([{ type: "something.else", properties: {} }, textEnded("x")], 1)
+    expect(events.map(describeEvent)).toEqual(["updated:x"])
+  })
+
+  test("hands a space-stream announcement to its owner and delivers no event for it", async () => {
     let resolveStreamFinished!: () => void
-    const streamFinished = new Promise<void>((resolve) => {
-      resolveStreamFinished = resolve
-    })
-    let resolveDelivered!: (event: Event) => void
-    const deliveredEvent = new Promise<Event>((resolve) => {
-      resolveDelivered = resolve
-    })
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const delivered: SyncEvent[] = []
+    const announced: Array<{ spaceId: string; status: string; wasReady: boolean }> = []
     const pipeline = createEventPipeline({
       sdk: createSdk([
-        {
-          type: "openchamber:session-status",
-          properties: {
-            sessionID: "ses_1",
-            status: "idle",
-          },
-        } as unknown as Event,
+        { type: "openchamber:space-stream", properties: { spaceId: "a1b2c3d4e5f6", status: "connected", wasReady: false, timestamp: 1 } as never },
+        { type: "openchamber:space-stream", properties: { spaceId: "not-an-id", status: "connected", wasReady: false } as never },
+        textEnded("a"),
       ], resolveStreamFinished),
-      onEvent: (_directory, payload) => {
-        resolveDelivered(payload)
-      },
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onSpaceStream: (details) => { announced.push(details) },
       transport: "sse",
       heartbeatTimeoutMs: 1_000,
     })
-
     try {
       await streamFinished
-      const delivered = await Promise.race([deliveredEvent, failAfter(500)])
-      expect(delivered.type).toBe("session.status")
-      expect(delivered.properties).toEqual({
-        sessionID: "ses_1",
-        status: { type: "idle" },
-      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
     } finally {
       pipeline.cleanup()
     }
+    expect(announced).toEqual([{ spaceId: "a1b2c3d4e5f6", status: "connected", wasReady: false }])
+    expect(delivered.map(describeEvent)).toEqual(["updated:a"])
+  })
+
+  test("hands a creation step of a space to its owner, failure included, and delivers no event for it", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const delivered: SyncEvent[] = []
+    const steps: Array<{ spaceId: string; step: string; failure: { code: string; message: string } | null }> = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "creating", failure: null, timestamp: 1 } as never },
+        { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "failed", failure: { code: "docker_daemon_unreachable", message: "down", details: null }, timestamp: 2 } as never },
+        { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "dancing", failure: null } as never },
+        textEnded("a"),
+      ], resolveStreamFinished),
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onSpaceProgress: (progress) => { steps.push(progress) },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      await streamFinished
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    expect(steps).toEqual([
+      { spaceId: "a1b2c3d4e5f6", step: "creating", failure: null },
+      { spaceId: "a1b2c3d4e5f6", step: "failed", failure: { code: "docker_daemon_unreachable", message: "down" } },
+    ])
+    expect(delivered.map(describeEvent)).toEqual(["updated:a"])
+  })
+
+  test("reports keepalives that carry no event as stream activity", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const delivered: SyncEvent[] = []
+    let activity = 0
+    const pipeline = createEventPipeline({
+      sdk: createSdk([textEnded("a")], resolveStreamFinished, 2),
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onStreamActivity: () => { activity += 1 },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      await streamFinished
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    // Two keepalives and one event; only the event is delivered.
+    expect(activity).toBe(3)
+    expect(delivered.map(describeEvent)).toEqual(["updated:a"])
+  })
+
+  test("reports no stream activity for an attempt that has received nothing", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    let activity = 0
+    const pipeline = createEventPipeline({
+      sdk: createSdk([], resolveStreamFinished),
+      onEvents: () => undefined,
+      onStreamActivity: () => { activity += 1 },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      await streamFinished
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    expect(activity).toBe(0)
+  })
+})
+
+/** A relay tunnel socket the test drives by hand. */
+function createFakeSocket(): RelayTunnelWebSocket {
+  let readyState = 1
+  return {
+    get readyState() { return readyState },
+    onopen: null,
+    onmessage: null,
+    onerror: null,
+    onclose: null,
+    send: () => undefined,
+    close: () => { readyState = 3 },
+  }
+}
+
+describe("createEventPipeline over the WebSocket transport", () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "window", {
+      value: Object.assign(new EventTarget(), { location: new URL("http://runtime.test") }),
+      configurable: true,
+      writable: true,
+    })
+    // A valid URL token lets the attempt open the socket without minting one.
+    setRuntimeUrlAuthToken("fixture-url-token", Date.now() + 10 * 60_000)
+  })
+
+  afterEach(() => {
+    deactivateRelayTunnel()
+    clearRuntimeUrlAuthToken()
+    Reflect.deleteProperty(globalThis, "window")
+  })
+
+  test("counts a heartbeat frame as stream activity without delivering an event", async () => {
+    const paths: string[] = []
+    const sockets: RelayTunnelWebSocket[] = []
+    const tunnel: RelayTunnelClient = {
+      async fetch() { throw new Error("the WebSocket transport must not fetch") },
+      openWebSocket(pathWithQuery) {
+        paths.push(pathWithQuery)
+        const socket = createFakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      getStatus: () => ({ state: "connected" }),
+      subscribeStatus: () => () => undefined,
+      close: () => undefined,
+    }
+    adoptRelayTunnel({ relayUrl: "wss://relay.test", serverId: "fixture", hostEncPubJwk: {} }, tunnel)
+    const delivered: SyncEvent[] = []
+    let activity = 0
+    const pipeline = createEventPipeline({
+      sdk: createSdk([], () => undefined),
+      onEvents: (_directory, batch) => { delivered.push(...batch) },
+      onStreamActivity: () => { activity += 1 },
+      transport: "ws",
+      heartbeatTimeoutMs: 1_000,
+    })
+    try {
+      for (let i = 0; i < 20 && sockets.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(sockets).toHaveLength(1)
+      expect(paths[0]).toContain("/api/global/event/ws")
+      const socket = sockets[0]
+      socket.onmessage?.({ data: JSON.stringify({ type: "ready" }) })
+      socket.onmessage?.({
+        data: JSON.stringify({ type: "event", payload: { type: "openchamber:heartbeat", timestamp: 1 }, directory: "global" }),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      pipeline.cleanup()
+    }
+    // The ready frame and the heartbeat frame both prove the socket is alive. Neither is an event.
+    expect(activity).toBe(2)
+    expect(delivered).toEqual([])
   })
 })

@@ -48,7 +48,7 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
   const scope = JSON.stringify([runtimeKey, normalizePath(directory ?? syncDirectory), sessionId]);
   const status = useDirectorySync(
     React.useCallback((state) => sessionId
-      ? state.session_status[sessionId]?.type ?? (state.sessionStatusReady ? 'idle' : 'unknown')
+      ? state.session_status[sessionId]?.type ?? (state.sessionStatusReady && !state.sessionStatusInvalidated?.[sessionId] ? 'idle' : 'unknown')
       : 'unknown', [sessionId]),
     directory ?? undefined,
   );

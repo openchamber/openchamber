@@ -4,13 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
-const workspaceRoot = path.resolve(electronRoot, '../..');
 const outputDir = path.join(electronRoot, 'resources', 'opencode-cli');
 const cacheRoot = path.join(electronRoot, '.cache', 'opencode-cli');
-const rootPackagePath = path.join(workspaceRoot, 'package.json');
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -27,45 +26,32 @@ const run = (command, args, options = {}) => {
   return result;
 };
 
-const readPinnedSdkVersion = () => {
-  const pkg = JSON.parse(fs.readFileSync(rootPackagePath, 'utf8'));
-  const version = pkg.dependencies?.['@opencode-ai/sdk'];
-  if (typeof version !== 'string' || !version.trim()) {
-    throw new Error('Missing @opencode-ai/sdk dependency in root package.json');
-  }
-  const trimmed = version.trim();
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(trimmed)) {
-    throw new Error(`@opencode-ai/sdk must be pinned to an exact version for desktop CLI bundling, got: ${trimmed}`);
-  }
-  return trimmed;
-};
-
+/**
+ * OpenCode 2.x ships on npm, not as GitHub release assets: `@opencode/cli`
+ * resolves a platform package (`@opencode/cli-<os>-<arch>`) whose tarball
+ * holds the compiled binary under `package/bin/`. OpenCode's own installer
+ * (`https://opencode.ai/v2/install`) downloads exactly these tarballs, so the
+ * bundled desktop binary comes from the same place.
+ */
 const artifactForPlatform = (platform, targetArchitecture) => {
   const arch = targetArchitecture.opencode;
   if (platform === 'darwin') {
-    if (arch === 'arm64') return { name: 'opencode-darwin-arm64.zip', binary: 'opencode' };
-    if (arch === 'x64') return { name: 'opencode-darwin-x64-baseline.zip', binary: 'opencode' };
+    if (arch === 'arm64') return { target: 'darwin-arm64', binary: 'opencode' };
+    if (arch === 'x64') return { target: 'darwin-x64-baseline', binary: 'opencode' };
   }
   if (platform === 'win32') {
-    // TEMPORARY WORKAROUND — Windows ARM64: native opencode.exe fails with a Bun
-    // FFI/TinyCC dlopen error (https://github.com/anomalyco/opencode/issues/19130).
-    // Bundle x64-baseline instead (runs under x64 emulation); OpenCode self-upgrade
-    // is disabled elsewhere so it can't overwrite with the broken ARM64 build.
-    // Remove this block and restore the original below when the upstream issue
-    // is resolved.
-    // --- ORIGINAL (restore when ARM64 is fixed) ---
-    // if (arch === 'arm64') return { name: 'opencode-windows-arm64.zip', binary: 'opencode.exe' };
-    // if (arch === 'x64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };
-    // --- END ORIGINAL ---
-    if (arch === 'arm64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };
-    if (arch === 'x64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };
+    if (arch === 'arm64') return { target: 'windows-arm64', binary: 'opencode.exe' };
+    if (arch === 'x64') return { target: 'windows-x64-baseline', binary: 'opencode.exe' };
   }
   if (platform === 'linux') {
-    if (arch === 'arm64') return { name: 'opencode-linux-arm64.tar.gz', binary: 'opencode' };
-    if (arch === 'x64') return { name: 'opencode-linux-x64-baseline.tar.gz', binary: 'opencode' };
+    if (arch === 'arm64') return { target: 'linux-arm64', binary: 'opencode' };
+    if (arch === 'x64') return { target: 'linux-x64-baseline', binary: 'opencode' };
   }
   throw new Error(`No OpenCode CLI artifact mapping for ${platform}/${arch}`);
 };
+
+const artifactUrl = (target, version) =>
+  `https://registry.npmjs.org/@opencode/cli-${target}/-/cli-${target}-${version}.tgz`;
 
 const outputBinaryPath = (binaryName) => path.join(outputDir, binaryName);
 
@@ -78,7 +64,7 @@ const readBinaryVersion = (binaryPath) => {
     windowsHide: true,
   });
   if (result.status !== 0) return null;
-  return (result.stdout || '').trim().split(/\s+/)[0] || null;
+  return parseOpenCodeCliVersion(result.stdout) || null;
 };
 
 const ensureExecutable = (filePath) => {
@@ -101,27 +87,11 @@ const download = async (url, destination) => {
 const extractArchive = (archivePath, destination) => {
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
-  if (archivePath.endsWith('.zip')) {
-    if (process.platform === 'win32') {
-      run('powershell.exe', [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        `Expand-Archive -LiteralPath ${JSON.stringify(archivePath)} -DestinationPath ${JSON.stringify(destination)} -Force`,
-      ]);
-      return;
-    }
-    run('unzip', ['-q', archivePath, '-d', destination]);
-    return;
-  }
-  if (archivePath.endsWith('.tar.gz')) {
-    run('tar', ['-xzf', archivePath, '-C', destination]);
-    return;
-  }
-  throw new Error(`Unsupported OpenCode CLI archive: ${archivePath}`);
+  // npm tarballs are gzipped tar on every platform; Windows 10+ ships bsdtar.
+  // The archive is addressed relative to the destination: under Git Bash on
+  // Windows, `tar` is GNU tar, which reads an absolute `D:\...` path as a
+  // remote host ("Cannot connect to D:").
+  run('tar', ['-xzf', path.relative(destination, archivePath)], { cwd: destination });
 };
 
 const findBinary = (root, binaryName) => {
@@ -140,7 +110,7 @@ const findBinary = (root, binaryName) => {
 };
 
 const main = async () => {
-  const version = process.env.OPENCHAMBER_OPENCODE_CLI_VERSION || readPinnedSdkVersion();
+  const version = process.env.OPENCHAMBER_OPENCODE_CLI_VERSION || readPinnedOpenCodeCliVersion();
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`Invalid OpenCode CLI version: ${version}`);
   }
@@ -155,10 +125,11 @@ const main = async () => {
   }
 
   const cacheDir = path.join(cacheRoot, version, `${process.platform}-${targetArchitecture.opencode}`);
-  const archivePath = path.join(cacheDir, artifact.name);
-  const url = `https://github.com/anomalyco/opencode/releases/download/v${version}/${artifact.name}`;
+  const archiveName = `cli-${artifact.target}-${version}.tgz`;
+  const archivePath = path.join(cacheDir, archiveName);
+  const url = artifactUrl(artifact.target, version);
   if (!fs.existsSync(archivePath)) {
-    console.log(`[electron] downloading OpenCode CLI ${version}: ${artifact.name}`);
+    console.log(`[electron] downloading OpenCode CLI ${version}: @opencode/cli-${artifact.target}`);
     await download(url, archivePath);
   } else {
     console.log(`[electron] using cached OpenCode CLI archive: ${archivePath}`);

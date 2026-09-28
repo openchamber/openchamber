@@ -1,3 +1,5 @@
+import { installGuestScrollbarActivity } from '../scrollbar-style.ts';
+
 const STYLE_ID = 'oc-sdk-ui-style';
 
 /** Every mount returns this. `update` merges props and repaints; `dispose` removes the node and every listener. */
@@ -20,6 +22,8 @@ export const ensureStyle = (css: string): void => {
     }
     return;
   }
+  // Kit pages previewed outside the host still get scroll-time scrollbars.
+  installGuestScrollbarActivity(document);
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = css;

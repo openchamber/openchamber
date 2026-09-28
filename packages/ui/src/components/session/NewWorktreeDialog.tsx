@@ -1084,7 +1084,7 @@ export function NewWorktreeDialog({
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
             : t('session.newWorktree.newSessionTitle');
 
-        const session = await sessionActions.createSession(sessionTitle, metadata.path, null);
+        const session = await sessionActions.createSession(sessionTitle, metadata.path);
         if (!session?.id) {
           throw new Error('Failed to create session');
         }

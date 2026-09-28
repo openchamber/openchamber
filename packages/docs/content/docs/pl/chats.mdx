@@ -1,0 +1,49 @@
+---
+title: Czaty
+description: Zwykłe rozmowy z agentem, poza jakimkolwiek projektem.
+---
+
+# Czaty
+
+Czat to zwykła rozmowa z agentem, poza jakimkolwiek projektem. Służy do rzeczy, które nie mają nic wspólnego z Twoimi bazami kodu: jak spatchować KDE pod FreeBSD, co robi wyrażenie regularne, szkic maila. Agent pracuje w tymczasowym folderze, bez repozytorium, bez gałęzi i bez kontekstu Twoich projektów obciążającego rozmowę.
+
+## Jak zacząć czat
+
+Najprościej kliknąć **+** przy sekcji **Czaty** w pasku bocznym. Na telefonie stuknij **Nowy czat** na górze listy sesji albo **+** przy czatach.
+
+**Mod+N** (Cmd+N na macOS, Ctrl+N w innych systemach) i **Nowa sesja** w palecie poleceń otwierają nową sesję po tej stronie, której używałeś ostatnio: czat, jeśli Twoja ostatnia nowa sesja była czatem, a w przeciwnym razie Twój projekt. Przed wysłaniem pierwszej wiadomości możesz przełączyć ją na czaty.
+
+## Gdzie są czaty
+
+Czaty mają własną sekcję na górze paska bocznego, nad [W toku](/pl/sessions-in-work/) i Twoimi projektami. Są posortowane tak jak inne sesje, od najświeższej aktywności, a przypięte czaty zostają na górze. W trybie Timeline sekcja pokazuje trzy najnowsze czaty, a **Pokaż więcej sesji** wczytuje resztę. Sekcję można zwinąć jak każdą inną.
+
+Na telefonie czaty są nad listą projektów w panelu sesji.
+
+## Co czat może, a czego nie
+
+Każdy czat dostaje własny pusty folder, więc agent i tak może tam tworzyć i edytować pliki: skrypt, szybki prototyp, przekonwertowany dokument. Czego czat nie ma:
+
+- statusu git, gałęzi ani worktree
+- przenoszenia do toku: czaty nigdy nie pojawiają się w [W toku](/pl/sessions-in-work/)
+- realizacji planu w nowej sesji
+- startu z zadania w Linear
+
+Notatki, zadania i plany działają. Wszystkie czaty dzielą jeden wspólny zestaw, oddzielny od Twoich projektów.
+
+Czat zostaje czatem. Gotowego czatu nie da się przenieść do projektu; jeśli rozmowa zamieni się w prawdziwą pracę, zacznij sesję w projekcie i przenieś tam to, co przydatne.
+
+## Archiwizacja i usuwanie
+
+Zarchiwizuj czat, żeby ukryć go z listy. Usuń go, żeby zniknął na dobre razem ze swoim folderem, gdy żadna inna sesja (fork albo subagent) już z tego folderu nie korzysta.
+
+## Gdzie są foldery
+
+Foldery czatów leżą w `~/.config/openchamber/chats`, po jednym folderze z datą na każdy dzień. Jeśli przeniosłeś dane OpenChamber przez `OPENCHAMBER_DATA_DIR`, leżą w tamtym folderze. Żeby trzymać czaty gdzie indziej, ustaw `OPENCHAMBER_CHATS_DIR`; zobacz [Zmienne środowiskowe](/pl/environment/). To ważne, gdy OpenCode działa jako inny użytkownik i nie może czytać Twojego katalogu domowego.
+
+> VS Code nie ma czatów. Rozszerzenie zawsze pracuje w folderze, który masz otwarty.
+
+## Powiązane
+
+- [Projekty](/pl/projects/): sesje związane z bazą kodu
+- [Sesje w toku](/pl/sessions-in-work/): trzymaj prawdziwą pracę na widoku
+- [Notatki, zadania i plany](/pl/notes-todos-plans/): notatki, które działają też w czatach

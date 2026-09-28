@@ -42,6 +42,19 @@ describe('project directory runtime', () => {
       expect(result).toEqual({ ok: true, directory: '/real/path/to/project', requestedDirectory: '/symlink/path/to/project' });
     });
 
+    it('refuses a directory the host says no to, before it looks at the disk', async () => {
+      let statCalls = 0;
+      const runtime = createTestRuntime({
+        fsPromises: { stat: async () => { statCalls += 1; return { isDirectory: () => true }; }, realpath: async (p) => p },
+        refuseDirectory: (candidate) => (candidate.startsWith('/spaces/') ? 'A directory under /spaces/ belongs to an isolated space' : null),
+      });
+
+      expect(await runtime.validateDirectoryPath('/spaces/a1b2c3d4e5f6/repo')).toEqual({ ok: false, error: 'A directory under /spaces/ belongs to an isolated space' });
+      expect(statCalls).toBe(0);
+      expect(await runtime.validateDirectoryPath('/home/user/project')).toMatchObject({ ok: true });
+      expect(statCalls).toBe(1);
+    });
+
     it('returns error when candidate is empty', async () => {
       const runtime = createTestRuntime();
       const result = await runtime.validateDirectoryPath('');

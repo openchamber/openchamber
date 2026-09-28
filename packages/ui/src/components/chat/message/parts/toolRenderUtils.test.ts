@@ -13,7 +13,7 @@ describe('tool rendering classification', () => {
     test('expands built-in tools without direct navigation', () => {
         expect(isExpandableTool('grep')).toBe(true);
         expect(isExpandableTool('webfetch')).toBe(true);
-        expect(isExpandableTool('todowrite')).toBe(true);
+        expect(isExpandableTool('bash')).toBe(true);
         expect(isExpandableTool('plan_exit')).toBe(true);
     });
 

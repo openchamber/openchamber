@@ -309,8 +309,8 @@ function cleanBranchName(branch: string): string {
 /**
  * Execute a raw git command and return the output
  */
-async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git' });
+async function execGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git', env });
 }
 
 function isValidCommitHash(hash: string): boolean {
@@ -879,6 +879,11 @@ export interface CreateGitWorktreePayload {
 export interface RemoveGitWorktreePayload {
   directory: string;
   deleteLocalBranch?: boolean;
+  /**
+   * Releases the OpenCode instance that served the worktree while its path
+   * still resolves. The bridge injects it; the webview payload never carries it.
+   */
+  disposeInstance?: (worktreeDirectory: string) => Promise<void>;
 }
 
 const OPENCODE_ADJECTIVES = [
@@ -2155,6 +2160,75 @@ export async function getWorktreeBootstrapStatus(directory: string): Promise<Wor
   };
 }
 
+/**
+ * Releases the OpenCode instance that served a removed worktree. The bridge
+ * injects `disposeInstance`; disposal is best-effort, so a failure is warned
+ * about and never fails or rolls back the removal.
+ */
+const disposeWorktreeInstanceBestEffort = async (
+  disposeInstance: RemoveGitWorktreePayload['disposeInstance'],
+  worktreeDirectory: string,
+): Promise<void> => {
+  if (!disposeInstance) {
+    return;
+  }
+  try {
+    await disposeInstance(worktreeDirectory);
+  } catch (error) {
+    console.warn(
+      `Failed to dispose the OpenCode instance for removed worktree ${worktreeDirectory}:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+};
+
+// Mirrors packages/web/server/lib/git/service.js: Windows refuses to delete a
+// folder another process still holds (a session's shell, a file watcher, an
+// editor); those handles are usually released moments later, so a busy
+// failure is retried briefly before it is reported.
+const WORKTREE_BUSY_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
+const WORKTREE_BUSY_MESSAGE = 'The worktree folder is still in use by another process (a running session, terminal or editor). Stop it and try again.';
+
+// Only Windows locks a folder that is open elsewhere; on other platforms the
+// same words mean a real permission problem and are reported as they are.
+const isWorktreeBusyError = (text: string | undefined): boolean => process.platform === 'win32'
+  && /Permission denied|EBUSY|EPERM|resource busy|being used by another process/i.test(text ?? '');
+
+const removeBusyDirectory = async (targetDirectory: string): Promise<void> => {
+  try {
+    // fs.rm retries EBUSY/EPERM itself with these options.
+    await fs.promises.rm(targetDirectory, { recursive: true, force: true, maxRetries: WORKTREE_BUSY_RETRY_DELAYS_MS.length, retryDelay: WORKTREE_BUSY_RETRY_DELAYS_MS[0] });
+  } catch (error) {
+    if (error instanceof Error && isWorktreeBusyError(`${(error as NodeJS.ErrnoException).code ?? ''} ${error.message}`)) {
+      throw new Error(WORKTREE_BUSY_MESSAGE);
+    }
+    throw error;
+  }
+};
+
+// Resolves true when git removed the worktree, false when git dropped the
+// registration but left the folder behind (the caller removes it as an orphan).
+const removeGitWorktreeWhenFree = async (primaryWorktree: string, worktreePath: string, targetCanonical: string): Promise<boolean> => {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await runGitCommand(primaryWorktree, ['worktree', 'remove', '--force', worktreePath]);
+    if (result.success) return true;
+    if (!isWorktreeBusyError(result.message)) {
+      throw new Error(result.message || 'Failed to remove git worktree');
+    }
+    let stillRegistered = false;
+    for (const entry of await listWorktreeEntries(primaryWorktree)) {
+      if (entry?.worktree && await canonicalPath(entry.worktree) === targetCanonical) {
+        stillRegistered = true;
+        break;
+      }
+    }
+    if (!stillRegistered) return false;
+    const delay = WORKTREE_BUSY_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) throw new Error(WORKTREE_BUSY_MESSAGE);
+    await wait(delay);
+  }
+};
+
 export async function removeWorktree(directory: string, input: RemoveGitWorktreePayload): Promise<boolean> {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
@@ -2186,22 +2260,37 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     return null;
   })();
 
-  if (!matchedEntry?.worktree) {
+  const removeManagedOrphan = async () => {
+    // Only a leftover directory inside the managed worktree root may be deleted;
+    // an arbitrary unregistered path is never removed recursively.
+    const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
+    const isManagedOrphan = targetCanonical !== worktreeRootCanonical
+      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
     const targetExists = await checkPathExists(targetDirectory);
-    if (targetExists) {
-      await fs.promises.rm(targetDirectory, { recursive: true, force: true });
+    if (targetExists && isManagedOrphan) {
+      await removeBusyDirectory(targetDirectory);
     }
+    // A removal git abandoned halfway leaves `.git/worktrees/<name>` without
+    // its gitdir; prune drops that metadata so it cannot linger.
+    await runGitCommand(context.primaryWorktree, ['worktree', 'prune']);
+  };
 
+  if (!matchedEntry?.worktree) {
+    await removeManagedOrphan();
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
   }
 
-  await runGitCommandOrThrow(
-    context.primaryWorktree,
-    ['worktree', 'remove', '--force', matchedEntry.worktree],
-    'Failed to remove git worktree'
-  );
+  // The directory is a registered linked worktree and still exists here, which
+  // is the only point where its OpenCode instance can be released by path.
+  await disposeWorktreeInstanceBestEffort(input?.disposeInstance, matchedEntry.worktree);
+
+  const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical);
+  if (!removedByGit) {
+    // Git deleted its registration but not the still-locked folder.
+    await removeManagedOrphan();
+  }
 
   if (deleteLocalBranch) {
     const branchName = cleanBranchName(String(matchedEntry.branchRef || matchedEntry.branch || '').trim());
@@ -2217,6 +2306,59 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   clearWorktreeBootstrapState(matchedEntry.worktree);
 
   return true;
+}
+
+// Run snapshots live under a private namespace so they never show up as
+// branches or tags, yet stay reachable (and safe from gc) until deleted.
+// Mirrors packages/web/server/lib/git/service.js snapshotWorktree.
+const RUN_SNAPSHOT_REF_PATTERN = /^refs\/openchamber\/runs\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+const assertRunSnapshotRef = (ref: string | undefined): string => {
+  const value = typeof ref === 'string' ? ref.trim() : '';
+  if (!RUN_SNAPSHOT_REF_PATTERN.test(value) || value.includes('..')) {
+    throw new Error('Invalid snapshot ref');
+  }
+  return value;
+};
+
+const SNAPSHOT_IDENTITY_ENV = {
+  GIT_AUTHOR_NAME: 'OpenChamber',
+  GIT_AUTHOR_EMAIL: 'snapshot@openchamber.local',
+  GIT_COMMITTER_NAME: 'OpenChamber',
+  GIT_COMMITTER_EMAIL: 'snapshot@openchamber.local',
+};
+
+export async function snapshotWorktree(directory: string, input: { ref?: string }): Promise<{ ref: string; commit: string; head: string }> {
+  const worktreeDirectory = normalizeDirectoryPath(directory);
+  if (!worktreeDirectory) {
+    throw new Error('Worktree directory is required');
+  }
+  const ref = assertRunSnapshotRef(input?.ref);
+  const head = (await runGitCommandOrThrow(worktreeDirectory, ['rev-parse', '--verify', 'HEAD'], 'Worktree has no HEAD commit')).stdout.trim();
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-snapshot-'));
+  const indexEnv = { GIT_INDEX_FILE: path.join(tempDir, 'index') };
+  try {
+    const run = async (args: string[], message: string, env: NodeJS.ProcessEnv = indexEnv): Promise<string> => {
+      const result = await execGit(args, worktreeDirectory, env);
+      if (result.exitCode !== 0) {
+        throw new Error(String(result.stderr || '').trim() || message);
+      }
+      return String(result.stdout || '').trim();
+    };
+    await run(['read-tree', head], 'Failed to prepare snapshot index');
+    await run(['add', '-A'], 'Failed to collect worktree changes');
+    const tree = await run(['write-tree'], 'Failed to write snapshot tree');
+    const commit = await run(
+      ['commit-tree', tree, '-p', head, '-m', 'OpenChamber run snapshot'],
+      'Failed to write snapshot commit',
+      { ...indexEnv, ...SNAPSHOT_IDENTITY_ENV },
+    );
+    await run(['update-ref', ref, commit], 'Failed to store snapshot ref', {});
+    return { ref, commit, head };
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 // ============== Diff Operations ==============

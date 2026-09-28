@@ -88,6 +88,12 @@ const requestBodySchema = z.object({
   body: z.string().max(64_000).optional(),
 });
 
+const serviceRequestBodySchema = requestBodySchema.extend({
+  // The shared-surface viewer open in the same window, if any. The host
+  // resolves it; an id that is not a live viewer of this extension is ignored.
+  viewerId: z.string().min(1).max(128).optional(),
+});
+
 const fileBodySchema = z.object({
   op: z.enum(['read', 'write', 'list', 'stat']),
   path: z.string().min(1).max(GUEST_FILE_PATH_MAX),
@@ -196,6 +202,7 @@ export const registerGuestRoutes = (app, {
   resolveOptionalProjectDirectory,
   getSmallModelService,
   onGuestDeactivated = async () => false,
+  surfaceViewerHeaders = () => null,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -547,7 +554,7 @@ export const registerGuestRoutes = (app, {
       if (!guest?.service) {
         return res.status(404).json({ error: 'not-found' });
       }
-      const parsed = requestBodySchema.safeParse(req.body);
+      const parsed = serviceRequestBodySchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ error: 'invalid-request' });
       }
@@ -562,6 +569,7 @@ export const registerGuestRoutes = (app, {
         path: parsed.data.path,
         query: parsed.data.query,
         body: parsed.data.body,
+        headers: parsed.data.viewerId ? surfaceViewerHeaders(guest.id, parsed.data.viewerId) ?? undefined : undefined,
       });
       res.json(result);
     } catch (error) {
@@ -580,7 +588,7 @@ export const registerGuestRoutes = (app, {
     try {
       const result = await runGuestStorage(persistPath, req.params.id, parsed.data, async () => {
         const guest = await loadGuest(req.params.id);
-        if (!guest || guest.enabled === false || (!guest.entry && !guest.backgroundEntry)) throw new Error('Extension is unavailable.');
+        if (!guest || guest.enabled === false || (!guest.entry && !guest.backgroundEntry && !guest.statusEntry)) throw new Error('Extension is unavailable.');
         if (!requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability))) throw new Error('Extension needs approval.');
       });
       return res.json(result);
@@ -814,7 +822,7 @@ export const registerGuestRoutes = (app, {
         return res.status(404).end();
       }
       const served = await resolveGuestServedFile(guest.packageRoot, relativePath, {
-        hasRuntime: Boolean(guest.entry || guest.backgroundEntry),
+        hasRuntime: Boolean(guest.entry || guest.backgroundEntry || guest.statusEntry),
       });
       if (!served) {
         return res.status(404).end();

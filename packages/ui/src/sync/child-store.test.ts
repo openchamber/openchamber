@@ -5,8 +5,8 @@ import {
   type DirectoryBootstrapContext,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
-  subscribeDirectoryQuestion,
-  subscribeDirectoryQuestions,
+  subscribeDirectoryForm,
+  subscribeDirectoryForms,
   subscribeDirectorySessionMessages,
 } from './child-store';
 import {
@@ -151,14 +151,14 @@ describe('ChildStoreManager permission subscriptions', () => {
   });
 });
 
-describe('ChildStoreManager question subscriptions', () => {
+describe('ChildStoreManager form subscriptions', () => {
   test('notifies only the owning session and ignores unrelated high-frequency updates', () => {
     const manager = new ChildStoreManager();
     const child = manager.ensureChild('/workspace', { bootstrap: false });
     const notifications = new Map<string, number>();
     const unsubscribers = Array.from({ length: 50 }, (_, index) => {
       const sessionID = `session-${index}`;
-      return subscribeDirectoryQuestion(child, sessionID, () => {
+      return subscribeDirectoryForm(child, sessionID, () => {
         notifications.set(sessionID, (notifications.get(sessionID) ?? 0) + 1);
       });
     });
@@ -169,26 +169,26 @@ describe('ChildStoreManager question subscriptions', () => {
     }
 
     expect(notifications.size).toBe(0);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(0);
 
-    child.setState({ question: { 'session-17': [{ id: 'question-1' }] as never[] } });
+    child.setState({ form: { 'session-17': [{ id: 'form-1' }] as never[] } });
 
     expect(notifications.get('session-17')).toBe(1);
     expect(notifications.size).toBe(1);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(1);
 
     // A new map that preserves session-17's bucket must not notify it again.
-    child.setState({ question: { ...child.getState().question, 'session-18': [{ id: 'question-2' }] as never[] } });
+    child.setState({ form: { ...child.getState().form, 'session-18': [{ id: 'form-2' }] as never[] } });
 
     expect(notifications.get('session-17')).toBe(1);
     expect(notifications.get('session-18')).toBe(1);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(2);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(2);
 
-    child.setState({ question: {} });
+    child.setState({ form: {} });
 
     expect(notifications.get('session-17')).toBe(2);
     expect(notifications.get('session-18')).toBe(2);
-    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(4);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(4);
 
     for (const unsubscribe of unsubscribers) unsubscribe();
     setSyncPerformanceDiagnosticsEnabled(false);
@@ -200,16 +200,16 @@ describe('ChildStoreManager question subscriptions', () => {
     const child = manager.ensureChild('/workspace', { bootstrap: false });
     let parentNotifications = 0;
     let childNotifications = 0;
-    const unsubscribeParent = subscribeDirectoryQuestions(child, ['parent', 'child'], () => {
+    const unsubscribeParent = subscribeDirectoryForms(child, ['parent', 'child'], () => {
       parentNotifications += 1;
     });
-    const unsubscribeChild = subscribeDirectoryQuestion(child, 'child', () => {
+    const unsubscribeChild = subscribeDirectoryForm(child, 'child', () => {
       childNotifications += 1;
     });
-    const parentQuestions = [{ id: 'question-parent' }] as never[];
-    const childQuestions = [{ id: 'question-child' }] as never[];
+    const parentForms = [{ id: 'form-parent' }] as never[];
+    const childForms = [{ id: 'form-child' }] as never[];
 
-    child.setState({ question: { parent: parentQuestions, child: childQuestions } });
+    child.setState({ form: { parent: parentForms, child: childForms } });
 
     expect(parentNotifications).toBe(1);
     expect(childNotifications).toBe(1);
@@ -219,16 +219,16 @@ describe('ChildStoreManager question subscriptions', () => {
     expect(childNotifications).toBe(1);
 
     child.setState({
-      question: {
-        parent: parentQuestions,
-        child: [{ id: 'question-child-replacement' }] as never[],
+      form: {
+        parent: parentForms,
+        child: [{ id: 'form-child-replacement' }] as never[],
       },
     });
 
     expect(parentNotifications).toBe(2);
     expect(childNotifications).toBe(2);
 
-    child.setState({ question: {} });
+    child.setState({ form: {} });
 
     expect(parentNotifications).toBe(3);
     expect(childNotifications).toBe(3);
@@ -238,7 +238,7 @@ describe('ChildStoreManager question subscriptions', () => {
     manager.disposeAll();
   });
 
-  test('aggregates exact question buckets across directory stores', () => {
+  test('aggregates exact form buckets across directory stores', () => {
     const manager = new ChildStoreManager();
     const parentStore = manager.ensureChild('/repo', { bootstrap: false });
     const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
@@ -247,29 +247,29 @@ describe('ChildStoreManager question subscriptions', () => {
       notifications += 1;
     };
     const unsubscribers = [
-      subscribeDirectoryQuestions(parentStore, ['parent'], notify),
-      subscribeDirectoryQuestions(childStore, ['child'], notify),
+      subscribeDirectoryForms(parentStore, ['parent'], notify),
+      subscribeDirectoryForms(childStore, ['child'], notify),
     ];
-    const questionCount = () => (
-      (parentStore.getState().question.parent?.length ?? 0)
-      + (childStore.getState().question.child?.length ?? 0)
+    const formCount = () => (
+      (parentStore.getState().form.parent?.length ?? 0)
+      + (childStore.getState().form.child?.length ?? 0)
     );
 
-    childStore.setState({ question: { child: [{ id: 'child-question' }] as never[] } });
-    expect(questionCount()).toBe(1);
+    childStore.setState({ form: { child: [{ id: 'child-form' }] as never[] } });
+    expect(formCount()).toBe(1);
     expect(notifications).toBe(1);
 
     childStore.setState({
-      question: {
-        ...childStore.getState().question,
-        unrelated: [{ id: 'unrelated-question' }] as never[],
+      form: {
+        ...childStore.getState().form,
+        unrelated: [{ id: 'unrelated-form' }] as never[],
       },
     });
-    expect(questionCount()).toBe(1);
+    expect(formCount()).toBe(1);
     expect(notifications).toBe(1);
 
-    parentStore.setState({ question: { parent: [{ id: 'parent-question' }] as never[] } });
-    expect(questionCount()).toBe(2);
+    parentStore.setState({ form: { parent: [{ id: 'parent-form' }] as never[] } });
+    expect(formCount()).toBe(2);
     expect(notifications).toBe(2);
 
     for (const unsubscribe of unsubscribers) unsubscribe();

@@ -405,7 +405,21 @@ export const startGuestSession = async (args: {
     }
     assertCurrent();
     failure = 'session-create-failed';
-    const session = await sessionActions.createSession(title, directory, null, undefined, undefined, navigation);
+    // v2 creates the session on a selection, so the first prompt runs on the
+    // model the extension asked for without a switch message in the transcript.
+    const session = await sessionActions.createSession(
+      title,
+      directory,
+      undefined,
+      undefined,
+      sendSelection
+        ? {
+            model: { providerID: sendSelection.providerID, id: sendSelection.modelID, variant: sendSelection.variant },
+            agent: sendSelection.agentName,
+          }
+        : undefined,
+      navigation,
+    );
     assertCurrent();
     if (!session) return null;
     createdDirectory = session.directory ?? directory;

@@ -31,7 +31,7 @@
       "subtle": "#28292c"
     },
     "interactive": {
-      "border": "#383a3f",
+      "border": "#303238",
       "selection": "#43454A",
       "borderHover": "#4B5059",
       "focusRing": "#6796f550",
@@ -114,7 +114,7 @@
     },
     "chat": {
       "userMessageBackground": "#2a3b5d76",
-      "divider": "#393B41"
+      "divider": "#303238"
     },
     "markdown": {
       "link": "#56A8F5",
@@ -122,11 +122,11 @@
       "inlineCode": "#6AAB73",
       "inlineCodeBackground": "#2B2C2F",
       "blockquote": "#7A7E85",
-      "blockquoteBorder": "#393B41",
+      "blockquoteBorder": "#303238",
       "listMarker": "#B3AE6099"
     },
     "tools": {
-      "border": "#393B41",
+      "border": "#303238",
       "icon": "#B0B1B3",
       "title": "#DFE1E5",
       "description": "#B0B1B3",

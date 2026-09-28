@@ -45,10 +45,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
   const sessionAttentionStates = new Map();
-  // Pending permission and question requests per session, kept from the same
+  // Pending permission requests and forms per session, kept from the same
   // upstream stream. Clients that do not initialize a directory cannot read
-  // its pending list from OpenCode (that read creates an instance), so this
-  // map is their seed. Entries live until the matching reply, the session's
+  // its pending list from OpenCode (that read creates a location), so this map
+  // is their seed. Entries live until the matching reply, the session's
   // deletion, or an OpenCode restart, which drops every pending request.
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
@@ -56,7 +56,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
     if (!entry) {
-      entry = { permissions: new Map(), questions: new Map() };
+      entry = { permissions: new Map(), forms: new Map() };
       pendingRequestsBySession.set(sessionId, entry);
     }
     return entry;
@@ -69,25 +69,36 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     // pending request of that kind we can still vouch for.
     if (requestId) entry[kind].delete(requestId);
     else entry[kind].clear();
-    if (entry.permissions.size === 0 && entry.questions.size === 0) pendingRequestsBySession.delete(sessionId);
+    if (entry.permissions.size === 0 && entry.forms.size === 0) pendingRequestsBySession.delete(sessionId);
   };
 
   const processBlockingRequestPayload = (payload) => {
     if (!payload || typeof payload.type !== 'string') return;
     const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
-    if (payload.type === 'permission.asked' || payload.type === 'question.asked') {
+    if (payload.type === 'permission.asked') {
       const sessionId = readRequestId(properties.sessionID);
       const requestId = readRequestId(properties.id);
       if (!sessionId || !requestId) return;
-      getOrCreatePendingRequests(sessionId)[payload.type === 'permission.asked' ? 'permissions' : 'questions'].set(requestId, properties);
+      getOrCreatePendingRequests(sessionId).permissions.set(requestId, properties);
+      return;
+    }
+    // v2 replaced the question tool with forms; the request itself rides in
+    // `properties.form`, so that object is what clients receive.
+    if (payload.type === 'form.created') {
+      const form = properties.form && typeof properties.form === 'object' ? properties.form : null;
+      if (!form) return;
+      const sessionId = readRequestId(form.sessionID) || readRequestId(properties.sessionID);
+      const requestId = readRequestId(form.id);
+      if (!sessionId || !requestId) return;
+      getOrCreatePendingRequests(sessionId).forms.set(requestId, form);
       return;
     }
     if (payload.type === 'permission.replied') {
       settlePendingRequest('permissions', readRequestId(properties.sessionID), readRequestId(properties.requestID));
       return;
     }
-    if (payload.type === 'question.replied' || payload.type === 'question.rejected') {
-      settlePendingRequest('questions', readRequestId(properties.sessionID), readRequestId(properties.requestID));
+    if (payload.type === 'form.settled') {
+      settlePendingRequest('forms', readRequestId(properties.sessionID), readRequestId(properties.formID));
       return;
     }
     if (payload.type === 'session.deleted') {
@@ -102,7 +113,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     for (const [sessionId, entry] of pendingRequestsBySession) {
       result[sessionId] = {
         permissions: [...entry.permissions.values()],
-        questions: [...entry.questions.values()],
+        forms: [...entry.forms.values()],
       };
     }
     return result;

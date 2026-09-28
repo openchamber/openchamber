@@ -1,0 +1,61 @@
+---
+title: Auto Model Routing
+description: Let OpenChamber pick the model, thinking level and agent for each prompt.
+---
+
+# Auto Model Routing
+
+Pick **Auto** in the model picker and OpenChamber chooses the model for every prompt you send. A typo fix goes to a cheap, fast model; a tricky bug goes to your strongest one. You decide which model handles which kind of task, once, in Settings.
+
+## Turn it on
+
+1. Make sure a [classification provider](/classification-providers/) is set up. Auto needs Jev to sort prompts.
+2. Open **Settings → Routing** and check **Enable Auto mode**.
+3. Choose a **Fallback model** (and its thinking level). Auto stays hidden until you do.
+4. Look through the categories below and give the ones you care about their own model.
+
+When everything is in place, the page says **Ready**. Pick **Auto** at the top of the model picker in any session.
+
+## Categories
+
+Every prompt lands in one category. Four come built in:
+
+| Category | For |
+| --- | --- |
+| Trivial | mechanical work: renames, typos, formatting, comments, simple commands |
+| Research | reading and explaining code without changing it |
+| Implement | a clear change: a feature with a known shape, tests, a fix whose cause is known |
+| Hard | bugs with an unknown cause, design and planning, security, auth, concurrency, migrations, money |
+
+For each category you can set:
+
+- **Model:** empty means the fallback model
+- **Thinking:** the thinking level for that model
+- **Agent:** the agent that runs these tasks; empty keeps the agent the composer would use
+
+Jev sorts prompts by reading the category names and descriptions, so the descriptions work as instructions. Say what belongs in the category and what doesn't. You can edit, turn off, remove or add categories, and restore a built-in one if you change your mind. Auto needs at least two categories turned on.
+
+## What happens when you send
+
+1. OpenChamber sends your message and a short excerpt of the last few turns to Jev.
+2. Jev picks a category and says how sure it is.
+3. The session switches to that category's model, thinking level and agent, and your message goes out.
+
+Every message is sorted again, so a session can move from a cheap model for a quick question to your strongest one for the next request. The composer keeps showing **Auto**, and the agent and thinking controls are hidden, because the category decides them.
+
+The fallback model answers when:
+
+- Jev isn't sure enough (below 60% confidence)
+- Jev fails or takes longer than four seconds
+- the category has no model of its own
+
+Choosing any real model in the picker takes the session out of Auto. Pick **Auto** again to come back. You can also make Auto the default for new sessions in **Settings → Sessions**.
+
+## Where it works
+
+Auto runs in the OpenChamber server: the desktop app, the web app, and your phone connected to either. VS Code doesn't offer Auto, because the extension talks to OpenCode directly.
+
+## Related
+
+- [Classification Providers (Jev)](/classification-providers/): set up the model that sorts prompts
+- [Providers, Models & Agents](/providers/): connect the models Auto can pick from

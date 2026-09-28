@@ -11,6 +11,9 @@ import {
 
 import type { IconName } from '@/components/icon/icons';
 import { formatMessageRecordText, type SessionMessageRecord } from '@/lib/exportSession';
+import { readContextPart } from '@/lib/messages/contextParts';
+import { formatContextMessage } from '@/lib/messages/messageMarkdown';
+import { hasParts } from '@/lib/opencode/model';
 
 import { isGuestActive } from './capabilities.ts';
 import { guestPackageIconSrc, resolveGuestIconName } from './icon.ts';
@@ -65,9 +68,28 @@ export const guestActionWantsMessages = (action: GuestActionContribution): boole
   action.payload?.includes('messages') ?? false
 );
 
+/**
+ * Only the agent's own replies read as `assistant`. A synthetic message is
+ * context the user attached to the next prompt, so it stays on the user side.
+ */
 const recordRole = (record: SessionMessageRecord): GuestItemRole => (
-  record.info.role === 'user' ? 'user' : 'assistant'
+  record.info.role === 'assistant' ? 'assistant' : 'user'
 );
+
+/**
+ * A message's text the way the Markdown export writes it. OpenCode v2
+ * interleaves plumbing roles — `system`, `skill`, `shell`, `compaction`, the
+ * `*-switched` notices — with the conversation; they carry no parts and no
+ * text, so they never become an item. A synthetic message counts only when it
+ * is attached context; prompt plumbing a server plugin injected does not.
+ */
+const recordText = (record: SessionMessageRecord): string => {
+  if (record.info.role === 'synthetic') {
+    return readContextPart(record.info) ? formatContextMessage(record.info).trim() : '';
+  }
+  if (!hasParts(record.info)) return '';
+  return formatMessageRecordText(record);
+};
 
 type SessionRef = {
   sessionId: string;
@@ -87,11 +109,11 @@ export const buildGuestMessageItem = (
   directory: session.directory ?? null,
   messageId: record.info.id,
   role: recordRole(record),
-  text: formatMessageRecordText(record).slice(0, GUEST_ITEM_MESSAGE_TEXT_MAX),
+  text: recordText(record).slice(0, GUEST_ITEM_MESSAGE_TEXT_MAX),
 });
 
 const toSessionItemMessage = (record: SessionMessageRecord): GuestSessionItemMessage | null => {
-  const text = formatMessageRecordText(record);
+  const text = recordText(record);
   if (!text) return null;
   return {
     id: record.info.id,

@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { getRemotes, getTrackingBranch } from '../git/index.js';
+import { getRemotes, getTrackingBranch, isAncestorOfHead } from '../git/index.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { noteIfGitHubRateLimit } from './rate-limit.js';
 
@@ -543,6 +543,26 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
 
 const isTerminalPr = (pr) => Boolean(pr) && (pr.state === 'closed' || Boolean(pr.merged_at));
 
+// A closed/merged PR is matched by head branch NAME, and names get reused: a
+// fresh worktree called `feature` cut from the default branch would inherit
+// the merged PR of last month's `feature`. The PR only belongs to this checkout
+// when the commit it was merged or closed at is part of the checkout's history.
+// `isAncestor` is the git check, replaceable so the tests need no git repository.
+const isHistoricalPrOfCheckout = async (directory, pr, { isAncestor = isAncestorOfHead } = {}) => {
+  const headSha = normalizeText(pr?.head?.sha);
+  if (!headSha) {
+    return false;
+  }
+  try {
+    return await isAncestor(directory, headSha);
+  } catch {
+    return false;
+  }
+};
+
+// Exported for focused unit tests.
+export { isHistoricalPrOfCheckout };
+
 /**
  * Resolve the PRs a branch is associated with in one repo target.
  *
@@ -764,7 +784,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     }
   }
 
-  if (historicalMatch) {
+  if (historicalMatch && await isHistoricalPrOfCheckout(directory, historicalMatch.pr)) {
     return historicalMatch;
   }
 

@@ -29,7 +29,7 @@
       "subtle": "#1f1f1f"
     },
     "interactive": {
-      "border": "#373636",
+      "border": "#2C2B2B",
       "selection": "#b1adad33",
       "selectionForeground": "#FFFFFF",
       "borderHover": "#202020",
@@ -45,7 +45,7 @@
       "warningForeground": "#101010",
       "success": "#99FFE4",
       "successForeground": "#101010",
-      "info": "#FFC799",
+      "info": "#8EAED7",
       "infoForeground": "#101010"
     },
     "syntax": {

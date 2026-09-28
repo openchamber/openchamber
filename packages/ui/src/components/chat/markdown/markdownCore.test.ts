@@ -106,15 +106,20 @@ describe('markdown sanitization', () => {
 });
 
 describe('Markdown parser failures', () => {
-  // Real parser recursion overflow, rather than a mocked parse failure.
-  const source = `${'> '.repeat(20000)}<img src=x onerror="alert(1)"> & text\n  **unfinished`;
+  // Real parser recursion overflow, rather than a mocked parse failure. Each
+  // quote level re-lexes the rest of the line, so the cost grows with the square
+  // of the depth an overflow needs. Bun on Windows allows a stack several times
+  // deeper than on Linux, where one parse then takes seconds, so these tests get
+  // their own timeout. A bare `>` nests the same way at half the length.
+  const PARSER_OVERFLOW_TIMEOUT_MS = 60_000;
+  const source = `${'>'.repeat(20000)}<img src=x onerror="alert(1)"> & text\n  **unfinished`;
   const fallback = `<div class="whitespace-pre-wrap break-words">${escapeRawMarkdownHtml(source)}</div>`;
 
   test('preserves source as inert text on first paint in both image modes', () => {
     expect(renderMarkdownSync(source, 'inline')).toBe(fallback);
     expect(renderMarkdownSync(source, 'label')).toBe(fallback);
     expect(renderMarkdownSync('**healthy**')).toContain('<strong>healthy</strong>');
-  });
+  }, PARSER_OVERFLOW_TIMEOUT_MS);
 
   test('keeps streaming and settled rendering readable and caches the settled fallback', async () => {
     resetMarkdownHtmlCacheForTests();
@@ -126,7 +131,7 @@ describe('Markdown parser failures', () => {
     expect(getCachedMarkdownBlocks(source)?.[0]?.html).toBe(fallback);
     const healthy = await renderMarkdownBlocks('**still healthy**', false);
     expect(healthy[0]?.html).toContain('<strong>still healthy</strong>');
-  });
+  }, PARSER_OVERFLOW_TIMEOUT_MS);
 
   test('keeps images from other messages when one message cannot be scanned', () => {
     expect(extractMarkdownImageCandidates([
@@ -137,7 +142,7 @@ describe('Markdown parser failures', () => {
       { source: 'https://example.test/before.png', filename: 'before.png' },
       { source: 'https://example.test/after.png', filename: 'after.png' },
     ]);
-  });
+  }, PARSER_OVERFLOW_TIMEOUT_MS);
 });
 
 describe('Markdown disclosures', () => {
@@ -487,6 +492,7 @@ describe('Dollar math rendering', () => {
       'raised $50M to $72M, then $100M',
       '总价 $5 and $10，合计 $50',
       '价格是 $100$ 整',
+      'the mysterious $1 on the 11580 — dedicated key. Gathering facts in parallel (wrapper key mechanics, the Go card "$" display logic)',
     ];
     for (const text of cases) {
       const html = renderMarkdownSync(text);
@@ -495,6 +501,8 @@ describe('Dollar math rendering', () => {
     // The dollar signs survive verbatim instead of being eaten as delimiters.
     expect(renderMarkdownSync('US$ 680')).toContain('US$ 680');
     expect(renderMarkdownSync('价格是 $100$ 整')).toContain('$100$');
+    // A digit-leading span such as $2\pi r$ is math, not currency.
+    expect(renderMarkdownSync('$2\\pi r$')).toContain('katex');
   });
 
   test('keeps dollar pairs out of code and out of link attributes', () => {

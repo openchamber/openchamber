@@ -116,7 +116,7 @@ type GuestSessionItem = {
   sessionId: string;
   sessionTitle: string;
   directory: string | null;  // the session's project directory
-  messages?: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: number }>; // oldest first; only with payload ["messages"] and the conversation grant
+  messages?: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: number }>; // oldest first; only with payload ["messages"] and the conversation grant. Same messages the Markdown export writes: the conversation plus context the user attached (`user`); OpenCode's own plumbing messages are left out
   truncated?: boolean;     // the oldest messages were dropped so the item stays under 2 000 000 serialized chars
 };
 ```
@@ -151,6 +151,8 @@ Access tokens never appear in `ready` or in request results.
 | `listDir`         | `path: string`                    | `Promise<{ entries }>`         | `{ name, kind: 'file' \| 'directory' \| 'other' }[]`, sorted, capped at 2 000. Same path rules |
 | `stat`            | `path: string`                    | `Promise<{ kind, size, mtime }>` | `kind` adds `'missing'`; a missing path is not an error. Same path rules              |
 | `setBadge`        | `count: number \| null`          | `Promise<void>`                | Number on this guest's rail icon, 0–999 (clamped); `null` clears. Opening the panel clears it too. In memory only |
+| `openCommit`      | `sha: string`                     | `Promise<void>`                | Show that commit of the open project in the host's Diff view (commit scope). 7–64 hex characters; the host reads the commit itself. `NO_DIRECTORY` without a project, `NOT_FOUND` for an unknown commit, `UNSUPPORTED` where the host has no Diff view |
+| `setHeight`       | `height: number`                  | `Promise<void>`                | Content height in CSS px. The Work Status section sizes its frame to it, clamped to 24–320; taller content scrolls inside. A page docked to a shared surface grows or shrinks its dock to it (a width for a `left`/`right` dock), from 24 px up to half the panel. Other surfaces ignore it |
 | `generate`        | `{ prompt, system?, maxOutputTokens? }` | `Promise<{ text }>`      | One-off text from the user's Small Model (capability `model`). No session, no history; the host picks the model. Waits up to 90 s |
 | `dispose`         | —                                 | `void`                         | Remove listener, reject pending RPCs                                                  |
 
@@ -199,7 +201,7 @@ Snapshots carry `state: 'loading' | 'ready' | 'error'`; session snapshots also c
 
 Projects contain `id`, `name`, `directory`. Worktrees contain `directory`, `name`, `branch`, and `status: 'ready' | 'pending' | 'invalid' | 'missing'`. Session records contain `id`, `title`, `projectId`, `directory`, `parentId`, `createdAt`, `updatedAt`, `archivedAt`, `worktree`, `activity`, `outcome`, and `items`. Item references contain only this extension's `id` and optional `data`.
 
-`activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question`. `outcome` is the last observed `completed` or `failed` turn, or `null` when unknown or working. Outcomes are in memory for the latest 2,000 observed sessions, reset on runtime switch, and are not reconstructed from persisted history. A later idle event preserves an observed failure until another run starts. `completed` never means the extension's task is Done. Blocking-request contents and approve/reply actions are not exposed.
+`activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question` (the agent put a form to the user and is waiting on the answer). `outcome` is the last observed `completed` or `failed` turn, or `null` when unknown or working. Outcomes are in memory for the latest 2,000 observed sessions, reset on runtime switch, and are not reconstructed from persisted history. A later idle event preserves an observed failure until another run starts. `completed` never means the extension's task is Done. Blocking-request contents and approve/reply actions are not exposed.
 
 ### Extension storage
 
@@ -210,6 +212,10 @@ Storage belongs to the extension on the connected server and needs no extra capa
 ### Full-screen pages
 
 `contributes.page: true` reuses `panel.entry`; `{ entry: 'panel/page.html', title?: 'Board' }` uses separate package HTML. It requires `panel.entry` and the same installed/approved/enabled state as the panel. The sidebar's Extension pages menu is the only page opener; `openSurface` does not open it. `ctx.surface` is `page`, `close()` closes it, and reload or runtime switch returns to chat. Pages use the existing sandbox and capabilities on web/desktop. VS Code and mobile remain unsupported.
+
+### Work Status sections
+
+`contributes.statusSection: true` reuses `panel.entry`; `{ entry: 'status/index.html', title?: 'Recent commits', height?: 160 }` uses separate package HTML (`.html`, inside the package, built scripts checked at install). The object form needs no `panel.entry`, so an extension can ship only a section and no rail icon. `title` is 1 to 60 characters and replaces `panel.name` on the section header; the icon is `panel.icon`. `height` (24 to 320, default 120) is the frame height before your page calls `setHeight`. The section appears in the chat's Work Status panel and in its section chooser, where the user can hide it or move it. `ctx.surface` is `status`. The frame runs only while the panel is shown and the section is expanded, so keep no state in it that you cannot rebuild. It gets the same sandbox, directory, session, theme, grants, and service as a panel. A status-only package may declare `capabilities`, `service`, `integration`, and `filesystem`; `page`, `attach`, `actions`, and `commands` still need `panel.entry` or `background.entry`. Web and desktop only.
 
 `sent` **values** (`startSession` / `prompt`): `sent` | `no-model` | `skipped` | `failed`. After `no-model` / `failed` on `startSession`, the session still exists.
 
@@ -263,6 +269,7 @@ See [Actions without opening a panel](./README.md#actions-without-opening-a-pane
 | `DENIED`           | The operating system refused the file access  |
 | `NO_MODEL`         | `generate` with no usable Small Model         |
 | `MODEL_FAILED`     | The Small Model returned an error             |
+| `UNSUPPORTED`      | This host surface cannot do that (for example `openCommit` without a Diff view) |
 | `SERVICE_FAILED`     | Service crashed or never became ready           |
 
 

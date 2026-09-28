@@ -11,7 +11,8 @@ afterEach(async () => {
 });
 
 test('a release bump packs workspace dependencies at the new version after a frozen install', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-release-pack-'));
+  // The real path: on Windows it also expands an 8.3 TEMP such as C:\Users\BOHDAN~1, which bun's workspace links need.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'oc-release-pack-')));
   roots.push(root);
   await fs.mkdir(path.join(root, 'scripts'));
   await fs.copyFile(new URL('./bump-version.mjs', import.meta.url), path.join(root, 'scripts/bump-version.mjs'));

@@ -129,6 +129,22 @@
           }
         },
         {
+          "label": "Chats",
+          "link": "/chats/",
+          "translations": {
+            "uk": "Чати",
+            "zh-CN": "聊天",
+            "es": "Chats",
+            "pt-BR": "Conversas",
+            "ko": "채팅",
+            "pl": "Czaty",
+            "fr": "Discussions",
+            "ja": "チャット",
+            "de": "Chats",
+            "tr": "Sohbetler"
+          }
+        },
+        {
           "label": "Context",
           "link": "/context/",
           "translations": {
@@ -206,6 +222,54 @@
             "ja": "セッションゴール",
             "de": "Sitzungsziele",
             "tr": "Oturum hedefleri"
+          }
+        },
+        {
+          "label": "Sessions in Work",
+          "link": "/sessions-in-work/",
+          "translations": {
+            "uk": "Сесії в роботі",
+            "zh-CN": "进行中的会话",
+            "es": "Sesiones en curso",
+            "pt-BR": "Sessões em andamento",
+            "ko": "작업 중인 세션",
+            "pl": "Sesje w toku",
+            "fr": "Sessions en cours",
+            "ja": "作業中のセッション",
+            "de": "Sitzungen in Arbeit",
+            "tr": "Devam eden oturumlar"
+          }
+        },
+        {
+          "label": "Permissions & Safety Net",
+          "link": "/permissions/",
+          "translations": {
+            "uk": "Дозволи та запобіжник",
+            "zh-CN": "权限与安全网",
+            "es": "Permisos y red de seguridad",
+            "pt-BR": "Permissões e rede de segurança",
+            "ko": "권한과 안전망",
+            "pl": "Uprawnienia i siatka bezpieczeństwa",
+            "fr": "Permissions et filet de sécurité",
+            "ja": "権限とセーフティネット",
+            "de": "Berechtigungen und Sicherheitsnetz",
+            "tr": "İzinler ve güvenlik ağı"
+          }
+        },
+        {
+          "label": "Auto Model Routing",
+          "link": "/auto-model-routing/",
+          "translations": {
+            "uk": "Автоматичний вибір моделі",
+            "zh-CN": "自动模型路由",
+            "es": "Enrutamiento automático de modelos",
+            "pt-BR": "Roteamento automático de modelos",
+            "ko": "자동 모델 라우팅",
+            "pl": "Automatyczny wybór modelu",
+            "fr": "Routage automatique des modèles",
+            "ja": "自動モデルルーティング",
+            "de": "Automatische Modellwahl",
+            "tr": "Otomatik model yönlendirme"
           }
         },
         {
@@ -387,6 +451,22 @@
             "ja": "プロバイダー、モデル、エージェント",
             "de": "Anbieter, Modelle und Agenten",
             "tr": "Sağlayıcılar, modeller ve agentlar"
+          }
+        },
+        {
+          "label": "Classification Providers (Jev)",
+          "link": "/classification-providers/",
+          "translations": {
+            "uk": "Постачальники класифікації (Jev)",
+            "zh-CN": "分类提供方（Jev）",
+            "es": "Proveedores de clasificación (Jev)",
+            "pt-BR": "Provedores de classificação (Jev)",
+            "ko": "분류 제공자 (Jev)",
+            "pl": "Dostawcy klasyfikacji (Jev)",
+            "fr": "Fournisseurs de classification (Jev)",
+            "ja": "分類プロバイダー（Jev）",
+            "de": "Klassifizierungsanbieter (Jev)",
+            "tr": "Sınıflandırma sağlayıcıları (Jev)"
           }
         },
         {

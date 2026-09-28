@@ -22,7 +22,7 @@ type ConfigState = {
   setSettingsDefaultAgent: () => void;
   selectionSource: 'auto';
   agentSelectionSource: 'auto';
-  agents: Array<{ name: string; model?: { providerID: string; modelID: string } }>;
+  agents: Array<{ name: string; model?: { providerID: string; id: string } }>;
   currentAgentName: string | undefined;
 };
 
@@ -69,17 +69,25 @@ mock.module('@/sync/selection-store', () => ({
 mock.module('@/sync/session-ui-store', () => ({
   useSessionUIStore: <T,>(selector: (state: typeof sessionState) => T): T => selector(sessionState),
 }));
+mock.module('@/lib/runtime-fetch', () => ({
+  runtimeFetch: async () => new Response(JSON.stringify({ authenticatedProviders: [] }), {
+    headers: { 'Content-Type': 'application/json' },
+  }),
+}));
+const persistenceModule = await import('@/lib/persistence');
 mock.module('@/lib/persistence', () => ({
+  ...persistenceModule,
   loadDesktopSettings: async () => savedSettings,
   updateDesktopSettings: async (changes: Partial<DesktopSettings>) => {
     updateCalls.push(changes);
     return { ok: true };
   },
+  reportSettingsSaveState: () => {},
 }));
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: async () => new Response(JSON.stringify({ authenticatedProviders: [] }), {
-    headers: { 'Content-Type': 'application/json' },
-  }),
+const opencodeModule = await import('@/lib/opencode/client');
+mock.module('@/lib/opencode/client', () => ({
+  ...opencodeModule,
+  opencodeClient: { getConfig: async () => ({ warming: false }) },
 }));
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -96,6 +104,10 @@ mock.module('@/components/sections/commands/AgentSelector', () => ({
 mock.module('@/components/sections/shared/SettingsInfoHint', () => ({
   SettingsInfoHint: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
+// The permission row reads the routing and UI stores; it has no bearing on the defaults under test.
+mock.module('@/components/sections/openchamber/PermissionDefaultModeField', () => ({
+  PermissionDefaultModeField: () => null,
+}));
 mock.module('@/components/sections/shared/SettingsSection', () => ({
   SettingsSection: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
   SettingsFieldRow: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -108,6 +120,7 @@ mock.module('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_SELECT_ROW_TRIGGER_CLASS: '',
   SETTINGS_SELECT_SIZE: 'sm',
   SETTINGS_OPTION_STACK_CLASS: '',
+  SETTINGS_FIELDS_STACK_CLASS: '',
 }));
 mock.module('@/components/ui/select', () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

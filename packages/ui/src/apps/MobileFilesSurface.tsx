@@ -14,6 +14,8 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { Input } from '@/components/ui/input';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { Icon } from '@/components/icon/Icon';
+import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
@@ -74,10 +76,14 @@ type MobileFilesSurfaceProps = {
 };
 
 export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose }) => {
+  const root = normalizePath(useEffectiveDirectory() ?? null);
+  return <MobileFilesSurfaceForRoot key={root} root={root} onClose={onClose} />;
+};
+
+const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: string }> = ({ root, onClose }) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
-  const root = normalizePath(useEffectiveDirectory() ?? null);
   const [route, setRoute] = React.useState<MobileFilesRoute>(() => ({ type: 'browser', directory: root }));
   const [entries, setEntries] = React.useState<FileListEntry[]>([]);
   const [isLoadingDirectory, setIsLoadingDirectory] = React.useState(false);
@@ -87,15 +93,9 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   const [isSearching, setIsSearching] = React.useState(false);
   const directoryLoadRequestIdRef = React.useRef(0);
 
-  React.useEffect(() => {
-    if (!root) return;
-    setRoute((current) => {
-      if (current.type === 'browser' && current.directory) return current;
-      return { type: 'browser', directory: root };
-    });
-  }, [root]);
-
   const currentDirectory = route.type === 'browser' ? route.directory : route.returnDirectory;
+  const currentDirectoryRef = React.useRef(currentDirectory);
+  currentDirectoryRef.current = currentDirectory;
 
   const loadDirectory = React.useCallback(async (directory: string) => {
     if (!directory) return;
@@ -125,6 +125,18 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     if (route.type !== 'browser') return;
     void loadDirectory(route.directory);
   }, [loadDirectory, route]);
+
+  // Reload the listing only when the upload landed in the folder still on screen.
+  const refreshUploadedDirectory = React.useCallback(async (directory: string) => {
+    if (normalizePath(directory) !== normalizePath(currentDirectoryRef.current)) return;
+    await loadDirectory(currentDirectoryRef.current);
+  }, [loadDirectory]);
+
+  const { canUpload, uploadingDirectory, pickFiles, uploadElements } = useFileTreeUpload({
+    root,
+    refreshDirectory: refreshUploadedDirectory,
+  });
+  const isUploading = uploadingDirectory !== null;
 
   React.useEffect(() => {
     if (route.type !== 'browser') return;
@@ -230,6 +242,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+      {uploadElements}
       <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
         {onClose ? (
           <button
@@ -265,6 +278,18 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
         >
           <RiRefreshLine className={cn('size-5', isLoadingDirectory && 'animate-spin')} />
         </button>
+        {canUpload ? (
+          <button
+            type="button"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            aria-label={t('sidebarFilesTree.actions.uploadFilesTitle')}
+            onClick={() => pickFiles(route.directory)}
+            disabled={isUploading}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name={isUploading ? 'loader-4' : 'upload-2'} className={cn('size-5', isUploading && 'animate-spin')} />
+          </button>
+        ) : null}
       </header>
       <div className="shrink-0 px-4 pb-2 pt-1">
         <div className="relative">

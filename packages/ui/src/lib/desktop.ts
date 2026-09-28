@@ -17,6 +17,8 @@ export type UpdateInfo = {
   // Web-specific fields
   packageManager?: string;
   updateCommand?: string;
+  /** The server cannot install this update itself; `updateCommand` must be run by hand. */
+  installBlocked?: 'service-manager';
 };
 
 export type UpdateProgress = {
@@ -139,6 +141,19 @@ export const invokeDesktop = async <T = unknown>(command: string, args?: Record<
   const bridge = getDesktopBridge();
   if (typeof bridge?.invoke !== 'function') return null;
   return bridge.invoke(command, args ?? {}) as Promise<T>;
+};
+
+// This reads the current native CLI preflight, never a persisted boot hint. Compare the
+// endpoint again after IPC so a runtime switch cannot reuse another host's state.
+export const hasCompatibleManagedDesktopOpenCode = async (): Promise<boolean> => {
+  if (!isDesktopShell() || !isDesktopLocalOriginActive()) return false;
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  try {
+    const result = z.boolean().safeParse(await invokeDesktop('desktop_managed_opencode_compatible', { apiBaseUrl }));
+    return result.success && result.data && apiBaseUrl === getRuntimeApiBaseUrl();
+  } catch {
+    return false;
+  }
 };
 
 type LaunchAtLoginStatus = {
@@ -484,12 +499,6 @@ const isDesktopFileGrantResult = (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 
-const desktopExistingFileGrantSchema = z.object({
-  path: z.string().min(1),
-  outsideFileGrant: z.string().min(1),
-  expiresAt: z.number().finite(),
-});
-
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
 ): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
@@ -528,36 +537,6 @@ export const requestFileAccess = async (
   }
 
   return { success: false, error: 'Native file picker not available' };
-};
-
-export const requestExistingFileAccess = async (
-  path: string
-): Promise<
-  | { success: true; path: string; outsideFileGrant: string; expiresAt: number }
-  | { success: false; error: string }
-> => {
-  const targetPath = typeof path === 'string' ? path.trim() : '';
-  if (!targetPath) {
-    return { success: false, error: 'Path is required' };
-  }
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return { success: false, error: 'Native file access not available' };
-  }
-
-  try {
-    const selected = await getDesktopBridge()?.grantFileAccess?.(targetPath);
-    const parsed = desktopExistingFileGrantSchema.safeParse(selected);
-    if (!parsed.success) {
-      return { success: false, error: 'File access was not granted' };
-    }
-    return {
-      success: true,
-      ...parsed.data,
-    };
-  } catch (error) {
-    console.warn('Failed to request existing file access', error);
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
 };
 
 export const startAccessingDirectory = async (

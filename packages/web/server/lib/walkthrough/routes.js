@@ -70,6 +70,26 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
     }
   });
 
+  // One file, both sides, straight from GitHub: the comparison view expands
+  // collapsed context on demand without touching the working tree.
+  app.get('/api/walkthrough/pr-file', async (req, res) => {
+    try {
+      const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+      const directory = query.get('directory')?.trim() ?? '';
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      const source = parseSource(readSource(query.get('source')));
+      if (source.kind !== 'pr') return res.status(400).json({ error: 'A pull request source is required' });
+      const path = query.get('path')?.trim() ?? '';
+      if (!path) return res.status(400).json({ error: 'path parameter is required' });
+      const previousPath = query.get('previousPath')?.trim() || undefined;
+      const status = query.get('status') ?? 'M';
+      const { getPullRequestFileContents } = await getWalkthroughService();
+      res.json(await getPullRequestFileContents(directory, source.number, source.sourceRepo, { path, previousPath, status }));
+    } catch (error) {
+      respondWithError(res, error, 'Failed to load pull request file');
+    }
+  });
+
   // Deliberately not aborted when the client disconnects: generation runs for
   // minutes and a refresh must not throw the work away. Leaving detaches the
   // client; the job finishes and caches its result. Stopping is an explicit

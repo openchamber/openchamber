@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
-import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { createStore } from "zustand/vanilla"
+import { opencodeClient } from "@/lib/opencode/client"
+import type { FormRequest, Session } from "@/lib/opencode/model"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
 import { getBackgroundNetworkState, runBackgroundNetworkTask } from "../lib/background-network"
@@ -11,38 +12,56 @@ const deferred = <T>() => {
   return { promise, resolve }
 }
 
-const createSdk = (respond?: (url: URL) => Response | Promise<Response> | undefined) => createOpencodeClient({
-  baseUrl: "https://bootstrap.test",
-  directory: "/sdk-default",
-  fetch: async (request) => {
-    const url = new URL(request instanceof Request ? request.url : request.toString())
-    const override = respond?.(url)
-    if (override) return override
-    const directory = url.searchParams.get("directory")
-    const body = url.pathname === "/project/current" ? { id: "project-a" }
-      : url.pathname === "/path" ? { directory, worktree: directory, state: "", config: "", home: "/home" }
-      : url.pathname === "/config" ? { instructions: [directory] }
-      : url.pathname === "/session/status" ? {}
-      : url.pathname === "/vcs" ? { branch: "main" }
-      : []
-    return Response.json(body)
-  },
+const location = spyOn(opencodeClient, "getLocation")
+const config = spyOn(opencodeClient, "getConfig")
+const statuses = spyOn(opencodeClient, "getActiveSessionStatuses")
+const commands = spyOn(opencodeClient, "listCommands")
+const mcp = spyOn(opencodeClient, "listMcpServers")
+const vcs = spyOn(opencodeClient, "getVcs")
+const forms = spyOn(opencodeClient, "listPendingForms")
+const permissions = spyOn(opencodeClient, "listPendingPermissions")
+// `commands` and `mcp` are spied so the regression test can assert bootstrap
+// never touches them; they are not part of directory initialization.
+const spies = [location, config, statuses, vcs, forms, permissions]
+
+beforeEach(() => {
+  for (const spy of [...spies, commands, mcp]) spy.mockReset()
+  location.mockImplementation(async (directory) => ({
+    directory: directory ?? "/repo",
+    project: { id: "project-a", directory: directory ?? "/repo", canonical: directory ?? "/repo" },
+  }))
+  config.mockResolvedValue({})
+  statuses.mockResolvedValue({})
+  commands.mockResolvedValue([])
+  mcp.mockResolvedValue([])
+  vcs.mockResolvedValue({ branch: "main" })
+  forms.mockResolvedValue([])
+  permissions.mockResolvedValue([])
 })
 
-const inputFor = (sdk = createSdk(), state: Partial<State> = {}) => {
+afterEach(() => {
+  expect(getBackgroundNetworkState().active).toBe(0)
+})
+
+const inputFor = (state: Partial<State> = {}) => {
   const store = createStore<State>(() => ({ ...INITIAL_STATE, ...state }))
   return {
-    directory: "/repo", sdk, store,
+    directory: "/repo", store,
     set: (patch: Partial<State>) => { store.setState(patch) },
-    global: { config: {}, projects: [] },
+    global: { config: {}, projects: [], path: { directory: "", worktree: "", home: "/home" } },
     loadSessions: async () => undefined,
   }
 }
 
+const form = (id: string, title = "Pick"): FormRequest => ({
+  id, sessionID: "session", title, fields: [{ key: "answer", type: "boolean" }],
+})
+
 describe("bootstrapDirectory", () => {
-  test("finishes session loading while /config is unresolved", async () => {
-    const blocked = deferred<Response>()
-    const input = inputFor(createSdk((url) => url.pathname === "/config" ? blocked.promise : undefined))
+  test("finishes session loading while the config read is unresolved", async () => {
+    const blocked = deferred<void>()
+    config.mockImplementation(async () => { await blocked.promise; return {} })
+    const input = inputFor()
     let initialized = false
     const bootstrap = bootstrapDirectory(input)
     void bootstrap.environment.then(() => { initialized = true })
@@ -51,90 +70,89 @@ describe("bootstrapDirectory", () => {
       expect(initialized).toBe(false)
       expect(input.store.getState().status).toBe("partial")
     } finally {
-      blocked.resolve(Response.json({}))
+      blocked.resolve()
       expect(await bootstrap.environment).toBe("complete")
       expect(input.store.getState().status).toBe("complete")
     }
   })
 
   test("keeps session-list failure separate from successful environment initialization", async () => {
-    const cached = [{
-      id: "cached", slug: "cached", projectID: "project-a", directory: "/repo",
-      title: "Cached", version: "1", time: { created: 1, updated: 1 },
+    const cached: Session[] = [{
+      id: "cached", projectID: "project-a", directory: "/repo", title: "Cached",
+      time: { created: 1, updated: 1 }, cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     }]
-    const input = inputFor(createSdk(), { session: cached })
+    const input = inputFor({ session: cached })
     const bootstrap = bootstrapDirectory({ ...input, loadSessions: async () => { throw new Error("unavailable") } })
     expect(await bootstrap.sessions).toBe("failed")
     expect(await bootstrap.environment).toBe("complete")
     expect(input.store.getState().session).toBe(cached)
   })
 
-  test("a config failure cannot suppress status or pending-question recovery", async () => {
-    const question = { id: "question", sessionID: "session", questions: [] }
-    const input = inputFor(createSdk((url) => {
-      if (url.pathname === "/config") return Response.json({ message: "invalid config" }, { status: 400 })
-      if (url.pathname === "/question") return Response.json([question])
-    }))
+  test("a config failure cannot suppress status or pending-form recovery", async () => {
+    config.mockRejectedValue(Object.assign(new Error("invalid config"), { status: 400 }))
+    const pending = form("pending")
+    forms.mockResolvedValue([pending])
+    const input = inputFor()
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("failed")
-    expect(input.store.getState().question.session).toEqual([question])
+    expect(input.store.getState().form.session).toEqual([pending])
     expect(input.store.getState().sessionStatusReady).toBe(true)
   })
 
-  test("a failed status request does not grant idle authority", async () => {
-    const input = inputFor(createSdk((url) => url.pathname === "/session/status"
-      ? Response.json({ message: "status unavailable" }, { status: 400 }) : undefined))
+  test("a failed status snapshot preserves live state and does not grant idle authority", async () => {
+    const previous: State["session_status"] = { session: { type: "busy" } }
+    statuses.mockResolvedValue(null)
+    const input = inputFor({ session_status: previous })
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("failed")
+    expect(input.store.getState().session_status).toBe(previous)
     expect(input.store.getState().sessionStatusReady).toBeUndefined()
   })
 
-  test("malformed status success does not clear live state or grant idle authority", async () => {
-    const statuses: State["session_status"] = { session: { type: "busy" } }
-    const input = inputFor(createSdk((url) => url.pathname === "/session/status" ? Response.json([]) : undefined), {
-      session_status: statuses,
-    })
+  test("optional VCS failure preserves its previous state without failing core initialization", async () => {
+    vcs.mockRejectedValue(Object.assign(new Error("VCS unavailable"), { status: 400 }))
+    const previous: State["vcs"] = { branch: "main" }
+    const input = inputFor({ vcs: previous })
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
-    expect(await bootstrap.environment).toBe("failed")
-    expect(input.store.getState().sessionStatusReady).toBeUndefined()
-    expect(input.store.getState().session_status).toBe(statuses)
+    expect(await bootstrap.environment).toBe("complete")
+    expect(input.store.getState().vcs).toBe(previous)
   })
 
   test("never reads MCP-initializing endpoints during directory initialization", async () => {
     // Reading MCP status initializes the directory's entire stdio server
     // fleet, and listing commands enumerates MCP prompts, which touches the
-    // same state. The sidebar declares bootstrap demand for every known
-    // project directory, so either read spawned a fleet per project at
-    // startup. MCP and command surfaces fetch on demand instead.
-    const requests: URL[] = []
-    const input = inputFor(createSdk((url) => { requests.push(url); return undefined }))
+    // same state. Bootstrap used to run for every known project directory, so
+    // either read spawned a fleet per project at startup. MCP and command
+    // surfaces fetch on demand instead.
+    const input = inputFor()
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("complete")
-    expect(requests.some((url) => url.pathname === "/mcp")).toBe(false)
-    expect(requests.some((url) => url.pathname === "/command")).toBe(false)
+    expect(mcp.mock.calls).toHaveLength(0)
+    expect(commands.mock.calls).toHaveLength(0)
   })
 
   test("rejects stale work before starting either phase", async () => {
-    let calls = 0
-    const input = inputFor(createSdk(() => { calls += 1; return undefined }))
+    const input = inputFor()
     const state = input.store.getState()
-    const bootstrap = bootstrapDirectory({ ...input, isStale: () => true, loadSessions: async () => { calls += 1 } })
+    let lists = 0
+    const bootstrap = bootstrapDirectory({ ...input, isStale: () => true, loadSessions: async () => { lists += 1 } })
     expect(await bootstrap.sessions).toBe("stale")
     expect(await bootstrap.environment).toBe("stale")
-    expect(calls).toBe(0)
+    expect(lists).toBe(0)
+    for (const spy of spies) expect(spy.mock.calls).toHaveLength(0)
     expect(input.store.getState()).toBe(state)
   })
 
   test("drops queued initialization reads after the directory generation changes", async () => {
     const blocked = Array.from({ length: getBackgroundNetworkState().limit }, () => deferred<void>())
     const occupied = blocked.map((task) => runBackgroundNetworkTask(() => task.promise))
-    let calls = 0
     let stale = false
-    const input = inputFor(createSdk(() => { calls += 1; return undefined }))
+    const input = inputFor()
     const bootstrap = bootstrapDirectory({ ...input, isStale: () => stale })
     expect(await bootstrap.sessions).toBe("complete")
     stale = true
@@ -142,77 +160,85 @@ describe("bootstrapDirectory", () => {
     for (const task of blocked) task.resolve()
     await Promise.all(occupied)
     expect(await bootstrap.environment).toBe("stale")
-    expect(calls).toBe(0)
+    for (const spy of spies) expect(spy.mock.calls).toHaveLength(0)
     expect(input.store.getState()).toBe(state)
   })
 
   test("an in-flight response cannot commit after its initialization is superseded", async () => {
-    const response = deferred<Response>()
+    const response = deferred<State["config"]>()
     const started = deferred<void>()
     let stale = false
-    const input = inputFor(createSdk((url) => {
-      if (url.pathname !== "/config") return undefined
-      started.resolve()
-      return response.promise
-    }))
+    config.mockImplementation(() => { started.resolve(); return response.promise })
+    const input = inputFor()
     const bootstrap = bootstrapDirectory({ ...input, isStale: () => stale })
     await bootstrap.sessions
     await started.promise
     stale = true
     const state = input.store.getState()
-    response.resolve(Response.json({ instructions: ["old configuration"] }))
+    response.resolve({ instructions: ["old configuration"] })
     expect(await bootstrap.environment).toBe("stale")
     expect(input.store.getState()).toBe(state)
   })
 
-  test("addresses every environment read to its directory rather than the SDK default", async () => {
-    const requests: URL[] = []
-    const sdk = createSdk((url) => { requests.push(url); return undefined })
+  test("addresses directory reads explicitly and names the directory to the v2 active-status read", async () => {
     for (const directory of ["/workspace/Alpha", "C:/Users/Developer/Tree", "//Server/Share/Project", "C:/Users/Ірина/Project with spaces/100%", "C:/"]) {
-      requests.length = 0
-      const input = { ...inputFor(sdk), directory }
+      for (const spy of spies) spy.mock.calls.length = 0
+      const input = { ...inputFor(), directory }
       const bootstrap = bootstrapDirectory(input)
       expect(await bootstrap.sessions).toBe("complete")
       expect(await bootstrap.environment).toBe("complete")
-      expect(requests).toHaveLength(8)
-      expect(new Set(requests.map((url) => url.searchParams.get("directory")))).toEqual(new Set([directory]))
+      for (const spy of [location, config, vcs]) expect(spy.mock.calls).toEqual([[directory]])
+      for (const spy of [forms, permissions]) expect(spy.mock.calls).toEqual([[{ directories: [directory], includeGlobal: false }]])
+      // The directory travels with the read; the client keeps the host's snapshot global and
+      // asks a directory inside an isolated space for its own.
+      expect(statuses.mock.calls).toEqual([[directory]])
       expect(input.store.getState().path.directory).toBe(directory)
-      expect(input.store.getState().config.instructions).toEqual([directory])
     }
   })
 
-  test("an authoritative empty question list clears old records", async () => {
-    const input = inputFor(createSdk(), { question: { session: [{ id: "old", sessionID: "session", questions: [] }] } })
+  test("an authoritative empty form list clears old records", async () => {
+    const input = inputFor({ form: { session: [form("old")] } })
     const bootstrap = bootstrapDirectory(input)
     await bootstrap.sessions
     expect(await bootstrap.environment).toBe("complete")
-    expect(input.store.getState().question).toEqual({})
+    expect(input.store.getState().form).toEqual({})
   })
 
-  test("failed question recovery preserves previous questions", async () => {
-    const questions = { session: [{ id: "old", sessionID: "session", questions: [] }] }
-    const input = inputFor(createSdk((url) => url.pathname === "/question"
-      ? Response.json({ message: "unavailable" }, { status: 400 }) : undefined), { question: questions })
+  test("failed form recovery preserves previous forms", async () => {
+    const previous = { session: [form("old")] }
+    forms.mockRejectedValue(Object.assign(new Error("unavailable"), { status: 400 }))
+    const input = inputFor({ form: previous })
     const bootstrap = bootstrapDirectory(input)
     await bootstrap.sessions
     expect(await bootstrap.environment).toBe("failed")
-    expect(input.store.getState().question).toBe(questions)
+    expect(input.store.getState().form).toBe(previous)
   })
 
-  test("retries transient question failures without replaying the session list", async () => {
-    let attempts = 0
+  test("retries transient form failures without replaying the session list", async () => {
     let lists = 0
-    const question = { id: "pending", sessionID: "session", questions: [] }
-    const input = inputFor(createSdk((url) => {
-      if (url.pathname !== "/question") return undefined
-      attempts += 1
-      return attempts === 1 ? Response.json({ message: "warming up" }, { status: 503 }) : Response.json([question])
-    }))
+    const pending = form("pending")
+    forms.mockRejectedValueOnce(Object.assign(new Error("warming up"), { status: 503 })).mockResolvedValue([pending])
+    const input = inputFor()
     const bootstrap = bootstrapDirectory({ ...input, loadSessions: async () => { lists += 1 } })
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("complete")
-    expect(attempts).toBe(2)
+    expect(forms.mock.calls).toHaveLength(2)
     expect(lists).toBe(1)
-    expect(input.store.getState().question.session).toEqual([question])
+    expect(input.store.getState().form.session).toEqual([pending])
+  })
+
+  test("fetched forms replace unchanged records and retain same-session live additions", async () => {
+    const old = form("form-1")
+    const added = form("form-2")
+    const updated = form("form-1", "Updated")
+    const input = inputFor({ form: { session: [old] } })
+    forms.mockImplementation(async () => {
+      input.store.setState({ form: { session: [old, added] } })
+      return [updated]
+    })
+    const bootstrap = bootstrapDirectory(input)
+    await bootstrap.sessions
+    expect(await bootstrap.environment).toBe("complete")
+    expect(input.store.getState().form.session).toEqual([updated, added])
   })
 })

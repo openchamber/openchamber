@@ -28,7 +28,7 @@ Ce n'est pas un callback de montage unique. Montez l'interface et inscrivez les 
 | `locale` | le tag de langue de l'application |
 | `directory` | le dossier du projet en cours, ou `null` |
 | `session` | `{ id, title, busy }` ou `null`. Le titre retombe sur l'id de session. `busy` est le statut en direct. `model` et `agent` (l'agent OpenCode) apparaissent quand la session les a. |
-| `surface` | `panel` dans la barre latérale, `dialog` dans la fenêtre d'attache, `page` en plein écran |
+| `surface` | `panel` dans la barre latérale, `dialog` dans la fenêtre d'attache, `page` en plein écran, `status` dans le panneau Work Status |
 | `item` | ce pour quoi cette surface a été ouverte, ou `null` : l'élément attaché sur lequel l'utilisateur a cliqué (les mêmes champs que vous avez passés à `attach`, y compris `data`), un message (`kind: "message"`) ou une session (`kind: "session"`) venant d'une de vos actions déclarées. Voir [Actions](/sdk/#actions-commandes-et-le-badge). |
 | `connection` | `{ connected, account }` pour votre intégration |
 | `settings` | les valeurs des champs déclarés dans `integration.settings` |
@@ -65,6 +65,8 @@ Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 | `generate({ prompt, system?, maxOutputTokens? })` | texte ponctuel du Small Model de l'utilisateur. Renvoie `{ text }`. Nécessite la capacité `model`. |
 | `onResolve(handler)` | enregistre le gestionnaire de vos commandes slash. Il reçoit `{ command, args }` et renvoie un élément à attacher ou `null`. |
 | `setBadge(count)` | affiche un nombre (0 à 999) sur votre icône de la barre latérale, ou `null` pour l'effacer |
+| `openCommit(sha)` | ouvrir la vue Diff sur ce commit du projet courant. `sha` fait de 7 à 64 caractères hexadécimaux ; OpenChamber lit le commit lui-même. |
+| `setHeight(px)` | régler la hauteur de votre section Work Status. OpenChamber la maintient entre 24 et 320 pixels ; un contenu plus haut défile dans votre page. Ailleurs, c'est ignoré. |
 
 ## attach, startSession et sessionLink
 
@@ -217,12 +219,13 @@ Les appels en échec lèvent `HostRequestError`. `code` est l'un des suivants ; 
 | `NO_SERVICE` | pas de service local déclaré, non approuvé, ou pas en cours d'exécution |
 | `NOT_GRANTED` | l'utilisateur n'a pas approuvé la capacité dont cet appel a besoin |
 | `SERVICE_FAILED` | le service local a planté ou n'est jamais devenu prêt |
-| `NO_DIRECTORY` | un chemin de fichier relatif a été utilisé sans projet ouvert |
-| `NOT_FOUND` | `readFile` sur un fichier qui n'existe pas |
+| `NO_DIRECTORY` | un chemin de fichier relatif a été utilisé sans projet ouvert, ou `openCommit` sans projet ouvert |
+| `NOT_FOUND` | `readFile` sur un fichier qui n'existe pas, ou `openCommit` sur un commit absent du projet |
 | `FILE_TOO_LARGE` | contenu du fichier au-delà de la limite, en lecture ou en écriture |
 | `DENIED` | le système d'exploitation a refusé l'opération sur le fichier |
 | `NO_MODEL` | `generate` sans Small Model disponible |
 | `MODEL_FAILED` | le Small Model a renvoyé une erreur |
+| `UNSUPPORTED` | cet OpenChamber ne peut pas faire l'appel, par exemple `openCommit` là où il n'y a pas de vue Diff |
 
 ## Voir aussi
 

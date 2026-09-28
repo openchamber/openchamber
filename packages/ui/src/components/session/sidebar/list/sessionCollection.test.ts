@@ -1,8 +1,7 @@
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
-import type { Event } from '@opencode-ai/sdk/v2/client';
+import type { Session } from '@/lib/opencode/model';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { deriveRecentSessions } from '../recent/activitySections';
@@ -110,6 +109,17 @@ describe('projectSidebarActiveSessions', () => {
       knownDirectories: new Set(),
       isVSCode: false,
     }).map((entry) => entry.id)).toEqual(['unknown', 'empty']);
+  });
+
+  test('retains unknown active full-app records when topology directories are known', () => {
+    const restored = { ...session('restored', '/deleted/worktrees/feature'), time: { created: 1, updated: 1 } };
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [restored],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/known']),
+      isVSCode: false,
+    }).map((entry) => entry.id)).toEqual(['restored']);
   });
 
   test('keeps archived sessions despite directory filtering', () => {
@@ -308,22 +318,20 @@ describe('useRecentSessionCollection', () => {
       expect(renderedIds).toEqual([]);
 
       await act(async () => {
-        // SAFETY: This fixture matches the SDK event shape consumed by the status event reducer.
         applyGlobalSessionStatusEvent('/workspace/a', {
           type: 'session.status',
           properties: { sessionID: 'old-root', status: { type: 'busy' } },
-        } as Event);
+        });
       });
       expect(renderedIds).toEqual(['old-root']);
       const activeRenderCount = renderCount;
       const activeDeriveOperationCount = timeReadCount;
 
       await act(async () => {
-        // SAFETY: This fixture matches the SDK event shape consumed by the status event reducer.
         applyGlobalSessionStatusEvent('/other-workspace', {
           type: 'session.status',
-          properties: { sessionID: 'old-root', status: { type: 'retry', attempt: 2, message: 'waiting' } },
-        } as Event);
+          properties: { sessionID: 'old-root', status: { type: 'retry', attempt: 2, message: 'waiting', next: 0 } },
+        });
       });
       expect(renderCount).toBe(activeRenderCount);
       expect(timeReadCount).toBe(activeDeriveOperationCount);

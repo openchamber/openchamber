@@ -57,6 +57,7 @@ const load = async (name: string, script = 'main', folder = 'panel') => {
     window, document: window.document, HTMLElement: window.HTMLElement, MessageEvent: window.MessageEvent, console,
     HTMLInputElement: window.HTMLInputElement, HTMLStyleElement: window.HTMLStyleElement, HTMLAnchorElement: window.HTMLAnchorElement,
     TextEncoder, URL, crypto, performance, setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
+    ResizeObserver: window.ResizeObserver,
   });
   return { window, messages, send, ready, reply, request, button, update };
 };
@@ -130,6 +131,58 @@ describe('checked-in SDK examples', () => {
     await tick();
     app.reply(app.request('service-status'), { status: 'ready' });
     expect(app.window.document.body.textContent).toContain('HTTP 200');
+  });
+
+  test('git graph section loads refs and history, expands one commit at a time, and opens its diff', async () => {
+    const app = await load('git-graph-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status' });
+    await tick();
+    app.reply(app.request('storage'), { storage: true, op: 'get', found: false });
+    await tick();
+    const service = (path: string) => {
+      const found = [...app.messages].reverse().find((message) => message.type === 'service-request' && message.payload.path === path);
+      if (!found || found.type !== 'service-request') throw new Error(`Missing ${path}`);
+      return found;
+    };
+    expect(service('/log').payload.query).toMatchObject({ directory: '/repo', mode: 'auto' });
+    app.reply(service('/refs'), { status: 200, body: JSON.stringify({
+      branch: 'main', upstream: 'origin/main', github: 'https://github.com/acme/repo',
+      refs: [{ name: 'main', kind: 'local' }, { name: 'origin/main', kind: 'remote' }],
+    }) });
+    app.reply(service('/log'), { status: 200, body: JSON.stringify({ uncommitted: 2, commits: [
+      { hash: 'b'.repeat(40), parents: ['a'.repeat(40)], author: 'Ada', when: '2 hours ago', date: '2026-09-24T08:00:00Z', subject: 'Add the graph',
+        refs: [{ name: 'main', kind: 'local', head: true }, { name: 'origin/main', kind: 'remote', head: false }] },
+      { hash: 'a'.repeat(40), parents: [], author: 'Ada', when: '3 days ago', date: '2026-09-21T08:00:00Z', subject: 'First commit', refs: [] },
+    ] }) });
+    await tick();
+    const document = app.window.document;
+    expect(document.body.textContent).toContain('Uncommitted changes');
+    expect(document.body.textContent).toContain('Ada · 2 hours ago');
+    expect(document.querySelector('.ref.head-ref')?.textContent).toBe('main');
+    expect(document.querySelector('.ref.remote')?.textContent).toBe('origin/main');
+    expect(document.querySelectorAll('svg.graph circle')).toHaveLength(3);
+
+    const rows = () => [...document.querySelectorAll('button.head')].filter((node) => node instanceof app.window.HTMLButtonElement);
+    rows()[0]?.click();
+    await tick();
+    const commit = service('/commit');
+    expect(commit.payload.query).toMatchObject({ sha: 'b'.repeat(40) });
+    app.reply(commit, { status: 200, body: JSON.stringify({
+      hash: 'b'.repeat(40), parents: ['a'.repeat(40)], author: 'Ada', email: 'ada@example.com', when: '2 hours ago', date: '2026-09-24T08:00:00Z',
+      subject: 'Add the graph', body: 'Longer story.', files: 3, insertions: 40, deletions: 2,
+    }) });
+    await tick();
+    expect(document.querySelector('.card')?.textContent).toContain('3 files changed');
+    expect(document.querySelector('.card')?.textContent).toContain('ada@example.com');
+    rows()[1]?.click();
+    await tick();
+    expect(document.querySelectorAll('.commit.open')).toHaveLength(1);
+    rows()[0]?.click();
+    await tick();
+    app.button('Open diff').click();
+    expect(app.request('open-commit')).toMatchObject({ payload: { sha: 'b'.repeat(40) } });
+    app.button('Open on GitHub').click();
+    expect(app.request('open-url')).toMatchObject({ payload: { url: `https://github.com/acme/repo/commit/${'b'.repeat(40)}` } });
   });
 
   test('repository refresh failures preserve results and context is composed without sending', async () => {

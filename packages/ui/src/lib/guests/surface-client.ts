@@ -45,6 +45,8 @@ export type SurfaceClientHandlers = {
   onResized?: (size: { width: number; height: number }) => void;
   onClipboard?: (id: string, text: string) => void;
   onError?: (code: string, message: string) => void;
+  /** The host-issued id of this connection; a new one after every reconnect. */
+  onViewer?: (viewerId: string) => void;
 };
 
 type SurfaceClientDependencies = {
@@ -211,6 +213,7 @@ export class SurfaceClient {
     }
     switch (message.type) {
       case 'hello':
+        this.handlers.onViewer?.(message.viewerId);
         return;
       case 'frame':
         this.pendingFrame = {

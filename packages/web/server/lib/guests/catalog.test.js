@@ -204,6 +204,39 @@ describe('listInstalledGuests', () => {
 
     await fs.rm(dir, { recursive: true, force: true });
   });
+
+  test('a page docked beside a shared surface reaches the public row with its edge and size', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'sim');
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), '<script src="./main.js"></script>');
+    await fs.writeFile(path.join(guestRoot, 'panel', 'main.js'), 'console.log("strip")');
+    await fs.writeFile(path.join(guestRoot, 'service.js'), 'console.log("service")');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/sim',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'sim', name: 'Sim', icon: 'window', entry: 'panel/index.html', dock: 'right', size: 240 },
+          service: { entry: 'service.js', runtime: 'host', surface: true },
+        },
+      },
+    }));
+
+    const inspected = await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' });
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(toPublicGuest({ ...inspected.guest, source: 'path', path: guestRoot })).toMatchObject({
+        entry: 'panel/index.html',
+        entryDock: 'right',
+        entrySize: 240,
+        service: expect.objectContaining({ surface: true }),
+      });
+    }
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
 });
 
 describe('page-less packages', () => {
@@ -224,6 +257,28 @@ describe('page-less packages', () => {
       expect(toPublicGuest(inspected.guest)).toMatchObject({ pageEntry: 'panel/page.html', pageTitle: 'Tasks' });
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
+  test('a status-section-only package validates its HTML and scripts and publishes title and height without a panel entry', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-status-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'git-graph', name: 'Git graph', icon: 'git-commit' },
+          statusSection: { entry: 'status/index.html', title: 'Recent commits', height: 160 },
+        },
+      } }));
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'invalid-manifest' });
+      await fs.mkdir(path.join(dir, 'status'));
+      await fs.writeFile(path.join(dir, 'status/index.html'), '<script src="main.js"></script>');
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'missing-build' });
+      await fs.writeFile(path.join(dir, 'status/main.js'), 'console.log("status")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+      expect(row).toMatchObject({ statusEntry: 'status/index.html', statusTitle: 'Recent commits', statusHeight: 160 });
+      expect(row).not.toHaveProperty('entry');
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
   test('installs a tools-only package without entry, omits entry from the row, and never serves it a frame', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
     const guestRoot = path.join(dir, 'tools-only');

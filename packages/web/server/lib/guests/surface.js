@@ -20,6 +20,8 @@
  * holding it releases it.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { WebSocketServer } from 'ws';
 
 import {
@@ -30,6 +32,7 @@ import {
   SURFACE_FRAME_MAX_BYTES,
   SURFACE_FRAME_MIMES,
   SURFACE_FRAME_PATH,
+  SURFACE_FRAME_SEQ_HEADER,
   SURFACE_FRAME_WAIT_MS,
   SURFACE_HEIGHT_HEADER,
   SURFACE_INPUT_PATH,
@@ -37,6 +40,8 @@ import {
   SURFACE_SEQ_HEADER,
   SURFACE_TITLE_HEADER,
   SURFACE_TITLE_MAX,
+  SURFACE_VIEWER_CONTROLS_HEADER,
+  SURFACE_VIEWER_HEADER,
   SURFACE_WIDTH_HEADER,
   isGuestApproved,
   requestedGuestCapabilities,
@@ -97,7 +102,9 @@ export const createGuestSurfaceRuntime = ({
   idleStopMs,
   openServiceRequest = openGuestServiceRequest,
   holdService = holdGuestService,
-  createViewerId = () => `viewer-${Math.random().toString(36).slice(2, 10)}`,
+  // Unguessable: a page call that names a viewer is told whether that viewer
+  // holds control, so the id works as the viewer's lease.
+  createViewerId = () => `viewer-${randomUUID()}`,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 }) => {
@@ -109,13 +116,15 @@ export const createGuestSurfaceRuntime = ({
    *   id: string,
    *   ws: import('ws').WebSocket,
    *   sentSeq: number,
+   *   sentServiceSeq: number,
+   *   shownServiceSeq: number,
    *   awaitingAck: boolean,
    * }} Viewer
    * @typedef {{
    *   guestId: string,
    *   guest: object,
    *   viewers: Map<string, Viewer>,
-   *   latest: { seq: number, width: number, height: number, mime: string, title?: string, agentActive: boolean, bytes: Buffer } | null,
+   *   latest: { seq: number, serviceSeq: number, width: number, height: number, mime: string, title?: string, agentActive: boolean, bytes: Buffer } | null,
    *   controller: 'none' | 'agent' | string,
    *   agentTimer: ReturnType<typeof setTimeout> | null,
    *   pumpAbort: AbortController | null,
@@ -164,13 +173,13 @@ export const createGuestSurfaceRuntime = ({
     return run;
   };
 
-  const notifyService = async (session, controller) => {
+  const notifyService = async (session, controller, viewerId) => {
     if (session.ended) return;
     try {
       const { response, finished } = await serviceRequest(session, {
         method: 'POST',
         path: SURFACE_CONTROL_PATH,
-        body: JSON.stringify({ controller }),
+        body: JSON.stringify(controller === 'user' && viewerId ? { controller, viewer: viewerId } : { controller }),
         timeoutMs: QUICK_REQUEST_TIMEOUT_MS,
       });
       await response.arrayBuffer().catch(() => undefined);
@@ -186,7 +195,8 @@ export const createGuestSurfaceRuntime = ({
     for (const viewer of session.viewers.values()) {
       send(viewer, { type: 'control', controller: kind, mine: session.controller === viewer.id });
     }
-    void enqueue(session, () => notifyService(session, kind));
+    const holder = kind === 'user' ? session.controller : undefined;
+    void enqueue(session, () => notifyService(session, kind, holder));
   };
 
   const clearAgentTimer = (session) => {
@@ -208,6 +218,7 @@ export const createGuestSurfaceRuntime = ({
     if (!frame || viewer.awaitingAck || viewer.sentSeq >= frame.seq || viewer.ws.readyState !== 1) return;
     viewer.awaitingAck = true;
     viewer.sentSeq = frame.seq;
+    viewer.sentServiceSeq = frame.serviceSeq;
     const meta = {
       type: 'frame',
       seq: frame.seq,
@@ -260,6 +271,9 @@ export const createGuestSurfaceRuntime = ({
     const title = (response.headers.get(SURFACE_TITLE_HEADER) || '').slice(0, SURFACE_TITLE_MAX);
     const frame = {
       seq,
+      // The service's own number, kept when `seq` is bumped below: input is
+      // stamped with it, and only the service knows which view it belongs to.
+      serviceSeq: seq,
       width,
       height,
       mime,
@@ -357,7 +371,7 @@ export const createGuestSurfaceRuntime = ({
    * control back: the user already let go, and re-taking it from a queued
    * click would lock the agent out with nobody to press the button.
    */
-  const handleInput = async (session, viewer, events, handoff) => {
+  const handleInput = async (session, viewer, events, handoff, frameSeq) => {
     if (viewer.gone) return;
     if (session.controller !== viewer.id) {
       if (session.controller !== 'none' && session.controller !== 'agent') {
@@ -373,10 +387,20 @@ export const createGuestSurfaceRuntime = ({
         method: 'POST',
         path: SURFACE_INPUT_PATH,
         body: JSON.stringify({ events }),
+        headers: {
+          [SURFACE_VIEWER_HEADER]: viewer.id,
+          [SURFACE_FRAME_SEQ_HEADER]: String(frameSeq),
+        },
         timeoutMs: QUICK_REQUEST_TIMEOUT_MS,
       });
       await response.arrayBuffer().catch(() => undefined);
       finished();
+      // 409: made on a picture the service no longer shows. Nothing reached
+      // the page, and the next frame shows the viewer what is there now.
+      if (response.status === 409) {
+        send(viewer, { type: 'error', code: 'INPUT_STALE', message: 'The picture changed before this input arrived; it was not applied.' });
+        return;
+      }
       if (response.status < 200 || response.status >= 300) {
         send(viewer, { type: 'error', code: 'INPUT_REJECTED', message: `The extension refused this input (HTTP ${response.status}).` });
       }
@@ -445,7 +469,8 @@ export const createGuestSurfaceRuntime = ({
   const handleViewerMessage = (session, viewer, raw) => {
     let parsed;
     try {
-      parsed = surfaceViewerMessageSchema.safeParse(JSON.parse(String(raw)));
+      // Node's `ws` delivers a Buffer, Bun's a Uint8Array; both decode here.
+      parsed = surfaceViewerMessageSchema.safeParse(JSON.parse(Buffer.from(raw).toString('utf8')));
     } catch {
       parsed = { success: false };
     }
@@ -458,12 +483,17 @@ export const createGuestSurfaceRuntime = ({
       case 'ack':
         if (message.seq === viewer.sentSeq) {
           viewer.awaitingAck = false;
+          // Acknowledged after drawing: this is the picture its next input is made on.
+          viewer.shownServiceSeq = viewer.sentServiceSeq;
           deliverLatest(session, viewer);
         }
         return;
       case 'input': {
         const handoff = session.handoffs;
-        void enqueue(session, () => handleInput(session, viewer, message.events, handoff));
+        // Read on arrival, not when the queue reaches the batch: the socket
+        // delivers acks and input in the order the viewer drew and acted.
+        const frameSeq = viewer.shownServiceSeq;
+        void enqueue(session, () => handleInput(session, viewer, message.events, handoff, frameSeq));
         return;
       }
       case 'release':
@@ -485,7 +515,7 @@ export const createGuestSurfaceRuntime = ({
 
   const attachViewer = (guestId, guest, ws) => {
     const session = ensureSession(guestId, guest);
-    const viewer = { id: createViewerId(), ws, sentSeq: 0, awaitingAck: false, gone: false };
+    const viewer = { id: createViewerId(), ws, sentSeq: 0, sentServiceSeq: 0, shownServiceSeq: 0, awaitingAck: false, gone: false };
     session.viewers.set(viewer.id, viewer);
     // Started with the first viewer in place: the pump's loop condition is
     // the viewer count, and it is checked before the first await.
@@ -607,6 +637,22 @@ export const createGuestSurfaceRuntime = ({
     endForGuest(guestId) {
       const session = sessions.get(guestId);
       if (session) endSession(session, 'extension-unavailable');
+    },
+
+    /**
+     * Headers for a page `serviceRequest` made from the window that holds
+     * `viewerId`, or null when that id is not a live viewer of this
+     * extension (then the request goes out without any).
+     */
+    viewerHeaders(guestId, viewerId) {
+      const session = sessions.get(guestId);
+      const viewer = session && !session.ended ? session.viewers.get(viewerId) : undefined;
+      if (!viewer || viewer.gone) return null;
+      return {
+        [SURFACE_VIEWER_HEADER]: viewer.id,
+        [SURFACE_VIEWER_CONTROLS_HEADER]: session.controller === viewer.id ? '1' : '0',
+        [SURFACE_FRAME_SEQ_HEADER]: String(viewer.shownServiceSeq),
+      };
     },
 
     /** Test seam. */

@@ -33,12 +33,19 @@ afterEach(() => {
  */
 const createOpenCode = () => {
   const state = {
-    statuses: {},
+    // `/api/session/active` lists only running sessions; an absent id is idle.
+    active: {},
+    // Subagent sessions per parent, as `GET /api/session?parentID=` lists them.
+    children: {},
     tail: [],
     commands: [],
     sent: [],
+    switched: [],
     failNext: null,
   };
+  // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
+  // `{ data, cursor }` and lists newest first.
+  const wrapped = (data) => Response.json({ location: { directory: DIRECTORY }, data });
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     const method = init.method ?? 'GET';
@@ -46,19 +53,29 @@ const createOpenCode = () => {
       state.failNext = null;
       return new Response('boom', { status: 500 });
     }
-    if (pathname === '/session/status') return Response.json(state.statuses);
-    if (pathname.endsWith('/message')) return Response.json(state.tail);
-    if (pathname === '/command') return Response.json(state.commands);
-    if (method === 'POST' && (pathname.endsWith('/prompt_async') || pathname.endsWith('/command'))) {
-      state.sent.push({ path: pathname, body: JSON.parse(init.body) });
+    // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
+    if (pathname === '/api/session/active') return Response.json({ data: state.active });
+    if (pathname === '/api/session' && method === 'GET') {
+      const parentID = new URL(url).searchParams.get('parentID');
+      return Response.json({ data: (state.children[parentID] ?? []).map((id) => ({ id, parentID })), cursor: {} });
+    }
+    if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
+    if (pathname === '/api/command') return wrapped(state.commands);
+    if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) {
+      // Kept apart from `sent`: switching the session is not a message.
+      state.switched.push({ path: pathname, body: JSON.parse(init.body) });
       return new Response(null, { status: 204 });
+    }
+    if (method === 'POST' && (pathname.endsWith('/prompt') || pathname.endsWith('/command') || pathname.endsWith('/synthetic'))) {
+      state.sent.push({ path: pathname, body: JSON.parse(init.body) });
+      return wrapped({ id: `msg_${state.sent.length}` });
     }
     return new Response('not found', { status: 404 });
   });
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolvePromptBody, now } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -79,7 +96,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     abortHoldMs: 50,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
-  if (resolvePromptBody) options.resolvePromptBody = resolvePromptBody;
+  if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
   if (now) options.now = now;
   const runtime = createMessageQueueRuntime(options);
   return {
@@ -88,7 +105,8 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     dataDir,
     broadcasts,
     promptSent,
-    emit: (payload, directory = DIRECTORY) => eventHandler({ payload, directory }),
+    // The hub hands server-side subscribers already-translated events.
+    emit: (payload, directory = DIRECTORY) => eventHandler({ payload, directory, translated: () => [payload] }),
     connect: () => statusHandler({ type: 'connect' }),
   };
 };
@@ -98,13 +116,11 @@ const settle = async (ms = 30) => {
 };
 
 describe('auto routing', () => {
-  it('lets the routing hook rewrite the model of a queued prompt and a queued command', async () => {
-    const resolvePromptBody = vi.fn(async (body) => {
-      if (body.model?.modelID === 'auto') body.model = { providerID: 'openai', modelID: 'gpt-6-astra' };
-      if (body.model === 'openchamber/auto') body.model = 'openai/gpt-6-astra';
-      return null;
-    });
-    const { runtime, openCode, emit } = createRuntime({ resolvePromptBody });
+  it('switches a queued prompt and a queued command onto the routed model and agent', async () => {
+    const resolveAutoSelection = vi.fn(async ({ model }) => (model?.id === 'auto'
+      ? { model: { providerID: 'openai', id: 'gpt-6-astra' }, agent: 'plan', decision: {} }
+      : null));
+    const { runtime, openCode, emit } = createRuntime({ resolveAutoSelection });
     runtime.start();
     openCode.state.statuses = { [SESSION]: { type: 'busy' } };
     openCode.state.commands = [{ name: 'review', template: 'Review $ARGUMENTS' }];
@@ -118,12 +134,16 @@ describe('auto routing', () => {
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
 
-    expect(openCode.state.sent.map((entry) => entry.body.model)).toEqual([
-      { providerID: 'openai', modelID: 'gpt-6-astra' },
-      'openai/gpt-6-astra',
+    // v2 carries no model in a prompt body: the session is switched first.
+    const switched = openCode.state.switched.filter((entry) => entry.path.endsWith('/model'));
+    expect(switched.map((entry) => entry.body.model)).toEqual([
+      { providerID: 'openai', id: 'gpt-6-astra' },
+      { providerID: 'openai', id: 'gpt-6-astra' },
     ]);
-    expect(resolvePromptBody).toHaveBeenCalledTimes(2);
-    expect(resolvePromptBody.mock.calls[0][1]).toEqual({ sessionId: SESSION, directory: DIRECTORY });
+    expect(openCode.state.switched.filter((entry) => entry.path.endsWith('/agent')).map((entry) => entry.body.agent))
+      .toEqual(['plan', 'plan']);
+    expect(resolveAutoSelection).toHaveBeenCalledTimes(2);
+    expect(resolveAutoSelection.mock.calls[0][0]).toMatchObject({ sessionId: SESSION, directory: DIRECTORY, requestText: 'plain' });
   });
 });
 
@@ -172,24 +192,22 @@ describe('message queue runtime', () => {
   it('delivers the head of the queue when the session goes idle, in order', async () => {
     const { runtime, openCode, emit, promptSent, broadcasts } = createRuntime();
     runtime.start();
-    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    openCode.state.active = { [SESSION]: { type: 'running' } };
 
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first', text: 'first' }));
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second', text: 'second' }));
     await settle();
     expect(openCode.state.sent).toHaveLength(0);
 
-    openCode.state.statuses = {};
+    openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
 
     expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
-    expect(openCode.state.sent[0].body).toEqual({
-      model: { providerID: 'anthropic', modelID: 'claude' },
-      agent: 'build',
-      parts: [{ type: 'text', text: 'first' }],
-    });
+    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
+    // v2 selects model and agent on the session, so the prompt carries text
+    // and attachments only.
+    expect(openCode.state.sent[0].body).toEqual({ text: 'first' });
     expect(promptSent).toEqual([SESSION]);
     expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.content)).toEqual(['second']);
     // Clients learned about the in-flight item and then the removal.
@@ -206,11 +224,32 @@ describe('message queue runtime', () => {
     expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
   });
 
+  it('waits for a background subagent before sending the queued message', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    // The parent paused: it is idle while its background subagent works.
+    openCode.state.children = { [SESSION]: ['ses_child'] };
+    openCode.state.active = { ses_child: { type: 'running' } };
+
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'next', text: 'next' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(0);
+
+    // The subagent finished and OpenCode ran the parent again with its result.
+    openCode.state.active = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
+  });
+
   it('does not send into a running turn even when the status event says idle', async () => {
     const { runtime, openCode, emit } = createRuntime({ now: () => 10_000 });
     runtime.start();
     // Live unfinished turn: created after this runtime started.
-    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 10_001 } } }];
+    openCode.state.tail = [{ type: 'assistant', time: { created: 10_001 } }];
     await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
@@ -218,7 +257,7 @@ describe('message queue runtime', () => {
 
     // The reply completes: that alone drains the queue (a missed idle event
     // must not strand it).
-    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 10_001, completed: 10_002 } } }];
+    openCode.state.tail = [{ type: 'assistant', time: { created: 10_001, completed: 10_002 } }];
     emit({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, time: { created: 10_001, completed: 10_002 } } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
@@ -230,19 +269,19 @@ describe('message queue runtime', () => {
     // Assistant reply interrupted by a server restart: unfinished, but older
     // than this runtime — no completion event will ever arrive for it, so it
     // must not block a restored queue forever.
-    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 1 } } }];
+    openCode.state.tail = [{ type: 'assistant', time: { created: 1 } }];
     await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
+    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
   });
 
   it('treats an unreachable OpenCode as unknown, not idle', async () => {
     const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 10 });
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
-    openCode.state.failNext = /\/session\/status$/;
+    openCode.state.failNext = /\/api\/session\/active$/;
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle(5);
     expect(openCode.state.sent).toHaveLength(0);
@@ -255,7 +294,7 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit, broadcasts } = createRuntime({ retryDelayMs: () => 20 });
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
-    openCode.state.failNext = /prompt_async$/;
+    openCode.state.failNext = /\/prompt$/;
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle(10);
     expect(openCode.state.sent).toHaveLength(0);
@@ -271,8 +310,10 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
-    emit({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, error: { name: 'MessageAbortedError' } } } });
+    // v2 reports a user abort as `session.execution.interrupted`, which the
+    // translator turns into an aborted `session.idle`.
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    emit({ type: 'session.idle', properties: { sessionID: SESSION, aborted: true, reason: 'user' } });
     await settle(10);
     expect(openCode.state.sent).toHaveLength(0);
     await settle(80);
@@ -297,7 +338,7 @@ describe('message queue runtime', () => {
     const dataDir = makeDataDir();
     const first = createRuntime({ dataDir });
     first.runtime.start();
-    first.openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
     await first.runtime.enqueue(SESSION, DIRECTORY, item({ content: 'persisted', text: 'persisted', contextPreview: 'Saved context preview' }));
     await first.runtime.flush();
     first.runtime.stop();
@@ -310,7 +351,7 @@ describe('message queue runtime', () => {
     second.connect();
     await settle();
     expect(second.openCode.state.sent).toHaveLength(1);
-    expect(second.openCode.state.sent[0].body.parts).toEqual([{ type: 'text', text: 'persisted' }]);
+    expect(second.openCode.state.sent[0].body).toEqual({ text: 'persisted' });
   });
 
   it('moves an unreadable queue file aside instead of treating it as empty', async () => {
@@ -326,9 +367,13 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     let release;
-    // status map, message tail, then the prompt itself (held open until released)
-    openCode.fetchImpl.mockImplementationOnce(async () => Response.json({}))
-      .mockImplementationOnce(async () => Response.json([]))
+    // active map, message tail, the subagent check (active map, children),
+    // model switch, then the prompt itself (held open until released)
+    openCode.fetchImpl.mockImplementationOnce(async () => Response.json({ location: {}, data: {} }))
+      .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
+      .mockImplementationOnce(async () => Response.json({ data: {} }))
+      .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
+      .mockImplementationOnce(async () => new Response(null, { status: 204 }))
       .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
     const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
@@ -398,7 +443,7 @@ describe('message queue runtime', () => {
     const { runtime, emit, broadcasts, openCode } = createRuntime();
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
-    openCode.state.statuses = {};
+    openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
 
@@ -434,11 +479,12 @@ describe('message queue runtime', () => {
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/command`);
-    expect(openCode.state.sent[0].body).toEqual({ command: 'review', arguments: 'src', model: 'p/m', agent: 'build', variant: 'max' });
+    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/command`);
+    // v2's command route takes `text`, and the selection lives on the session.
+    expect(openCode.state.sent[0].body).toEqual({ name: 'review', text: 'src' });
   });
 
-  it('delivers captured context as synthetic parts, instructions first, before project knowledge', async () => {
+  it('delivers captured context as synthetic messages, instructions first, before project knowledge', async () => {
     const knowledge = {
       resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
       recordDelivered: async () => {},
@@ -457,16 +503,29 @@ describe('message queue runtime', () => {
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
-    expect(openCode.state.sent[0].body.parts).toEqual([
-      { type: 'text', text: 'follow up' },
-      { type: 'file', mime: 'text/plain', filename: 'f.txt', url: 'data:text/plain,hi' },
-      { type: 'text', text: 'how to read it', synthetic: true },
-      { type: 'text', text: 'the diff', synthetic: true, metadata },
-      { type: 'text', text: 'conflict payload', synthetic: true },
-      { type: 'text', text: 'use the skill', synthetic: true },
-      { type: 'text', text: 'pinned notes', synthetic: true },
-      { type: 'agent', name: 'reviewer' },
+
+    // v2 has no inline synthetic parts: everything attached to the message is
+    // admitted as its own synthetic message, before the prompt.
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/prompt`,
     ]);
+    expect(openCode.state.sent.slice(0, 5).map((entry) => entry.body)).toEqual([
+      { text: 'how to read it', resume: false },
+      { text: 'the diff', resume: false, metadata },
+      { text: 'conflict payload', resume: false },
+      { text: 'use the skill', resume: false },
+      { text: 'pinned notes', resume: false },
+    ]);
+    expect(openCode.state.sent.at(-1).body).toEqual({
+      text: 'follow up',
+      files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
+      agents: [{ name: 'reviewer' }],
+    });
   });
 
   it('keeps files on the command route, which is all that route accepts', async () => {
@@ -480,17 +539,21 @@ describe('message queue runtime', () => {
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
-    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/command`);
-    expect(openCode.state.sent[0].body.parts).toEqual([{ type: 'file', mime: 'text/plain', filename: 'f.txt', url: 'data:text/plain,hi' }]);
+    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/command`);
+    expect(openCode.state.sent[0].body).toEqual({
+      name: 'review',
+      text: '',
+      files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
+    });
   });
 
-  it('sends a command queued with context as its expanded prompt, context included', async () => {
-    // The command route rejects text parts, so a command with captured
-    // context takes the prompt route with the template expanded, exactly as
-    // the composer does.
+  it('admits captured context as synthetic messages and still runs a queued command through the command route', async () => {
+    // The command route takes attachments only, so the context goes ahead as
+    // synthetic messages; the command itself keeps its route, because sending
+    // "/review ..." as a prompt would skip the template OpenCode expands there.
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
-    openCode.state.commands = [{ name: 'review', source: 'command', template: 'Review $1 with focus on $2' }];
+    openCode.state.commands = [{ name: 'review', description: 'Review' }];
     const metadata = { openchamberContext: { kind: 'chat-quote', quote: 'q', text: 'why?' } };
     await runtime.enqueue(SESSION, DIRECTORY, item({
       content: '/review src "error handling"',
@@ -499,30 +562,50 @@ describe('message queue runtime', () => {
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
-    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
-    expect(openCode.state.sent[0].body.parts).toEqual([
-      { type: 'text', text: 'Review src with focus on error handling' },
-      { type: 'text', text: 'quoted', synthetic: true, metadata },
+
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/command`,
     ]);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'quoted', resume: false, metadata });
+    expect(openCode.state.sent[1].body).toEqual({ name: 'review', text: 'src "error handling"' });
   });
 
-  it('sends a skill queued with context as an explicit invocation, context included', async () => {
+  it('delivers pending project knowledge ahead of a queued command and records it', async () => {
+    const recorded = [];
+    const knowledge = {
+      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
+      recordDelivered: async (sessionId, directory, signature) => { recorded.push({ sessionId, directory, signature }); },
+    };
+    const { runtime, openCode, emit } = createRuntime({ knowledge });
+    runtime.start();
+    openCode.state.commands = [{ name: 'review' }];
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review', text: '/review' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/command`,
+    ]);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'pinned notes', resume: false });
+    expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
+  });
+
+  it('admits nothing when the command lookup fails, so a retry cannot duplicate the context', async () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
-    openCode.state.commands = [{ name: 'grill', source: 'skill', template: 'skill body' }];
+    openCode.state.failNext = /^\/api\/command$/;
     await runtime.enqueue(SESSION, DIRECTORY, item({
-      content: '/grill auth',
-      text: '/grill auth',
-      context: [{ kind: 'synthetic', text: 'focus on tests' }],
+      content: '/review',
+      text: '/review',
+      context: [{ kind: 'context', text: 'quoted', metadata: {} }],
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
-    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
-    expect(openCode.state.sent[0].body.parts).toEqual([
-      { type: 'text', text: '/grill auth' },
-      { type: 'text', text: 'focus on tests', synthetic: true },
-      { type: 'text', text: 'The user explicitly invoked the grill skill. Use the corresponding skill tool to handle this request.', synthetic: true },
-    ]);
+
+    expect(openCode.state.sent).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
   });
 
   it('keeps captured context out of snapshots and broadcasts, and hands it back on take', async () => {
@@ -548,12 +631,15 @@ describe('message queue runtime', () => {
     await runtime.enqueue(SESSION, DIRECTORY, item({ agentMention: 'reviewer', attachments: [{ id: 'a', filename: 'f.txt', mimeType: 'text/plain', size: 1, source: 'local', dataUrl: 'data:text/plain,hi' }] }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
-    expect(openCode.state.sent[0].body.parts).toEqual([
-      { type: 'text', text: 'follow up' },
-      { type: 'file', mime: 'text/plain', filename: 'f.txt', url: 'data:text/plain,hi' },
-      { type: 'text', text: 'pinned notes', synthetic: true },
-      { type: 'agent', name: 'reviewer' },
-    ]);
+    // Knowledge is admitted as a synthetic message ahead of the prompt.
+    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/synthetic`);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'pinned notes', resume: false });
+    expect(openCode.state.sent[1].path).toBe(`/api/session/${SESSION}/prompt`);
+    expect(openCode.state.sent[1].body).toEqual({
+      text: 'follow up',
+      files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
+      agents: [{ name: 'reviewer' }],
+    });
     expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
   });
 });

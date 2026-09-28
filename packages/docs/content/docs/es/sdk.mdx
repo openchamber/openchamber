@@ -89,7 +89,7 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` abre en la ventana una página aparte tuya, para que el selector no tenga que compartir código con el panel de la barra lateral
 - si lo omites, la extensión no aparece en ese menú
 
-`ctx.surface` es `panel`, `dialog` o `page`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
+`ctx.surface` es `panel`, `dialog`, `page` o `status`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
 
 `contributes.page: true` ofrece el panel a pantalla completa en el menú Páginas de extensiones, encima de las sesiones. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. Sigue necesitando `panel.entry` y usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 Las escrituras son atómicas: OpenChamber escribe un archivo temporal y lo renombra, así que un lector nunca ve un archivo a medio escribir. Los archivos se leen y escriben como texto UTF-8, hasta 2 MB.
 
+## Una sección en Work Status
+
+`contributes.statusSection` añade tu propia sección al panel Work Status junto al chat. Los usuarios la activan, la desactivan y la mueven en la lista de secciones de ese panel, igual que las secciones integradas.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` reutiliza `panel.entry`.
+- `entry` es una página HTML aparte en tu carpeta. Con ella no necesitas `panel.entry`, así que la extensión puede ser solo esta sección, sin icono en la barra lateral.
+- `title` sustituye el nombre del panel en el encabezado de la sección, hasta 60 caracteres.
+- `height` es la altura inicial en píxeles, de 24 a 320 (120 por defecto). Llama a [`host.setHeight()`](/sdk/host/) cuando cambie el tamaño de tu contenido.
+
+Tu página ve `ctx.surface` como `status`. OpenChamber la carga solo mientras el panel Work Status está visible y tu sección está desplegada, y la descarga cuando el usuario la pliega, así que no guardes ahí nada que no puedas reconstruir. Una extensión que solo tiene la sección puede usar permisos, un servicio, una integración y archivos, pero no `page`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `git-graph-status` es una sección completa.
+
 ## Acciones, comandos y la insignia
 
 Además de la barra lateral y el menú +, una extensión puede aparecer en tres sitios más. Todos entregan a la extensión un `item` igual que un clic en un chip.
@@ -219,7 +234,7 @@ Cuando tu plugin de OpenCode o servidor MCP añade una herramienta, el chat mues
 
 `match` es el nombre de la herramienta tal como lo reporta OpenCode; un `*` final coincide con un prefijo. `icon` es un nombre de Remixicon o un archivo `.svg` en tu paquete, como `panel.icon`. `title` y `subtitle` son plantillas sobre `input`, `output` y `metadata` de la llamada. `output` elige cómo se renderiza el cuerpo: `text`, `json` (un árbol), `markdown`, `code` con un `language`, `table` con `columns` (las filas vienen del array de salida o de `output.items`) o `auto` para el comportamiento por defecto. Un `match` exacto gana a un comodín, y en caso de empate gana la primera extensión instalada. No hace falta ningún permiso: esto solo cambia cómo se dibujan datos que ya están en el chat.
 
-Una extensión que solo da estilo a herramientas no necesita página: omite `panel.entry` y no tendrá icono en la barra lateral, solo una tarjeta en Ajustes → Extensiones. Sin página puede declarar `tools` y nada más.
+Una extensión que solo da estilo a herramientas no necesita página: omite `panel.entry` y no tendrá icono en la barra lateral, solo una tarjeta en Ajustes → Extensiones. Sin página puede declarar `tools` y nada más. La otra excepción es una sección de Work Status con su propio `entry`, ver arriba.
 
 ## Primeras líneas en el panel
 

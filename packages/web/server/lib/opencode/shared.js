@@ -3,17 +3,21 @@ import path from 'path';
 import os from 'os';
 import yaml from 'yaml';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
+import { readSectionEntry, readMcpEntry } from './config-v2.js';
 
 // ============== PATH CONSTANTS ==============
 
-const OPENCODE_CONFIG_DIR = path.join(
-  process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config'),
-  'opencode',
-);
+// OpenCode 2 resolves its global config directory as `OPENCODE_CONFIG_DIR`
+// when set, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`.
+const OPENCODE_CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR?.trim()
+  ? path.resolve(process.env.OPENCODE_CONFIG_DIR.trim())
+  : path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config'), 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
-const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
+// OpenCode 2 reads only `opencode.json(c)`; the v1-era `config.json` is not
+// discovered any more, so it is neither read nor written here.
+const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 
 // ============== SCOPE TYPE CONSTANTS ==============
@@ -122,13 +126,21 @@ function writeMdFile(filePath, frontmatter, body) {
 
 // ============== CONFIG FILE OPERATIONS ==============
 
+/**
+ * Project config files in the order OpenCode 2 lets them win: a file under
+ * `.opencode/` overrides the one beside it at the project root, and
+ * `opencode.json` overrides `opencode.jsonc`. When several exist, the
+ * highest-priority one is the file OpenChamber reads and writes for the
+ * project scope (OpenCode merges them all; an entry that lives only in a
+ * lower file is visible through the resolved catalog but not editable here).
+ */
 function getProjectConfigCandidates(workingDirectory) {
   if (!workingDirectory) return [];
   return [
-    path.join(workingDirectory, 'opencode.json'),
-    path.join(workingDirectory, 'opencode.jsonc'),
     path.join(workingDirectory, '.opencode', 'opencode.json'),
     path.join(workingDirectory, '.opencode', 'opencode.jsonc'),
+    path.join(workingDirectory, 'opencode.json'),
+    path.join(workingDirectory, 'opencode.jsonc'),
   ];
 }
 
@@ -143,13 +155,13 @@ function getProjectConfigPath(workingDirectory) {
     }
   }
 
+  // A new project config goes beside the project's other `.opencode/` files.
   return candidates[0];
 }
 
 function getConfigPaths(workingDirectory) {
   return {
     userPaths: [
-      path.join(OPENCODE_CONFIG_DIR, 'config.json'),
       path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
       path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
     ],
@@ -268,17 +280,25 @@ function readConfigLayer(filePath) {
 function readConfigLayers(workingDirectory) {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
+  // OpenCode loads every global config file in order, so an `opencode.jsonc`
+  // next to `opencode.json` overrides it. New entries still go to the primary
+  // file; entries found in the override are edited where they live.
+  const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
   const userLayer = readConfigLayer(userPath);
+  const userOverrideLayer = readConfigLayer(userOverridePath);
   const projectLayer = readConfigLayer(projectPath);
   const customLayer = readConfigLayer(customPath);
   const mergedConfig = mergeConfigs(
-    mergeConfigs(userLayer.config, projectLayer.config),
+    mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), projectLayer.config),
     customLayer.config,
   );
 
   const layerErrors = [];
   if (userLayer.error) {
     layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
+  }
+  if (userOverrideLayer.error && userOverridePath) {
+    layerErrors.push({ path: userOverridePath, code: userOverrideLayer.error.code, message: userOverrideLayer.error.message });
   }
   if (projectLayer.error && projectPath) {
     layerErrors.push({ path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message });
@@ -289,10 +309,11 @@ function readConfigLayers(workingDirectory) {
 
   return {
     userConfig: userLayer.config,
+    userOverrideConfig: userOverrideLayer.config,
     projectConfig: projectLayer.config,
     customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, projectPath, customPath },
+    paths: { userPath, userOverridePath, projectPath, customPath },
     layerErrors,
   };
 }
@@ -357,30 +378,55 @@ function throwIfLayerError(layers, filePath) {
   throw error;
 }
 
-function getJsonEntrySource(layers, sectionKey, entryName) {
+/**
+ * Look one entry up in a config layer, accepting both OpenCode 2 section keys
+ * and the v1 keys v2 still decodes. `sectionKind` is `agents`, `commands`,
+ * `providers`, or `mcp`.
+ */
+function lookupSectionEntry(config, sectionKind, entryName) {
+  if (sectionKind === 'mcp') {
+    return readMcpEntry(config, entryName);
+  }
+  return readSectionEntry(config, sectionKind, entryName);
+}
+
+function getJsonEntrySource(layers, sectionKind, entryName) {
   const { userConfig, projectConfig, customConfig, paths } = layers;
+  const found = (config, filePath) => {
+    const entry = lookupSectionEntry(config, sectionKind, entryName);
+    if (entry.value === undefined) return null;
+    return {
+      section: entry.value,
+      config,
+      path: filePath,
+      exists: true,
+      sectionKey: entry.key,
+      legacy: entry.legacy,
+    };
+  };
+
   if (paths.customPath) {
     throwIfLayerError(layers, paths.customPath);
-    const customSection = customConfig?.[sectionKey]?.[entryName];
-    if (customSection !== undefined) {
-      return { section: customSection, config: customConfig, path: paths.customPath, exists: true };
-    }
+    const custom = found(customConfig, paths.customPath);
+    if (custom) return custom;
   }
 
   if (paths.projectPath && !getLayerError(layers, paths.projectPath)) {
-    const projectSection = projectConfig?.[sectionKey]?.[entryName];
-    if (projectSection !== undefined) {
-      return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
-    }
+    const project = found(projectConfig, paths.projectPath);
+    if (project) return project;
+  }
+
+  if (paths.userOverridePath) {
+    throwIfLayerError(layers, paths.userOverridePath);
+    const userOverride = found(layers.userOverrideConfig, paths.userOverridePath);
+    if (userOverride) return userOverride;
   }
 
   throwIfLayerError(layers, paths.userPath);
-  const userSection = userConfig?.[sectionKey]?.[entryName];
-  if (userSection !== undefined) {
-    return { section: userSection, config: userConfig, path: paths.userPath, exists: true };
-  }
+  const user = found(userConfig, paths.userPath);
+  if (user) return user;
 
-  return { section: null, config: null, path: null, exists: false };
+  return { section: null, config: null, path: null, exists: false, sectionKey: null, legacy: false };
 }
 
 function getJsonWriteTarget(layers, preferredScope) {
@@ -478,7 +524,20 @@ function walkSkillMdFiles(rootDir) {
   if (!rootDir || !fs.existsSync(rootDir)) return [];
 
   const results = [];
+  // Real paths of the directories on the current walk path. Links (symlinks and
+  // Windows junctions) are followed at any depth; a link back to one of its own
+  // ancestors is skipped instead of recursing forever. Two links to the same
+  // target elsewhere in the tree are both walked, as the top level always did.
+  const ancestors = new Set();
   const walk = (dir) => {
+    let realDir;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (ancestors.has(realDir)) return;
+
     let entries = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -486,16 +545,33 @@ function walkSkillMdFiles(rootDir) {
       return;
     }
 
+    ancestors.add(realDir);
+
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      // Junctions report as links, not directories. A link whose target cannot be
+      // stat'ed is skipped, the way an unreadable directory is, instead of failing
+      // the whole scan.
+      let isDirectoryEntry = entry.isDirectory();
+      let isFileEntry = entry.isFile();
+      if (entry.isSymbolicLink()) {
+        try {
+          const target = fs.statSync(fullPath);
+          isDirectoryEntry = target.isDirectory();
+          isFileEntry = target.isFile();
+        } catch {
+          continue;
+        }
+      }
+      if (isDirectoryEntry) {
         walk(fullPath);
         continue;
       }
-      if (entry.isFile() && entry.name === 'SKILL.md') {
+      if (isFileEntry && entry.name === 'SKILL.md') {
         results.push(fullPath);
       }
     }
+    ancestors.delete(realDir);
   };
 
   walk(rootDir);
@@ -659,6 +735,7 @@ export {
   readConfig,
   getConfigForPath,
   writeConfig,
+  lookupSectionEntry,
   getJsonEntrySource,
   getJsonWriteTarget,
   getAncestors,

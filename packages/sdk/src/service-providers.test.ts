@@ -6,7 +6,16 @@ import { BROWSER_CONTROL_ACTIONS, isBrowserControlAction, readBrowserProviderReq
 describe('browser provider contract', () => {
   test('reads the body the host posts and refuses anything else', () => {
     const body = JSON.stringify({ requestId: 'req-1', action: 'browser.click', parameters: { selector: '#save' } });
-    expect(readBrowserProviderRequest(body)).toEqual({ requestId: 'req-1', action: 'browser.click', parameters: { selector: '#save' } });
+    expect(readBrowserProviderRequest(body)).toEqual({
+      requestId: 'req-1',
+      action: 'browser.click',
+      parameters: { selector: '#save' },
+      context: { directory: null, sessionId: null },
+    });
+    const scoped = JSON.stringify({ requestId: 'req-2', action: 'browser.back', parameters: {}, context: { directory: '/repo', sessionId: 'ses_1' } });
+    expect(readBrowserProviderRequest(scoped)?.context).toEqual({ directory: '/repo', sessionId: 'ses_1' });
+    const halfScoped = JSON.stringify({ requestId: 'req-3', action: 'browser.back', parameters: {}, context: { directory: '', sessionId: 7 } });
+    expect(readBrowserProviderRequest(halfScoped)?.context).toEqual({ directory: null, sessionId: null });
 
     expect(readBrowserProviderRequest('not json')).toBeNull();
     expect(readBrowserProviderRequest('null')).toBeNull();

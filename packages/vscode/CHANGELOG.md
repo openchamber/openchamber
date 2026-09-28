@@ -1,3 +1,101 @@
+## [2.0.3] - 2026-09-28
+
+### New
+
+- **Permissions: every session has a mode: ask, safety net or accept all.** The shield in the composer switches it.
+- Settings/Providers: providers are a card grid, and one provider can hold several accounts.
+- Settings: MCP servers and plugins are cards that show their status at a glance.
+
+### Improvements
+
+- **Run on several models replaces the Agent Manager.** The composer runs one prompt on several models, each run is one row in the sessions list, and its overview compares the answers.
+
+### Fixes
+
+- The extension no longer hangs at startup on Windows when the PowerShell profile sits in a OneDrive folder (thanks to @thewerthon).
+- Settings/Providers: custom providers with an API key save again.
+- OpenCode: the extension connects when you set your own `OPENCODE_PASSWORD`.
+- Models: the model picker scrolls through providers with 40 or more models to the last one.
+- Chat: commands that run as a subagent show a running card and then their result.
+- Chat: subagent answers show formatted text.
+- Chat: a message with only a linked GitHub issue can be sent (thanks to @hiro-nikaitou).
+- Sessions: a session deleted outside the extension closes, and messages no longer fail with "Session not found" (thanks to @hiro-nikaitou).
+- Worktrees: removing a worktree on Windows finishes, even when a session was still using its folder (thanks to @bashrusakh).
+- Settings/Plugins: plugins from a private npm registry no longer show as not found (thanks to @Ex0ry).
+- Usage: the Zhipu Coding Plan card shows its limits again (thanks to @CMBill).
+
+## [2.0.2] - 2026-09-26
+
+### Fixes
+
+- The extension connects to OpenCode running as a background service.
+- Chat: answers typed into a question form survive switching sessions.
+- Agents: agents added by plugins show up in the composer without a reload (thanks to @hiro-nikaitou).
+- Chat: the retry countdown shows again while OpenCode waits to retry.
+- Chat: a dollar sign in regular text no longer turns the rest of the line into math (thanks to @hiro-nikaitou).
+- Chat: long identifiers in Markdown tables wrap properly (thanks to @aiiibolo).
+- Small model: commit messages keep working while plugins are still loading.
+
+## [2.0.1] - 2026-09-24
+
+### New
+
+- **Diff: file tree mode.** A toolbar toggle turns the diff view into a file tree with one file open at a time.
+- **Chat: comments stay on the reply.** Quoted text stays highlighted in the reply, and you can edit or remove its comment from there.
+- Chat: the prompt navigator is available in the extension.
+- **Chat: `/fork` with a message.** Type `/fork your message` to branch the session from its last finished reply and send the message into the new session right away.
+
+### Improvements
+
+- Git: the changes tree reads like a real tree, with collapsible folders and file names only.
+- Chat: long code blocks stay smooth while they stream (thanks to @deatheros).
+- Models: the model info panel shows for models from custom providers.
+- Agents: pickers show an agent's display name.
+- Settings/MCP: Code Mode has a Default choice that lets OpenCode decide per server.
+
+### Fixes
+
+- **Skills:** starting a message with `/skill-name` runs the skill again, no more "Command not found" error (thanks to @XiaChuerwu).
+- **Diff view:** the left side of an edit diff keeps the file's indentation.
+- Skills: Settings/Skills lists every skill OpenCode has, and built-in skills stay read-only (thanks to @aiiibolo and @hiro-nikaitou).
+- Chat: `@name` handles and emails in a message no longer turn into missing file attachments that failed the whole message (thanks to @hdp01).
+- Settings/Providers: editing a custom provider keeps its protocol, its API key variable and its reasoning levels as you configured them.
+- Chat: subagent rows show live activity again when you open a session mid-run.
+- Chat: the suggested next message shows up again after a reply.
+- Chat: file mentions with spaces in the path attach the whole file.
+- Chat: clicking a file link in a reply opens the file (thanks to @aiiibolo).
+- Providers: GitHub Copilot and other known providers show their own logo (thanks to @aiiibolo).
+
+## [2.0.0] - 2026-09-23
+
+### New
+
+- **OpenCode 2:** the extension now runs on OpenCode 2, so skills, agents, commands, MCP servers and plugins apply as soon as you save them. With OpenCode 1.x installed, it shows a screen to update, with one-click install. [Read the story on our blog](https://openchamber.dev/blog/opencode-v2/).
+- **Code Mode:** the agent can call your MCP tools and plugin tools from one short script, and the chat shows a Script row with every call it made.
+- Chat: fork a session from an agent answer.
+
+### Improvements
+
+- Chat: writing `/skill` anywhere in a message loads that skill with the message every time.
+- Chat: permission requests say in plain words what the agent wants to do and where, and "Always" names exactly what it will allow.
+- Chat: permission requests and forms appear above the message box, and forms walk through their questions one step at a time.
+- Chat: web search results show as cards with the site, title, date and snippet.
+- Sessions: optional animated activity indicators show running sessions in the sidebar and switcher (thanks to @mattv8).
+- Reviews: new review sessions inherit the current session's permission auto-accept setting.
+
+### Fixes
+
+- Sessions: queued messages and auto-review wait until a session's subagents finish.
+- Chat: edit and patch rows show their added and removed line counts again.
+- Chat: an explicit Steer stays a steer after dismissing blockers (thanks to @JustinKeltner).
+- Chat: approval cards show file changes that were missing from the preview.
+- Chat: comment quote previews fill the available width, and comment highlighting is translucent again.
+- Chat: message image export works when a message links to an external page (thanks to @ChangeHow).
+
+### Misc
+
+- Requires OpenCode 2.0.15 or newer.
+
 ## [1.24.2] - 2026-09-18
 
 ### Fixes

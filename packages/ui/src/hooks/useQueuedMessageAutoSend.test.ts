@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { Agent, Message } from '@opencode-ai/sdk/v2';
+import type { Agent, Message, Session } from '@/lib/opencode/model';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
@@ -164,6 +164,15 @@ describe('resolveQueuedSessionStatusType', () => {
   test('resolves idle when the trailing assistant message has completed', () => {
     const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
     store.setState({ message: { ses_1: [assistantMessage('msg_done', 5)] } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+  });
+
+  test('treats an idle parent as busy while its background subagent runs', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    const child = { id: 'ses_child', parentID: 'ses_1' } as Session;
+    store.setState({ session: [child], session_status: { ses_child: { type: 'busy' } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+    store.setState({ session_status: {} });
     expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
   });
 

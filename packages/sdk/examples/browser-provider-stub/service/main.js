@@ -1,6 +1,64 @@
 // packages/sdk/examples/browser-provider-stub/service/main.ts
 import http from "node:http";
 import { deflateSync } from "node:zlib";
+// packages/sdk/src/scrollbar-style.ts
+var GUEST_SCROLLING_ATTRIBUTE = "data-oc-scrolling";
+var GUEST_SCROLLBAR_CSS = `
+:root {
+  --oc-scrollbar-thumb: color-mix(in srgb, var(--oc-muted, currentColor) 40%, transparent);
+  --oc-scrollbar-thumb-hover: color-mix(in srgb, var(--oc-muted, currentColor) 65%, transparent);
+  scrollbar-gutter: stable;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+:hover, [${GUEST_SCROLLING_ATTRIBUTE}] {
+  scrollbar-color: var(--oc-scrollbar-thumb) transparent;
+}
+/* Chromium's standard scrollbar properties otherwise override its pseudo-elements. */
+@supports selector(::-webkit-scrollbar) {
+  *, :hover, [${GUEST_SCROLLING_ATTRIBUTE}] { scrollbar-width: auto; scrollbar-color: auto; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+    min-width: 24px;
+    min-height: 24px;
+  }
+  :hover::-webkit-scrollbar-thumb, [${GUEST_SCROLLING_ATTRIBUTE}]::-webkit-scrollbar-thumb { background: var(--oc-scrollbar-thumb); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--oc-scrollbar-thumb-hover); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+}
+@media (forced-colors: active) {
+  *, :hover, [${GUEST_SCROLLING_ATTRIBUTE}] { scrollbar-color: auto; }
+  ::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: CanvasText; }
+}
+`;
+function installGuestScrollbarActivity(doc) {
+  const root = doc.documentElement;
+  if (root.hasAttribute("data-oc-scrollbar-activity"))
+    return;
+  root.setAttribute("data-oc-scrollbar-activity", "");
+  const timers = new WeakMap;
+  doc.addEventListener("scroll", (event) => {
+    const target = event.target === doc ? root : event.target;
+    if (!(target instanceof Element))
+      return;
+    if (!target.hasAttribute("data-oc-scrolling"))
+      target.setAttribute("data-oc-scrolling", "");
+    const pending = timers.get(target);
+    if (pending !== undefined)
+      clearTimeout(pending);
+    timers.set(target, setTimeout(() => {
+      timers.delete(target);
+      target.removeAttribute("data-oc-scrolling");
+    }, 1000));
+  }, { capture: true, passive: true });
+}
+var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/contract.ts
 var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
 var HOST_REQUEST_ERROR_CODES = [
@@ -21,7 +79,8 @@ var HOST_REQUEST_ERROR_CODES = [
   "FILE_TOO_LARGE",
   "DENIED",
   "NO_MODEL",
-  "MODEL_FAILED"
+  "MODEL_FAILED",
+  "UNSUPPORTED"
 ];
 var SERVICE_STATUS_VALUES = ["stopped", "starting", "ready", "failed"];
 var hostRequestErrorCodeSet = new Set(HOST_REQUEST_ERROR_CODES);
@@ -56,6 +115,14 @@ var BROWSER_CONTROL_ACTIONS = [
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
 var isBrowserControlAction = (value) => CONTROL_ACTIONS.has(value);
+var readContext = (wire) => {
+  const directory = wire?.directory;
+  const sessionId = wire?.sessionId;
+  return {
+    directory: String(directory) === directory && directory.length > 0 ? directory : null,
+    sessionId: String(sessionId) === sessionId && sessionId.length > 0 ? sessionId : null
+  };
+};
 var readBrowserProviderRequest = (body) => {
   let wire;
   try {
@@ -66,14 +133,14 @@ var readBrowserProviderRequest = (body) => {
   } catch {
     return null;
   }
-  const { requestId, action, parameters } = wire;
+  const { requestId, action, parameters, context } = wire;
   if (String(requestId) !== requestId || requestId.length === 0)
     return null;
   if (String(action) !== action || !isBrowserControlAction(action))
     return null;
   if (Object(parameters) !== parameters)
     return null;
-  return { requestId, action, parameters };
+  return { requestId, action, parameters, context: readContext(context) };
 };
 // packages/sdk/src/service-surface.ts
 var SURFACE_FRAME_PATH = "/surface/frame";
@@ -163,10 +230,13 @@ var readSurfaceControlNotice = (body) => {
   }
   if (Object(parsed) !== parsed || parsed === null)
     return null;
-  const { controller } = parsed;
+  const { controller, viewer } = parsed;
   if (!isText(controller) || !CONTROLLERS.has(controller))
     return null;
-  return { controller };
+  const notice = { controller };
+  if (controller === "user" && isText(viewer) && viewer.length > 0)
+    notice.viewer = viewer;
+  return notice;
 };
 var readSurfaceResizeRequest = (body) => {
   let parsed;
@@ -221,8 +291,13 @@ var navigate = (url) => {
   page.title = `Stub page for ${new URL(url).host}`;
   page.scrollY = 0;
 };
+var lastCaller = { directory: null, sessionId: null };
 var handle = (request) => {
   markAgentActive();
+  lastCaller = request.context;
+  if (request.parameters.tabId !== undefined) {
+    return { ok: false, error: "This browser has a single page and no tabs; omit tabId." };
+  }
   switch (request.action) {
     case "browser.open":
       navigate(request.parameters.url);
@@ -524,6 +599,28 @@ http.createServer((req, res) => {
     handleSurface(req, res, url).then((handled) => {
       if (!handled)
         json(res, 404, { ok: false, error: "not-found" });
+    });
+    return;
+  }
+  if (url.pathname === "/state" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller }));
+    return;
+  }
+  if (url.pathname === "/navigate" && req.method === "POST") {
+    readBody(req).then((body) => {
+      let target = "";
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && String(parsed.url) === parsed.url)
+          target = parsed.url;
+      } catch {}
+      if (!target) {
+        json(res, 400, { ok: false, error: "url is required" });
+        return;
+      }
+      navigate(target);
+      json(res, 200, { ok: true });
     });
     return;
   }

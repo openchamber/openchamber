@@ -89,7 +89,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }`은 여러분의 별도 페이지를 창으로 열어서, 선택기가 레일 패널과 코드를 공유하지 않아도 되게 합니다
 - 생략하면 확장은 그 메뉴에 나타나지 않습니다
 
-`ctx.surface`는 `panel`, `dialog`, `page` 중 하나입니다. 첨부 항목을 클릭하면 해당 데이터가 `ctx.item`에 들어가며, 그 외에는 `null`입니다.
+`ctx.surface`는 `panel`, `dialog`, `page`, `status` 중 하나입니다. 첨부 항목을 클릭하면 해당 데이터가 `ctx.item`에 들어가며, 그 외에는 `null`입니다.
 
 `contributes.page: true`를 지정하면 세션 목록 위의 확장 프로그램 페이지 메뉴에서 전체 화면으로 열 수 있습니다. `{ "entry": "panel/page.html", "title": "Board" }`로 별도의 HTML과 선택적 제목을 지정합니다. `panel.entry`는 필수이며 샌드박스와 권한은 같습니다. 사용자만 페이지를 열 수 있습니다. 새로고침, 일시 중지, 제거, 서버 전환 시 닫힙니다.
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 쓰기는 원자적입니다. OpenChamber가 임시 파일에 쓴 뒤 이름을 바꾸므로, 읽는 쪽이 반쯤 쓰인 파일을 보는 일은 없습니다. 파일은 UTF-8 텍스트로 읽고 쓰며, 최대 2 MB입니다.
 
+## Work Status의 섹션
+
+`contributes.statusSection`은 채팅 옆 Work Status 패널에 직접 만든 섹션을 추가합니다. 사용자는 기본 섹션처럼 그 패널의 섹션 목록에서 켜고 끄거나 순서를 바꿀 수 있습니다.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true`는 `panel.entry`를 그대로 씁니다.
+- `entry`는 폴더 안의 별도 HTML 페이지입니다. 이것이 있으면 `panel.entry`가 필요 없으므로, 레일 아이콘 없이 이 섹션만 있는 확장도 됩니다.
+- `title`은 섹션 제목에서 패널 이름을 대신하며, 최대 60자입니다.
+- `height`는 픽셀 단위 시작 높이로 24~320이며 기본값은 120입니다. 콘텐츠 크기가 바뀌면 [`host.setHeight()`](/sdk/host/)를 호출하세요.
+
+페이지에서 `ctx.surface`는 `status`입니다. OpenChamber는 Work Status 패널이 보이고 섹션이 펼쳐져 있는 동안에만 페이지를 불러오고, 사용자가 섹션을 접으면 내립니다. 그러니 다시 만들 수 없는 상태는 두지 마세요. 섹션만 있는 확장은 권한, 서비스, 통합, 파일을 쓸 수 있지만 `page`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `git-graph-status` 예제가 완성된 섹션입니다.
+
 ## 작업, 명령, 배지
 
 레일과 + 메뉴 외에도 확장은 세 곳에 더 나타날 수 있습니다. 모두 칩을 클릭했을 때와 같은 방식으로 확장에 `item`을 넘깁니다.
@@ -219,7 +234,7 @@ OpenCode 플러그인이나 MCP 서버가 도구를 추가하면 채팅은 그 �
 
 `match`는 OpenCode가 보고하는 도구 이름이며, 끝의 `*`는 접두사와 일치합니다. `icon`은 Remixicon 이름이거나 패키지 안의 `.svg` 파일이며, `panel.icon`과 같습니다. `title`과 `subtitle`은 호출의 `input`, `output`, `metadata`를 쓰는 템플릿입니다. `output`은 본문을 그리는 방식을 고릅니다. `text`, `json`(트리), `markdown`, `language`가 있는 `code`, `columns`가 있는 `table`(행은 출력 배열이나 `output.items`에서 가져옵니다), 또는 기본값인 `auto`입니다. 정확한 `match`가 와일드카드보다 우선하고, 동점이면 먼저 설치된 확장이 이깁니다. 권한은 필요 없습니다. 이미 채팅에 있는 데이터를 그리는 방식만 바꾸기 때문입니다.
 
-도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`만 선언하고 다른 것은 선언하지 않아도 됩니다.
+도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`만 선언하고 다른 것은 선언하지 않아도 됩니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션입니다(위 참고).
 
 ## 패널의 첫 줄
 

@@ -1,4 +1,4 @@
-import type { Event } from '@opencode-ai/sdk/v2/client';
+import type { SyncEvent } from '@/lib/opencode/events';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -43,8 +43,8 @@ export const buildHostStatusSeedEvents = (
   snapshot: HostSessionStatusSnapshot,
   deps: SeedDependencies,
   maxAgeMs = HOST_STATUS_SEED_MAX_AGE_MS,
-): Map<string, Event[]> => {
-  const eventsByDirectory = new Map<string, Event[]>();
+): Map<string, SyncEvent[]> => {
+  const eventsByDirectory = new Map<string, SyncEvent[]>();
   for (const [sessionId, entry] of Object.entries(snapshot.sessions)) {
     if (entry.status !== 'busy' && entry.status !== 'retry') continue;
     if (snapshot.serverTime - entry.lastUpdateAt > maxAgeMs) continue;
@@ -52,11 +52,7 @@ export const buildHostStatusSeedEvents = (
     const directory = deps.resolveDirectory(sessionId);
     if (!directory) continue;
     const events = eventsByDirectory.get(directory) ?? [];
-    events.push({
-      id: `host-seed:${sessionId}`,
-      type: 'session.status',
-      properties: { sessionID: sessionId, status: { type: 'busy' } },
-    });
+    events.push({ type: 'session.status', properties: { sessionID: sessionId, status: { type: 'busy' } } });
     eventsByDirectory.set(directory, events);
   }
   return eventsByDirectory;
@@ -85,7 +81,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     for (const [directory, payloads] of events) {
       applyGlobalSessionStatusEvents(directory, payloads);
     }
-    // Pending permissions and questions ride on the same response. They are
+    // Pending permission requests and forms ride on the same response. They are
     // not age-limited: the host drops them on reply, deletion, and OpenCode
     // restart, so a listed request is one OpenCode is still waiting on.
     const pending: Array<Parameters<typeof seedGlobalBlockingRequests>[0][number]> = [];
@@ -93,7 +89,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
       const session = entities.get(sessionId);
       const directory = session ? resolveGlobalSessionDirectory(session) : null;
       if (!directory) continue;
-      pending.push({ sessionId, directory, permissions: entry.permissions, questions: entry.questions });
+      pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.forms });
     }
     seedGlobalBlockingRequests(pending);
   })().finally(() => {

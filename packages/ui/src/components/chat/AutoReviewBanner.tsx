@@ -39,7 +39,7 @@ export const AutoReviewBanner = memo(() => {
 
   return (
     <div className="pb-2 w-full px-1">
-      <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
+      <div className="oc-glass-popover w-full min-w-0 overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
         <div className="flex w-full items-center gap-2 px-3 py-2 text-left">
           <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
           <div className="min-w-0 flex-1">

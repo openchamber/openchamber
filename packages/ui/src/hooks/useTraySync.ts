@@ -1,11 +1,15 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import {
+  useGlobalBlockingRequestsStore,
+  type BlockingFormRequest,
+  type BlockingPermissionRequest,
+} from '@/sync/global-blocking-requests';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
@@ -24,8 +28,6 @@ import { resolveProjectForSessionDirectory, normalizeProjectPath } from '@/lib/p
 import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { toast } from '@/components/ui';
-import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
 
 // Native tray/menu bar bridge. The Electron main process owns the Tray UI; this hook
 // streams a compact snapshot of live session/approval state to it via the
@@ -55,7 +57,7 @@ type TraySession = {
 };
 
 type TrayApproval = {
-  kind: 'permission' | 'question';
+  kind: 'permission' | 'form';
   id: string;
   sessionId: string;
   sessionTitle: string;
@@ -104,16 +106,13 @@ const isTrayPlatform = (): boolean => {
 const isTrayEnabled = (): boolean =>
   typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.trayEnabled !== false;
 
-const permissionLabel = (request: PermissionRequest): string => {
-  const head = typeof request.permission === 'string' ? request.permission : 'Permission';
-  const pattern = Array.isArray(request.patterns) ? request.patterns.find((p) => typeof p === 'string' && p.trim()) : '';
-  return pattern ? `${head}: ${pattern}` : head;
+const permissionLabel = (request: BlockingPermissionRequest): string => {
+  const head = request.action.trim() || 'Permission';
+  const resource = request.resources.find((item) => item.trim());
+  return resource ? `${head}: ${resource}` : head;
 };
 
-const questionLabel = (request: QuestionRequest): string => {
-  const first = Array.isArray(request.questions) ? request.questions[0] : undefined;
-  return first?.header || first?.question || 'Question';
-};
+const formLabel = (request: BlockingFormRequest): string => request.title.trim() || 'Question';
 
 const compareSessionOrder = (left: Session, right: Session): number => (
   compareSessionsByLifecycleOrder(
@@ -269,11 +268,11 @@ const collectLiveData = (): LiveData => {
         approvals.push({ kind: 'permission', id: request.id, sessionId: sid, sessionTitle: '', label: permissionLabel(request), directory });
       }
     }
-    for (const [sessionId, requests] of Object.entries(state.question ?? {})) {
+    for (const [sessionId, requests] of Object.entries(state.form ?? {})) {
       for (const request of requests ?? []) {
         if (!request?.id) continue;
         const sid = request.sessionID || sessionId;
-        approvals.push({ kind: 'question', id: request.id, sessionId: sid, sessionTitle: '', label: questionLabel(request), directory });
+        approvals.push({ kind: 'form', id: request.id, sessionId: sid, sessionTitle: '', label: formLabel(request), directory });
       }
     }
   }
@@ -398,10 +397,10 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
       seen.add(request.id);
       approvals.push({ kind: 'permission', id: request.id, sessionId, sessionTitle, label: permissionLabel(request), directory: pending.directory });
     }
-    for (const request of pending.questions) {
+    for (const request of pending.forms) {
       if (seen.has(request.id)) continue;
       seen.add(request.id);
-      approvals.push({ kind: 'question', id: request.id, sessionId, sessionTitle, label: questionLabel(request), directory: pending.directory });
+      approvals.push({ kind: 'form', id: request.id, sessionId, sessionTitle, label: formLabel(request), directory: pending.directory });
     }
   }
 

@@ -8,4 +8,8 @@ describe('provider logo aliases', () => {
         expect(source).toContain("compact.startsWith('exe-') ? 'exe-dev' : undefined");
         expect(source).toContain('const candidates = [prefixAlias,');
     });
+
+    test('aliases the copilot provider id to the bundled github-copilot logo', () => {
+        expect(source).toContain("['copilot', 'github-copilot']");
+    });
 });

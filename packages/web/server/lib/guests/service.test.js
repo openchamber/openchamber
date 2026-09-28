@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import {
   getServiceStatus,
+  beginGuestServiceHost,
+  beginGuestServiceShutdown,
   proxyGuestServiceRequest,
   readServicePid,
   stopAllGuestServices,
@@ -44,6 +46,8 @@ http.createServer((req, res) => {
   await writeExtensionStore(persistPath, { paths: [packageRoot], sources: {}, capabilityGrants: {} });
   return { dir, persistPath, packageRoot };
 };
+
+beforeEach(() => beginGuestServiceHost());
 
 afterEach(async () => {
   await stopAllGuestServices();
@@ -352,6 +356,122 @@ describe('restart after the process died', () => {
       expect(await proxyGuestServiceRequest(params)).toEqual({ status: 200, body: '{"pong":true}' });
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('host shutdown', () => {
+  const request = (fixture) => ({
+    guestId: 'docker', packageRoot: fixture.packageRoot,
+    service: { entry: 'service/main.js' }, granted: ['service'],
+    persistPath: fixture.persistPath, method: 'GET', path: '/ping',
+  });
+
+  test('a replacement waits for the previous child and cannot escape host shutdown', async () => {
+    const fixture = await writeFixture();
+    await fs.appendFile(path.join(fixture.packageRoot, 'service/main.js'), '\nprocess.on("SIGTERM", () => {});\n');
+    let pid;
+    let reading;
+    let accessing;
+    try {
+      await proxyGuestServiceRequest(request(fixture));
+      pid = readServicePid('docker');
+      const previousStop = stopGuestService('docker');
+      accessing = spyOn(fs, 'access');
+      const storeRead = Promise.withResolvers();
+      const readFile = fs.readFile.bind(fs);
+      reading = spyOn(fs, 'readFile').mockImplementation(async (...args) => {
+        const result = await readFile(...args);
+        if (args[0] === fixture.persistPath) storeRead.resolve();
+        return result;
+      });
+      const replacement = proxyGuestServiceRequest(request(fixture)).catch((error) => error);
+      await storeRead.promise;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(accessing).not.toHaveBeenCalledWith(path.join(fixture.packageRoot, 'service/main.js'));
+      expect(readServicePid('docker')).toBeNull();
+      beginGuestServiceShutdown();
+      const stopping = stopAllGuestServices();
+      process.kill(pid, 'SIGKILL');
+      await Promise.all([previousStop, stopping]);
+      expect(await replacement).toMatchObject({ code: 'NO_SERVICE' });
+      expect(readServicePid('docker')).toBeNull();
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      reading?.mockRestore();
+      accessing?.mockRestore();
+      if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+      await stopAllGuestServices();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects new requests, drains a live child, and only reopens on a new host lifecycle', async () => {
+    const fixture = await writeFixture();
+    try {
+      expect((await proxyGuestServiceRequest(request(fixture))).status).toBe(200);
+      const pid = readServicePid('docker');
+      beginGuestServiceShutdown();
+      const stopping = stopAllGuestServices();
+      await expect(proxyGuestServiceRequest(request(fixture))).rejects.toMatchObject({ code: 'NO_SERVICE' });
+      await stopping;
+      expect(readServicePid('docker')).toBeNull();
+      expect(() => process.kill(pid, 0)).toThrow();
+      await expect(proxyGuestServiceRequest(request(fixture))).rejects.toMatchObject({ code: 'NO_SERVICE' });
+      beginGuestServiceHost();
+      expect((await proxyGuestServiceRequest(request(fixture))).status).toBe(200);
+    } finally {
+      await stopAllGuestServices();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('drains a first start paused before spawn and prevents it from surviving shutdown', async () => {
+    const fixture = await writeFixture();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const access = fs.access.bind(fs);
+    const pausedAccess = spyOn(fs, 'access').mockImplementation(async (...args) => {
+      if (args[0] === path.join(fixture.packageRoot, 'service/main.js')) {
+        entered.resolve();
+        await release.promise;
+      }
+      return access(...args);
+    });
+    try {
+      const pending = proxyGuestServiceRequest(request(fixture)).catch((error) => error);
+      await entered.promise;
+      expect(readServicePid('docker')).toBeNull();
+      beginGuestServiceShutdown();
+      let drained = false;
+      const stopping = stopAllGuestServices().then(() => { drained = true; });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      expect(() => beginGuestServiceHost()).toThrow();
+      release.resolve();
+      expect(await pending).toMatchObject({ code: 'NO_SERVICE' });
+      await stopping;
+      expect(readServicePid('docker')).toBeNull();
+      expect(getServiceStatus('docker')).toBe('stopped');
+    } finally {
+      release.resolve();
+      pausedAccess.mockRestore();
+      await stopAllGuestServices();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a request still reading the store cannot enter a later host lifecycle', async () => {
+    const fixture = await writeFixture();
+    try {
+      const pending = proxyGuestServiceRequest(request(fixture));
+      beginGuestServiceShutdown();
+      await stopAllGuestServices();
+      beginGuestServiceHost();
+      await expect(pending).rejects.toMatchObject({ code: 'NO_SERVICE' });
+      expect(readServicePid('docker')).toBeNull();
+    } finally {
+      await fs.rm(fixture.dir, { recursive: true, force: true });
     }
   });
 });

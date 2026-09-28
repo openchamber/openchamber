@@ -59,6 +59,16 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- `file.open` shows a file in the user's viewer. `file-open.js` resolves a
+  relative path against the session directory (an explicit `directory` wins),
+  refuses a relative path with no directory at all, checks the target is an
+  existing file, then hands `{ path, directory, sessionId }` to the injected
+  `emit`, which `index.js` writes to every UI control stream as
+  `openchamber:file-open-request`. Nothing comes back: opening a tab does not
+  fail quietly on a client, so the count of clients reached is the signal, and
+  zero is a 503, never a claimed success. Paths outside the workspace are
+  allowed on purpose: screenshots and recordings often land in a temp
+  directory, and the viewer already reads such files.
 - `browser.capture` writes its image on the server, into
   `.openchamber/screenshots/` under the scoped project directory, and returns
   the project-relative path rather than the image bytes. The client that took

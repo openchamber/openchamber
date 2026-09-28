@@ -72,7 +72,7 @@ Repository guidance is part of correctness review, not a separate style pass.
 4. Read the nearest package README and module `DOCUMENTATION.md` for each affected owning module. Follow links needed to understand an invariant or contract.
 5. Apply the discovered rules while reviewing implementation correctness, tests, runtime parity, UX, security, performance, and evidence.
 
-The contributor's repository-guidance table is a claim to verify, not the source of truth. Missing a relevant skill is itself evidence that the implementation may have ignored required constraints, but only report a finding when you can identify the concrete unmet rule, missing proof, or failure mode.
+The PR body does not list applicable skills or docs; you discover them yourself. An implementation that ignores a relevant skill's constraint is a finding only when you can identify the concrete unmet rule, missing proof, or failure mode.
 
 Apply the discovered guidance silently. Name a skill or document in the comment only when it produced an actual finding ("violates the sync DOCUMENTATION's authority rule"); never list sources to record that they were read or do not apply.
 
@@ -95,10 +95,8 @@ Review the PR as a handoff to a maintainer, not only as a code snapshot. Verify 
 
 Require concrete, proportionate answers for:
 
-- intent and resulting behavior;
-- scope and meaningful non-goals;
+- intent and resulting behavior in plain words a user of the app could follow (what was wrong as they saw it, what they see now), including any nearby behavior deliberately left unchanged. A section that narrates the diff file by file, lists functions, or reads as generated boilerplate instead of explaining the change to a person is a handoff gap: ask for a rewrite in the Handoff line, never a blocker;
 - affected packages, user-visible states, persisted/external contracts, and the per-runtime surface table, where a blank row is an unanswered question and a claim contradicted by the diff is a finding;
-- applicable repository guidance and how its important constraints were handled;
 - exact automated and manual validation results, including what was not verified;
 - relevant failure, rollback, cleanup, compatibility, security, performance, and cross-runtime risk.
 

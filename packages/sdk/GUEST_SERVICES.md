@@ -89,7 +89,7 @@ Parse rules:
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
 - `service.runtime` phase 1 accepts only `"host"`.
 - `service.provides` is optional: roles the service stands in for on the host. Only `"browser"` exists today (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself.
-- `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). It excludes `panel.entry`; the surface is the panel.
+- `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). With `panel.entry` too, that page is docked to one edge of the picture (`panel.dock`: `top`, `bottom`, `left`, or `right`, default `top`; `panel.size` in CSS px across that edge, 24 to 480, default 40); without it, the picture is the whole panel.
 - `service.permissions.sockets` and `service.permissions.exec` are shown to the user in the approval dialog. They describe intent and do not confine the process: a service runs with the user's full access. Declaring `contributes.service` adds the `service` capability to the package's request list; the user approves the whole list once when the package is installed (Settings → Extensions), and the first `serviceRequest` is refused with `NO_SERVICE` until then.
 - The catalog adds `service.socketBindings`: `{ id, candidates, resolved, override }` for this host. The user can override a path in Extensions. Override empty clears it and the next spawn re-resolves.
 - `contributes.integration` remains valid next to `service`. Cloud `request` and `serviceRequest` may both exist on one guest.
@@ -181,10 +181,19 @@ Lifecycle differs from a panel-driven service in two ways. The host starts the s
 `POST /browser-control` on the service loopback, same bearer as every request, JSON body:
 
 ```json
-{ "requestId": "browser-…", "action": "browser.click", "parameters": { "selector": "#save" } }
+{
+  "requestId": "browser-…",
+  "action": "browser.click",
+  "parameters": { "selector": "#save" },
+  "context": { "directory": "/Users/me/app", "sessionId": "ses_…" }
+}
 ```
 
-`readBrowserProviderRequest(body)` from `@openchamber/sdk` parses it (`null` → answer HTTP 400). The host validated `parameters` for the action before posting, so the service can trust the shape. Answer HTTP 200 with one of:
+`readBrowserProviderRequest(body)` from `@openchamber/sdk` parses it (`null` → answer HTTP 400). The host validated `parameters` for the action before posting, so the service can trust the shape.
+
+`context` says where the action came from: the project the agent works in and the chat it runs in. The host fills it from the tool call; the model never types it. A provider that keeps one browser per project or chat keys its targets on these; one that keeps a single browser ignores them. Either field is `null` when the host had none (an action sent from the CLI, for example); treat that as "unknown", not as a scope of its own. The shared surface is still one per service: if you keep several targets, choose which one the picture shows.
+
+Answer HTTP 200 with one of:
 
 ```json
 { "ok": true, "data": { … } }
@@ -209,6 +218,8 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | `browser.capture` | `label?` | `base64`, `mime`, `width`, `height`, `url`, `title`, `viewport`; the host writes the file into the project and returns its path |
 | `browser.resize` | `viewport` (`mobile`/`tablet`/`desktop`/`fill`) | `viewport` |
 
+Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id.
+
 `viewport` in answers is `{ mode, width, height }` (`mode` may be `custom`; `fill` has `null` sizes). Snapshot `elements` carry `selector`, `tag`, `bounds`, and only the fields that apply (`inViewport`, `type`, `role`, `label`, `disabled`, `missingAccessibleName`). Keep `text` and `elements` bounded yourself; report what was dropped with the truncation fields.
 
 `examples/browser-provider-stub` is a checked-in provider with no browser: one in-memory page that answers every action. Install it to see the dropdown, the routing, and the idle stop before writing a real one.
@@ -226,11 +237,17 @@ Plain HTTP on the service loopback, same bearer as everything else:
 | Call | Body / answer |
 |---|---|
 | `GET /surface/frame?after=<seq>&wait=<ms>` | 200 with `image/jpeg` or `image/png` bytes and headers `x-surface-seq`, `x-surface-width`, `x-surface-height`, optional `x-surface-title`, optional `x-surface-agent-active: 1` while your own automation is driving; 204 when nothing newer than `seq` arrived within `wait` ms. Sequence numbers start at 1, so `after=0` is "the current picture, now". The host asks one frame at a time per viewer; a viewer that draws slowly skips frames rather than queueing them. Frames up to `SURFACE_FRAME_MAX_BYTES` (8 MB). |
-| `POST /surface/input` | `{ events: SurfaceInputEvent[] }`: `pointer` (`down`/`up`/`move`, `x`, `y` in frame pixels, `button`, `buttons`, `modifiers`), `wheel` (`x`, `y`, `deltaX`, `deltaY`, `modifiers`), `key` (`down`/`up`, `key`, `code`, `modifiers`), `text` (pasted or composed text). Parse with `readSurfaceInputBatch`; `null` → 400. Sent only while the user holds control. |
-| `POST /surface/control` | `{ controller: "none" \| "agent" \| "user" }` whenever control changes. Parse with `readSurfaceControlNotice`. Advisory. |
+| `POST /surface/input` | `{ events: SurfaceInputEvent[] }`: `pointer` (`down`/`up`/`move`, `x`, `y` in frame pixels, `button`, `buttons`, `modifiers`), `wheel` (`x`, `y`, `deltaX`, `deltaY`, `modifiers`), `key` (`down`/`up`, `key`, `code`, `modifiers`), `text` (pasted or composed text). Parse with `readSurfaceInputBatch`; `null` → 400. Sent only while the user holds control. Headers `x-surface-viewer` (the viewer's id) and `x-surface-frame-seq` (your own sequence number of the frame that viewer last drew, `0` before its first) say where the input came from; answer 409 to refuse input made on a picture you no longer show, and the host tells the viewer it was not applied. |
+| `POST /surface/control` | `{ controller: "none" \| "agent" \| "user", viewer? }` whenever control changes; `viewer` is the controlling viewer's id when `controller` is `user`. Parse with `readSurfaceControlNotice`. Advisory. |
 | `POST /surface/resize` | `{ width, height }` the panel can show, in device pixels. Answer `{ width, height }` you settled on, or 400 to keep your size. Parse with `readSurfaceResizeRequest`. |
 | `GET /surface/clipboard` | `{ text }`: what the user copied inside the surface. The host asks after a copy chord and puts it on the user's clipboard. |
 
 Input, control notices, resizes, and clipboard reads reach the service one at a time, in the order the viewer sent them, so a batch never overtakes the one before it. Copy and paste: the host sends `Ctrl/Cmd+C` as a `key` event and then, behind it, reads `/surface/clipboard`; it never sends the paste chord, it sends a `text` event with the pasted text instead. Every other key reaches you as pressed, including the host's own shortcuts, which stand down while the surface has focus.
 
-The types and paths are exported from `@openchamber/sdk` (`SURFACE_*`, `SurfaceInputEvent`, …). `examples/browser-provider-stub` also declares `surface: true` and paints its fake page with rectangles, so the viewer, the hand-off, and the input path can be seen working without a browser.
+### Your own controls beside the picture
+
+Declare `panel.entry` as well and the host docks that page to one edge of the surface: `panel.dock` picks the edge (`top` by default; `bottom` for an inspector, `left` or `right` for a tool column) and `panel.size` its thickness in CSS pixels across that edge (default 40). It is an ordinary sandboxed panel page: it talks to your service through `host.serviceRequest`, gets the theme and the current session like any panel, and stays mounted while the tab is hidden. Call `host.setHeight(px)` to grow or shrink the dock, for example to open a console under the address field and close it again: the value is the thickness across the dock's edge (a width for `left` and `right`), at least 24 px and at most half the panel, so the picture stays in view. Put an address field, tabs, a device picker, or a console toggle there; the picture, the input, and who is in control stay with the host. The page and the surface are independent: the page does not see frames, and the host does not route input through it.
+
+While a viewer is open in the same window, every `serviceRequest` from your pages (the docked one included) reaches the service with three headers the host sets itself: `x-surface-viewer`, `x-surface-viewer-controls` (`1` while that viewer holds control, else `0`), and `x-surface-frame-seq` (the frame it last drew). Compare the viewer with the one from `/surface/control` to let the person in control use the dock while others only watch, and compare the frame with the view it belongs to so a toolbar command made on an old picture cannot change a view selected since. Without a viewer in that window the headers are absent.
+
+The types and paths are exported from `@openchamber/sdk` (`SURFACE_*`, `SurfaceInputEvent`, …). `examples/browser-provider-stub` also declares `surface: true` and paints its fake page with rectangles, so the viewer, the hand-off, and the input path can be seen working without a browser; its `panel/` is a one-line address bar docked above the picture.

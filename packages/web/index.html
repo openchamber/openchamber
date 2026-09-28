@@ -471,11 +471,15 @@
         --splash-logo-fill: var(--splash-stroke);
       }
 
+      /* Keep these fills in step with the desktop splash in
+         packages/electron/early-startup.mjs: the desktop shell shows that
+         document first and this one replaces it on navigation, so any
+         difference reads as the logo changing. */
       html[data-splash-variant='light'] {
         --splash-background: var(--splash-background-light);
         --splash-stroke: var(--splash-stroke-light);
         --splash-face-fill: rgba(0, 0, 0, 0.15);
-        --splash-cell-fill: rgba(0, 0, 0, 0.4);
+        --splash-cell-fill: rgba(0, 0, 0, 0.35);
         --splash-logo-fill: var(--splash-stroke);
       }
 
@@ -486,7 +490,9 @@
       }
 
       @supports (color: color-mix(in srgb, white 50%, transparent)) {
-        :root {
+        :root,
+        html[data-splash-variant='light'],
+        html[data-splash-variant='dark'] {
           --splash-face-fill: color-mix(in srgb, var(--splash-stroke) 15%, transparent);
           --splash-cell-fill: color-mix(in srgb, var(--splash-stroke) 35%, transparent);
         }

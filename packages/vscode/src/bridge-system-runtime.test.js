@@ -41,6 +41,7 @@ mock.module('vscode', () => ({
 mock.module('./opencodeConfig', () => ({
   removeProviderConfig: mock(),
   getProviderSources: mock(),
+  getStoredProviderConfig: mock(),
   upsertProviderConfig: mock(),
 }));
 mock.module('./opencodeAuth', () => ({
@@ -217,5 +218,22 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
       error: 'Directory path is required',
     });
     expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+  });
+});
+
+describe('VS Code v2 migration bridge', () => {
+  test('waits for the manager to finish installing and restarting', async () => {
+    let completed = false;
+    const manager = { installV2: async () => { completed = true; } };
+    const response = await handleSystemBridgeMessage({ id: 'install', type: 'api:opencode/install-v2' }, { manager }, deps);
+    expect(completed).toBe(true);
+    expect(response).toEqual({ id: 'install', type: 'api:opencode/install-v2', success: true, data: { success: true } });
+  });
+
+  test('does not claim success without a manager or after installation failure', async () => {
+    const response = await handleSystemBridgeMessage({ id: 'missing', type: 'api:opencode/install-v2' }, undefined, deps);
+    expect(response.success).toBe(false);
+    const manager = { installV2: async () => { throw new Error('Installation failed'); } };
+    await expect(handleSystemBridgeMessage({ id: 'failed', type: 'api:opencode/install-v2' }, { manager }, deps)).rejects.toThrow('Installation failed');
   });
 });

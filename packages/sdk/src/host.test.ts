@@ -909,6 +909,31 @@ describe('connectHost resolve and badge', () => {
     await Promise.all(calls);
   });
 
+  test('openCommit posts a valid hash and refuses anything else locally', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const sent = host.openCommit('abcdef1').catch(() => undefined);
+    await expect(host.openCommit('main')).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    expect(parent.posted.filter((message) => message.type === 'open-commit').map((message) => (message.type === 'open-commit' ? message.payload.sha : ''))).toEqual(['abcdef1']);
+    host.dispose();
+    await sent;
+  });
+
+  test('setHeight sends whole pixels within the wire range', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+
+    const calls = [180, 12.2, -5, 50_000, Number.NaN].map((height) => host.setHeight(height).catch(() => undefined));
+    const sizes = parent.posted.filter((message) => message.type === 'resize');
+    expect(sizes.map((message) => (message.type === 'resize' ? message.payload.height : undefined))).toEqual([180, 13, 0, 10_000, 0]);
+    host.dispose();
+    await Promise.all(calls);
+  });
+
   test('replays a message item to a late onItem listener', () => {
     const parent = createFrame();
     const guest = createFrame();

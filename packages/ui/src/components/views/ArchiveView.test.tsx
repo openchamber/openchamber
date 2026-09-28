@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 const browser = new Window({ url: 'http://localhost' });
 let root: Root;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
@@ -19,7 +19,7 @@ const { ArchiveView } = await import('./ArchiveView');
 const initialUI = useUIStore.getState();
 const initialSessions = useGlobalSessionsStore.getState();
 const session = (id: string, title: string, archived = 2): Session => ({
-  id, title, slug: id, projectID: 'project', version: '1', directory: '/workspace',
+  id, title, projectID: 'project', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, directory: '/workspace',
   time: { created: 1, updated: 1, archived },
 });
 

@@ -13,6 +13,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -27,6 +29,9 @@ const DISPATCH_QUIET_MS = 500;
 // After a user abort the UI held the queue for two seconds so the stop is not
 // immediately followed by the next prompt; the server keeps that window.
 const ABORT_HOLD_MS = 2_000;
+// While a background subagent keeps the turn open, how often the head is
+// rechecked in case the parent's rerun idle event is missed.
+const SUBAGENT_RECHECK_MS = 5_000;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 // A hold is asserted by a UI-driven process (auto-review) that dies with the
@@ -193,9 +198,20 @@ const extractAssistantMessageUpdate = (payload) => {
   if (!sessionId) return null;
   return {
     sessionId,
-    aborted: asRecord(info.error)?.name === 'MessageAbortedError',
     completed: asCount(asRecord(info.time)?.completed) !== null,
   };
+};
+
+/**
+ * A user abort no longer arrives as an assistant message carrying
+ * `MessageAbortedError`: v2 reports `session.execution.interrupted`, which the
+ * translator turns into `session.idle` with `aborted: true`.
+ */
+const extractAbortedSessionId = (payload) => {
+  if (payload.type !== 'session.idle') return null;
+  const properties = asRecord(payload.properties) ?? {};
+  if (properties.aborted !== true) return null;
+  return asNonEmptyString(properties.sessionID);
 };
 
 const extractDeletedSessionId = (payload) => {
@@ -211,9 +227,9 @@ export function createMessageQueueRuntime({
   sessionKnowledgeRuntime = null,
   broadcastGlobalUiEvent,
   onPromptSent,
-  // Turns the `openchamber/auto` model into a real one right before the send;
-  // absent means the queue never sees the sentinel.
-  resolvePromptBody = null,
+  // Resolves the `openchamber/auto` sentinel into a real model and agent right
+  // before the send; absent means the queue never sees the sentinel.
+  resolveAutoSelection = null,
   dataDir,
   fetchImpl = fetch,
   now = Date.now,
@@ -382,29 +398,43 @@ export function createMessageQueueRuntime({
       const detail = await response.text().catch(() => '');
       throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
     }
-    return response.json().catch(() => null);
+    return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };
 
   /**
    * Live idleness, or null when it could not be established. Unknown is never
    * idle: a fetch failure re-arms instead of sending into a running turn.
    */
-  const isSessionIdle = async (sessionId, directory) => {
-    const statuses = asRecord(await openCodeFetch('/session/status', { directory }).catch(() => null));
+  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
+
+  /** True while a subagent of the session runs; null when it could not be checked. */
+  const hasWorkingSubagents = async (sessionId) => {
+    const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
-    const type = asRecord(statuses[sessionId])?.type;
-    if (type === 'busy' || type === 'retry') return false;
-    // The status map lists only busy sessions, so a missed busy event leaves
-    // no entry while a turn still streams. The trailing unfinished assistant
-    // message is the live evidence of that turn (mirrors the UI gate).
-    const messages = asList(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
+    return activityProbe.hasWorkingChildren(sessionId, statuses);
+  };
+
+  const isSessionIdle = async (sessionId, directory) => {
+    // `/api/session/active` is global and lists only the sessions that are
+    // running right now, so an absent entry means idle.
+    // The route answers `{ data: { [id]: { type: 'running' } } }`; the shared
+    // unwrap hands over the map, and an envelope is still accepted.
+    const body = asRecord(await openCodeFetch('/api/session/active').catch(() => null));
+    const statuses = asRecord(body && 'data' in body ? body.data : body);
+    if (!statuses) return null;
+    if (asRecord(statuses[sessionId])) return false;
+    // A missed event leaves no entry while a turn still streams. The trailing
+    // unfinished assistant message is the live evidence of that turn (mirrors
+    // the UI gate). v2 lists messages newest first.
+    const page = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_TAIL_LIMIT) },
-    }).catch(() => null));
+    }).catch(() => null);
+    const messages = asList(asRecord(page)?.data);
     if (!messages) return null;
-    const last = asRecord(asRecord(messages[messages.length - 1])?.info);
+    const last = asRecord(messages[0]);
     const lastTime = asRecord(last?.time);
-    if (last?.role === 'assistant' && asCount(lastTime?.completed) === null) {
+    if (last?.type === 'assistant' && asCount(lastTime?.completed) === null) {
       const created = asCount(lastTime?.created);
       if (created === null || created >= runtimeStartedAt) return false;
       // Unfinished tail from before this runtime started: its run died with
@@ -420,112 +450,122 @@ export function createMessageQueueRuntime({
     const [head, ...tail] = text.split(' ');
     const name = head.slice(1);
     if (!name) return null;
-    const commands = asList(await openCodeFetch('/command', { directory })) ?? [];
+    const commands = asList(await openCodeFetch('/api/command', { directory })) ?? [];
     const match = commands.map(asRecord).find((command) => command?.name === name);
     if (!match) return null;
     return {
       name,
       arguments: tail.join(' '),
-      isSkill: match.source === 'skill',
-      template: asNonEmptyString(match.template),
     };
   };
 
-  /**
-   * The prompt a slash command stands for, expanded the way OpenCode expands
-   * it: `$ARGUMENTS` takes the whole argument string, `$1..$N` take quoted or
-   * bare words with the last position absorbing the rest, and a template with
-   * no placeholder gets the arguments appended. Twin of the UI's
-   * `expandSlashCommandGoalObjective` in `packages/ui/src/sync/session-ui-store.ts`.
-   */
-  const expandCommandTemplate = (template, argumentsText) => {
-    if (template.includes('$ARGUMENTS')) return template.replaceAll('$ARGUMENTS', argumentsText);
-    const positions = [...template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
-    if (positions.length > 0) {
-      const parsed = [...argumentsText.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
-        .map((match) => match[1] ?? match[2] ?? match[3] ?? '');
-      const last = Math.max(...positions);
-      return template.replace(/\$(\d+)/g, (_match, value) => {
-        const position = Number(value);
-        return position === last ? parsed.slice(position - 1).join(' ') : (parsed[position - 1] ?? '');
-      });
-    }
-    return argumentsText ? `${template}\n\n${argumentsText}` : template;
-  };
-
-  const toFilePart = (attachment) => ({
-    type: 'file',
-    mime: attachment.mimeType,
-    filename: attachment.filename,
-    url: attachment.dataUrl,
+  // v2 takes prompt attachments as URIs; a data URL is one.
+  const toPromptFile = (attachment) => ({
+    uri: attachment.dataUrl,
+    ...(attachment.filename ? { name: attachment.filename } : {}),
   });
 
-  // Captured context is delivered the way the composer delivers it: one
-  // synthetic text part per entry, an attached item's metadata riding along
-  // and its reading instructions (a linked PR) going first.
-  const toContextParts = (part) => {
-    const synthetic = { type: 'text', text: part.text, synthetic: true };
-    if (part.kind !== 'context') return [synthetic];
-    synthetic.metadata = part.metadata;
+  /**
+   * Captured context travels as synthetic messages in v2 — the composer's
+   * inline `synthetic: true` text parts are gone. One message per entry, an
+   * attached item's metadata riding along, and its reading instructions (a
+   * linked PR) going first.
+   */
+  const toContextMessages = (part) => {
+    const body = { text: part.text, resume: false };
+    if (part.kind !== 'context') return [body];
+    const withMetadata = part.metadata ? { ...body, metadata: part.metadata } : body;
     return part.instructions
-      ? [{ type: 'text', text: part.instructions, synthetic: true }, synthetic]
-      : [synthetic];
+      ? [{ text: part.instructions, resume: false }, withMetadata]
+      : [withMetadata];
   };
 
   const sendItem = async (sessionId, directory, item) => {
-    const { providerID, modelID, agent, variant } = item.sendConfig;
-    const fileParts = item.attachments.map(toFilePart);
-    const contextParts = item.context.flatMap(toContextParts);
-    // OpenCode's command route takes file parts only, so a command queued
-    // with captured context cannot go through it. Same rule as the composer:
-    // without context the command route keeps its semantics; with context the
-    // prompt route carries the expanded template (or the skill invocation as an
-    // explicit instruction) together with the context.
-    const command = await resolveSlashCommand(item.text, directory);
-    if (command && contextParts.length === 0) {
-      const body = { command: command.name, arguments: command.arguments, model: `${providerID}/${modelID}` };
-      if (agent) body.agent = agent;
-      if (variant) body.variant = variant;
-      if (fileParts.length > 0) body.parts = fileParts;
-      await resolvePromptBody?.(body, { sessionId, directory });
-      await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/command`, { directory, method: 'POST', body });
-      return;
-    }
-    let text = item.text;
-    const commandParts = [];
-    if (command?.isSkill) {
-      commandParts.push({
-        type: 'text',
-        text: `The user explicitly invoked the ${command.name} skill. Use the corresponding skill tool to handle this request.`,
-        synthetic: true,
-      });
-    } else if (command?.template) {
-      text = expandCommandTemplate(command.template, command.arguments);
+    const { providerID, modelID, variant } = item.sendConfig;
+    let agent = item.sendConfig.agent;
+    let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
+    const promptFiles = item.attachments.map(toPromptFile);
+    const contextMessages = item.context.flatMap(toContextMessages);
+
+    // Jev routing, when the queued send named the Auto sentinel. A failure
+    // inside resolves to the fallback model; only a missing fallback throws.
+    const routed = await resolveAutoSelection?.({
+      sessionId,
+      directory,
+      model,
+      agent,
+      requestText: item.text,
+    });
+    if (routed) {
+      model = routed.model;
+      agent = routed.agent ?? agent;
     }
 
-    // Standing project context rides the prompt exactly as a UI send would
+    // v2 selects model and agent on the session, not per prompt: the choice is
+    // switched once and then persists.
+    await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+      directory,
+      method: 'POST',
+      body: { model },
+    });
+    if (agent) {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
+        directory,
+        method: 'POST',
+        body: { agent },
+      });
+    }
+
+    // Resolved before anything is admitted: a failed command lookup fails the
+    // whole send, so a retry does not admit the context twice.
+    const command = await resolveSlashCommand(item.text, directory);
+
+    // Standing project context rides the send exactly as a UI send would
     // attach it; a failed lookup sends without it rather than not at all.
     const knowledge = sessionKnowledgeRuntime
       ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionId, directory)
         .catch(() => ({ text: '', signature: '' }))
       : { text: '', signature: '' };
-    // Same order as a UI send: the user's text and files, the context queued
-    // with them, then the standing context, then the mentioned agent.
-    const parts = [];
-    if (text.trim()) parts.push({ type: 'text', text });
-    parts.push(...fileParts);
-    parts.push(...contextParts);
-    parts.push(...commandParts);
-    if (knowledge.text) parts.push({ type: 'text', text: knowledge.text, synthetic: true });
-    if (item.agentMention) parts.push({ type: 'agent', name: item.agentMention });
-    const body = { model: { providerID, modelID } };
-    if (agent) body.agent = agent;
-    if (variant) body.variant = variant;
-    body.parts = parts;
-    await resolvePromptBody?.(body, { sessionId, directory });
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, { directory, method: 'POST', body });
+
+    // Same order as a UI send: everything attached to the message is admitted
+    // before the message itself, so the model reads it as background. This
+    // holds for a command too: its route takes file attachments only, and
+    // sending "/name args" as a prompt instead would skip the template
+    // OpenCode 2.x expands only on the command route.
+    const preamble = [...contextMessages];
+    if (knowledge.text) preamble.push({ text: knowledge.text, resume: false });
+    for (const synthetic of preamble) {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+        directory,
+        method: 'POST',
+        body: synthetic,
+      });
+    }
+
+    if (command) {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/command`, {
+        directory,
+        method: 'POST',
+        body: {
+          // OpenCode 2.0.8 renamed the command body field `command` to `name`.
+          name: command.name,
+          text: command.arguments,
+          ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
+        },
+      });
+    } else {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
+        directory,
+        method: 'POST',
+        body: {
+          text: item.text,
+          ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
+          ...(item.agentMention ? { agents: [{ name: item.agentMention }] } : {}),
+        },
+      });
+    }
     if (knowledge.text && sessionKnowledgeRuntime) {
-      // After the prompt is accepted, so a rejected dispatch carries it again.
+      // After the send is accepted, so a rejected dispatch carries it again.
       await sessionKnowledgeRuntime.recordDelivered(sessionId, directory, knowledge.signature).catch(() => undefined);
     }
   };
@@ -587,6 +627,16 @@ export function createMessageQueueRuntime({
     }
     // Busy: the next idle status event re-arms the loop.
     if (!idle) return;
+
+    // A queued message waits for the whole turn. A parent idles while a
+    // background subagent works and runs again when OpenCode hands the
+    // result back, so the turn is only over once no subagent runs. That rerun
+    // re-arms through its idle event; the recheck covers a missed one.
+    const subagentsWorking = await hasWorkingSubagents(sessionId);
+    if (subagentsWorking !== false) {
+      armDispatch(sessionId, subagentsWorking === null ? retryDelayMs(1) : SUBAGENT_RECHECK_MS);
+      return;
+    }
 
     // Re-read after the awaits — the user may have edited the queue meanwhile.
     const current = queues.get(sessionId);
@@ -771,9 +821,14 @@ export function createMessageQueueRuntime({
       return;
     }
 
+    const abortedSessionId = extractAbortedSessionId(payload);
+    if (abortedSessionId) {
+      if (queues.has(abortedSessionId)) abortedAt.set(abortedSessionId, now());
+      return;
+    }
+
     const assistant = extractAssistantMessageUpdate(payload);
     if (assistant && queues.has(assistant.sessionId)) {
-      if (assistant.aborted) abortedAt.set(assistant.sessionId, now());
       // A completed reply without a following idle status (missed event)
       // must still drain the queue; the tick verifies idleness itself.
       if (assistant.completed && !timers.has(assistant.sessionId)) armDispatch(assistant.sessionId);
@@ -781,8 +836,8 @@ export function createMessageQueueRuntime({
   };
 
   const processEvent = (event) => {
-    const raw = asRecord(asRecord(event)?.payload);
-    processPayload(asRecord(raw?.payload) ?? raw);
+    // The hub translates v2 wire events into the server's vocabulary once.
+    for (const payload of event?.translated?.() ?? []) processPayload(payload);
   };
 
   const start = () => {

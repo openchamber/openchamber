@@ -4,7 +4,7 @@
  * A single send can carry more than what the user just typed: messages queued
  * while the previous turn ran, inline review comments, `@file` references
  * resolved to attachments, a linked GitHub issue or PR, synthetic parts from
- * conflict resolution, and an instruction naming the skills mentioned inline.
+ * conflict resolution, and the skills mentioned inline.
  *
  * OpenCode takes one primary message plus additional parts, so all of that has
  * to be flattened into that shape — and the flattening has rules that are easy
@@ -34,6 +34,12 @@ export interface OutgoingMessage {
     additionalParts: OutgoingPart[];
     /** The agent the first `@agent` mention routed to, if any. */
     agentMentionName?: string;
+    /**
+     * Skills the composer text names inline, deduped in order of appearance.
+     * The send attaches them to the prompt (see `SkillMentions`); queued
+     * messages already carry the instruction they were queued with.
+     */
+    skillNames: string[];
     /** True when there is nothing worth sending. */
     isEmpty: boolean;
 }
@@ -92,8 +98,6 @@ export interface OutgoingMessageDeps {
     sanitizeAttachments: (files: readonly AttachedFile[] | undefined) => AttachedFile[];
     /** Skills named inline with `/name`. */
     collectSkillNames: (text: string) => string[];
-    /** Instruction telling the model which skills the user named. */
-    buildSkillInstruction: (names: string[]) => string | null;
 }
 
 export function buildOutgoingMessage(
@@ -161,7 +165,7 @@ export function buildOutgoingMessage(
 
     // Everything the composer had attached follows its text.
     additionalParts.push(...queuedContextToParts(
-        buildComposerContext(input, deps.buildSkillInstruction(skillNames)),
+        buildComposerContext(input, null),
     ));
 
     return {
@@ -169,6 +173,7 @@ export function buildOutgoingMessage(
         primaryAttachments,
         additionalParts,
         agentMentionName,
+        skillNames,
         isEmpty: !primaryText && primaryAttachments.length === 0 && additionalParts.length === 0,
     };
 }

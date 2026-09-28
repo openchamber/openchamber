@@ -1,6 +1,6 @@
 import React from 'react';
 import { GUEST_TOOL_TEMPLATE_VALUE_MAX, type GuestToolContribution, type JsonValue } from '@openchamber/sdk';
-import type { ToolStateCompleted } from '@opencode-ai/sdk/v2';
+import type { ToolInput } from '@/lib/opencode/model';
 
 import { isGuestActive } from './capabilities.ts';
 import { useGuestsStore } from './store.ts';
@@ -171,19 +171,12 @@ const templateOutputValue = (output: string | undefined): TemplateValue => {
   }
 };
 
-/** Tool input and metadata as the OpenCode SDK types them: an open object. */
-type ToolStateData = ToolStateCompleted['input'];
-
 /**
- * Tool input and metadata were decoded from the JSON the server sent, so
- * they are JSON values; this is the one place the registry says so.
+ * Tool input and metadata as the domain model types them. `ToolInput` and
+ * `Metadata` are both `Record<string, JsonValue>`, so a tool part's input and
+ * metadata already are template values and need no assertion.
  */
-const templateDataValue = (value: ToolStateData | undefined): TemplateValue => {
-  if (value === undefined) return undefined;
-  // SAFETY: `value` was produced by JSON.parse of an OpenCode tool part, so every
-  // nested value is a JSON value; the SDK just does not carry that in its type.
-  return value as { [key: string]: JsonValue };
-};
+type ToolStateData = ToolInput;
 
 type GuestToolHeader = {
   title: string | null;
@@ -205,9 +198,9 @@ export const renderGuestToolHeader = (
     || (rule.subtitle && TEMPLATE_NEEDS_OUTPUT.test(rule.subtitle)),
   );
   const context: TemplateContext = {
-    input: templateDataValue(data.input),
+    input: data.input,
     output: needsOutput ? templateOutputValue(data.output) : undefined,
-    metadata: templateDataValue(data.metadata),
+    metadata: data.metadata,
   };
   const renderedTitle = rule.title ? renderTemplate(rule.title, context) : '';
   const renderedSubtitle = rule.subtitle ? renderTemplate(rule.subtitle, context) : '';

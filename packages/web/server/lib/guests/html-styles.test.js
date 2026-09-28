@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
-import { GUEST_SCROLLBAR_CSS } from '@openchamber/sdk';
+import { GUEST_SCROLLBAR_CSS, GUEST_SCROLLBAR_SCRIPT } from '@openchamber/sdk';
 import { injectGuestDocumentStyles } from './html-styles.js';
 import { registerGuestRoutes } from './routes.js';
 import { writeExtensionStore } from './persist.js';
@@ -16,9 +16,19 @@ describe('guest document styles', () => {
   test('preserves doctypes, CSP, and tag-like text inside authored scripts', () => {
     const html = '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="style-src \'self\'"><script>const text = "</head><head>";</script></head><body>Guest</body></html>';
     const decorated = injectGuestDocumentStyles(html);
-    expect(decorated.startsWith(html)).toBe(true);
+    const meta = '<meta name="color-scheme" content="light dark">';
+    expect(decorated.startsWith(`<!doctype html>${meta}${html.slice('<!doctype html>'.length)}`)).toBe(true);
     expect(decorated).toContain(GUEST_SCROLLBAR_CSS);
     expect(decorated).toContain('data-openchamber-guest-styles');
+    expect(decorated).toContain(`<script data-openchamber-guest-scrollbar>${GUEST_SCROLLBAR_SCRIPT}</script>`);
+  });
+
+  test('declares the color scheme before any authored content', () => {
+    const meta = '<meta name="color-scheme" content="light dark">';
+    expect(injectGuestDocumentStyles('<html><body>x</body></html>').startsWith(`${meta}<html>`)).toBe(true);
+    expect(injectGuestDocumentStyles('\n<!DOCTYPE html>\n<html></html>').startsWith(`\n<!DOCTYPE html>${meta}\n<html>`)).toBe(true);
+    // A doctype-looking string later in the document is authored text, not the doctype.
+    expect(injectGuestDocumentStyles('<p>"<!doctype html>"</p>').startsWith(`${meta}<p>`)).toBe(true);
   });
 
   test('serves scrollbar defaults to existing guests with or without an asset token', async () => {
@@ -36,6 +46,7 @@ describe('guest document styles', () => {
       expect(response.headers['content-security-policy']).toBe('sandbox allow-scripts');
       expect(response.headers['cache-control']).toBe('no-store');
       expect(response.text).toContain(GUEST_SCROLLBAR_CSS);
+      expect(response.text).toContain(GUEST_SCROLLBAR_SCRIPT);
       expect(response.text.startsWith('<!doctype html>')).toBe(true);
       expect(response.text).toContain(suffix ? 'main.js?oc_url_token=fixture-scope' : 'src="main.js"');
     }

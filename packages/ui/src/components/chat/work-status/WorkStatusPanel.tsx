@@ -10,18 +10,20 @@ import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
 import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
 import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
-import { WorkStatusTasksSection } from './WorkStatusTasksSection';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
+import { WorkStatusExtensionSection } from './WorkStatusExtensionSection';
 import {
   areAllWorkStatusSectionsHidden,
   getWorkStatusPanelPresentation,
+  isExtensionSectionId,
   isWorkStatusSectionVisible,
-  sanitizeWorkStatusSectionOrder,
+  resolveWorkStatusSectionOrder,
   type WorkStatusSectionId,
 } from './sections';
+import { useWorkStatusExtensionSections } from './useWorkStatusExtensionSections';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -72,7 +74,11 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
-  const sectionOrder = React.useMemo(() => sanitizeWorkStatusSectionOrder(storedOrder), [storedOrder]);
+  const extensionSections = useWorkStatusExtensionSections();
+  const sectionOrder = React.useMemo(
+    () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids),
+    [extensionSections.ids, storedOrder],
+  );
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
   // Starts optimistic: sections report after their first commit, and rendering
   // nothing on the way in would make the card flash out and back on arrival.
@@ -98,7 +104,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // re-enable sections. The previous `renderedSections > 0` guard is preserved
   // for the transient "no data yet" state so the panel doesn't flash a bare
   // bordered card on first mount.
-  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections);
+  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections, extensionSections.ids);
   const { interactive, showEmptyState } = getWorkStatusPanelPresentation({
     visible,
     contentMounted,
@@ -174,7 +180,6 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     usage: <WorkStatusUsageSection />,
     telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,
     subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
-    tasks: <WorkStatusTasksSection sessionId={sessionId} directory={directory} />,
     mcp: <WorkStatusMcpSection directory={directory} />,
     pinned: <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />,
     contextSources: <WorkStatusContextSection sessionId={sessionId} directory={directory} />,
@@ -272,6 +277,10 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         >
           {(primary) => sectionOrder.map((id) => {
             if (!sectionVisible(id)) return null;
+            if (isExtensionSectionId(id)) {
+              const guest = extensionSections.byId.get(id);
+              return guest ? <WorkStatusExtensionSection key={id} guest={guest} /> : null;
+            }
             return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
           })}
         </WorkStatusPrimaryGroup>

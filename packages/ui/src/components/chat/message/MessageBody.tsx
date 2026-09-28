@@ -1,16 +1,16 @@
 import React from 'react';
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
+import { isQuestionTool } from '@/lib/opencode/tools';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
-import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
+import type { ToolPart as ToolPartType } from '@/lib/opencode/model';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnActivityGroup, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,11 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import type { Session } from '@/lib/opencode/model';
+import { getMultiRunIdentity } from '@/lib/multirun/identity';
+import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
+import { AskOtherModelsDialog } from '@/components/multirun/AskOtherModelsDialog';
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
@@ -50,17 +55,16 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
-import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import {
     type ReviewTransferDirection,
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
 import { cloneMessageImageExportSource } from './imageExport';
 
@@ -201,242 +205,6 @@ const TurnChangedFilePills = React.memo(({ files, isInteractive }: { files?: Tur
         </Collapsible>
     );
 });
-
-type SubtaskPartLike = Part & {
-    type: 'subtask';
-    description?: unknown;
-    command?: unknown;
-    agent?: unknown;
-    prompt?: unknown;
-    taskSessionID?: unknown;
-    model?: {
-        providerID?: unknown;
-        modelID?: unknown;
-    };
-};
-
-type ShellActionPartLike = Part & {
-    type: 'text';
-    shellAction?: {
-        command?: unknown;
-        output?: unknown;
-        status?: unknown;
-    };
-};
-
-const isSubtaskPart = (part: Part): part is SubtaskPartLike => {
-    return part.type === 'subtask';
-};
-
-const isShellActionPart = (part: Part): part is ShellActionPartLike => {
-    const textPart = part as unknown as { type?: unknown; shellAction?: unknown };
-    return textPart.type === 'text' && typeof textPart.shellAction === 'object' && textPart.shellAction !== null;
-};
-
-const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null => {
-    if (!model || typeof model !== 'object') return null;
-    const providerID = typeof model.providerID === 'string' ? model.providerID.trim() : '';
-    const modelID = typeof model.modelID === 'string' ? model.modelID.trim() : '';
-    if (!providerID || !modelID) return null;
-    return `${providerID}/${modelID}`;
-};
-
-const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
-    const [expanded, setExpanded] = React.useState(false);
-    const effectiveDirectory = useEffectiveDirectory();
-    const { isMobile } = useDeviceInfo();
-    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-    const { t } = useI18n();
-
-    const description = typeof part.description === 'string' ? part.description.trim() : '';
-    const command = typeof part.command === 'string' ? part.command.trim() : '';
-    const agent = typeof part.agent === 'string' ? part.agent.trim() : '';
-    const prompt = typeof part.prompt === 'string' ? part.prompt.trim() : '';
-    const taskSessionID = typeof part.taskSessionID === 'string' ? part.taskSessionID.trim() : '';
-    const model = normalizeSubtaskModel(part.model);
-
-    return (
-        <div className="mt-2">
-            <div className="flex items-center gap-2 flex-wrap">
-                <span className="typography-meta font-semibold text-foreground">{t('chat.messageBody.subtask.title')}</span>
-                {command ? (
-                    <span className="inline-flex h-5 items-center rounded px-1.5 text-[11px] leading-none bg-foreground/5 text-muted-foreground">
-                        /{command}
-                    </span>
-                ) : null}
-                {agent ? (
-                    <span className="inline-flex h-5 items-center rounded px-1.5 text-[11px] leading-none bg-foreground/5 text-muted-foreground">
-                        @{agent}
-                    </span>
-                ) : null}
-                {model ? (
-                    <span className="inline-flex h-5 items-center rounded px-1.5 text-[11px] leading-none bg-foreground/5 text-muted-foreground">
-                        {model}
-                    </span>
-                ) : null}
-            </div>
-
-            {description ? (
-                <div className="typography-ui-label text-foreground/90 mt-1.5">
-                    {description}
-                </div>
-            ) : null}
-
-            {prompt ? (
-                <div className="mt-2 border-t border-border/60 pt-1.5">
-                    <button
-                        type="button"
-                        className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-                        onClick={() => setExpanded((value) => !value)}
-                    >
-                        {expanded ? t('chat.messageBody.subtask.hidePrompt') : t('chat.messageBody.subtask.showPrompt')}
-                    </button>
-                    {expanded ? (
-                        <pre className="typography-meta mt-1.5 overflow-x-auto whitespace-pre-wrap break-words text-foreground/85">
-                            {prompt}
-                        </pre>
-                    ) : null}
-                </div>
-            ) : null}
-
-            {taskSessionID ? (
-                <div className="mt-1.5">
-                    <button
-                        type="button"
-                        className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-                        onClick={() => {
-                            if (!effectiveDirectory) return;
-                            // In contexts with no ContextPanel (embedded
-                            // session-chat iframe) or single-surface layouts
-                            // (mobile, VS Code), navigate in place. Otherwise
-                            // open a new side-panel tab.
-                            if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
-                                setCurrentSession(taskSessionID, effectiveDirectory);
-                                return;
-                            }
-
-                            openContextPanelTab(effectiveDirectory, {
-                                mode: 'chat',
-                                dedupeKey: `session:${taskSessionID}`,
-                                label: description || agent || t('contextPanel.mode.chat'),
-                                readOnly: true,
-                            });
-                        }}
-                    >
-                        {t('chat.messageBody.subtask.openSession')}
-                    </button>
-                </div>
-            ) : null}
-        </div>
-    );
-};
-
-const SHELL_CODE_TAG_STYLE: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
-
-const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) => {
-    const output = typeof part.shellAction?.output === 'string' ? part.shellAction.output : '';
-    const [expanded, setExpanded] = React.useState(true);
-    const [copiedOutput, setCopiedOutput] = React.useState(false);
-    const copiedResetTimeoutRef = React.useRef<number | null>(null);
-    const { t } = useI18n();
-
-    const command = typeof part.shellAction?.command === 'string' ? part.shellAction.command.trim() : '';
-    const status = typeof part.shellAction?.status === 'string' ? part.shellAction.status.trim().toLowerCase() : '';
-    const hasOutput = output.trim().length > 0;
-    const clearCopiedResetTimeout = React.useCallback(() => {
-        if (copiedResetTimeoutRef.current !== null && typeof window !== 'undefined') {
-            window.clearTimeout(copiedResetTimeoutRef.current);
-            copiedResetTimeoutRef.current = null;
-        }
-    }, []);
-
-    React.useEffect(() => {
-        return () => {
-            clearCopiedResetTimeout();
-        };
-    }, [clearCopiedResetTimeout]);
-
-    const copyOutputToClipboard = React.useCallback(async () => {
-        if (!hasOutput) return;
-
-        const result = await copyTextToClipboard(output);
-        if (!result.ok) return;
-
-        clearCopiedResetTimeout();
-        setCopiedOutput(true);
-        if (typeof window !== 'undefined') {
-            copiedResetTimeoutRef.current = window.setTimeout(() => {
-                setCopiedOutput(false);
-                copiedResetTimeoutRef.current = null;
-            }, 2000);
-        }
-    }, [clearCopiedResetTimeout, hasOutput, output]);
-
-    return (
-        <div className="mt-2">
-            <div className="flex items-center gap-2 flex-wrap">
-                <span className="typography-meta font-semibold text-foreground">{t('chat.messageBody.shellCommand.title')}</span>
-                {status ? (
-                    <span className={cn(
-                        'inline-flex h-5 items-center rounded px-1.5 text-[11px] leading-none',
-                        status === 'error'
-                            ? 'bg-[var(--status-error-background)] text-[var(--status-error)]'
-                            : 'bg-foreground/5 text-muted-foreground'
-                    )}>
-                        {status}
-                    </span>
-                ) : null}
-            </div>
-
-            {command ? (
-                <div className="typography-meta mt-1.5 overflow-x-auto font-mono">
-                    <WorkerHighlightedCode
-                        language="bash"
-                        code={command}
-                        codeStyle={SHELL_CODE_TAG_STYLE}
-                        wrap
-                    />
-                </div>
-            ) : null}
-
-            {hasOutput ? (
-                <div className="mt-2 border-t border-border/60 pt-1.5">
-                    <div className="flex items-center gap-3 flex-wrap">
-                        <button
-                            type="button"
-                            className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-                            onClick={() => setExpanded((value) => !value)}
-                        >
-                            {expanded ? t('chat.messageBody.shellCommand.hideOutput') : t('chat.messageBody.shellCommand.showOutput')}
-                        </button>
-                        <button
-                            type="button"
-                            className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                            onClick={() => {
-                                void copyOutputToClipboard();
-                            }}
-                            aria-label={copiedOutput ? t('chat.messageBody.shellCommand.copied') : t('chat.messageBody.shellCommand.copyOutput')}
-                            title={copiedOutput ? t('chat.messageBody.shellCommand.copied') : t('chat.messageBody.shellCommand.copyOutput')}
-                        >
-                            {copiedOutput ? <Icon name="check" className="h-3.5 w-3.5" /> : <Icon name="file-copy" className="h-3.5 w-3.5" />}
-                        </button>
-                    </div>
-                    {expanded ? (
-                        <div className="typography-meta mt-1.5 max-h-56 overflow-auto font-mono text-foreground/85">
-                            <WorkerHighlightedCode
-                                language="bash"
-                                code={output}
-                                codeStyle={SHELL_CODE_TAG_STYLE}
-                                wrap
-                            />
-                        </div>
-                    ) : null}
-                </div>
-            ) : null}
-        </div>
-    );
-};
 
 const formatTurnDuration = (durationMs: number): string => {
     const totalSeconds = durationMs / 1000;
@@ -607,12 +375,6 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
         return parts.filter((part) => {
             if (part.type === 'text') {
                 return !isEmptyTextPart(part);
-            }
-            if (isSubtaskPart(part)) {
-                return true;
-            }
-            if (isShellActionPart(part)) {
-                return true;
             }
             return false;
         });
@@ -959,22 +721,6 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                     message swaps the optimistic part id, and id-based keys would
                     remount the text subtree (blank frame + height jump). */}
                 {userContentParts.map((part, index) => {
-                    if (isSubtaskPart(part)) {
-                        return (
-                            <React.Fragment key={`user-subtask-${index}`}>
-                                <UserSubtaskPart part={part} />
-                            </React.Fragment>
-                        );
-                    }
-
-                    if (isShellActionPart(part)) {
-                        return (
-                            <React.Fragment key={`user-shell-${index}`}>
-                                <UserShellActionPart part={part} />
-                            </React.Fragment>
-                        );
-                    }
-
                     let mentionForPart: AgentMentionInfo | undefined;
                     if (agentMention && mentionToken && !mentionInjected) {
                         const candidateText = extractTextContent(part);
@@ -1356,12 +1102,7 @@ const AssistantMessageBody = React.memo(({
     const animateActivityRows = awaitingMessageCompletion || Boolean(turnGroupingContext?.isWorking);
 
     const visibleParts = React.useMemo(() => {
-        return parts
-            .filter((part) => !isEmptyTextPart(part))
-            .filter((part) => {
-                const rawPart = part as Record<string, unknown>;
-                return rawPart.type !== 'compaction';
-            });
+        return parts.filter((part) => !isEmptyTextPart(part));
     }, [parts]);
 
     const toolParts = React.useMemo(() => {
@@ -1496,7 +1237,6 @@ const AssistantMessageBody = React.memo(({
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
-    const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
     const isReviewSessionView = reviewTransferDirection === 'review-to-original';
@@ -1634,20 +1374,36 @@ const AssistantMessageBody = React.memo(({
         [assistantPlanText, createSessionFromAssistantMessage, effectiveDirectory, getDirectoryForSession, sessionId, t]
     );
 
-    const handleForkMultiRunClick = React.useCallback(
-        (event: React.MouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            event.preventDefault();
+    const handleForkFromHere = React.useCallback(() => {
+        if (!sessionId) return;
+        void useSessionUIStore.getState().forkAfterMessage(sessionId, messageId);
+    }, [messageId, sessionId]);
 
+    const handleForkMultiRun = React.useCallback(
+        () => {
             if (!assistantPlanText.trim()) {
                 return;
             }
 
             const prefilledPrompt = `${MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT}\n\n${assistantPlanText}`;
-            openMultiRunLauncherWithPrompt(prefilledPrompt);
+            openParallelComposer(prefilledPrompt);
         },
-        [assistantPlanText, openMultiRunLauncherWithPrompt]
+        [assistantPlanText]
     );
+
+    const [askOtherModelsSession, setAskOtherModelsSession] = React.useState<Session | null>(null);
+    const handleAskOtherModels = React.useCallback(() => {
+        if (!sessionId) return;
+        const session = useGlobalSessionsStore.getState().activeSessions.find((entry) => entry.id === sessionId);
+        if (!session) return;
+        // A lane is already part of a run: its overview is where more models join.
+        const identity = getMultiRunIdentity(session);
+        if (identity) {
+            useUIStore.getState().setRunOverviewKey(identity.key);
+            return;
+        }
+        setAskOtherModelsSession(session);
+    }, [sessionId]);
 
     const handleSaveAsPlanClick = React.useCallback(
         // Optional event: the footer's action sheet calls this without one.
@@ -1782,11 +1538,7 @@ const AssistantMessageBody = React.memo(({
                     }
                 } else if (isCapacitorMobileApp()) {
                     const blob = await fetch(dataUrl).then((response) => response.blob());
-                    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
-                    if (!navigator.canShare?.({ files: [file] })) {
-                        throw new Error('Image sharing is unavailable in this mobile runtime');
-                    }
-                    await navigator.share({ files: [file] });
+                    await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
                 } else {
                     const link = document.createElement('a');
                     link.download = fileName;
@@ -1870,7 +1622,7 @@ const AssistantMessageBody = React.memo(({
     // question indefinitely (OPE-199). Render such messages' text inline,
     // matching OpenCode's display.
     const hasQuestionTool = React.useMemo(() => {
-        return toolParts.some((toolPart) => toolPart.tool === 'question');
+        return toolParts.some((toolPart) => isQuestionTool(toolPart.tool));
     }, [toolParts]);
 
     const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish && !hasQuestionTool;
@@ -2371,6 +2123,12 @@ const AssistantMessageBody = React.memo(({
         }
         if (!isMiniChatSurface && !isReviewSessionView) {
             actions.push({
+                id: 'fork-from-here',
+                label: t('chat.messageBody.actions.fork'),
+                icon: <Icon name="git-branch" className="h-3.5 w-3.5" />,
+                onSelect: handleForkFromHere,
+            });
+            actions.push({
                 id: 'fork',
                 label: t('chat.messageBody.actions.startNewSession'),
                 icon: <Icon name="chat-new" className="h-3.5 w-3.5" />,
@@ -2383,7 +2141,7 @@ const AssistantMessageBody = React.memo(({
             }
         }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyMessage, onToggleContextPin, playFooterTTS, reviewTransferAction, shareMessageAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyMessage, onToggleContextPin, playFooterTTS, reviewTransferAction, shareMessageAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 
     const finalTurnActionButtons = (
         <>
@@ -2456,37 +2214,56 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isMiniChatSurface && !isReviewSessionView ? <Tooltip>
-                <TooltipTrigger asChild>
-                    <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={handleForkClick}
-                    >
-                        <Icon name="chat-new" className="h-3 w-3" />
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
-            </Tooltip> : null}
-            {canShowMultiRunAction && !isReviewSessionView ? (
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={handleForkMultiRunClick}
-                        >
-                            <ArrowsMerge className="h-3 w-3" />
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewMultiRun')}</TooltipContent>
-                </Tooltip>
+            {!isMiniChatSurface && !isReviewSessionView ? (
+                <DropdownMenu>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                                    aria-label={t('chat.messageBody.actions.branchMenu')}
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                >
+                                    <Icon name="git-branch" className="h-3 w-3" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.branchMenu')}</TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent align="end" onPointerDown={(event) => event.stopPropagation()}>
+                        <DropdownMenuItem className="typography-meta" onSelect={handleForkFromHere}>
+                            <Icon name="git-branch" className="h-3.5 w-3.5" />
+                            {t('chat.messageBody.actions.fork')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="typography-meta" onSelect={() => handleForkClick()}>
+                            <Icon name="chat-new" className="h-3.5 w-3.5" />
+                            {t('chat.messageBody.actions.startNewSession')}
+                        </DropdownMenuItem>
+                        {canShowMultiRunAction && turnGroupingContext?.turnId ? (
+                            <DropdownMenuItem className="typography-meta" onSelect={handleAskOtherModels}>
+                                <ArrowsMerge className="h-3.5 w-3.5" />
+                                {t('chat.messageBody.actions.askOtherModels')}
+                            </DropdownMenuItem>
+                        ) : null}
+                        {canShowMultiRunAction ? (
+                            <DropdownMenuItem className="typography-meta" onSelect={handleForkMultiRun}>
+                                <ArrowsMerge className="h-3.5 w-3.5" />
+                                {t('chat.messageBody.actions.startNewMultiRun')}
+                            </DropdownMenuItem>
+                        ) : null}
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            ) : null}
+            {askOtherModelsSession && turnGroupingContext?.turnId ? (
+                <AskOtherModelsDialog
+                    session={askOtherModelsSession}
+                    turnUserMessageId={turnGroupingContext.turnId}
+                    open
+                    onOpenChange={(open) => { if (!open) setAskOtherModelsSession(null); }}
+                />
             ) : null}
         </>
     );
@@ -2496,6 +2273,7 @@ const AssistantMessageBody = React.memo(({
          <div
               ref={messageContentRef}
               data-message-text-export-root="true"
+              data-chat-quote-root="true"
               className={cn(
                  'relative w-full group/message'
              )}

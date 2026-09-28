@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
+import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import {
   applyGlobalSessionStatusEvent,
@@ -16,9 +17,10 @@ import { resetSessionActivityTiming } from './session-activity-timing';
 
 const NOW = 1_700_000_000_000;
 
-const session = (id: string, directory: string) => ({
-  id, slug: id, directory, projectID: 'project', title: id, version: '1',
-  time: { created: 1, updated: 1 },
+const session = (id: string, directory: string): Session => ({
+  id, directory, projectID: 'project', title: id,
+  time: { created: 1, updated: 1 }, cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
 });
 
 describe('buildHostStatusSeedEvents', () => {
@@ -37,7 +39,6 @@ describe('buildHostStatusSeedEvents', () => {
 
     expect([...events.keys()]).toEqual(['/repo', '/other']);
     expect(events.get('/repo')).toEqual([{
-      id: 'host-seed:a',
       type: 'session.status',
       properties: { sessionID: 'a', status: { type: 'busy' } },
     }]);
@@ -60,7 +61,6 @@ describe('buildHostStatusSeedEvents', () => {
 
     expect([...events.keys()]).toEqual(['/repo']);
     expect(events.get('/repo')).toEqual([{
-      id: 'host-seed:fresh',
       type: 'session.status',
       properties: { sessionID: 'fresh', status: { type: 'busy' } },
     }]);
@@ -97,9 +97,7 @@ describe('seedGlobalSessionStatusFromHost', () => {
   test('seeds an unopened directory session and never overrides a live observation', async () => {
     // A live idle arrived for this session before the host answered: the host
     // still lists it busy (its map lags), and the seed must not resurrect it.
-    applyGlobalSessionStatusEvent('/repo', {
-      id: 'e1', type: 'session.idle', properties: { sessionID: 'settled-here' },
-    });
+    applyGlobalSessionStatusEvent('/repo', { type: 'session.idle', properties: { sessionID: 'settled-here' } });
     snapshot = {
       serverTime: NOW,
       sessions: {
@@ -117,9 +115,7 @@ describe('seedGlobalSessionStatusFromHost', () => {
   });
 
   test('a failed fetch and an absent entry leave existing activity untouched', async () => {
-    applyGlobalSessionStatusEvent('/repo', {
-      id: 'e1', type: 'session.status', properties: { sessionID: 'settled-here', status: { type: 'busy' } },
-    });
+    applyGlobalSessionStatusEvent('/repo', { type: 'session.status', properties: { sessionID: 'settled-here', status: { type: 'busy' } } });
     snapshot = null;
     await seedGlobalSessionStatusFromHost();
     expect(useGlobalSessionStatusStore.getState().statusById.has('settled-here')).toBe(true);

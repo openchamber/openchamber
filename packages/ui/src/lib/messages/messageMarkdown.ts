@@ -1,4 +1,4 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Metadata, Part } from '@/lib/opencode/model';
 import { readContextPart, type ContextPartPayload } from './contextParts';
 import { extractTerminalContexts } from './terminalContext';
 
@@ -55,20 +55,23 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
   }
 }
 
-/** User-attached synthetic parts are content; other synthetic prompts are optional. */
+/**
+ * The model-facing text of a message's own parts. Attached context is no
+ * longer a part — it arrives as its own synthetic message — so render it with
+ * `formatContextMessage`.
+ */
 export function formatMessageText(
   parts: readonly Part[],
-  options: { user?: boolean; excludeSynthetic?: boolean; fieldLimit?: number } = {},
+  options: { user?: boolean; fieldLimit?: number } = {},
 ): string {
   const blocks: string[] = [];
   for (const part of parts) {
-    if (part.type !== 'text' || (options.excludeSynthetic && part.ignored)) continue;
+    if (part.type !== 'text') continue;
     const context = options.user ? readContextPart(part) : null;
     if (context) {
       blocks.push(formatContext(context, part.text, options.fieldLimit));
       continue;
     }
-    if (options.excludeSynthetic && part.synthetic) continue;
     if (!options.user) {
       blocks.push(options.fieldLimit ? excerptMarkdown(part.text, options.fieldLimit) : part.text);
       continue;
@@ -80,4 +83,14 @@ export function formatMessageText(
     }
   }
   return blocks.map((block) => block.trim()).filter(Boolean).join('\n\n');
+}
+
+/** One attached context item (a synthetic message) as model-facing Markdown. */
+export function formatContextMessage(
+  message: { text: string; metadata?: Metadata },
+  fieldLimit?: number,
+): string {
+  const payload = readContextPart(message);
+  if (payload) return formatContext(payload, message.text, fieldLimit);
+  return fieldLimit ? excerptMarkdown(message.text, fieldLimit) : message.text;
 }

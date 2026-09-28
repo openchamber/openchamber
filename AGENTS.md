@@ -31,7 +31,7 @@ read. Skill loading is a required part of the task, not optional guidance.
 - `packages/sdk`: guest contract for third-party panels. Manifest parse, iframe envelope, `connectHost`. Host and guest import from here; do not copy these types into `packages/ui`.
 - `packages/extensions`: app-owned SDK extensions and their build registry, not a Bun workspace. See its `DOCUMENTATION.md` for trust, packaging, and migration rules.
 
-Shared UI calls official OpenCode APIs through `@opencode-ai/sdk/v2`. OpenChamber-owned capabilities use `RuntimeAPIs`, `runtimeFetch`, and shared browser/realtime transport helpers. Server-side upstream integrations may use their owning runtime modules.
+Shared UI calls official OpenCode APIs through `@opencode/client` (OpenCode 2.x) via `opencodeClient`; wire shapes stay inside `packages/ui/src/lib/opencode/`. OpenChamber-owned capabilities use `RuntimeAPIs`, `runtimeFetch`, and shared browser/realtime transport helpers. Server-side upstream integrations may use their owning runtime modules.
 
 Electron starts the OpenChamber backend in-process, never as a sidecar. Development may load loopback/HMR UI; packaged builds load staged assets through `openchamber-ui://` while the loopback server remains the API backend. Keep domain backends in web/runtime modules unless behavior is inherently native.
 
@@ -97,6 +97,7 @@ process violation.
 | Shared UI data access, OpenCode SDK or server routes, `RuntimeAPIs`, runtime auth/URLs, bridges, or runtime switching | `ui-api-decoupling` |
 | Electron main/preload, IPC, native UI, updater, deep links, SSH/tunnels, packaging, or child processes | `desktop-shell` |
 | Session sync, bootstrap/reconnect, reducers, polling, optimistic state, queues, live status, reconciliation, or directory-scoped caches | `sync-state-invariants` |
+| Isolated-space trust boundaries: hardening, networks and gatekeeper policy, exec and lifecycle, grants and credentials, code transfer and apply, dispatcher isolation, preview content, or protection tests | `isolated-space-boundary` |
 | Render/store/event hot paths, large lists, caches/indexes, or reported lag, freezes, CPU/memory, startup, or performance regressions | `performance-engineering` |
 | WebSocket, SSE, streaming transport, runtime transport internals, or private relay | `relay-transport` |
 | UI components, styling, colors, buttons, or icons | `theme-system` |
@@ -106,6 +107,7 @@ process violation.
 | iOS Simulator build, launch, preview, gestures, or `serve-sim` control | `serve-sim` |
 | The maintainer explicitly asks to update the changelog (main app or VS Code extension) — the only time `changelog/unreleased.md` is edited | `update-changelog` |
 | Creating or editing skills, `AGENTS.md`, or docs reached through agent instructions/context pointers | `writing-for-agents` |
+| OpenCode routes, events, message/session shapes, plugins, the pinned OpenCode version, "what's new in OpenCode 2.0.x", or a bug that looks like OpenCode behaving unexpectedly | `opencode-v2` |
 | Reviewing a single pull request or drafting a PR verdict/close/review comment | `pr-review` |
 | Triaging, cleaning up, or batch-processing the open PR queue | `triage-prs` |
 | Triaging, cleaning up, or batch-processing the issue backlog | `triage-issues` |
@@ -120,6 +122,7 @@ Keep each cross-cutting rule with one canonical owner; companion skills add only
 |---|---|
 | Change scope, abstraction discipline, and validation risk | `openchamber-change-discipline` |
 | State authority, reconciliation, optimistic state, and lifecycle correctness | `sync-state-invariants` |
+| Isolated-space trust boundaries and the evidence that each one holds | `isolated-space-boundary` |
 | Measurement, hot-path cost, caching performance, and optimization evidence | `performance-engineering` |
 | Shared UI API and runtime boundaries | `ui-api-decoupling` |
 | WebSocket/SSE and private relay mechanics | `relay-transport` |
@@ -147,5 +150,31 @@ Before adding guidance to a skill, identify its canonical owner. If another skil
 Before creating or updating a pull request, read `CONTRIBUTING.md` and
 `.github/PULL_REQUEST_TEMPLATE.md`. Complete the template with concrete,
 current evidence for the final PR HEAD; do not make the reviewer reconstruct
-intent, affected surfaces, applicable guidance, validation, visual behavior,
-or failure and rollback considerations from the diff alone.
+intent, affected surfaces, validation, visual behavior, or failure and
+rollback considerations from the diff alone.
+
+A **product decision** belongs to the maintainer and is settled before the code,
+never inside the diff. A product decision is anything where two reasonable people
+could disagree about whether it should exist or how it should behave: a new
+button, panel, setting or command; a changed default; a shortcut or gesture that
+now does something else; different wording, ordering or grouping in the UI;
+anything that turns existing behavior on or off for everyone. Removing or
+bypassing behavior the code marks as deliberate is one too, and there the first
+question is whether it is a defect at all. A crash, wrong data, behavior that
+contradicts what it plainly claims, or a performance fix that keeps behavior
+identical is a bug, not a product decision.
+
+Where that decision is settled depends on who is working:
+
+- **Working with the maintainer or a team member** (anyone with repository
+  access): raise the product question in the session and get an answer there.
+  The decision already happened off GitHub; no discussion thread and no link is
+  expected on the pull request.
+- **Working as an outside contributor**: the decision happens in an agreed
+  [Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas)
+  before the code, linked from the pull request. Without the maintainer's
+  go-ahead such a pull request is not reviewed, and a discussion opened
+  afterwards to describe finished work is closed along with it.
+
+When the call is unclear, ask before building. Deciding it silently is the one
+thing that is always wrong.

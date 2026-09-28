@@ -1,0 +1,76 @@
+---
+title: Sessions in Work
+description: Keep sessions with real work in progress on top of the sidebar until you mark them done.
+---
+
+# Sessions in Work
+
+Questions, research and quick experiments pile up fast, and the session where you're actually fixing something gets buried among them. The **In work** block keeps those sessions in one place in the sidebar. A session stays there until you say it's done.
+
+That's the difference from Recent. Recent shows whatever changed in the last two days and moves on its own; a session you touched this morning out of curiosity is there, a fix you paused on Monday is gone. In work is the list of things you haven't finished, however long ago you last opened them.
+
+## Where to find it
+
+The **In work** block sits in the sidebar under Chats and above Recent (or the timeline, in Timeline mode). On the phone it's in the same place in the sessions list.
+
+A session in work moves there together with its subsessions. It doesn't show up a second time in Recent, the timeline, its project or its folder. Mark it done and it goes back to where it was.
+
+## Track and finish a session by hand
+
+- **Track:** hover a session and press the eye, or choose **Track as in work** in the session menu.
+- **Finish:** hover a session in the block and press the check, or choose **Mark done** in the menu.
+
+On the phone, swipe a session row to reach the same action, or use the session menu.
+
+Any project session can be in work, including sessions in worktrees. Subsessions come along with their parent. Chats never do: they're plain conversations, so they don't get the eye.
+
+## Let Jev move sessions in for you
+
+With a [classification provider](/classification-providers/) set up, you don't have to track sessions yourself. Jev reads each message you send and moves the session into work when you:
+
+- ask for a change
+- report a bug
+- discuss a concrete change you're about to make
+
+Questions, explanations and research don't count. Jev looks again when the agent finishes a turn, which catches the work that only becomes clear from the reply.
+
+Jev only ever moves sessions **in**. Once you mark a session done, only a new request sent after that brings it back.
+
+### "This work looks done"
+
+When a turn looks like the end of the work (you said thanks, asked for a commit, confirmed it works), Jev leaves a hint instead of closing anything:
+
+- a grey check on the session row in the sidebar
+- a strip above the composer: **This work looks done.** with a **Mark done** button
+
+Press **Mark done** if Jev is right. If not, just keep going: the hint disappears with your next message.
+
+## Recap and next-message suggestion
+
+After the agent finishes and the session stays quiet for a minute, OpenChamber can write two things with your Small Model (see [Providers, Models & Agents](/providers/)):
+
+- **Recap:** a short reminder of what was done and where things stand, shown under the last reply and in the session's tooltip in the sidebar
+- **Suggestion:** the next message you'd probably send, as a row at the top of the composer; click it to put the text in the composer, it never sends by itself
+
+With Jev available, OpenChamber first asks it whether the turn needs them. A plain "thanks, that's it" after real work still gets a recap, but a suggestion is skipped when nothing is left to do, and the Small Model isn't called at all when neither is useful. Without Jev both are generated after every turn, as before.
+
+Turn them on or off in **Settings → Chat → Session Assistance**.
+
+## Settings
+
+Open **Settings → Sessions → Sessions in work**:
+
+- **Show sessions in work:** the block itself; turn it off and sessions stay where they always were
+- **Move sessions into work automatically:** the Jev part; turn it off to track only by hand
+
+Both are on by default.
+
+## Where it works
+
+The block and the manual track/done work everywhere, VS Code included. Moving sessions in automatically, the "looks done" hint and the Jev filter for recaps need the OpenChamber server, so they work in the desktop app, the web app and on your phone, but not in VS Code.
+
+## Related
+
+- [Classification Providers (Jev)](/classification-providers/): set up automatic tracking
+- [Chats](/chats/): conversations that stay out of work
+- [Session Goals](/session-goals/): keep the agent working toward a finish line

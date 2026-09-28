@@ -1,4 +1,4 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 // Session goal driven by the server's session-goal runtime, stored under
 // session.metadata.openchamber.goal. The UI writes goals (create/edit/

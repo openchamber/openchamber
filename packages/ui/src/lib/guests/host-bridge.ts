@@ -33,6 +33,7 @@ import {
 
 import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files';
 import type { GuestGenerateProxyResult } from '@/lib/guests/generate';
+import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
@@ -77,6 +78,10 @@ type HostBridgeEffects = {
   generate: (request: GenerateRequest) => Promise<GuestGenerateProxyResult>;
   /** Rail badge for this guest; `null` clears. */
   setBadge: (count: number | null) => void;
+  /** Show a commit of the open project in the Diff view; the pane owns directory and runtime support. */
+  openCommit: (sha: string) => Promise<GuestOpenCommitResult>;
+  /** Content height the guest asked for; only the Work Status section sizes its frame from it. */
+  resize: (height: number) => void;
   /** The guest answered a host `resolve` with this id. Not a request, so no `result` goes back. */
   resolveResult: (id: string, payload: ResolveResultPayload) => void;
 };
@@ -354,6 +359,13 @@ export const answerGuestMessage = async (
     }
     case 'badge':
       effects.setBadge(message.payload.count);
+      return okResult(message.id);
+    case 'open-commit': {
+      const opened = await effects.openCommit(message.payload.sha);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'resize':
+      effects.resize(message.payload.height);
       return okResult(message.id);
     case 'resolve-result':
       effects.resolveResult(message.id, message.payload);

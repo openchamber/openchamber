@@ -39,12 +39,17 @@ import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
 import { guestGenerate } from '@/lib/guests/generate';
+import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
 import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
 import { useGuestItemStore } from '@/lib/guests/item-store';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
 import { loadGuestServiceStatus, proxyGuestServiceRequest } from '@/lib/guests/service';
+import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import {
   AUTHORIZATION_POLL_MS,
   AUTHORIZATION_WATCH_MS,
@@ -87,6 +92,8 @@ type PluginPaneProps = {
   onDismiss?: () => void;
   onAttach?: (issue: AttachIssueRequest) => void;
   onSessionStarted?: () => void;
+  /** The guest asked for this content height (`setHeight`). The Work Status section sizes its frame from it. */
+  onResize?: (height: number) => void;
 };
 
 // Sandboxed frames without allow-same-origin have an opaque origin.
@@ -124,6 +131,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onDismiss,
   onAttach,
   onSessionStarted,
+  onResize,
 }) => {
   const { t, locale } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -218,7 +226,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     item,
   }), [currentTheme, readableColors, directory, guest?.backgroundEntry, headless, item, locale, oauthStatus, sessionSnapshot, surface]);
 
-  const frameKey = `${guestId}:${guest?.version ?? ''}:${guestEnabled}:service-${guest?.service?.granted ? '1' : '0'}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}`;
+  const frameKey = `${guestId}:${guest?.version ?? ''}:${guestEnabled}:service-${guest?.service?.granted ? '1' : '0'}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}`;
 
   // Scoped auth is minted per mount/version/grant and renewed if an existing
   // iframe navigates after expiry. Healthy documents retain their local state.
@@ -227,6 +235,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const guestEntry = guest
     ? headless ? guest.backgroundEntry ?? guest.entry ?? null
       : surface === 'page' ? guest.pageEntry ?? null
+        : surface === 'status' ? guest.statusEntry ?? null
         : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null
     : null;
   const { src, srcDoc, status: frameStatus, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
@@ -257,6 +266,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onDismissRef.current = onDismiss;
   const onSessionStartedRef = React.useRef(onSessionStarted);
   onSessionStartedRef.current = onSessionStarted;
+  const onResizeRef = React.useRef(onResize);
+  onResizeRef.current = onResize;
   const oauthPollRef = React.useRef<number | null>(null);
   // Outstanding `resolve` requests this pane sent; answered by `resolve-result`.
   const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
@@ -532,7 +543,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
               message: 'This extension is disabled in Settings → Extensions.',
             });
           }
-          return proxyGuestServiceRequest(guestIdRef.current, request);
+          return proxyGuestServiceRequest(guestIdRef.current, request, getSurfaceViewerId(guestIdRef.current));
         },
         serviceStatus: () => loadGuestServiceStatus(guestIdRef.current),
         file: (request) => {
@@ -570,6 +581,19 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         setBadge: (count) => {
           if (!guestEnabledRef.current) return;
           useGuestBadgeStore.getState().setBadge(guestIdRef.current, count);
+        },
+        openCommit: (sha) => {
+          const git = getRegisteredRuntimeAPIs()?.git ?? null;
+          return openGuestCommit({
+          sha,
+          directory: directoryRef.current || null,
+          git,
+          currentBranch: (dir) => (git ? readCurrentBranch(git, dir) : Promise.resolve(null)),
+          supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
+          });
+        },
+        resize: (height) => {
+          onResizeRef.current?.(height);
         },
         resolveResult: (id, payload: ResolveResultPayload) => {
           const waiter = resolveWaitersRef.current.get(id);
@@ -624,12 +648,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [pushHostState, ready, directory]);
 
   React.useEffect(() => {
-    if (headless || catalogStatus !== 'ready' || guest?.entry) {
+    // A Work Status section is not a rail tab and may be the package's only frame.
+    if (headless || surface === 'status' || catalogStatus !== 'ready' || guest?.entry) {
       return;
     }
     closeGuestTabsEverywhere(mode);
     onDismiss?.();
-  }, [catalogStatus, guest?.entry, headless, mode, onDismiss]);
+  }, [catalogStatus, guest?.entry, headless, mode, onDismiss, surface]);
 
   React.useEffect(() => {
     if (!currentSessionId || !lifecyclePhase) {
@@ -669,7 +694,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       sandbox="allow-scripts"
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
-        surface === 'dialog' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
+        // The attach window and the Work Status card draw their own chrome behind the page.
+        surface === 'dialog' || surface === 'status' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
       )}
       onLoad={() => {
         // A kept-alive iframe can navigate again after its scoped URL token

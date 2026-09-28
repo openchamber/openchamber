@@ -118,4 +118,4 @@ host.onConnection((connection) => {
 
 通过 Git URL 安装和更新时，请将构建后的 `panel/main.js` 与 HTML 和清单一起提交。OpenChamber 安装扩展时不会安装 npm 依赖或编译 TypeScript。提交锁文件，将 `node_modules/` 加入 `.gitignore`，并将浏览器依赖打包进 IIFE。发布更新时，提升扩展自身 `package.json` 中的版本，重新构建、提交并推送，然后在 Settings → Extensions 中选择 Update。固定到 Git 标签的 URL 会保持在该标签。
 
-在该文件夹中用 `bunx openchamber-guest-bundle panel/main.ts panel/main.js` 构建，然后在 设置 → 扩展 中添加这个文件夹。另外五个示例（每个 UI 控件、带操作和斜杠命令的任务列表、一个本地服务、一个配置文件编辑器、一个仅含工具的包）在 [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples)。
+在该文件夹中用 `bunx openchamber-guest-bundle panel/main.ts panel/main.js` 构建，然后在 设置 → 扩展 中添加这个文件夹。另外六个示例（每个 UI 控件、带操作和斜杠命令的任务列表、一个本地服务、一个配置文件编辑器、一个仅含工具的包、一个带 git 图的 Work Status 分区）在 [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples)。

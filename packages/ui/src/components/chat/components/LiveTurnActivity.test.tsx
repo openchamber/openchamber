@@ -6,7 +6,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { createOpencodeClient, type Part, type AssistantMessage } from '@opencode-ai/sdk/v2';
+import { OpenCode } from '@opencode/client';
+import type { Part, AssistantMessage } from '@/lib/opencode/model';
 import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -44,15 +45,17 @@ const runtimeApis: RuntimeAPIs = {
     get settings() { return unavailable(); },
     get permissions() { return unavailable(); },
     get notifications() { return unavailable(); },
-    get tools() { return unavailable(); },
 };
-const sdk = createOpencodeClient({ baseUrl: 'http://localhost', fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) });
+const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) });
+// The answer's action bar also has an aria-expanded button, the branch menu
+// trigger, so the changed-file disclosure is the one that opens no popup.
+const changedFilesDisclosure = () => document.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]:not([aria-haspopup])');
 let MessageBody: typeof import('../message/MessageBody').default;
 
-function assistant(id: string, parts: Part[], finish?: string): ChatMessageEntry {
+function assistant(id: string, parts: Part[], finish?: AssistantMessage['finish']): ChatMessageEntry {
     const info: AssistantMessage = {
-        id, sessionID: 'session', role: 'assistant', parentID: 'user', time: { created: 2, completed: finish ? 3 : undefined },
-        modelID: 'model', providerID: 'provider', mode: 'build', agent: 'build', path: { cwd: '/project', root: '/project' },
+        id, sessionID: 'session', role: 'assistant', time: { created: 2, completed: finish ? 3 : undefined },
+        modelID: 'model', providerID: 'provider', agent: 'build',
         cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, finish,
     };
     return { info, parts };
@@ -62,11 +65,11 @@ function text(id: string, content: string): Part {
 }
 const readPart: Part = {
     type: 'tool', tool: 'read', id: 'read', callID: 'read', sessionID: 'session', messageID: 'progress',
-    state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', title: 'Read', metadata: {}, time: { start: 1, end: 2 } },
+    state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', metadata: {}, time: { start: 1, end: 2 } },
 };
 function turn(messages: ChatMessageEntry[]): TurnRecord {
     return projectTurnRecords([{
-        info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 }, agent: 'build', model: { providerID: 'provider', modelID: 'model' } },
+        info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } },
         parts: [text('request', 'Request')],
     }, ...messages]).turns[0];
 }
@@ -195,7 +198,7 @@ describe('live Activity with the real message body', () => {
     test('keeps file statistics visible when expanded and uses an ASCII minus', async () => {
         const edit: Part = {
             type: 'tool', tool: 'edit', id: 'edit', callID: 'edit', sessionID: 'session', messageID: 'progress',
-            state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: '', title: 'Edit',
+            state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: '',
                 metadata: { diff: '@@ -1,1 +1,2 @@\n-old\n+new\n+added' }, time: { start: 1, end: 2 } },
         };
         await act(async () => root.render(<Harness record={turn([
@@ -216,7 +219,7 @@ describe('live Activity with the real message body', () => {
             const files = Array.from({ length: count }, (_, index) => ({ file: `src/file-${index}.ts`, additions: 1, deletions: 0 }));
             await act(async () => root.render(<Harness record={record} changedFiles={files} />));
             expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(Math.min(count, 4));
-            const trigger = container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]');
+            const trigger = changedFilesDisclosure();
             if (count <= 4) {
                 expect(trigger).toBeNull();
             } else {
@@ -231,7 +234,7 @@ describe('live Activity with the real message body', () => {
         const record = turn([assistant('final', [text('answer', 'Done')], 'stop')]);
         const files = Array.from({ length: 100 }, (_, index) => ({ file: `src/file-${index}.ts`, additions: 1, deletions: 0 }));
         await act(async () => root.render(<Harness record={record} changedFiles={files} />));
-        const trigger = container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]');
+        const trigger = changedFilesDisclosure();
         if (!trigger) throw new Error('Missing changed-file disclosure');
         trigger.focus();
         await act(async () => trigger.click());
@@ -275,7 +278,7 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).not.toContain('file-0.ts');
         await act(async () => root.render(<Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} />));
         expect(container.textContent).toContain('file-0.ts');
-        await act(async () => container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]')?.click());
+        await act(async () => changedFilesDisclosure()?.click());
         expect(container.textContent).toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
     });

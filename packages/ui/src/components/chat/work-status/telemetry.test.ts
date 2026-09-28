@@ -1,18 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Part, TextPart, UserMessage } from '@opencode-ai/sdk/v2';
+import type { AssistantMessage, Part, SyntheticMessage, TextPart, TokenUsageInfo, UserMessage } from '@/lib/opencode/model';
 import { formatTelemetryDuration, formatTelemetryTokens, formatThroughputRate, getLatestCompletedTurnStats, mergeTimeIntervals, sumIntervalsDuration } from './telemetry';
 
-const user: UserMessage = { id: 'u1', sessionID: 'session-1', role: 'user', time: { created: 0 }, agent: 'build', model: { providerID: 'test', modelID: 'test' } };
+const user: UserMessage = { id: 'u1', sessionID: 'session-1', role: 'user', time: { created: 0 } };
+const baseTokens = (): TokenUsageInfo => ({ input: 100, output: 100, reasoning: 0, cache: { read: 0, write: 0 } });
 const assistant = (overrides: Partial<AssistantMessage> = {}): AssistantMessage => ({
-  id: 'a1', sessionID: 'session-1', role: 'assistant', parentID: user.id,
-  agent: 'build', mode: 'build', providerID: 'test', modelID: 'test', path: { cwd: '/repo', root: '/repo' },
+  id: 'a1', sessionID: 'session-1', role: 'assistant',
+  agent: 'build', providerID: 'test', modelID: 'test',
   time: { created: 1000, completed: 5000 }, cost: 0,
-  tokens: { input: 100, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+  tokens: baseTokens(),
   ...overrides,
 });
 const tool = (start: number, end: number): Part => ({
   id: `tool-${start}`, sessionID: user.sessionID, messageID: 'a1', type: 'tool', tool: 'bash', callID: 'call',
-  state: { status: 'completed', input: {}, output: '', title: 'test', metadata: {}, time: { start, end } },
+  state: { status: 'completed', input: {}, output: '', metadata: {}, time: { start, end } },
 });
 const text = (start: number): TextPart => ({ id: `text-${start}`, sessionID: user.sessionID, messageID: 'a1', type: 'text', text: '', time: { start } });
 const turn = (info = assistant(), parts: Part[] = []) => [{ info: user, parts: [] }, { info, parts }];
@@ -56,6 +57,12 @@ describe('turn telemetry', () => {
     expect(getLatestCompletedTurnStats(records)?.lastAssistantMessageId).toBe('new');
   });
 
+  test('a plumbing message after the final step does not hide the finished turn', () => {
+    const synthetic: SyntheticMessage = { id: 's1', sessionID: user.sessionID, role: 'synthetic', time: { created: 6000 }, text: 'plugin prompt' };
+    const records = [...turn(assistant(), [text(1500)]), { info: synthetic, parts: [] }];
+    expect(getLatestCompletedTurnStats(records)?.lastAssistantMessageId).toBe('a1');
+  });
+
   test('does not publish unfinished or truncated turns, or substitute older results', () => {
     expect(getLatestCompletedTurnStats(null)).toBeNull();
     expect(getLatestCompletedTurnStats([])).toBeNull();
@@ -71,7 +78,7 @@ describe('turn telemetry', () => {
     const info = assistant();
     expect(getLatestCompletedTurnStats([{ info, parts: [] }])).toBeNull();
     expect(getLatestCompletedTurnStats(turn(info))?.tokensPerSecond).toBe(25);
-    expect(getLatestCompletedTurnStats(turn({ ...info, tokens: { ...info.tokens, output: 200 } }))?.tokensPerSecond).toBe(50);
+    expect(getLatestCompletedTurnStats(turn({ ...info, tokens: { ...baseTokens(), output: 200 } }))?.tokensPerSecond).toBe(50);
     expect(getLatestCompletedTurnStats(turn(info, [tool(2000, 4000)]))?.tokensPerSecond).toBe(50);
     // A second directory/runtime may reuse IDs but must never reuse the result.
     expect(getLatestCompletedTurnStats(turn(info))?.tokensPerSecond).toBe(25);
@@ -90,16 +97,17 @@ describe('turn telemetry', () => {
   });
 
   test('missing reasoning is not treated as zero and invalid token counts are not summed', () => {
-    const info = assistant();
-    Reflect.deleteProperty(info.tokens, 'reasoning');
+    const tokens = baseTokens();
+    Reflect.deleteProperty(tokens, 'reasoning');
+    const info = assistant({ tokens });
     expect(getLatestCompletedTurnStats(turn(info))?.tokensPerSecond).toBeNull();
     for (const output of [-1, NaN, Infinity]) {
-      expect(getLatestCompletedTurnStats(turn(assistant({ tokens: { ...assistant().tokens, output } })))?.totalGeneratedTokens).toBeNull();
+      expect(getLatestCompletedTurnStats(turn(assistant({ tokens: { ...baseTokens(), output } })))?.totalGeneratedTokens).toBeNull();
     }
   });
 
   test('preserves genuine zero usage, cache hits and cost', () => {
-    const stats = getLatestCompletedTurnStats(turn(assistant({ tokens: { ...assistant().tokens, output: 0 } })));
+    const stats = getLatestCompletedTurnStats(turn(assistant({ tokens: { ...baseTokens(), output: 0 } })));
     expect(stats?.tokensPerSecond).toBe(0);
     expect(stats?.cost).toBe(0);
     expect(stats?.cacheHitPercent).toBe(0);
@@ -150,22 +158,22 @@ describe('turn telemetry', () => {
     expect(getLatestCompletedTurnStats(residual)?.tokensPerSecond).toBeNull();
     expect(getLatestCompletedTurnStats(residual)?.totalLlmDurationMs).toBe(1);
 
-    const finalText = turn(assistant({ tokens: { ...assistant().tokens, output: 400 } }),
+    const finalText = turn(assistant({ tokens: { ...baseTokens(), output: 400 } }),
       [{ ...text(1000), text: 'Final answer', time: { start: 1000, end: 1002 } }]);
     expect(getLatestCompletedTurnStats(finalText)?.responseTokensPerSecond).toBeNull();
 
     // A fast but possible rate still shows.
-    const quick = turn(assistant({ time: { created: 1000, completed: 1100 }, tokens: { ...assistant().tokens, output: 200 } }));
+    const quick = turn(assistant({ time: { created: 1000, completed: 1100 }, tokens: { ...baseTokens(), output: 200 } }));
     expect(getLatestCompletedTurnStats(quick)?.tokensPerSecond).toBe(2000);
   });
 
   test('separates final text delivery from whole-turn throughput on the measured tool-heavy shape', () => {
     const records = turn(assistant({
       time: { created: 1000, completed: 38438 },
-      tokens: { ...assistant().tokens, output: 223 },
+      tokens: { ...baseTokens(), output: 223 },
     }), [tool(19950, 38438)]);
     records.push({ info: assistant({ id: 'final', time: { created: 40000, completed: 45598 },
-      tokens: { ...assistant().tokens, output: 338 },
+      tokens: { ...baseTokens(), output: 338 },
     }), parts: [{ ...text(42661), text: 'Final answer', time: { start: 42661, end: 45442 } }] });
     const stats = getLatestCompletedTurnStats(records);
     expect(Math.round(stats?.tokensPerSecond ?? 0)).toBe(23);
@@ -173,7 +181,7 @@ describe('turn telemetry', () => {
   });
 
   test('measures the final text only, excluding reasoning tokens and their time', () => {
-    const stats = getLatestCompletedTurnStats(turn(assistant({ tokens: { ...assistant().tokens, output: 260, reasoning: 100 } }), [
+    const stats = getLatestCompletedTurnStats(turn(assistant({ tokens: { ...baseTokens(), output: 260, reasoning: 100 } }), [
       { id: 'reasoning', sessionID: user.sessionID, messageID: 'a1', type: 'reasoning', text: 'Thinking', time: { start: 1200, end: 2000 } },
       { ...text(2500), text: 'Final answer', time: { start: 2500, end: 4500 } },
     ]));
@@ -198,7 +206,6 @@ describe('turn telemetry', () => {
       [{ ...text(2000), text: 'Late end', time: { start: 2000, end: 6000 } }],
       [{ ...text(2000), text: 'Zero span', time: { start: 2000, end: 2000 } }],
       [{ ...text(2000), text: 'Bad time', time: { start: NaN, end: 4000 } }],
-      [{ ...text(2000), text: 'Synthetic', synthetic: true, time: { start: 2000, end: 4000 } }],
       [{ ...text(2000), text: 'Tool preface', time: { start: 2000, end: 3000 } }, tool(3000, 4000)],
       [{ ...text(2000), text: 'Timed', time: { start: 2000, end: 3000 } }, { ...text(3000), text: 'Untimed' }],
     ];
@@ -211,10 +218,11 @@ describe('turn telemetry', () => {
 
   test('response speed needs valid output usage and a successful final reply', () => {
     const parts = [{ ...text(2000), text: 'Final reply', time: { start: 2000, end: 4000 } }];
-    const missingUsage = assistant();
-    Reflect.deleteProperty(missingUsage.tokens, 'output');
+    const missingOutput = baseTokens();
+    Reflect.deleteProperty(missingOutput, 'output');
+    const missingUsage = assistant({ tokens: missingOutput });
     expect(getLatestCompletedTurnStats(turn(missingUsage, parts))?.responseTokensPerSecond).toBeNull();
-    expect(getLatestCompletedTurnStats(turn(assistant({ error: { name: 'MessageAbortedError', data: { message: 'Stopped' } } }), parts))?.responseTokensPerSecond).toBeNull();
+    expect(getLatestCompletedTurnStats(turn(assistant({ error: { type: 'MessageAbortedError', message: 'Stopped' } }), parts))?.responseTokensPerSecond).toBeNull();
     expect(getLatestCompletedTurnStats(turn(assistant({ time: { created: NaN, completed: 5000 } }), parts))?.responseTokensPerSecond).toBeNull();
   });
 });

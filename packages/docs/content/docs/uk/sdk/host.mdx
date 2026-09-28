@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | тег мови застосунку |
 | `directory` | тека поточного проєкту або `null` |
 | `session` | `{ id, title, busy }` або `null`. Якщо назви немає, замість неї id сесії. `busy` - поточний статус. `model` і `agent` (агент OpenCode) з'являються, коли вони є в сесії. |
-| `surface` | `panel` на рейці, `dialog` у вікні прикріплення, `page` на повному екрані |
+| `surface` | `panel` на рейці, `dialog` у вікні прикріплення, `page` на повному екрані, `status` у панелі Work Status |
 | `item` | для чого відкрита ця поверхня, або `null`: прикріплений елемент, який клацнув користувач (ті самі поля, які ви передали в `attach`, включно з `data`), повідомлення (`kind: "message"`) або сесія (`kind: "session"`) з однієї з оголошених вами дій. Див. [Дії](/sdk/#дії-команди-та-бейдж). |
 | `connection` | `{ connected, account }` для вашої інтеграції |
 | `settings` | значення полів, які ви оголосили в `integration.settings` |
@@ -65,6 +65,8 @@ const host = connectHost();
 | `generate({ prompt, system?, maxOutputTokens? })` | одноразовий текст від Small Model користувача. Повертає `{ text }`. Потребує дозволу `model`. |
 | `onResolve(handler)` | зареєструвати обробник ваших слеш-команд. Він отримує `{ command, args }` і повертає елемент для прикріплення або `null`. |
 | `setBadge(count)` | показати число (від 0 до 999) на вашій іконці в рейці або `null`, щоб прибрати його |
+| `openCommit(sha)` | відкрити Diff view на цьому коміті поточного проєкту. `sha` має від 7 до 64 шістнадцяткових символів; OpenChamber сам читає коміт. |
+| `setHeight(px)` | задати висоту вашої секції Work Status. OpenChamber тримає її в межах від 24 до 320 пікселів; вищий вміст прокручується всередині вашої сторінки. В інших місцях ігнорується. |
 
 ## attach, startSession і sessionLink
 
@@ -217,12 +219,13 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `NO_SERVICE` | сервіс не оголошено, не підтверджено або не запущено |
 | `NOT_GRANTED` | користувач не підтвердив дозвіл, потрібний для цього виклику |
 | `SERVICE_FAILED` | сервіс упав або так і не став готовим |
-| `NO_DIRECTORY` | відносний шлях до файлу використано без відкритого проєкту |
-| `NOT_FOUND` | `readFile` файлу, якого не існує |
+| `NO_DIRECTORY` | відносний шлях до файлу використано без відкритого проєкту, або `openCommit` без відкритого проєкту |
+| `NOT_FOUND` | `readFile` файлу, якого не існує, або `openCommit` на коміті, якого немає в проєкті |
 | `FILE_TOO_LARGE` | вміст файлу перевищує обмеження, під час читання або запису |
 | `DENIED` | операційна система відмовила у файловій операції |
 | `NO_MODEL` | `generate` без доступного Small Model |
 | `MODEL_FAILED` | Small Model повернула помилку |
+| `UNSUPPORTED` | цей OpenChamber не вміє виконати виклик, наприклад `openCommit` там, де немає Diff view |
 
 ## Дивіться також
 

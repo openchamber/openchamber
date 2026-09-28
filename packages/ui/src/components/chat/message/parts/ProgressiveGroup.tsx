@@ -1,8 +1,9 @@
+import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
-import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
+import type { Metadata, ToolInput, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import type { StreamPhase } from '../types';
 import type { ToolPopupContent } from '../types';
 import ToolPart from './ToolPart';
@@ -20,7 +21,6 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
-import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
@@ -143,85 +143,6 @@ const getToolSkillDirectory = (activity: TurnActivityPart): string | null => {
     return typeof dir === 'string' && dir.trim().length > 0 ? dir : null;
 };
 
-const toTodoStatusKey = (value: unknown): 'pending' | 'in_progress' | 'completed' | 'cancelled' | null => {
-    if (typeof value !== 'string') {
-        return null;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'pending') return 'pending';
-    if (normalized === 'in_progress' || normalized === 'in progress' || normalized === 'inprogress') return 'in_progress';
-    if (normalized === 'completed' || normalized === 'done') return 'completed';
-    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
-    return null;
-};
-
-const formatTodoSummary = (todos: unknown[]): string | null => {
-    if (todos.length === 0) {
-        return '0 tasks';
-    }
-
-    let pending = 0;
-    let inProgress = 0;
-    for (const todo of todos) {
-        if (!todo || typeof todo !== 'object') {
-            continue;
-        }
-        const status = toTodoStatusKey((todo as { status?: unknown }).status);
-        if (!status) {
-            continue;
-        }
-        if (status === 'pending') pending += 1;
-        if (status === 'in_progress') inProgress += 1;
-    }
-
-    const activeCount = pending + inProgress;
-    if (activeCount === 0) {
-        return '0 tasks';
-    }
-
-    return `${activeCount} ${activeCount === 1 ? 'task' : 'tasks'}`;
-};
-
-const getTodoSummaryFromActivity = (activity: TurnActivityPart): string | null => {
-    const part = activity.part as ToolPartType;
-    const state = part.state as { input?: Record<string, unknown>; output?: unknown } | undefined;
-    const input = state?.input;
-    const output = state?.output;
-
-    if (Array.isArray(input?.todos)) {
-        const summary = formatTodoSummary(input.todos);
-        if (summary) return summary;
-    }
-
-    if (Array.isArray(output)) {
-        const summary = formatTodoSummary(output);
-        if (summary) return summary;
-    }
-
-    if (output && typeof output === 'object' && Array.isArray((output as { todos?: unknown }).todos)) {
-        const summary = formatTodoSummary((output as { todos: unknown[] }).todos);
-        if (summary) return summary;
-    }
-
-    if (typeof output === 'string' && output.trim().length > 0) {
-        try {
-            const parsed = JSON.parse(output) as unknown;
-            if (Array.isArray(parsed)) {
-                const summary = formatTodoSummary(parsed);
-                if (summary) return summary;
-            }
-            if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { todos?: unknown }).todos)) {
-                const summary = formatTodoSummary((parsed as { todos: unknown[] }).todos);
-                if (summary) return summary;
-            }
-        } catch {
-            // Ignore non-JSON output.
-        }
-    }
-
-    return null;
-};
-
 const getToolReadOffset = (activity: TurnActivityPart): number | undefined => {
     const part = activity.part as ToolPartType;
     const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
@@ -298,67 +219,22 @@ const resolveSkillFilePath = (skillPathOrDir: string): string => {
 };
 
 /**
- * Get a short description for a static tool (for aggregation display).
+ * Short description for a static tool row (aggregation display). Tool naming
+ * and per-tool input fields live in `@/lib/opencode/tools`; this only trims
+ * the result to the row's width and falls back to a bare file name.
  */
+const SHORT_DESCRIPTION_MAX = 50;
+
 const getToolShortDescription = (activity: TurnActivityPart): string | null => {
     const part = activity.part as ToolPartType;
-    const toolName = part.tool?.toLowerCase() ?? '';
-    const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
-    const input = state?.input;
-    const metadata = state?.metadata;
+    const state = part.state as { input?: ToolInput; metadata?: Metadata } | undefined;
+    const described = toolDescription(part.tool, state?.input, state?.metadata);
 
-    // For search tools, show pattern
-    if (toolName === 'grep' || toolName === 'search' || toolName === 'find' || toolName === 'ripgrep') {
-        const pattern = input?.pattern;
-        if (typeof pattern === 'string' && pattern.trim().length > 0) {
-            return pattern.length > 40 ? pattern.slice(0, 40) + '...' : pattern;
-        }
+    if (described?.kind === 'text') {
+        return described.value.length > SHORT_DESCRIPTION_MAX
+            ? `${described.value.slice(0, SHORT_DESCRIPTION_MAX)}...`
+            : described.value;
     }
-
-    // For glob, show pattern
-    if (toolName === 'glob') {
-        const pattern = input?.pattern;
-        if (typeof pattern === 'string' && pattern.trim().length > 0) {
-            return pattern.length > 40 ? pattern.slice(0, 40) + '...' : pattern;
-        }
-    }
-
-    // For web search tools, show query
-    if (toolName === 'websearch' || toolName === 'web-search' || toolName === 'search_web' || toolName === 'codesearch' || toolName === 'perplexity') {
-        const query = input?.query;
-        if (typeof query === 'string' && query.trim().length > 0) {
-            return query.length > 50 ? query.slice(0, 50) + '...' : query;
-        }
-    }
-
-    // For skill, show name
-    if (toolName === 'skill') {
-        const name = input?.name;
-        if (typeof name === 'string' && name.trim().length > 0) {
-            return name;
-        }
-    }
-
-    // For fetch-url tools, show URL
-    if (toolName === 'webfetch' || toolName === 'fetch' || toolName === 'curl' || toolName === 'wget') {
-        const url =
-            (typeof input?.url === 'string' && input.url) ||
-            (typeof input?.URL === 'string' && input.URL) ||
-            (typeof metadata?.url === 'string' && metadata.url) ||
-            (typeof metadata?.URL === 'string' && metadata.URL) ||
-            '';
-
-        if (typeof url === 'string' && url.trim().length > 0) {
-            return url.trim();
-        }
-    }
-
-    // For todo tools, show status summary without task names
-    if (toolName === 'todowrite' || toolName === 'todoread') {
-        return getTodoSummaryFromActivity(activity);
-    }
-
-    // Fallback: try filename
     return getToolFileName(activity);
 };
 
@@ -585,7 +461,7 @@ const StaticToolRowInner: React.FC<{
     }, [activities]);
 
     const skillEntries = React.useMemo(() => {
-        if (toolName.toLowerCase() !== 'skill') return [] as Array<{ name: string; path: string }>;
+        if (!isSkillTool(toolName)) return [] as Array<{ name: string; path: string }>;
 
         const entries: Array<{ name: string; path: string }> = [];
         for (const activity of activities) {
@@ -631,7 +507,7 @@ const StaticToolRowInner: React.FC<{
 
         // Dedicated mobile app: stage the same pending file focus/navigation
         // desktop uses, then surface the Files pane (workspace drawer tab),
-        // which consumes it. Desktop grant flows don't apply here.
+        // which consumes it.
         if (mobileActions) {
             const uiStore = useUIStore.getState();
             const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
@@ -645,15 +521,13 @@ const StaticToolRowInner: React.FC<{
         }
 
         if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
-            void ensureOutsideFileGrantForDesktop(absolutePath, currentDirectory).then(() => {
-                const uiStore = useUIStore.getState();
-                const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
-                if (offset && Number.isFinite(offset)) {
-                    uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
-                    return;
-                }
-                uiStore.openContextFile(contextDirectory, absolutePath);
-            });
+            const uiStore = useUIStore.getState();
+            const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+            if (offset && Number.isFinite(offset)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+                return;
+            }
+            uiStore.openContextFile(contextDirectory, absolutePath);
             return;
         }
 
@@ -673,7 +547,7 @@ const StaticToolRowInner: React.FC<{
         || normalizedToolName === 'ripgrep'
         || normalizedToolName === 'glob';
     const isFetchGroup = normalizedToolName === 'webfetch' || normalizedToolName === 'fetch' || normalizedToolName === 'curl' || normalizedToolName === 'wget';
-    const isSkillGroup = normalizedToolName === 'skill';
+    const isSkillGroup = isSkillTool(normalizedToolName);
 
     return (
         <div

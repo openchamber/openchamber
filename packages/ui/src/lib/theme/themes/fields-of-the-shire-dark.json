@@ -31,7 +31,7 @@
       "subtle": "#282320"
     },
     "interactive": {
-      "border": "#35322f",
+      "border": "#2E2B28",
       "selection": "#f0e6d81f",
       "borderHover": "#f0e6d830",
       "borderFocus": "#373d2c",
@@ -111,11 +111,11 @@
       "inlineCode": "#93a56b",
       "inlineCodeBackground": "#282522",
       "blockquote": "#a89888",
-      "blockquoteBorder": "#f0e6d830",
+      "blockquoteBorder": "#f0e6d81c",
       "listMarker": "#c47a3a99"
     },
     "tools": {
-      "border": "#f0e6d830",
+      "border": "#f0e6d81c",
       "icon": "#a89888",
       "title": "#ebe0d1",
       "description": "#a19a96",

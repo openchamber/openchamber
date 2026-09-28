@@ -1,28 +1,26 @@
 import type {
   Agent,
   Config,
-  LspStatus,
+  FormRequest,
   Message,
   Part,
-  Path,
   PermissionRequest,
   Project,
-  ProviderAuthResponse,
-  ProviderListResponse,
-  QuestionRequest,
   Session,
   SessionStatus,
-  Todo,
-  VcsInfo,
-} from "@opencode-ai/sdk/v2/client"
+  Vcs,
+} from "@/lib/opencode/model"
+import type { ProviderCatalog } from "@/lib/opencode/client"
 
-export type FileDiff = {
-  file?: string
-  status?: string
-  additions?: number
-  deletions?: number
-  patch?: string
-  [key: string]: unknown
+export type { Project }
+
+/** Resolved filesystem context of a directory (from `/api/location` plus the server home). */
+export type Path = {
+  /** Directory the store is scoped to. */
+  directory: string
+  /** Project root that contains `directory`. */
+  worktree: string
+  home: string
 }
 
 export type ProjectMeta = {
@@ -43,7 +41,7 @@ export type State = {
   project: string
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
-  provider: ProviderListResponse
+  provider: ProviderCatalog
   config: Config
   path: Path
   session: Session[]
@@ -55,12 +53,12 @@ export type State = {
   session_status: Record<string, SessionStatus>
   /** A successful status snapshot makes omitted sessions authoritatively idle. */
   sessionStatusReady?: boolean
-  session_diff: Record<string, FileDiff[]>
-  todo: Record<string, Todo[]>
+  /** Archive evicts a session's status; the earlier snapshot no longer covers it. */
+  sessionStatusInvalidated?: Record<string, true>
   permission: Record<string, PermissionRequest[]>
-  question: Record<string, QuestionRequest[]>
-  lsp: LspStatus[]
-  vcs: VcsInfo | undefined
+  /** Pending forms (the agent asking the user for input), keyed by session. */
+  form: Record<string, FormRequest[]>
+  vcs: Vcs | undefined
   limit: number
   message: Record<string, Message[]>
   part: Record<string, Part[]>
@@ -72,11 +70,9 @@ export type GlobalState = {
   error?: InitError
   path: Path
   projects: Project[]
-  providers: ProviderListResponse
-  providerAuth: ProviderAuthResponse
+  providers: ProviderCatalog
   config: Config
   reload: undefined | "pending" | "complete"
-  sessionTodo: Record<string, Todo[]>
 }
 
 type InitError = {
@@ -122,15 +118,18 @@ export const MAX_DIR_STORES = 30
  */
 export const EVICTION_GRACE_MS = 30 * 1000
 export const DIR_IDLE_TTL_MS = 20 * 60 * 1000
-export const SESSION_CACHE_LIMIT = 40
+export const SESSION_CACHE_LIMIT = 20
+
+export const EMPTY_PATH: Path = { directory: "", worktree: "", home: "" }
+export const EMPTY_PROVIDER_CATALOG: ProviderCatalog = { providers: [], models: [] }
 
 export const INITIAL_STATE: State = {
   project: "",
   projectMeta: undefined,
   icon: undefined,
-  provider: { all: [], connected: [], default: {} },
+  provider: EMPTY_PROVIDER_CATALOG,
   config: {},
-  path: { state: "", config: "", worktree: "", directory: "", home: "" },
+  path: EMPTY_PATH,
   status: "loading",
   agent: [],
   session: [],
@@ -140,11 +139,8 @@ export const INITIAL_STATE: State = {
   sessionEventRevision: {},
   sessionDeletedRevision: {},
   session_status: {},
-  session_diff: {},
-  todo: {},
   permission: {},
-  question: {},
-  lsp: [],
+  form: {},
   vcs: undefined,
   limit: 5,
   message: {},
@@ -153,11 +149,9 @@ export const INITIAL_STATE: State = {
 
 export const INITIAL_GLOBAL_STATE: GlobalState = {
   ready: false,
-  path: { state: "", config: "", worktree: "", directory: "", home: "" },
+  path: EMPTY_PATH,
   projects: [],
-  providers: { all: [], connected: [], default: {} },
-  providerAuth: {},
+  providers: EMPTY_PROVIDER_CATALOG,
   config: {},
   reload: undefined,
-  sessionTodo: {},
 }

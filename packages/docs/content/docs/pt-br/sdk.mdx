@@ -89,7 +89,7 @@ Você também pode adicionar um `.zip` local ou um link https para um repositór
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` abre na janela uma página separada sua, para o seletor não precisar compartilhar código com o painel da barra lateral
 - omita, e a extensão fica fora desse menu
 
-`ctx.surface` é `panel`, `dialog` ou `page`. Clicar em um item anexado coloca seus dados em `ctx.item`; nos demais casos é `null`.
+`ctx.surface` é `panel`, `dialog`, `page` ou `status`. Clicar em um item anexado coloca seus dados em `ctx.item`; nos demais casos é `null`.
 
 `contributes.page: true` oferece o painel em tela cheia no menu Páginas de extensões acima das sessões. `{ "entry": "panel/page.html", "title": "Board" }` usa um HTML separado e um título opcional. `panel.entry` continua obrigatório, com o mesmo isolamento e permissões. Só o usuário abre a página. Recarregar, pausar, remover ou trocar de servidor fecha a página.
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 As escritas são atômicas: o OpenChamber escreve um arquivo temporário e o renomeia, então quem lê nunca vê um arquivo pela metade. Os arquivos são lidos e escritos como texto UTF-8, até 2 MB.
 
+## Uma seção no Work Status
+
+`contributes.statusSection` adiciona uma seção sua ao painel Work Status ao lado do chat. Os usuários ligam, desligam e movem a seção na lista de seções desse painel, como as seções nativas.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` reutiliza `panel.entry`.
+- `entry` é uma página HTML separada na sua pasta. Com ela você não precisa de `panel.entry`, então a extensão pode ser só essa seção, sem ícone na barra lateral.
+- `title` substitui o nome do painel no cabeçalho da seção, até 60 caracteres.
+- `height` é a altura inicial em pixels, de 24 a 320 (120 por padrão). Chame [`host.setHeight()`](/sdk/host/) quando o tamanho do conteúdo mudar.
+
+Sua página vê `ctx.surface` como `status`. O OpenChamber só a carrega enquanto o painel Work Status está visível e sua seção está expandida, e a descarrega quando o usuário recolhe a seção, então não guarde ali nada que você não consiga reconstruir. Uma extensão só com a seção pode usar permissões, um serviço, uma integração e arquivos, mas não `page`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `git-graph-status` é uma seção completa.
+
 ## Ações, comandos e o selo
 
 Além da barra lateral e do menu +, uma extensão pode aparecer em mais três lugares. Todos entregam à extensão um `item` do mesmo jeito que um clique no chip.
@@ -219,7 +234,7 @@ Quando o seu plugin do OpenCode ou servidor MCP adiciona uma ferramenta, o chat 
 
 `match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
 
-Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e nada mais.
+Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e nada mais. A outra exceção é uma seção do Work Status com `entry` próprio, veja acima.
 
 ## Primeiras linhas no painel
 

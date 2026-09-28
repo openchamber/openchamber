@@ -63,6 +63,9 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       className={cn(
         'flex w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1',
         'border-[var(--interactive-border)]',
+        // The strip floats over the transcript like the composer box it sits
+        // above, so it needs a surface of its own: a border alone is clear glass.
+        'oc-glass-composer',
         className,
       )}
       aria-label={t('chat.goal.row.aria')}

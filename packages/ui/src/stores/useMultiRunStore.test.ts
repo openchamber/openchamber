@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { createOpencodeClient, type Session } from '@opencode-ai/sdk/v2';
 import { z } from 'zod';
+import type { Metadata, Session } from '@/lib/opencode/model';
 
 const upsertedSessions: Session[] = [];
 const registeredDirectories: Array<{ sessionID: string; directory: string }> = [];
@@ -36,36 +36,47 @@ const childState = {
   sessionTotal: 0,
   limit: 5,
 };
-const requestSchema = z.object({ title: z.string().optional(), metadata: z.record(z.string(), z.unknown()).optional() });
-let storedSession: Session;
-const sdkClient = createOpencodeClient({
-  baseUrl: 'http://multirun.test',
-  fetch: async (request) => {
-    const req = new Request(request);
-    const directory = new URL(req.url).searchParams.get('directory') ?? '/repo';
-    if (req.method === 'POST') {
-      const body = requestSchema.parse(await req.json());
-      operationOrder.push(`createSession:${directory}`);
-      createdCount += 1;
-      storedSession = { id: createdCount === 1 ? 'ses_multirun' : `ses_multirun_${createdCount}`, slug: 'multirun', projectID: 'p', version: '1',
-        title: body.title ?? '', directory, metadata: body.metadata, time: { created: 1, updated: 1 } };
-      onCreate();
-    }
-    if (req.method === 'PATCH') {
-      if (rejectNextMembership) {
-        rejectNextMembership = false;
-        return Response.json({ error: 'membership write failed' }, { status: 500 });
-      }
-      storedSession = { ...storedSession, ...requestSchema.parse(await req.json()) };
-    }
-    if (req.method === 'DELETE') {
-      deletedSessionIds.push(storedSession.id);
-      return Response.json(true);
-    }
-    return Response.json(storedSession);
+const recordSchema = z.record(z.string(), z.json());
+
+/** The RFC 7386 merge the OpenChamber metadata route performs server-side. */
+const mergePatch = (current: Metadata, patch: Metadata): Metadata => {
+  const base: Metadata = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) { delete base[key]; continue; }
+    const nested = recordSchema.safeParse(value);
+    if (!nested.success) { base[key] = value; continue; }
+    const previous = recordSchema.safeParse(base[key]);
+    base[key] = mergePatch(previous.success ? previous.data : {}, nested.data);
+  }
+  return base;
+};
+
+const storedMetadata = new Map<string, Metadata>();
+type FakeRuntimeClient = { runtime: string };
+const sdkClient = { runtime: 'multirun.test' };
+let activeClient: FakeRuntimeClient = sdkClient;
+
+const fakeOpencodeClient = {
+  getSdkClient: () => activeClient,
+  createSession: async (params: { title?: string; metadata?: Metadata }, directory?: string | null): Promise<Session> => {
+    const dir = directory ?? '/repo';
+    operationOrder.push(`createSession:${dir}`);
+    createdCount += 1;
+    const id = createdCount === 1 ? 'ses_multirun' : `ses_multirun_${createdCount}`;
+    storedMetadata.set(id, params.metadata ?? {});
+    onCreate();
+    return {
+      id, projectID: 'p', title: params.title ?? '', directory: dir,
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 }, metadata: params.metadata,
+    };
   },
-});
-let activeClient = sdkClient;
+  deleteSession: async (id: string) => {
+    deletedSessionIds.push(id);
+    storedMetadata.delete(id);
+    return true;
+  },
+};
 
 mock.module('@/sync/session-ui-store', () => ({
   routeMessage: async ({ sessionId }: { sessionId: string }) => { dispatchedSessionIds.push(sessionId); },
@@ -80,8 +91,23 @@ mock.module('@/sync/session-ui-store', () => ({
 }));
 
 mock.module('@/lib/opencode/client', () => ({
-  opencodeClient: {
-    getSdkClient: () => activeClient,
+  opencodeClient: fakeOpencodeClient,
+}));
+
+mock.module('@/lib/sessionKnowledgeApi', () => ({
+  fetchSessionKnowledge: () => ({ text: '', signature: '' }),
+  reportSessionKnowledgeDelivered: async () => undefined,
+}));
+
+mock.module('@/sync/session-archive-batch', () => ({
+  requestSessionMetadataUpdate: async (sessionID: string, patch: Metadata) => {
+    if (rejectNextMembership) {
+      rejectNextMembership = false;
+      return { outcome: 'unavailable' as const, reason: 'membership write failed' };
+    }
+    const metadata = mergePatch(storedMetadata.get(sessionID) ?? {}, patch);
+    storedMetadata.set(sessionID, metadata);
+    return { outcome: 'updated' as const, metadata };
   },
 }));
 
@@ -180,6 +206,7 @@ describe('useMultiRunStore', () => {
     createdCount = 0;
     rejectNextMembership = false;
     activeClient = sdkClient;
+    storedMetadata.clear();
     onCreate = () => {};
     isGitRepository = false;
     waitForWorktreeSetup = false;
@@ -215,7 +242,8 @@ describe('useMultiRunStore', () => {
         { providerID: 'openrouter', modelID: 'vendor/success' },
       ] }],
     });
-    await Promise.resolve();
+    // Dispatch runs in the background after createMultiRun resolves.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(result?.sessionIds).toEqual(['ses_multirun_2']);
     expect(result?.failedCount).toBe(1);
     expect(deletedSessionIds).toEqual(['ses_multirun']);
@@ -225,7 +253,7 @@ describe('useMultiRunStore', () => {
 
   test('changing runtime while creating stops dispatch and registration', async () => {
     onCreate = () => {
-      activeClient = createOpencodeClient({ baseUrl: 'http://other-runtime.test' });
+      activeClient = { runtime: 'other-runtime.test' };
       useMultiRunStore.getState().resetForRuntimeSwitch();
     };
     const result = await useMultiRunStore.getState().createMultiRun({

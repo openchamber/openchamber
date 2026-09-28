@@ -1,0 +1,76 @@
+---
+title: Sesiones en curso
+description: Mantén a la vista en la barra lateral las sesiones con trabajo real en marcha, hasta que las marques como hechas.
+---
+
+# Sesiones en curso
+
+Las preguntas, las investigaciones y los experimentos rápidos se acumulan enseguida, y la sesión en la que de verdad estás arreglando algo acaba enterrada entre ellos. El bloque **En curso** reúne esas sesiones en un solo sitio de la barra lateral. Una sesión se queda ahí hasta que digas que está hecha.
+
+Esa es la diferencia con «Reciente». «Reciente» muestra todo lo que cambió en los últimos dos días y se renueva solo: una sesión que abriste esta mañana por curiosidad está ahí, y un arreglo que dejaste en pausa el lunes ya no. «En curso» es la lista de lo que aún no has terminado, sin importar cuánto hace que lo abriste.
+
+## Dónde encontrarlo
+
+El bloque **En curso** está en la barra lateral, debajo de los chats y encima de «Reciente» (o de la cronología, en el modo Timeline). En el teléfono está en el mismo lugar de la lista de sesiones.
+
+Una sesión en curso se mueve allí junto con sus subsesiones. No vuelve a aparecer en «Reciente», en la cronología, en su proyecto ni en su carpeta. Márcala como hecha y vuelve adonde estaba.
+
+## Seguir y terminar una sesión a mano
+
+- **Seguir:** pasa el cursor por una sesión y pulsa el ojo, o elige **Seguir como en curso** en el menú de la sesión.
+- **Terminar:** pasa el cursor por una sesión del bloque y pulsa la marca de verificación, o elige **Marcar como hecho** en el menú.
+
+En el teléfono, desliza la fila de una sesión para llegar a la misma acción, o usa el menú de la sesión.
+
+Cualquier sesión de un proyecto puede estar en curso, incluidas las sesiones en worktrees. Las subsesiones van con su sesión principal. Los chats nunca: son conversaciones sin más, así que no tienen el ojo.
+
+## Deja que Jev mueva las sesiones por ti
+
+Con un [proveedor de clasificación](/es/classification-providers/) configurado, no tienes que seguir las sesiones tú. Jev lee cada mensaje que envías y pasa la sesión a en curso cuando:
+
+- pides un cambio
+- informas de un error
+- hablas de un cambio concreto que vas a hacer
+
+Las preguntas, las explicaciones y la investigación no cuentan. Jev vuelve a mirar cuando el agente termina un turno, y así detecta el trabajo que solo queda claro con la respuesta.
+
+Jev solo mueve sesiones **hacia** en curso. Cuando marcas una sesión como hecha, solo una nueva petición enviada después la trae de vuelta.
+
+### «Este trabajo parece terminado.»
+
+Cuando un turno parece el final del trabajo (diste las gracias, pediste un commit, confirmaste que funciona), Jev no cierra nada y deja una pista:
+
+- una marca gris en la fila de la sesión en la barra lateral
+- una franja encima del campo de mensaje: **Este trabajo parece terminado.** con un botón **Marcar como hecho**
+
+Pulsa **Marcar como hecho** si Jev tiene razón. Si no, sigue sin más: la pista desaparece con tu próximo mensaje.
+
+## Resumen y sugerencia del próximo mensaje
+
+Cuando el agente termina y la sesión se queda quieta un minuto, OpenChamber puede escribir dos cosas con tu modelo pequeño (consulta [Proveedores, modelos y agentes](/es/providers/)):
+
+- **Resumen:** un recordatorio breve de lo que se hizo y de cómo quedó todo, debajo de la última respuesta y en la información emergente de la sesión en la barra lateral
+- **Sugerencia:** el mensaje que probablemente enviarías a continuación, como una fila en la parte superior del campo de mensaje; al hacer clic, el texto pasa al campo, y nunca se envía solo
+
+Si Jev está disponible, OpenChamber primero le pregunta si el turno los necesita. Un simple «gracias, eso es todo» después de un trabajo real sigue recibiendo un resumen, pero la sugerencia se omite cuando no queda nada por hacer, y el modelo pequeño ni siquiera se llama cuando ninguno de los dos sirve. Sin Jev, ambos se generan después de cada turno, como antes.
+
+Actívalos o desactívalos en **Configuración → Chat → Asistencia de sesión**.
+
+## Configuración
+
+Abre **Configuración → Sesiones → Sesiones en curso**:
+
+- **Mostrar sesiones en curso:** el bloque en sí; si lo desactivas, las sesiones se quedan donde siempre estuvieron
+- **Mover sesiones a en curso automáticamente:** la parte de Jev; desactívala para seguir solo a mano
+
+Las dos están activadas por defecto.
+
+## Dónde funciona
+
+El bloque y el seguimiento manual funcionan en todas partes, VS Code incluido. El movimiento automático, la pista «parece terminado» y el filtro de Jev para los resúmenes necesitan el servidor de OpenChamber, así que funcionan en la app de escritorio, en la app web y en el teléfono, pero no en VS Code.
+
+## Relacionado
+
+- [Proveedores de clasificación (Jev)](/es/classification-providers/): configura el seguimiento automático
+- [Chats](/es/chats/): conversaciones que se quedan fuera del trabajo en curso
+- [Objetivos de sesión](/es/session-goals/): que el agente trabaje hasta la meta

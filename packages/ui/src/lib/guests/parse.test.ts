@@ -212,6 +212,13 @@ describe('parseGuestCatalogJson', () => {
     expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools: [{ match: 'x', output: 'html' }] })] }))).toBeNull();
   });
 
+  test('keeps a status section without a panel entry and drops an out-of-range height', () => {
+    const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }] })))
+      .toEqual([{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }]);
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusHeight: 4000 }] }))).toBeNull();
+  });
+
   test('rejects junk instead of returning an empty catalog', () => {
     expect(parseGuestCatalogJson('null')).toBeNull();
     expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toBeNull();

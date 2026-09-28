@@ -9,6 +9,7 @@ const requiredKeys = [
   'contextRail.surface.plugin',
   'contextRail.surface.plugin.description',
   'contextPanel.plugin.loadFailed',
+  'chat.workStatus.sections.extensionBadge',
   'contextPanel.plugin.actionFailed',
   'contextPanel.plugin.toast.copy',
   'contextPanel.plugin.toast.copied',
@@ -52,6 +53,8 @@ const sameInEveryLocale = new Set<string>([
   // "item" is the same word in Portuguese, so the singular forms match English there.
   'contextRail.surface.plugin.badgeAriaSingle',
   'contextRail.surface.plugin.badgeTooltipSingle',
+  // French spells "Extension" the same way.
+  'chat.workStatus.sections.extensionBadge',
 ]);
 
 describe('plugin panel translations', () => {

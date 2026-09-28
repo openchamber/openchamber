@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
+import * as sessionRoutes from './session-archive-batch';
 import { opencodeClient } from '@/lib/opencode/client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -11,7 +12,7 @@ import { buildSessionRetentionCandidates, runSessionRetentionCleanup, useSession
 const now = Date.now();
 const day = 86_400_000;
 const session = (id: string, patch: Partial<Session> = {}): Session => ({
-  id, slug: id, projectID: 'project', directory: '/retention-project', title: id, version: '1',
+  id, projectID: 'project', directory: '/retention-project', title: id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: now - 60 * day, updated: now - 40 * day }, ...patch,
 });
 const recent = Array.from({ length: 5 }, (_, index) => session(`recent-${index}`, {
@@ -49,9 +50,9 @@ beforeEach(() => {
 afterEach(() => { mock.restore(); });
 
 describe('retention eligibility', () => {
-  test('retains recent, current, shared, archived and running sessions', () => {
+  test('retains recent, current, archived and running sessions', () => {
     const sessions = [
-      session('old'), session('current'), session('shared', { share: { url: 'https://share.test' } }),
+      session('old'), session('current'),
       session('archived', { time: { created: 1, updated: 2, archived: 3 } }), session('busy'),
     ];
     expect(buildSessionRetentionCandidates({
@@ -60,8 +61,8 @@ describe('retention eligibility', () => {
     })).toEqual(['old']);
   });
 
-  test('protects every ancestor of a recent, shared or archived child from cascade deletion', () => {
-    for (const child of [recent[0], session('shared', { share: { url: 'https://share.test' } }),
+  test('protects every ancestor of a recent or archived child from cascade deletion', () => {
+    for (const child of [recent[0],
       session('archived', { time: { created: 1, updated: 2, archived: 3 } })]) {
       expect(candidates([
         session('root'), session('middle', { parentID: 'root' }), { ...child, parentID: 'middle' }, session('unrelated'),
@@ -82,6 +83,14 @@ describe('retention eligibility', () => {
   test('orders descendants before ancestors regardless of timestamps or list order', () => {
     expect(candidates([session('root'), session('child', { parentID: 'root' }), session('leaf', { parentID: 'child' })]))
       .toEqual(['leaf', 'child', 'root']);
+  });
+
+  test('never selects a record that carries no timestamps', () => {
+    // Models a cached record another build wrote without `time`; the filter
+    // must protect it rather than throw on the first render.
+    const stale = Object.assign(session('stale'), { time: undefined });
+    expect(candidates([stale, session('old')])).toEqual(['old']);
+    expect(candidates([stale, session('old')], 'archive')).toEqual(['old']);
   });
 
   test('rejects invalid retention periods and cycles', () => {
@@ -192,13 +201,14 @@ describe('retention execution', () => {
     expect(useUIStore.getState().autoDeleteLastRunAt).toBe(123);
   });
 
-  test('archives through the canonical action and retains the returned server record', async () => {
-    seed([session('old')]);
+  test('archives through the canonical action and keeps the whole record with the server stamp', async () => {
+    const old = session('old');
+    seed([old]);
     useUIStore.setState({ sessionRetentionAction: 'archive' });
-    const archived = session('old', { time: { created: 1, updated: now, archived: now } });
-    spyOn(opencodeClient, 'updateSession').mockResolvedValue(archived);
+    spyOn(sessionRoutes, 'requestSessionArchiveBatch')
+      .mockResolvedValue({ outcome: 'archived', archived: [{ id: 'old', archivedAt: now }], failedIds: [] });
     expect((await runSessionRetentionCleanup({ force: true })).completedIds).toEqual(['old']);
-    expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([archived]);
+    expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([{ ...old, time: { ...old.time, archived: now } }]);
   });
 
   test('processes 850 hierarchical sessions with one confirmed delete per candidate', async () => {
@@ -248,11 +258,10 @@ describe('archived-only retention', () => {
     })).toEqual(['archived-5', 'archived-6']);
   });
 
-  test('protects shared archives and parents of unarchived or recently archived descendants', () => {
+  test('protects parents of unarchived or recently archived descendants', () => {
     expect(archivedCandidates([
       archived('parent'), session('active-child', { parentID: 'parent' }),
       archived('recent-parent'), { ...recentArchived[0], parentID: 'recent-parent' },
-      archived('shared', { share: { url: 'https://share.test' } }),
       archived('unrelated'),
     ])).toEqual(['unrelated']);
   });
@@ -261,7 +270,7 @@ describe('archived-only retention', () => {
     seed([...recentArchived, archived('parent'), archived('child', { parentID: 'parent' }), session('unarchived')]);
     useUIStore.setState({ sessionRetentionOnlyArchived: true, sessionRetentionAction: 'archive' });
     const remove = spyOn(opencodeClient, 'deleteSession').mockResolvedValue(true);
-    const update = spyOn(opencodeClient, 'updateSession');
+    const update = spyOn(sessionRoutes, 'requestSessionArchiveBatch');
     const result = await runSessionRetentionCleanup({ force: true });
     expect(result.action).toBe('delete');
     expect(result.completedIds).toEqual(['child', 'parent']);

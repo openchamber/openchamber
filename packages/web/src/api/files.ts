@@ -10,6 +10,7 @@ import {
   type FilesystemErrorReason,
 } from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { shareFileFromNativeApp } from '@openchamber/ui/lib/nativeFileShare';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 
@@ -166,6 +167,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/stat', {
       query: params,
+      signal: AbortSignal.timeout(30_000),
       headers: directoryHeaders(getDirectory, options?.directory),
     });
 
@@ -197,6 +199,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/read', {
       query: params,
+      signal: AbortSignal.timeout(30_000),
       cache: options?.optional || options?.fresh ? 'no-store' : 'default',
       headers: directoryHeaders(getDirectory, options?.directory),
     });
@@ -327,9 +330,8 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     const capacitor = (window as typeof window & {
       Capacitor?: { isNativePlatform?: () => boolean };
     }).Capacitor;
-    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
-    if (capacitor?.isNativePlatform?.() === true && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file] });
+    if (capacitor?.isNativePlatform?.() === true) {
+      await shareFileFromNativeApp(new File([blob], filename, { type: blob.type || 'application/octet-stream' }));
       return;
     }
 

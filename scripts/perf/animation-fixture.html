@@ -17,6 +17,7 @@
     cannot handle recalculates style every frame.
   */
   @keyframes oc-transform-rotate { to { transform: rotate(360deg); } }
+  @keyframes oc-transform-stepped { to { transform: rotate(360deg); } }
   @keyframes oc-rotate-property { to { rotate: 360deg; } }
   @keyframes oc-opacity { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
   @keyframes oc-translate { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
@@ -31,6 +32,7 @@
   .v-transform-rotate svg { animation: oc-transform-rotate 1s linear infinite; }
   .v-transform-rotate-willchange svg { animation: oc-transform-rotate 1s linear infinite; will-change: transform; }
   .v-transform-rotate-steps svg { animation: oc-transform-rotate 1s steps(12) infinite; }
+  .v-transform-stepped svg { animation: oc-transform-stepped 1.5s steps(30) infinite; }
   .v-transform-rotate-wrapper .wrap { animation: oc-transform-rotate 1s linear infinite; }
   .v-rotate-property svg { animation: oc-rotate-property 1s linear infinite; }
   .v-opacity svg { animation: oc-opacity 1.2s ease-in-out infinite; }

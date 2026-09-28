@@ -1,4 +1,4 @@
-import type { PermissionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest, Session } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { getAllSyncSessionMap, getDirectoryState } from "./sync-refs"
@@ -128,8 +128,12 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
   return { processPermission, reconcilePending }
 }
 
+// VS Code has no safety net (no OpenChamber server), so a session either
+// answers by itself or it does not.
 const runtime = createVSCodePermissionAutoAcceptRuntime({
-  getPolicy: () => usePermissionStore.getState().autoAccept,
+  getPolicy: () => Object.fromEntries(
+    Object.entries(usePermissionStore.getState().modes).map(([sessionId, mode]) => [sessionId, mode !== "ask"]),
+  ),
   getSessions: getAllSyncSessionMap,
   getSession: (sessionId, directory) => opencodeClient.getSession(sessionId, directory),
   getKnownPendingPermissions: (directory) => Object.values(getDirectoryState(directory)?.permission ?? {}).flat(),

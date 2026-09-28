@@ -83,7 +83,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - It first searches for **open** PRs by likely source owner plus exact head branch.
 - If that fails, it falls back to broader GitHub search for open PRs on the branch name.
 - An **open PR from any candidate repo always wins** over a closed/merged one, so a merged fork PR can never hide an open upstream PR for the same head.
-- Only when no target has an open PR does it return the branch's newest closed/merged PR, as history.
+- Only when no target has an open PR does it return the branch's newest closed/merged PR, as history — and only when that PR's head commit is an ancestor of the checkout's `HEAD`. History is matched by branch name, and names get reused: a fresh worktree cut from the default branch under a name that was merged before must not inherit the old PR.
 - History is looked up **only for the ranked-first remote and the branch's own name** — the repo it actually pushes to. Live status is worth searching the whole fork network for; history is not, and asking every target for it multiplies serial GitHub calls until the route hits its `12s` resolve timeout and returns no status at all.
 - The history answer is remembered per repo+branch so discovery polls do not re-query it: a found closed/merged record for `6h`, and "no history yet" for `10m`. A found record only changes if a second PR appears on the same head, and while that one is open the open-PR path wins without ever reading this cache.
 - Creating, merging, or closing a PR invalidates both the shared repo pull list and that remembered history.

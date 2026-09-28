@@ -20,7 +20,7 @@
     },
     "surface": {
       "background": "#14151F",
-      "foreground": "#F8F8F2",
+      "foreground": "#C9C8D0",
       "muted": "#181926",
       "mutedForeground": "#7c7e9c",
       "elevated": "#161722",
@@ -107,7 +107,7 @@
     "tools": {
       "border": "#494c6180",
       "icon": "#B6B9E4",
-      "title": "#F8F8F2",
+      "title": "#C9C8D0",
       "description": "#B6B9E4",
       "edit": {
         "addedBackground": "#50FA7B25",

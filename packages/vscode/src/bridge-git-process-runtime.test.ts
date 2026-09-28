@@ -21,6 +21,20 @@ const waitForPids = async (marker: string, count: number) => {
   throw new Error('Fixture processes did not start');
 };
 
+// Windows keeps a killed process's working directory busy until it has fully exited. Bun ignores
+// the `maxRetries` option of `fs.rm`, so the retry is spelled out.
+const removeWhenReleased = async (directory: string) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt >= 50 || !(error instanceof Error && 'code' in error && error.code === 'EBUSY')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+};
+
 const holdingCommand = (marker: string) => `
   process.on('SIGTERM', () => {});
   require('node:fs').appendFileSync(${JSON.stringify(marker)}, process.pid + '\\n');
@@ -37,7 +51,9 @@ test('a Git process terminated by a signal is never reported as successful', { s
   }
 });
 
-test('repeated read deadlines terminate the processes, not just the waiters', async () => {
+// Twelve processes, a 1.5 s deadline and a tree kill each take about 4.5 s on Windows, too close to
+// Bun's 5 s default under a parallel run.
+test('repeated read deadlines terminate the processes, not just the waiters', { timeout: 30_000 }, async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-deadlines-'));
   const marker = path.join(cwd, 'pids');
   try {
@@ -51,7 +67,7 @@ test('repeated read deadlines terminate the processes, not just the waiters', as
     assert.deepEqual(pids.filter(alive), []);
   } finally {
     for (const pid of await readPids(marker)) if (alive(pid)) process.kill(pid, 'SIGKILL');
-    await fs.rm(cwd, { recursive: true, force: true });
+    await removeWhenReleased(cwd);
   }
 });
 

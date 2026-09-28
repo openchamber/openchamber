@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
+import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveStatusSectionEntry, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -980,19 +980,32 @@ describe('page-less extensions', () => {
     }))).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
-  test('a surface service needs no panel entry and refuses one', () => {
+  test('a surface service needs no panel entry; with one, panel.dock and panel.size place it', () => {
     const ok = withContributes({ service: { entry: 'service/main.js', runtime: 'host', surface: true } });
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.manifest.contributes.service?.surface).toBe(true);
 
-    const withPanel = parseManifest({
+    const withStrip = parseManifest({
       apiVersion: 1,
       contributes: {
-        panel: { ...pageless, entry: 'panel/index.html' },
+        panel: { ...pageless, entry: 'panel/index.html', dock: 'right', size: 240 },
         service: { entry: 'service/main.js', runtime: 'host', surface: true },
       },
     });
-    expect(withPanel).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withStrip.ok).toBe(true);
+    if (withStrip.ok) expect(withStrip.manifest.contributes.panel).toMatchObject({ dock: 'right', size: 240 });
+
+    expect(parseManifest({
+      apiVersion: 1,
+      contributes: { panel: { ...pageless, entry: 'panel/index.html', dock: 'bottom' } },
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    expect(parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: { ...pageless, entry: 'panel/index.html', size: 8 },
+        service: { entry: 'service/main.js', runtime: 'host', surface: true },
+      },
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
 
     expect(parseManifestJson(JSON.stringify({
       apiVersion: 1,
@@ -1007,5 +1020,65 @@ describe('page-less extensions', () => {
     }));
     expect(bogusAttach).toMatchObject({ ok: false, code: 'invalid-attach' });
     expect(withContributes({ commands: [] })).toMatchObject({ ok: false, code: 'invalid-commands' });
+  });
+});
+
+describe('contributes.statusSection', () => {
+  const pageless = { id: 'git-graph', name: 'Git graph', icon: 'git-commit' };
+  const parse = (contributes: Record<string, unknown>) => parseManifestJson(JSON.stringify({ apiVersion: 1, contributes }));
+
+  test('a status section alone is enough: no panel page, no rail icon', () => {
+    const result = parse({ panel: pageless, statusSection: { entry: 'status/index.html', title: 'Recent commits', height: 160 } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(hasGuestPage(result.manifest.contributes)).toBe(false);
+    expect(resolveStatusSectionEntry(result.manifest.contributes)).toBe('status/index.html');
+    expect(result.manifest.contributes.statusSection).toEqual({ entry: 'status/index.html', title: 'Recent commits', height: 160 });
+  });
+
+  test('the section frame may use a service and granted capabilities', () => {
+    const result = parse({
+      panel: pageless, statusSection: { entry: 'status/index.html' },
+      service: { entry: 'service/main.js', runtime: 'host' }, capabilities: ['files'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['files', 'service']);
+  });
+
+  test('true reuses panel.entry and needs one', () => {
+    const result = parse({ panel: { ...pageless, entry: 'panel/index.html' }, statusSection: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(resolveStatusSectionEntry(result.manifest.contributes)).toBe('panel/index.html');
+    expect(parse({ panel: pageless, statusSection: true })).toMatchObject({ ok: false, code: 'invalid-status-section' });
+  });
+
+  test('a status-only package cannot declare things that open or invoke another frame', () => {
+    for (const extra of [
+      { page: { entry: 'page.html' } }, { attach: 'dialog' }, { commands: [{ name: 'graph' }] },
+      { actions: [{ id: 'inspect', label: 'Inspect', where: 'message', mode: 'background' }] },
+    ]) {
+      expect(parse({ panel: pageless, statusSection: { entry: 'status/index.html' }, ...extra })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    }
+    expect(parse({
+      panel: pageless, statusSection: { entry: 'status/index.html' }, background: { entry: 'background/index.html' },
+      commands: [{ name: 'graph' }],
+    })).toMatchObject({ ok: true });
+  });
+
+  test('refuses entries outside the package, non-HTML entries, and out-of-range sizes', () => {
+    for (const statusSection of [false, {}, { entry: '../status.html' }, { entry: 'status/main.js' }, { entry: 'https://example.com/a.html' },
+      { entry: 'status/index.html', height: 10 }, { entry: 'status/index.html', height: 400 }, { entry: 'status/index.html', height: 100.5 },
+      { entry: 'status/index.html', title: '' }, { entry: 'status/index.html', title: 'x'.repeat(61) }]) {
+      expect(parse({ panel: pageless, statusSection })).toMatchObject({ ok: false, code: 'invalid-status-section' });
+    }
+  });
+
+  test('clamps heights to the host range', () => {
+    expect(clampStatusSectionHeight(5)).toBe(24);
+    expect(clampStatusSectionHeight(200.4)).toBe(200);
+    expect(clampStatusSectionHeight(5000)).toBe(320);
+    expect(clampStatusSectionHeight(Number.NaN)).toBe(120);
   });
 });

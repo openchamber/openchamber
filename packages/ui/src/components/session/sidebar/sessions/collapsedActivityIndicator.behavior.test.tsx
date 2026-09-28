@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { useNotificationStore } from '@/sync/notification-store';
@@ -49,22 +49,22 @@ describe('collapsed activity scalar selector', () => {
       // A pending request outranks a running turn, and a request elsewhere is ignored.
       const activeRenders = capture.renders;
       await act(async () => applyGlobalBlockingRequestEvents('/other', [{
-        id: 'e1', type: 'question.asked', properties: { id: 'q-other', sessionID: 'unrelated', questions: [] },
+        type: 'form.created', properties: { form: { id: 'q-other', sessionID: 'unrelated', title: 'Pick', fields: [{ key: 'answer', type: 'boolean' }] } },
       }]));
       expect(capture.state).toBe('active');
       expect(capture.renders).toBe(activeRenders);
       await act(async () => applyGlobalBlockingRequestEvents('/workspace', [{
-        id: 'e2', type: 'question.asked', properties: { id: 'q1', sessionID: 'relevant', questions: [] },
+        type: 'form.created', properties: { form: { id: 'q1', sessionID: 'relevant', title: 'Pick', fields: [{ key: 'answer', type: 'boolean' }] } },
       }]));
-      expect(capture.state).toBe('question');
+      expect(capture.state).toBe('form');
       await act(async () => applyGlobalBlockingRequestEvents('/workspace', [{
-        id: 'e3', type: 'permission.asked',
-        properties: { id: 'p1', sessionID: 'relevant', permission: 'bash', patterns: [], metadata: {}, always: [] },
+        type: 'permission.asked',
+        properties: { id: 'p1', sessionID: 'relevant', action: 'bash', resources: [] },
       }]));
       expect(capture.state).toBe('permission');
       await act(async () => applyGlobalBlockingRequestEvents('/workspace', [
-        { id: 'e4', type: 'permission.replied', properties: { sessionID: 'relevant', requestID: 'p1', reply: 'once' } },
-        { id: 'e5', type: 'question.replied', properties: { sessionID: 'relevant', requestID: 'q1', answers: [] } },
+        { type: 'permission.replied', properties: { sessionID: 'relevant', requestID: 'p1' } },
+        { type: 'form.settled', properties: { sessionID: 'relevant', formID: 'q1' } },
       ]));
       expect(capture.state).toBe('active');
     } finally {

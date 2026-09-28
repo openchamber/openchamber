@@ -237,18 +237,32 @@ export const SETTINGS_REGISTRY = {
   githubScopes: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   skillCatalogs: field<SkillCatalogConfig[]>({ scope: 'instance', parse: parseSkillCatalogs }),
   defaultGitIdentityId: field({ scope: 'instance', parse: parseTrimmedString }),
+  // Per-session permission modes; booleans are policies from before the modes,
+  // which the server converts on its first read.
   permissionAutoAccept: field({
     scope: 'instance',
     parse: fromSchema(z.object({
-      sessions: z.record(z.string().min(1), z.boolean()).catch({}),
+      sessions: z.record(z.string().min(1), z.union([z.boolean(), z.enum(['ask', 'safety', 'auto'])])).catch({}),
       revision: z.number().int().nonnegative().catch(0),
     })),
+  }),
+  // The mode the server writes onto each new top-level session. VS Code has no
+  // OpenChamber server to write it.
+  permissionDefaultMode: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.enum(['ask', 'safety', 'auto'])),
+    ui: uiStore('permissionDefaultMode', (v) => useUIStore.getState().setPermissionDefaultMode(v)),
   }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
   // `builtin` or an installed extension id; the server falls back to `builtin` when that extension cannot serve.
   browserProvider: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('browserProvider', (v) => useUIStore.getState().setBrowserProvider(v)) }),
+  agentNotifyToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentNotifyToolEnabled', (v) => useUIStore.getState().setAgentNotifyToolEnabled(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
+  // The isolated-spaces switch. The server reads it once at start; a change takes effect at the
+  // next start, which the settings row says. Never shown in VS Code (decision 16 of the design).
+  isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('isolatedSpacesEnabled', (v) => useUIStore.getState().setIsolatedSpacesEnabled(v)) }),
   // Server-owned: it says whether this build has the feature at all.
   agentMemoryFeatureAvailable: field({
     scope: 'instance',
@@ -295,9 +309,14 @@ export const SETTINGS_REGISTRY = {
 
   // ── Sidebar display (profile; useSessionDisplayStore) ──
   sidebarProjectDisplayMode: field({ scope: 'profile', parse: parseOneOf(['all', 'single']), ui: sessionDisplayField('projectDisplayMode') }),
-  sidebarSessionGroupingMode: field({ scope: 'profile', parse: parseOneOf(['by-worktree', 'flat']), ui: sessionDisplayField('sessionGroupingMode') }),
+  // Per surface: the phone defaults to the timeline and a choice made there
+  // must not flip the desktop sidebar (and vice versa).
+  sidebarViewMode: field({ scope: 'profile', perSurface: true, parse: parseOneOf(['projects', 'timeline']), ui: sessionDisplayField('sidebarViewMode') }),
   sidebarProjectSortOrder: field({ scope: 'profile', parse: parseOneOf(['manual', 'a-z', 'z-a', 'date-added', 'recent']), ui: sessionDisplayField('projectSortOrder') }),
-  sidebarShowRecentSection: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('showRecentSection') }),
+  sidebarWorktreeSortOrder: field({ scope: 'profile', parse: parseOneOf(['recent', 'manual', 'a-z']), ui: sessionDisplayField('worktreeSortOrder') }),
+  // Per surface: Recent turned on in the desktop sidebar must not fill the
+  // phone's drawer, and the phone's choice must not change the desktop.
+  sidebarShowRecentSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showRecentSection') }),
 
   // ── Work status ──
   workStatusSectionOrder: field({
@@ -373,7 +392,6 @@ export const SETTINGS_REGISTRY = {
   autoSaveEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('autoSaveEnabled', (v) => useUIStore.getState().setAutoSaveEnabled(v)) }),
   autoCreateWorktree: field({ scope: 'profile', parse: parseBoolean }),
   sessionTabsEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'vscode'], parse: parseBoolean, ui: uiStore('sessionTabsEnabled', (v) => useUIStore.getState().setSessionTabsEnabled(v)) }),
-  showOpenCodeRestartConfirm: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showOpenCodeRestartConfirm', (v) => useUIStore.getState().setShowOpenCodeRestartConfirm(v)) }),
   allowPromptingSubagentSessions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('allowPromptingSubagentSessions', (v) => useUIStore.getState().setAllowPromptingSubagentSessions(v)) }),
 
   // ── Composer (profile) ──
@@ -451,6 +469,9 @@ export const SETTINGS_REGISTRY = {
   // ── Sessions and summaries (profile) ──
   sessionRecapEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionRecapEnabled', (v) => useUIStore.getState().setSessionRecapEnabled(v)) }),
   sessionSuggestionEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionSuggestionEnabled', (v) => useUIStore.getState().setSessionSuggestionEnabled(v)) }),
+  sessionWorkEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionWorkEnabled', (v) => useUIStore.getState().setSessionWorkEnabled(v)) }),
+  // Jev runs on the OpenChamber server, which VS Code does not have.
+  sessionWorkAutoOpen: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionWorkAutoOpen', (v) => useUIStore.getState().setSessionWorkAutoOpen(v)) }),
   sessionGoalEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalEnabled', (v) => useUIStore.getState().setSessionGoalEnabled(v)) }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),
@@ -488,7 +509,6 @@ export const SETTINGS_REGISTRY = {
   responseStyleEnabled: field({ scope: 'profile', parse: parseBoolean }),
   responseStylePreset: field({ scope: 'profile', parse: parseOneOf(RESPONSE_STYLE_PRESETS) }),
   responseStyleCustomInstructions: field({ scope: 'profile', parse: parseTextUpTo(50_000) }),
-  optimizeSystemPrompt: field({ scope: 'profile', parse: parseBoolean }),
 
   // The server serves the PWA manifest from these, so they are facts about
   // the instance even though only the installed web app shows them.
@@ -555,6 +575,8 @@ export const LOCAL_DEVICE_KEYS = [
   'autoDeleteLastRunAt',
   'messageLimit',
   'walkthroughTocWidth',
+  'diffFileListMode',
+  'diffFileTreeWidth',
   'linearIssueListStatus',
   'linearIssueListAssignee',
   'linearIssueListTeamIdByRuntime',

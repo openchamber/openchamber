@@ -166,7 +166,7 @@ function SelectTrigger({
         // Shared trigger chrome: one source of truth for every dropdown trigger.
         // Legacy sizes map onto the two canonical ones: sm (dense) / default (forms).
         dropdownTriggerVariants({ size: size === 'settings' || size === 'lg' ? 'default' : 'sm' }),
-        "w-fit data-[placeholder]:text-muted-foreground aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2",
+        "w-fit data-[placeholder]:text-muted-foreground aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
       )}
       onPointerDownCapture={(event) => {

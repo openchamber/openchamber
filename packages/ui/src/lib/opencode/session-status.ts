@@ -1,35 +1,21 @@
 import { z } from "zod"
 
-// An empty status map grants idle authority; null, arrays, or malformed entries
-// must never be accepted as an empty successful response by a recovery caller.
-export const sessionStatusSnapshotSchema = z.record(z.string().min(1), z.discriminatedUnion("type", [
-  z.object({ type: z.literal("idle") }),
-  z.object({ type: z.literal("busy") }),
-  z.object({ type: z.literal("retry"), attempt: z.number(), message: z.string(), next: z.number() }),
-]))
+// v2 reports active loops globally. A malformed response cannot prove idle.
+export const activeSessionSnapshotSchema = z.record(z.string().min(1), z.object({ type: z.literal("running") }))
 
-// Requests the host forwards verbatim from OpenCode's ask events; the shapes
-// mirror `@/types/permission` and `@/types/question` so a parsed entry is one.
-const toolReferenceSchema = z.object({ messageID: z.string(), callID: z.string() }).optional()
+// Requests the host forwards from OpenCode's own events. Only the fields the
+// cross-directory index needs are parsed; zod drops the rest, so a parsed
+// entry is exactly the projection `sync/global-blocking-requests.ts` stores.
 const hostPermissionRequestSchema = z.object({
   id: z.string().min(1),
   sessionID: z.string().min(1),
-  permission: z.string(),
-  patterns: z.array(z.string()),
-  metadata: z.record(z.string(), z.unknown()),
-  always: z.array(z.string()),
-  tool: toolReferenceSchema,
+  action: z.string(),
+  resources: z.array(z.string()),
 })
-const hostQuestionRequestSchema = z.object({
+const hostFormRequestSchema = z.object({
   id: z.string().min(1),
   sessionID: z.string().min(1),
-  questions: z.array(z.object({
-    question: z.string(),
-    header: z.string(),
-    options: z.array(z.object({ label: z.string(), description: z.string() })),
-    multiple: z.boolean().optional(),
-  })),
-  tool: toolReferenceSchema,
+  title: z.string(),
 })
 
 // Cross-project status kept by the OpenChamber host (web server or VS Code
@@ -40,11 +26,11 @@ export const hostSessionStatusSnapshotSchema = z.object({
     status: z.string(),
     lastUpdateAt: z.number(),
   })),
-  // Permission and question requests the host still sees unanswered, keyed by
+  // Permission requests and forms the host still sees unanswered, keyed by
   // session. Optional: hosts predating the field, and the VS Code shim, omit it.
   pending: z.record(z.string().min(1), z.object({
     permissions: z.array(hostPermissionRequestSchema),
-    questions: z.array(hostQuestionRequestSchema),
+    forms: z.array(hostFormRequestSchema),
   })).optional(),
   serverTime: z.number(),
 })

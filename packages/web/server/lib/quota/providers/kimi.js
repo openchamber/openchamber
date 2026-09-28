@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
-const aliases = ['kimi-for-coding', 'kimi'];
+const aliases = ['kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
 // Kimi's weekly `usage` block reports `used`; its rate-limit `limits[].detail`
 // blocks report `remaining` instead. Neither field is guaranteed present, so

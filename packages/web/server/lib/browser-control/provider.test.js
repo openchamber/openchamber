@@ -93,7 +93,10 @@ describe('browser control router', () => {
 
   test('posts the action to the selected provider service and returns its data', async () => {
     const { router, brokerCalls, proxied } = createRouter();
-    const result = await router.request('browser.open', { url: 'http://localhost:3000/' }, { timeoutMs: 45_000 });
+    const result = await router.request('browser.open', { url: 'http://localhost:3000/' }, {
+      timeoutMs: 45_000,
+      context: { directory: '/repo', sessionId: 'ses_1' },
+    });
     expect(result).toEqual({ url: 'http://localhost:3000/', title: 'App' });
     expect(brokerCalls).toHaveLength(0);
     expect(proxied).toHaveLength(1);
@@ -101,7 +104,12 @@ describe('browser control router', () => {
     expect(call.guestId).toBe('server-chrome');
     expect(call.method).toBe('POST');
     expect(call.path).toBe(BROWSER_PROVIDER_PATH);
-    expect(JSON.parse(call.body)).toEqual({ requestId: 'req-1', action: 'browser.open', parameters: { url: 'http://localhost:3000/' } });
+    expect(JSON.parse(call.body)).toEqual({
+      requestId: 'req-1',
+      action: 'browser.open',
+      parameters: { url: 'http://localhost:3000/' },
+      context: { directory: '/repo', sessionId: 'ses_1' },
+    });
     expect(call.idleStopMs).toBe(BROWSER_PROVIDER_IDLE_MS);
     expect(call.granted).toEqual(['service']);
   });

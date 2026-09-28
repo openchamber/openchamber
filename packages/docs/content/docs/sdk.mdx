@@ -89,7 +89,7 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opens a separate page of yours in the window, so the picker does not have to share code with the rail panel
 - omit it and the extension stays off that menu
 
-Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, or `page`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
+Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, or `status`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
 
 `contributes.page: true` makes your panel available full-screen from the Extension pages menu above the session list. Use `{ "entry": "panel/page.html", "title": "Board" }` for separate HTML and an optional title. Ship that HTML and its built scripts. A page requires `panel.entry`, uses the same sandbox and permissions, and opens only when the user selects it. Reload, pause, removal, or a server switch closes it.
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 Writes are atomic: OpenChamber writes a temporary file and renames it, so a reader never sees a half-written file. Files are read and written as UTF-8 text, up to 2 MB.
 
+## A section in Work Status
+
+`contributes.statusSection` adds your own section to the Work Status panel next to the chat. Users turn it on and off and move it in that panel's section list, like the built-in sections.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` reuses `panel.entry`.
+- `entry` is a separate HTML page in your folder. With it you don't need `panel.entry`, so the extension can be just this section, with no rail icon.
+- `title` replaces the panel name in the section header, up to 60 characters.
+- `height` is the starting height in pixels, from 24 to 320 (120 by default). Call [`host.setHeight()`](/sdk/host/) when your content changes size.
+
+Your page sees `ctx.surface` as `status`. OpenChamber loads it only while the Work Status panel is visible and your section is expanded, and unloads it when the user collapses the section, so keep nothing there you can't rebuild. A section-only extension can use capabilities, a service, an integration, and files, but not `page`, `attach`, `actions`, or `commands`. Web and desktop only. The `git-graph-status` example is a complete section.
+
 ## Actions, commands, and the badge
 
 Beyond the rail and the + menu, an extension can appear in three more places. All of them hand the extension an `item` the same way a chip click does.
@@ -219,7 +234,7 @@ When your OpenCode plugin or MCP server adds a tool, the chat shows its calls wi
 
 `match` is the tool name as OpenCode reports it; a trailing `*` matches a prefix. `icon` is a Remixicon name or an `.svg` file in your package, like `panel.icon`. `title` and `subtitle` are templates over the call's `input`, `output`, and `metadata`. `output` picks how the body renders: `text`, `json` (a tree), `markdown`, `code` with a `language`, `table` with `columns` (rows come from the output array or `output.items`), or `auto` for the default. An exact `match` beats a wildcard, and the first installed extension wins a tie. No permission is needed: this only changes how data already in the chat is drawn.
 
-An extension that only styles tools needs no page at all: leave out `panel.entry` and it has no rail icon, just a card in Settings → Extensions. Without a page it may declare `tools` and nothing else.
+An extension that only styles tools needs no page at all: leave out `panel.entry` and it has no rail icon, just a card in Settings → Extensions. Without a page it may declare `tools` and nothing else. A Work Status section with its own `entry` is the other exception, see above.
 
 ## First lines in the panel
 

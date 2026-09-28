@@ -3,9 +3,15 @@ import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
+import { spaceApiPath } from './spaces/space-route';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
+  /**
+   * The directory the request is about, when the request does not name it in the open. A
+   * directory inside an isolated space sends the request to that space; see `addressSpace`.
+   */
+  directory?: string | null;
 }
 
 const shouldResolveApiPath = (input: string): boolean => {
@@ -52,6 +58,71 @@ const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
     if (value === null || value === undefined) continue;
     url.searchParams.set(key, String(value));
   }
+};
+
+// ── Isolated spaces ────────────────────────────────────────────────────────
+// A request about a directory inside an isolated space goes to that space, under
+// `/api/spaces/<id>/`. The directory is read where the request already names it in the
+// open, as the server's guards read it: the `directory` or `location[directory]` query, the
+// `x-opencode-directory` header (URI-encoded by the SDK, plain from the files API), or the
+// caller's explicit option for a request that carries it only in a body. Nothing is
+// remembered between calls.
+const decodeDirectoryHint = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const directoryFromSearch = (search: string): string | null => {
+  const params = new URLSearchParams(search);
+  return decodeDirectoryHint(params.get('directory') ?? params.get('location[directory]'));
+};
+
+// Read without building a `Headers`: a caller's plain header may still hold characters the
+// Headers API refuses, which `sanitizeHeadersForBrowser` encodes later on the way out.
+const directoryFromHeaders = (headers: HeadersInit | undefined): string | null => {
+  if (!headers) return null;
+  const entries: Iterable<[string, string]> = headers instanceof Headers
+    ? headers.entries()
+    : Array.isArray(headers) ? headers : Object.entries(headers);
+  for (const [key, value] of entries) {
+    if (key.toLowerCase() === 'x-opencode-directory') return decodeDirectoryHint(value);
+  }
+  return null;
+};
+
+const splitPath = (raw: string): { path: string; rest: string; origin: string } | null => {
+  if (!isAbsoluteUrl(raw)) {
+    const index = raw.search(/[?#]/);
+    return index === -1 ? { path: raw, rest: '', origin: '' } : { path: raw.slice(0, index), rest: raw.slice(index), origin: '' };
+  }
+  try {
+    const url = new URL(raw);
+    if (!isCurrentWindowUrl(url) && !isActiveRuntimeServiceUrl(url)) return null;
+    return { path: url.pathname, rest: `${url.search}${url.hash}`, origin: url.origin };
+  } catch {
+    return null;
+  }
+};
+
+/** The request addressed to the space its directory belongs to, or the request as it came. */
+const addressSpace = (input: string | URL | Request, init: RuntimeFetchOptions): string | URL | Request => {
+  const raw = input instanceof Request ? input.url : input.toString();
+  const parts = splitPath(raw);
+  if (!parts || !parts.path.startsWith('/api/')) return input;
+  const directory = init.directory
+    ?? directoryFromSearch(parts.rest)
+    ?? (init.query ? directoryFromSearch(new URLSearchParams(init.query instanceof URLSearchParams ? init.query : Object.entries(init.query).flatMap(([key, value]) => (value === null || value === undefined ? [] : [[key, String(value)]]))).toString()) : null)
+    ?? directoryFromHeaders(init.headers)
+    ?? (input instanceof Request ? directoryFromHeaders(input.headers) : null);
+  const path = spaceApiPath(parts.path, directory);
+  if (path === parts.path) return input;
+  const target = `${parts.origin}${path}${parts.rest}`;
+  if (input instanceof Request) return new Request(target, input);
+  return input instanceof URL ? new URL(target, input) : target;
 };
 
 const isActiveRuntimeServiceUrl = (url: URL): boolean => {
@@ -249,16 +320,22 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<Response>>();
 
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
+// OpenCode 2.x scopes these reads by the `x-opencode-directory` header, not
+// the URL, so two projects asking for `/api/config` at once must not share
+// one response.
+const coalesceReadKey = (method: string, url: string, hasSignal: boolean, headers: Headers): string | null => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
   if (!COALESCE_READ_PATH.test(url)) return null;
-  return `GET ${url}`;
+  return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
 };
 
-export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
-  const { query, ...requestInit } = init;
+export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
+  // Before either transport: the relay and the network see the same path.
+  const input = addressSpace(rawInput, init);
+  const { query, directory, ...requestInit } = init;
+  void directory;
 
   // Resolve the transport once — relay tunnel or network — then apply the SAME
   // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so
@@ -269,12 +346,14 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   let doFetch: () => Promise<Response>;
   let url: string;
   let method: string;
+  let scopeHeaders: Headers;
   if (relay && relayPath !== null) {
     const inputHeaders = input instanceof Request ? input.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
     doFetch = input instanceof Request
       ? () => relay.fetch(input, { ...requestInit, headers })
       : () => relay.fetch(relayPath, { ...requestInit, headers });
+    scopeHeaders = headers;
     url = relayPath;
     method = String(requestInit.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   } else {
@@ -289,6 +368,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     doFetch = resolvedInput instanceof Request
       ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
       : () => fetch(resolvedInput, { ...requestInit, headers });
+    scopeHeaders = headers;
     url = resolvedUrl;
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
@@ -307,7 +387,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
-  const key = coalesceReadKey(method, url, hasSignal);
+  const key = coalesceReadKey(method, url, hasSignal, scopeHeaders);
   if (!key) return doFetch();
 
   const existing = READ_COALESCE.get(key);

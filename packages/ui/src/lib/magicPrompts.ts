@@ -52,7 +52,8 @@ export type MagicPromptId =
   | 'session.explore.visible'
   | 'session.explore.instructions'
   | 'session.fusion.visible'
-  | 'session.fusion.instructions';
+  | 'session.fusion.instructions'
+  | 'session.fusion.codeInstructions';
 
 export interface MagicPromptDefinition {
   id: MagicPromptId;
@@ -1040,6 +1041,34 @@ Respond in the same language the user uses.`,
 Goal: produce the strongest possible final answer by combining complementary information, resolving conflicts, removing duplicates, and preserving useful nuance.
 
 Use the results below as source material. Do not mention that the inputs were hidden parts. If sources disagree, prefer the most specific, well-supported, and internally consistent answer.
+
+--- FUSION INPUTS START ---`,
+  },
+  {
+    id: 'session.fusion.codeInstructions',
+    title: 'Code Fusion Instructions',
+    group: 'Session',
+    description: 'Hidden instructions for fusing parallel runs that changed code. The fusion works in its own worktree and reads each attempt from git.',
+    placeholders: [
+      { key: 'baseCommit', description: 'Commit every attempt started from; the fusion worktree starts here too' },
+      { key: 'attemptCount', description: 'Number of attempts being fused' },
+    ],
+    template: `You are fusing {{attemptCount}} parallel attempts at the same coding task into one result.
+
+You are working in a fresh git worktree created at {{baseCommit}}, the commit every attempt started from. Each attempt's complete result, including uncommitted and new files, is saved as a snapshot commit listed below. Read the attempts with git instead of guessing:
+
+- \`git diff {{baseCommit}} <snapshot> --stat\` gives an overview of an attempt.
+- \`git diff {{baseCommit}} <snapshot> -- <path>\` shows one file's changes.
+- \`git show <snapshot>:<path>\` prints a file as that attempt left it.
+
+How to work:
+1. Read each attempt's final answer and change summary below, then pick the strongest attempt as your base.
+2. Bring the base in with \`git checkout <snapshot> -- .\` (or per path).
+3. Where attempts differ, compare the relevant files and port what is better from the others: fixes, tests, edge cases, clearer code.
+4. Keep the result consistent and run the project's checks when they are available.
+5. Do not commit. Finish with a short summary: which attempt you used as the base and what you took from each of the others.
+
+Read diffs selectively, file by file; do not print every attempt in full.
 
 --- FUSION INPUTS START ---`,
   },

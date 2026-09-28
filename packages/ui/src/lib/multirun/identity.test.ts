@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
-import { getMultiRunIdentity, isFusionSource, sameMultiRunIdentity, withMultiRunMembership, type MultiRunMembership } from './identity';
+import type { Session } from '@/lib/opencode/model';
+import { getMultiRunIdentity, sameMultiRunIdentity, withMultiRunMembership, type MultiRunMembership } from './identity';
 import { getMultiRunSessionTitle, getFusionSessionTitle, parseMultiRunSessionTitle } from './title';
-import { buildAgentGroups } from './groups';
+import { buildMultiRunIndex } from './runs';
 
 const group = { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca103e' } as const;
 const membership = (id: string): MultiRunMembership => ({
@@ -10,8 +10,8 @@ const membership = (id: string): MultiRunMembership => ({
   providerID: 'openrouter', modelID: 'vendor/model',
 });
 const session = (id: string, marker: MultiRunMembership | null = membership(id)): Session => {
-  const result: Session = { id, slug: id, projectID: 'project', directory: '/repo', title: 'bench/openrouter/vendor/model',
-    version: '1', time: { created: 1, updated: 1 } };
+  const result: Session = { id, projectID: 'project', directory: '/repo', title: 'bench/openrouter/vendor/model',
+    cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 } };
   if (marker) result.metadata = withMultiRunMembership({}, marker);
   return result;
 };
@@ -38,22 +38,24 @@ describe('multi-run identity', () => {
     }
   });
 
-  test('keeps separate launches and prompt groups out of fusion, including prior fusion results', () => {
+  test('separate launches never share a group; prompt variants and fusion results do', () => {
     const anchor = getMultiRunIdentity(session('s1'))!;
     const sibling = session('s2');
-    const otherLaunch = session('s3', { ...membership('s3'), group: { kind: 'id', id: '5fdf22b1-d21e-4324-b2df-01747396c704' } });
+    const otherGroup = { kind: 'id', id: '5fdf22b1-d21e-4324-b2df-01747396c704' } as const;
+    const otherLaunch = session('s3', { ...membership('s3'), group: otherGroup });
     const otherPrompt = session('s4', { ...membership('s4'), runGroup: 'g2' });
     const fusion = session('f1', { ...membership('f1'), role: 'fusion' });
     const legacy = session('old', null);
-    const sources = [sibling, otherLaunch, otherPrompt, fusion, legacy, { ...sibling, id: 'fork' }]
-      .filter((candidate) => isFusionSource(anchor, getMultiRunIdentity(candidate)));
-    expect(sources.map((item) => item.id)).toEqual(['s2']);
-    expect(isFusionSource(getMultiRunIdentity(fusion)!, getMultiRunIdentity(sibling))).toBe(true);
-    const groups = buildAgentGroups([session('s1'), sibling, otherLaunch, fusion], new Map(), '/repo');
-    expect(groups).toHaveLength(2);
-    expect(groups.map((item) => item.sessionCount).sort()).toEqual([1, 3]);
-    expect(groups[0].name).toBe(groups[1].name);
-    expect(groups[0].id).not.toBe(groups[1].id);
+    const sameGroup = [sibling, otherLaunch, otherPrompt, fusion, legacy, { ...sibling, id: 'fork' }]
+      .filter((candidate) => getMultiRunIdentity(candidate)?.key === anchor.key);
+    expect(sameGroup.map((item) => item.id)).toEqual(['s2', 's4', 'f1']);
+    // Same name, two launches: two runs, never merged.
+    const otherLaunchSibling = session('s5', { ...membership('s5'), group: otherGroup });
+    const runs = [...buildMultiRunIndex([session('s1'), sibling, otherLaunch, otherLaunchSibling, fusion], () => '/repo').runs.values()];
+    expect(runs).toHaveLength(2);
+    expect(runs.map((run) => run.memberIds.length).sort()).toEqual([2, 3]);
+    expect(runs[0].title).toBe(runs[1].title);
+    expect(runs[0].key).not.toBe(runs[1].key);
   });
 
   test('legacy slash IDs, groups, duplicate indices and fusion share one parser', () => {
@@ -77,12 +79,22 @@ describe('multi-run identity', () => {
     const old = session('old', null);
     const anchor = getMultiRunIdentity(old)!;
     const fusion = session('fusion', { ...membership('fusion'), group: anchor.group, runGroup: undefined, role: 'fusion' });
-    expect(isFusionSource(getMultiRunIdentity(fusion)!, anchor)).toBe(true);
-    expect(isFusionSource(getMultiRunIdentity(fusion)!, getMultiRunIdentity(old, '/different-project'))).toBe(false);
+    expect(getMultiRunIdentity(fusion)!.key).toBe(anchor.key);
+    expect(getMultiRunIdentity(old, '/different-project')!.key).not.toBe(anchor.key);
     expect(old.metadata).toBeUndefined();
     for (const kind of ['btw', 'review']) {
       expect(getMultiRunIdentity({ ...old, metadata: { openchamber: { kind } } })).toBeNull();
     }
+  });
+
+  test('title and auto-fusion round-trip; markers without them stay valid', () => {
+    const autoFusion = { providerID: 'anthropic', modelID: 'claude', launcherId: 'page-1' };
+    const marked = session('s1', { ...membership('s1'), title: 'Fix the race', autoFusion });
+    expect(getMultiRunIdentity(JSON.parse(JSON.stringify(marked)))).toMatchObject({ title: 'Fix the race', autoFusion });
+    const plain = getMultiRunIdentity(session('s1'));
+    expect(plain?.title).toBeUndefined();
+    expect(plain?.autoFusion).toBeUndefined();
+    expect(sameMultiRunIdentity(session('s1'), marked)).toBe(false);
   });
 
   test('preserves unrelated metadata and invalidates row memoization only for relevant changes', () => {

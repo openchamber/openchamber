@@ -973,3 +973,20 @@ describe('context panel tab limits', () => {
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
   });
 });
+
+describe('useUIStore openAgentBrowserTab', () => {
+  const directory = '/agent-repo';
+
+  test('opens a new background tab even when one already shows the address, and returns its id', () => {
+    useUIStore.getState().openContextBrowser(directory, 'https://a.test');
+    const shownId = useUIStore.getState().contextPanelByDirectory[directory]?.activeTabId;
+
+    const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test');
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(agentId).not.toBeNull();
+    expect(agentId).not.toBe(shownId);
+    expect(state?.tabs.find((tab) => tab.id === agentId)?.targetPath).toBe('https://a.test');
+    expect(state?.activeTabId).toBe(shownId);
+  });
+});

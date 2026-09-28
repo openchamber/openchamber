@@ -7,8 +7,7 @@
  * the pinned transcript above it, snap by the height difference before the
  * keyboard has even started moving.
  *
- * The morph is a FLIP over that swap, after t3code's resting-composer
- * transition: the swap commits at once, then the box is frozen at its old
+ * The morph is a FLIP over that swap: the swap commits at once, then the box is frozen at its old
  * height and animated to the new one with its contents anchored to the
  * bottom edge (the footer icon row and the model/agent row stay where the
  * pill's rows were), the prompt travels from where it was to where it is

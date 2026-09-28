@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { create, type StoreApi } from "zustand"
-import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, SessionStatus } from "@/lib/opencode/model"
 import { INITIAL_STATE } from "../types"
 import type { DirectoryStore } from "../child-store"
 
@@ -16,13 +16,16 @@ type StatusSnapshot = Record<string, SessionStatus | undefined>
 let respondWithSnapshot: () => Promise<StatusSnapshot | null> = () => Promise.resolve({ ses_1: { type: "idle" } })
 const statusSnapshotCalls: string[] = []
 let runtimeKey = "test-runtime"
+// The v2 status snapshot is global; the tests still assert which directory
+// asked for it, so the directory under test is recorded alongside each call.
+const pollingDirectory = "/test/project"
 let sdkIdentity = {}
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getSdkClient: () => sdkIdentity,
-    getSessionStatusForDirectory: mock((directory: string) => {
-      statusSnapshotCalls.push(directory)
+    getActiveSessionStatuses: mock(() => {
+      statusSnapshotCalls.push(pollingDirectory)
       return respondWithSnapshot()
     }),
   },

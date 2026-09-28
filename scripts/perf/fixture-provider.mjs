@@ -15,10 +15,18 @@
  * fast.
  *
  * Model names select the speed: `stream-300cps` streams 300 characters per
- * second. Hosted models sit between roughly 100 and 1500. `think-30s` stays
+ * second. Hosted models sit between roughly 100 and 1500. `code-300cps`
+ * streams a different document at the same kind of rate: a short introduction
+ * and one 240-line TypeScript block, because what a growing code fence costs
+ * (highlighting, lexing) does not show in fences of five lines. `think-30s` stays
  * silent for thirty seconds and then answers in one word, which holds the app
  * in its "working" state with nothing streaming: the cost of the busy
  * indicator and of whatever else runs while an agent thinks or uses a tool.
+ * `agent-20tools-300cps` behaves like an agent: twenty steps that each say a
+ * line and call the `glob` tool, then the document. OpenCode runs the tools
+ * for real, so the turn on screen carries twenty tool parts by the time the
+ * answer streams, which is the shape a long agentic turn has and what the
+ * cost of re-rendering a whole turn per delta depends on.
  */
 
 import { createServer } from "node:http"
@@ -26,9 +34,17 @@ import process from "node:process"
 
 const FIXTURE_PROVIDER_ID = "perf"
 const FIXTURE_RATES = [100, 300, 600, 1200]
+const FIXTURE_CODE_RATES = [300, 1200]
 const FIXTURE_THINK_SECONDS = [30]
+const FIXTURE_AGENT_STEPS = [20, 40]
+const FIXTURE_AGENT_RATES = [300]
 const THINK_ANSWER = "Done."
 const CHUNK_CHARACTERS = 4
+
+// Read-only lookups over the session's directory: small results, no
+// permission prompt, and a different one on each step.
+const AGENT_GLOBS = ["packages/*/package.json", "scripts/perf/*.mjs", "*.md", ".agents/skills/*/SKILL.md"]
+const AGENT_STEP_TEXT = (step, total) => `Step ${step} of ${total}: listing files that the answer should mention.\n\n`
 
 const SECTION = (index) => `## ${index}. Executing a call in a bytecode virtual machine
 
@@ -83,11 +99,74 @@ the instruction pointer is restored from the saved return address.
 
 const FIXTURE_DOCUMENT = [1, 2, 3].map(SECTION).join("")
 
+const FENCE = "```"
+
+// Plain string concatenation in the sample: nested template literals would
+// need escaping here and add nothing to what is measured.
+const CODE_FUNCTION = (index) => [
+  `/** Resolves the owner of entry ${index} and caches the answer. */`,
+  `export function resolveOwner${index}(entries: Map<string, Entry>, key: string): Owner | undefined {`,
+  `  const cacheKey = key + ":${index}"`,
+  "  const cached = ownerCache.get(cacheKey)",
+  "  if (cached) return cached",
+  "  const entry = entries.get(key)",
+  `  if (!entry || entry.revision < ${index}) return undefined`,
+  `  const owner = { id: entry.ownerId, label: "owner-" + entry.ownerId, depth: ${index % 7} }`,
+  "  ownerCache.set(cacheKey, owner)",
+  "  return owner",
+  "}",
+  "",
+].join("\n")
+
+const FIXTURE_CODE_DOCUMENT = [
+  "## Ownership index",
+  "",
+  "The index below resolves an owner once per key and revision, then serves every later read from the cache.",
+  "",
+  `${FENCE}typescript`,
+  "type Entry = { ownerId: string; revision: number }",
+  "type Owner = { id: string; label: string; depth: number }",
+  "",
+  "const ownerCache = new Map<string, Owner>()",
+  "",
+  Array.from({ length: 22 }, (_, index) => CODE_FUNCTION(index + 1)).join("\n") + FENCE,
+  "",
+  "Each function is independent, so the cache can be cleared per revision without touching the others.",
+  "",
+].join("\n")
+
 const parseModel = (model) => {
   const think = /think-(\d+)s/.exec(String(model ?? ""))
-  if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER }
-  const rate = /stream-(\d+)cps/.exec(String(model ?? ""))
-  return { delayMs: 0, charactersPerSecond: rate ? Math.max(1, Number(rate[1])) : 300, document: FIXTURE_DOCUMENT }
+  if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER, toolSteps: 0 }
+  const agent = /agent-(\d+)tools-(\d+)cps/.exec(String(model ?? ""))
+  if (agent) return { delayMs: 0, charactersPerSecond: Math.max(1, Number(agent[2])), document: FIXTURE_DOCUMENT, toolSteps: Number(agent[1]) }
+  const rate = /(stream|code)-(\d+)cps/.exec(String(model ?? ""))
+  return {
+    delayMs: 0,
+    charactersPerSecond: rate ? Math.max(1, Number(rate[2])) : 300,
+    document: rate?.[1] === "code" ? FIXTURE_CODE_DOCUMENT : FIXTURE_DOCUMENT,
+    toolSteps: 0,
+  }
+}
+
+/**
+ * What this request should answer. An agent model counts the tool results
+ * already in the conversation: while steps remain it says a line and calls a
+ * tool, and once every step has run it streams the document.
+ */
+const planResponse = (model, body) => {
+  const { delayMs, charactersPerSecond, document, toolSteps } = parseModel(model)
+  const toolResults = (Array.isArray(body.messages) ? body.messages : []).filter((message) => message?.role === "tool").length
+  if (toolSteps > 0 && toolResults < toolSteps) {
+    const step = toolResults + 1
+    return {
+      delayMs,
+      charactersPerSecond,
+      text: AGENT_STEP_TEXT(step, toolSteps),
+      toolCall: { id: `call_fixture_${step}`, name: "glob", arguments: { pattern: AGENT_GLOBS[toolResults % AGENT_GLOBS.length] } },
+    }
+  }
+  return { delayMs, charactersPerSecond, text: document, toolCall: null }
 }
 
 const chunkFrame = (model, delta, finishReason = null) => ({
@@ -115,28 +194,50 @@ const readBody = (request) => new Promise((resolveBody) => {
 const usageFor = (text) => ({ prompt_tokens: 1, completion_tokens: Math.ceil(text.length / 4), total_tokens: 1 + Math.ceil(text.length / 4) })
 
 /**
- * Streams the document against a wall-clock schedule rather than a fixed
- * interval, so timer drift cannot change the delivered rate between runs.
+ * Streams text against a wall-clock schedule rather than a fixed interval, so
+ * timer drift cannot change the delivered rate between runs. Resolves once the
+ * whole text is out, or rejects when the client went away first.
  */
-const streamDocument = (response, model) => {
-  const { delayMs, charactersPerSecond, document } = parseModel(model)
+const streamText = (response, model, text, { delayMs, charactersPerSecond }) => new Promise((resolveStream, reject) => {
   const startedAt = Date.now() + delayMs
   let sent = 0
-  response.write(sseFrame(chunkFrame(model, { role: "assistant", content: "" })))
   const timer = setInterval(() => {
     const elapsedSeconds = Math.max(0, Date.now() - startedAt) / 1000
-    const due = Math.min(document.length, Math.floor(elapsedSeconds * charactersPerSecond))
+    const due = Math.min(text.length, Math.floor(elapsedSeconds * charactersPerSecond))
     while (sent < due) {
       const next = Math.min(due, sent + CHUNK_CHARACTERS)
-      response.write(sseFrame(chunkFrame(model, { content: document.slice(sent, next) })))
+      response.write(sseFrame(chunkFrame(model, { content: text.slice(sent, next) })))
       sent = next
     }
-    if (sent < document.length) return
+    if (sent < text.length) return
     clearInterval(timer)
-    response.write(sseFrame({ ...chunkFrame(model, {}, "stop"), usage: usageFor(document) }))
-    response.end("data: [DONE]\n\n")
+    resolveStream()
   }, 5)
-  response.on("close", () => clearInterval(timer))
+  response.on("close", () => {
+    clearInterval(timer)
+    reject(new Error("client closed the stream"))
+  })
+})
+
+const streamCompletion = async (response, model, body) => {
+  const plan = planResponse(model, body)
+  response.write(sseFrame(chunkFrame(model, { role: "assistant", content: "" })))
+  try {
+    await streamText(response, model, plan.text, plan)
+  } catch {
+    return
+  }
+  if (plan.toolCall) {
+    // The shape the OpenAI protocol streams a call in: the name with the first
+    // frame, the arguments as they are produced, and a matching finish reason.
+    const { id, name, arguments: args } = plan.toolCall
+    response.write(sseFrame(chunkFrame(model, { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: "" } }] })))
+    response.write(sseFrame(chunkFrame(model, { tool_calls: [{ index: 0, function: { arguments: JSON.stringify(args) } }] })))
+    response.write(sseFrame({ ...chunkFrame(model, {}, "tool_calls"), usage: usageFor(plan.text) }))
+  } else {
+    response.write(sseFrame({ ...chunkFrame(model, {}, "stop"), usage: usageFor(plan.text) }))
+  }
+  response.end("data: [DONE]\n\n")
 }
 
 const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
@@ -160,7 +261,7 @@ const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
       return
     }
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" })
-    streamDocument(response, body.model)
+    void streamCompletion(response, body.model, body)
   })
   server.on("error", reject)
   server.listen(port, "127.0.0.1", () => resolveServer(server))
@@ -175,7 +276,12 @@ const fixtureProviderConfig = (port) => ({
       options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "unused" },
       models: Object.fromEntries([
         ...FIXTURE_RATES.map((rate) => [`stream-${rate}cps`, { name: `Fixture stream, ${rate} characters/s` }]),
+        ...FIXTURE_CODE_RATES.map((rate) => [`code-${rate}cps`, { name: `Fixture code block, ${rate} characters/s` }]),
         ...FIXTURE_THINK_SECONDS.map((seconds) => [`think-${seconds}s`, { name: `Fixture silence, ${seconds}s` }]),
+        ...FIXTURE_AGENT_STEPS.flatMap((steps) => FIXTURE_AGENT_RATES.map((rate) => [
+          `agent-${steps}tools-${rate}cps`,
+          { name: `Fixture agent, ${steps} tool calls then ${rate} characters/s`, tool_call: true },
+        ])),
       ]),
     },
   },

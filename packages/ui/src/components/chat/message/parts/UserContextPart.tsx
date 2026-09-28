@@ -5,6 +5,8 @@ import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import type { ContextPartPayload } from '@/lib/messages/contextParts';
 import { cn } from '@/lib/utils';
+import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
 
 /**
  * A context item attached to a user message: an inline code comment, a
@@ -34,7 +36,9 @@ const ContextCard: React.FC<{
      */
     collapsed?: boolean;
     onExpand?: () => void;
-}> = ({ icon, summary, title, body, text, mono, collapsed, onExpand }) => {
+    /** Scroll to where the quote came from, with the button's label. */
+    reveal?: { label: string; onReveal: () => void };
+}> = ({ icon, summary, title, body, text, mono, collapsed, onExpand, reveal }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasBody = body.trim().length > 0;
     const hasText = text.trim().length > 0;
@@ -72,6 +76,21 @@ const ContextCard: React.FC<{
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{summary}</span>
+                    {reveal ? (
+                        <button
+                            type="button"
+                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                reveal.onReveal();
+                            }}
+                            aria-label={reveal.label}
+                            title={reveal.label}
+                        >
+                            <Icon name="arrow-up" className="h-3.5 w-3.5" />
+                        </button>
+                    ) : null}
                 </div>
                 {hasBody ? (
                     <div
@@ -104,6 +123,7 @@ const UserContextPart: React.FC<{
     onExpand?: () => void;
 }> = ({ payload, collapsed, onExpand }) => {
     const { t } = useI18n();
+    const quoteHighlights = useChatQuoteHighlightApi();
     const shared = { collapsed, onExpand };
 
     switch (payload.kind) {
@@ -173,16 +193,24 @@ const UserContextPart: React.FC<{
                 : t('chat.message.context.fileQuote', { file });
             return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} {...shared} />;
         }
-        case 'chat-quote':
+        case 'chat-quote': {
+            const sourceMessageId = payload.messageId;
             return (
                 <ContextCard
                     icon="chat-1"
                     summary={t('chat.message.context.chatQuote')}
                     body={payload.quote}
                     text={payload.text}
+                    reveal={quoteHighlights && sourceMessageId
+                        ? {
+                            label: t('chat.message.context.showQuoteSource'),
+                            onReveal: () => quoteHighlights.reveal(sourceMessageId, payload.anchor ?? legacyChatQuoteAnchor(payload.quote)),
+                        }
+                        : undefined}
                     {...shared}
                 />
             );
+        }
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':

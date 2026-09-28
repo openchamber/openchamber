@@ -1,6 +1,6 @@
 # Extension gallery
 
-Six examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Seven examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ Six examples to use, explore, and adapt. The five panel extensions also have ful
 | `github-token` | **Repository Explorer** | Connect GitHub in Settings → Integrations → Extension accounts → GitHub (token). Search and filter repositories, load another page, inspect a repository, and add its context to chat. Sample repositories let you explore the layout before connecting. |
 | `service-echo` | **Local Service Lab** | Send an echo request, inspect its response and round-trip time, and watch the service state. Try an invalid path to see the host refuse it. The optional system-information experiment requires `uname` on the server. |
 | `config-editor` | **Config Studio** | Browse and filter JSON keys, edit or format the raw file, then compare the on-disk content with your draft before saving. Reads only the declared `~/.config/opencode/opencode.json` path on the connected instance. |
+| `git-graph-status` | **Git Graph** | Open a chat in a git project and look at the Work Status panel: **Recent commits** draws the project's history with the same lanes and curves as the Git view, branch, remote and tag badges, and a row for uncommitted changes. Switch between Auto (your branch and its upstream), All, and Manual (tick the branches you want). Click a commit to see its details, copy its hash, open it on GitHub, or open its diff. It has no rail icon and no panel, only that section. Approve its local service at install; the service only reads git. |
 | `tools-only` | **Tool Gallery** | Render review findings and project checks as tables inside chat. This extension has no panel. Its optional read-only MCP fixture makes the results reproducible; see [its README](./tools-only/README.md). |
 
 ## Install and explore
@@ -51,6 +52,8 @@ bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/attach.ts packages/sdk/examples/tasks-demo/panel/attach.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/page.ts packages/sdk/examples/tasks-demo/panel/page.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tools-only/mcp.ts packages/sdk/examples/tools-only/mcp.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/git-graph-status/status/main.ts packages/sdk/examples/git-graph-status/status/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/git-graph-status/service/main.ts packages/sdk/examples/git-graph-status/service/main.js
 ```
 
 Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git.
@@ -64,4 +67,4 @@ bun run --cwd packages/sdk test
 bun test packages/ui/src/lib/guests/sdk-examples.test.ts
 ```
 
-SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, and freshness of all ten bundles. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.
+SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.

@@ -35,6 +35,7 @@ const ACCEPTED_ATTACHMENT_TYPES = [
   ".diff",
   ".docx",
   ".drawio",
+  ".excalidraw",
   ".env",
   ".erl",
   ".ex",

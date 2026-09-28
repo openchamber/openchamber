@@ -1,13 +1,15 @@
 import React from 'react';
 import { animate, type AnimationPlaybackControls } from 'motion';
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { BusyDots } from './BusyDots';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
+import type { MarkdownVariant } from '../../MarkdownRendererImpl';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { commitStreamedText } from '../../lib/streamTextCommit';
 import type { StreamPhase } from '../types';
@@ -88,6 +90,20 @@ type ReasoningTimelineBlockProps = {
     actions?: React.ReactNode;
     /** Override the initial expanded state. Defaults to `isStreaming`. */
     defaultExpanded?: boolean;
+    /**
+     * Presentation for rows that borrow this block for something other than
+     * reasoning (a compaction summary): its own icon, title, toggle labels,
+     * body typography and box height.
+     */
+    presentation?: {
+        icon: IconName;
+        iconClassName?: string;
+        title: string;
+        expandLabel: string;
+        collapseLabel: string;
+        markdownVariant: MarkdownVariant;
+        maxHeightClassName: string;
+    };
 };
 
 type ExpansionState = {
@@ -103,6 +119,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     isStreaming = false,
     actions,
     defaultExpanded,
+    presentation,
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
@@ -187,8 +204,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const toggleAriaLabel = isExpanded
-        ? t('chat.reasoningTrace.collapseAria')
-        : t('chat.reasoningTrace.expandAria');
+        ? presentation?.collapseLabel ?? t('chat.reasoningTrace.collapseAria')
+        : presentation?.expandLabel ?? t('chat.reasoningTrace.expandAria');
+    const title = presentation?.title
+        ?? t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking');
 
     const handleToggle = React.useCallback(() => {
         setShouldRenderExpandedContent(true);
@@ -340,7 +359,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     messageId={blockId}
                     isAnimated={false}
                     isStreaming={isStreaming}
-                    variant="reasoning"
+                    variant={presentation?.markdownVariant ?? 'reasoning'}
                 />
             </div>
             {actions ? (
@@ -377,7 +396,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                             )}
                             style={{ color: 'var(--tools-icon)' }}
                         >
-                            <Icon name="brain-ai-3" className="h-3.5 w-3.5" />
+                            <Icon name={presentation?.icon ?? 'brain-ai-3'} className={cn('h-3.5 w-3.5', presentation?.iconClassName)} />
                         </div>
                         <div
                             className={cn(
@@ -393,22 +412,15 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
                     {isStreaming ? (
                         <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-title)' }}>
-                            <span>{t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}</span>
+                            <span>{title}</span>
                             <BusyDots />
-                        </span>
-                    ) : isExpanded ? (
-                        <span
-                            className={TOOL_ROW_TITLE_CLASS}
-                            style={{ color: 'var(--tools-title)' }}
-                        >
-                            {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
                         </span>
                     ) : (
                         <span
                             className={TOOL_ROW_TITLE_CLASS}
                             style={{ color: 'var(--tools-title)' }}
                         >
-                            {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
+                            {title}
                         </span>
                     )}
                 </div>
@@ -455,7 +467,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                         <ScrollableOverlay
                             ref={scrollBoxRef}
                             as="div"
-                            outerClassName="max-h-80"
+                            outerClassName={presentation?.maxHeightClassName ?? 'max-h-80'}
                             className="p-0"
                             useScrollShadow
                             scrollShadowSize={36}

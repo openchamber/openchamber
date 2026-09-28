@@ -19,12 +19,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
-import { selectAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
+import { selectAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
-import type { Agent } from '@opencode-ai/sdk/v2';
+import type { Agent } from '@/lib/opencode/model';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { SettingsSidebarNoMatches, SettingsSidebarSearch } from '@/components/sections/shared/SettingsSidebarSearch';
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -34,77 +36,9 @@ interface AgentsSidebarProps {
   onItemSelect?: () => void;
 }
 
-type PermissionAction = 'allow' | 'ask' | 'deny';
-type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
-
-type PermissionConfigValue = PermissionAction | Record<string, PermissionAction>;
-
-const toPermissionRuleset = (ruleset: unknown): PermissionRule[] => {
-  if (!Array.isArray(ruleset)) {
-    return [];
-  }
-
-  const parsed: PermissionRule[] = [];
-  for (const entry of ruleset) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const candidate = entry as Partial<PermissionRule>;
-    if (typeof candidate.permission !== 'string' || typeof candidate.pattern !== 'string' || typeof candidate.action !== 'string') {
-      continue;
-    }
-    if (candidate.action !== 'allow' && candidate.action !== 'ask' && candidate.action !== 'deny') {
-      continue;
-    }
-    parsed.push({ permission: candidate.permission, pattern: candidate.pattern, action: candidate.action });
-  }
-
-  return parsed;
-};
-
-const normalizeRuleset = (ruleset: PermissionRule[]): PermissionRule[] => {
-  const map = new Map<string, PermissionRule>();
-  for (const rule of ruleset) {
-    if (!rule.permission || rule.permission === 'invalid') {
-      continue;
-    }
-    if (!rule.pattern) {
-      continue;
-    }
-    map.set(`${rule.permission}::${rule.pattern}`, rule);
-  }
-  return Array.from(map.values());
-};
-
-const rulesetToPermissionConfig = (ruleset: unknown): AgentDraft['permission'] => {
-  const parsed = normalizeRuleset(toPermissionRuleset(ruleset));
-  if (parsed.length === 0) {
-    return undefined;
-  }
-
-  const byPermission: Record<string, Record<string, PermissionAction>> = {};
-  for (const rule of parsed) {
-    if (!rule.permission) {
-      continue;
-    }
-    (byPermission[rule.permission] ||= {})[rule.pattern] = rule.action;
-  }
-
-  const result: Record<string, PermissionConfigValue> = {};
-  for (const [permissionName, map] of Object.entries(byPermission)) {
-    const patterns = Object.keys(map);
-    if (patterns.length === 1 && patterns[0] === '*') {
-      result[permissionName] = map['*'];
-      continue;
-    }
-    result[permissionName] = map;
-  }
-
-  return Object.keys(result).length > 0 ? (result as AgentDraft['permission']) : undefined;
-};
-
 export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
   const [renameDialogAgent, setRenameDialogAgent] = React.useState<Agent | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [confirmActionAgent, setConfirmActionAgent] = React.useState<Agent | null>(null);
@@ -119,6 +53,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     createAgent,
     deleteAgent,
     loadAgents,
+    fetchAgentEntity,
   } = useAgentsStore(useShallow((s) => ({
     selectedAgentName: s.selectedAgentName,
     setSelectedAgent: s.setSelectedAgent,
@@ -126,6 +61,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     createAgent: s.createAgent,
     deleteAgent: s.deleteAgent,
     loadAgents: s.loadAgents,
+    fetchAgentEntity: s.fetchAgentEntity,
   })));
 
   // Settings browses whichever project its own selector points at; the app
@@ -190,11 +126,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       const result = await deleteAgent(confirmActionAgent.name, (confirmActionAgent as Agent & { scope?: AgentScope }).scope, settingsDirectory);
 
       if (result.ok) {
-        if (result.requiresManualRestart) {
-          toast.warning(t('settings.agents.page.toast.savedManualRestart'));
-        } else if (result.restartDeferred) {
-          toast.success(t('settings.view.pendingRestart.saved'));
-        } else if (confirmActionType === 'delete') {
+        if (confirmActionType === 'delete') {
           toast.success(t('settings.agents.sidebar.toast.agentDeleted', { name: confirmActionAgent.name }));
         } else {
           toast.success(t('settings.agents.sidebar.toast.agentReset', { name: confirmActionAgent.name }));
@@ -220,7 +152,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     setIsConfirmActionPending(false);
   };
 
-  const handleDuplicateAgent = (agent: Agent) => {
+  const handleDuplicateAgent = async (agent: Agent) => {
     const baseName = agent.name;
     let copyNumber = 1;
     let newName = `${baseName}-copy`;
@@ -230,24 +162,28 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       newName = `${baseName}-copy-${copyNumber}`;
     }
 
-    // Set draft with prefilled values from source agent
-    const extAgent = agent as Agent & { scope?: AgentScope };
-    const modelStr = agent.model?.providerID && agent.model?.modelID
-      ? `${agent.model.providerID}/${agent.model.modelID}`
-      : null;
-    const draftAgent = agent as Agent & { disable?: boolean };
+    // Copy the agent's OWN stored entry, not the resolved `AgentInfo`: the
+    // resolved view merges global config and built-in defaults, and baking
+    // those into a new file would silently widen the copy's permissions.
+    // SAFETY: the agents store attaches `scope` to every entry it loads.
+    const extAgent = agent as AgentWithExtras & { scope?: AgentScope };
+    const envelope = await fetchAgentEntity(agent.name, settingsDirectory);
+    if (!envelope) {
+      toast.error(t('settings.agents.sidebar.toast.renameFailed'));
+      return;
+    }
+    const body = envelope.config.request?.body;
     setAgentDraft({
       name: newName,
-      scope: extAgent.scope || 'user',
-      description: agent.description,
-      model: modelStr,
-      variant: agent.variant,
-      temperature: agent.temperature,
-      top_p: agent.topP,
-      prompt: agent.prompt,
-      mode: agent.mode,
-      permission: rulesetToPermissionConfig(agent.permission),
-      disable: draftAgent.disable,
+      scope: envelope.scope ?? extAgent.scope ?? 'user',
+      description: envelope.config.description ?? undefined,
+      model: envelope.config.model ?? null,
+      system: envelope.config.system ?? undefined,
+      steps: envelope.config.steps ?? undefined,
+      temperature: body?.temperature,
+      top_p: body?.top_p,
+      mode: envelope.config.mode ?? extAgent.mode,
+      permissions: envelope.config.permissions ?? undefined,
     });
     setSelectedAgent(newName);
     onItemSelect?.();
@@ -279,34 +215,26 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // Create new agent with new name and all existing config
-    const renameModelStr = renameDialogAgent.model?.providerID && renameDialogAgent.model?.modelID
-      ? `${renameDialogAgent.model.providerID}/${renameDialogAgent.model.modelID}`
-      : null;
-    const renameExt = renameDialogAgent as Agent & { scope?: AgentScope; disable?: boolean };
+    // A rename is a copy under a new name plus a delete, so it reads the
+    // agent's OWN stored entry for the same reason duplicating does.
+    // SAFETY: the agents store attaches `scope` to every entry it loads.
+    const renameExt = renameDialogAgent as AgentWithExtras & { scope?: AgentScope };
+    const renameEnvelope = await fetchAgentEntity(renameDialogAgent.name, settingsDirectory);
+    if (!renameEnvelope) {
+      toast.error(t('settings.agents.sidebar.toast.renameFailed'));
+      return;
+    }
     const createResult = await createAgent({
+      ...renameEnvelope.config,
       name: sanitizedName,
-      description: renameDialogAgent.description,
-      model: renameModelStr,
-      variant: renameDialogAgent.variant,
-      temperature: renameDialogAgent.temperature,
-      top_p: renameDialogAgent.topP,
-      prompt: renameDialogAgent.prompt,
-      mode: renameDialogAgent.mode,
-      permission: rulesetToPermissionConfig(renameDialogAgent.permission),
-      disable: renameExt.disable,
-      scope: renameExt.scope,
+      scope: renameEnvelope.scope ?? renameExt.scope,
     }, settingsDirectory);
 
     if (createResult.ok) {
       // Delete old agent
       const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope, settingsDirectory);
       if (deleteResult.ok) {
-        if (createResult.requiresManualRestart || deleteResult.requiresManualRestart) {
-          toast.warning(t('settings.agents.page.toast.savedManualRestart'));
-        } else {
-          toast.success(t('settings.agents.sidebar.toast.agentRenamed', { name: sanitizedName }));
-        }
+        toast.success(t('settings.agents.sidebar.toast.agentRenamed', { name: sanitizedName }));
         setSelectedAgent(sanitizedName);
       } else {
         toast.error(t('settings.agents.sidebar.toast.removeOldAfterRenameFailed'));
@@ -333,8 +261,9 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   // Filter out hidden agents (internal agents like title, compaction, summary)
   const visibleAgents = agents.filter((agent) => !isAgentHidden(agent));
-  const builtInAgents = visibleAgents.filter(isAgentBuiltIn);
-  const customAgents = visibleAgents.filter((agent) => !isAgentBuiltIn(agent));
+  const shownAgents = visibleAgents.filter((agent) => matchesRankQuery([agent.name, agent.description], query));
+  const builtInAgents = shownAgents.filter(isAgentBuiltIn);
+  const customAgents = shownAgents.filter((agent) => !isAgentBuiltIn(agent));
 
   // Group custom agents by subfolder
   const { groupedCustomAgents, ungroupedCustomAgents } = useMemo(() => {
@@ -371,6 +300,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
+        {visibleAgents.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
@@ -380,6 +310,8 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.empty.description')}</p>
           </div>
+        ) : shownAgents.length === 0 ? (
+          <SettingsSidebarNoMatches query={query} />
         ) : (
           <>
             {builtInAgents.length > 0 && (
@@ -398,7 +330,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
                     }}
                     onReset={() => handleResetAgent(agent)}
-                    onDuplicate={() => handleDuplicateAgent(agent)}
+                    onDuplicate={() => void handleDuplicateAgent(agent)}
                     getAgentModeIcon={getAgentModeIcon}
                     isMenuOpen={openMenuAgent === agent.name}
                     onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}
@@ -433,7 +365,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                         }}
                         onRename={() => handleOpenRenameDialog(agent)}
                         onDelete={() => handleDeleteAgent(agent)}
-                        onDuplicate={() => handleDuplicateAgent(agent)}
+                        onDuplicate={() => void handleDuplicateAgent(agent)}
                         getAgentModeIcon={getAgentModeIcon}
                         isMenuOpen={openMenuAgent === agent.name}
                         onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}
@@ -455,7 +387,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                     }}
                     onRename={() => handleOpenRenameDialog(agent)}
                     onDelete={() => handleDeleteAgent(agent)}
-                    onDuplicate={() => handleDuplicateAgent(agent)}
+                    onDuplicate={() => void handleDuplicateAgent(agent)}
                     getAgentModeIcon={getAgentModeIcon}
                     isMenuOpen={openMenuAgent === agent.name}
                     onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}

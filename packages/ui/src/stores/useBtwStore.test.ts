@@ -4,7 +4,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 
 const composerModel = { providerId: 'openai', modelId: 'gpt-5.6-terra' };
 const input = {
-  agents: [{ name: 'build', mode: 'primary' as const }, { name: 'plan', mode: 'primary' as const }],
+  agents: [{ name: 'build', mode: 'primary' as const, hidden: false }, { name: 'plan', mode: 'primary' as const, hidden: false }],
   savedAgent: null,
   savedModel: null,
   composerModel,
@@ -51,8 +51,8 @@ describe('useBtwStore', () => {
     expect(resolveBtwSelection({ ...input, composerVariant: null }).variant).toBeNull();
     expect(resolveBtwSelection({ ...input, composerModel: null }).model).toBeNull();
     expect(resolveBtwSelection({ ...input, agents: [
-      { name: 'hidden', mode: 'primary', hidden: true },
-      { name: 'custom', mode: 'primary' },
+      { name: 'hidden', mode: 'primary' as const, hidden: true },
+      { name: 'custom', mode: 'primary' as const, hidden: false },
     ] })).toEqual({ agent: 'custom', model: composerModel, variant: 'medium' });
   });
 

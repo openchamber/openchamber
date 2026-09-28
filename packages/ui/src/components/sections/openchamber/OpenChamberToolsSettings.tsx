@@ -18,7 +18,6 @@ import {
 import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
-import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -31,9 +30,9 @@ import { useI18n } from '@/lib/i18n';
  * belong together and not under the CLI's own configuration — the binary path
  * is about which OpenCode runs, these are about what it can do.
  *
- * A toggle is written immediately but only reaches agents once OpenCode
- * restarts, so each one records a pending restart rather than implying the
- * change is already live.
+ * A toggle only writes the setting: the server keeps OpenChamber's plugin
+ * injection in a watched file, so OpenCode picks the change up on its own and
+ * the tool list is live without a restart.
  */
 export const OpenChamberToolsSettings: React.FC = () => {
   const { t } = useI18n();
@@ -49,18 +48,23 @@ export const OpenChamberToolsSettings: React.FC = () => {
   // visible switch invites turning on something that was never announced.
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
+  const agentNotifyToolEnabled = useUIStore((state) => state.agentNotifyToolEnabled);
+  const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
     setAgentControlToolEnabled(enabled);
     void updateDesktopSettings({ agentControlToolEnabled: enabled });
-    recordDeferredOpenCodeRestart('cli', { id: 'agent-control-tool' });
   }, [setAgentControlToolEnabled]);
 
   const handleAgentWebToolChange = React.useCallback((enabled: boolean) => {
     setAgentWebToolEnabled(enabled);
     void updateDesktopSettings({ agentWebToolEnabled: enabled });
-    recordDeferredOpenCodeRestart('cli', { id: 'agent-web-tool' });
   }, [setAgentWebToolEnabled]);
+
+  const handleAgentNotifyToolChange = React.useCallback((enabled: boolean) => {
+    setAgentNotifyToolEnabled(enabled);
+    void updateDesktopSettings({ agentNotifyToolEnabled: enabled });
+  }, [setAgentNotifyToolEnabled]);
 
   // The dropdown lists installed extensions, so the catalog has to be loaded
   // here too: this page can be the first thing opened after a fresh start.
@@ -95,7 +99,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           void useAgentMemoryStore.getState().refresh();
         }
       });
-    recordDeferredOpenCodeRestart('cli', { id: 'agent-memory-tool' });
   }, [setAgentMemoryToolEnabled]);
 
   return (
@@ -152,6 +155,15 @@ export const OpenChamberToolsSettings: React.FC = () => {
             </SelectContent>
           </Select>
         </SettingsFieldRow>
+
+        <SettingsCheckboxRow
+          settingsItem="sessions.agent-notify-tool"
+          checked={agentNotifyToolEnabled}
+          onChange={handleAgentNotifyToolChange}
+          label={t('settings.openchamber.tools.field.agentNotifyTool')}
+          ariaLabel={t('settings.openchamber.tools.field.agentNotifyToolAria')}
+          info={t('settings.openchamber.tools.field.agentNotifyToolInfo')}
+        />
 
         {agentMemoryAvailable ? (
         <SettingsCheckboxRow

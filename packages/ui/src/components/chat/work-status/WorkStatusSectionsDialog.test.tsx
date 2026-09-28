@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { useUIStore } from '@/stores/useUIStore';
 import { I18nProvider } from '@/lib/i18n';
+import { useGuestsStore } from '@/lib/guests/store';
 import { WORK_STATUS_SECTION_IDS } from './sections';
 
 let WorkStatusSectionsDialog: typeof import('./WorkStatusSectionsDialog').WorkStatusSectionsDialog;
@@ -71,6 +72,7 @@ describe('section arrangement dialog', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    useGuestsStore.setState({ guests: [] });
     await win.happyDOM.close();
     restoreGlobals();
   });
@@ -86,6 +88,24 @@ describe('section arrangement dialog', () => {
     expect(useUIStore.getState().workStatusSectionOrder.slice(0, 3)).toEqual(['repository', 'usage', 'session']);
     expect(useUIStore.getState().workStatusHiddenSections).toEqual([]);
     expect(closeCount).toBe(0);
+  });
+
+  test('lists an extension section under its own title, toggles it, and keeps unavailable ones saved', async () => {
+    await act(async () => {
+      useGuestsStore.setState({ guests: [{
+        id: 'git-graph', name: 'Git graph', icon: 'git-commit', statusEntry: 'status/index.html', statusTitle: 'Recent commits',
+        capabilities: { requested: [], granted: [] },
+      }] });
+      useUIStore.getState().setWorkStatusSectionOrder(['ext:gone', 'ext:git-graph', 'session']);
+    });
+    const toggles = () => [...document.querySelectorAll<HTMLElement>('[aria-pressed]')];
+    const extensionRow = toggles().find((row) => row.textContent?.includes('Recent commits'));
+    if (!extensionRow) throw new Error('Expected the extension row');
+    expect(extensionRow.parentElement?.textContent).toContain('Extension');
+    expect(toggles().indexOf(extensionRow)).toBe(0);
+    await act(async () => extensionRow.click());
+    expect(useUIStore.getState().workStatusHiddenSections).toEqual(['ext:git-graph']);
+    expect(useUIStore.getState().workStatusSectionOrder.slice(0, 3)).toEqual(['ext:gone', 'ext:git-graph', 'session']);
   });
 
   test('visibility toggles preserve positions and remount restores the arrangement', async () => {

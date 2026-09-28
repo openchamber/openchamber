@@ -1,3 +1,5 @@
+import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+
 export const createBootstrapRuntime = (dependencies) => {
   const {
     createUiAuth,
@@ -63,7 +65,9 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       setAutoAcceptSession,
       agentToolRuntime,
+      pluginNotificationEmitter,
       desktopUpdater,
+      skipBodyParsing,
     } = options;
 
     const uiAuthController = createUiAuth({
@@ -90,9 +94,16 @@ export const createBootstrapRuntime = (dependencies) => {
       uiAuthController,
     });
 
-    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
     registerAgentToolRoutes(app, { express, agentToolRuntime });
+
+    const notificationEmitRoutes = registerNotificationEmitRoutes(app, {
+      express,
+      isAgentToolRequestAuthorized: (req) => agentToolRuntime?.authorizeRequest?.(req) === true,
+      emitter: pluginNotificationEmitter,
+    });
+    notificationEmitRoutes.registerPluginRoute();
 
     registerAuthAndAccessRoutes(app, {
       express,
@@ -109,6 +120,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+
+    notificationEmitRoutes.registerApiRoute();
 
     registerTtsRoutes(app, { sayTTSCapability });
 

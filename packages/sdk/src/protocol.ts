@@ -8,6 +8,8 @@ import {
   GUEST_ACCOUNT_MAX,
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
+  GUEST_FRAME_HEIGHT_MAX,
+  GUEST_COMMIT_SHA,
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
   GUEST_RESOLVE_ERROR_MAX,
@@ -212,7 +214,7 @@ const readyPayloadSchema = z.object({
   locale: z.string().min(1),
   directory: z.string().nullable(),
   session: sessionSnapshotSchema,
-  surface: z.enum(['panel', 'dialog', 'page', 'background']),
+  surface: z.enum(['panel', 'dialog', 'page', 'background', 'status']),
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
   item: guestItemSchema,
@@ -511,6 +513,22 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     id: z.string().min(1),
     payload: z.object({
       count: z.number().int().min(0).max(GUEST_BADGE_MAX).nullable(),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('open-commit'),
+    id: z.string().min(1),
+    payload: z.object({
+      sha: z.string().regex(GUEST_COMMIT_SHA),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('resize'),
+    id: z.string().min(1),
+    payload: z.object({
+      height: z.number().int().min(0).max(GUEST_FRAME_HEIGHT_MAX),
     }),
   }),
   z.object({

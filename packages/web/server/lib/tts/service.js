@@ -5,8 +5,8 @@
  * This bypasses mobile Safari's audio context restrictions.
  */
 
-import OpenAI from 'openai';
 import { readAuthFile } from '../opencode/auth.js';
+import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 // Voice options from OpenAI
@@ -53,11 +53,12 @@ class TTSService {
     this._lastApiKey = null;
   }
 
-  _getClient() {
+  async _getClient() {
     const apiKey = getOpenAIApiKey();
 
     // If API key changed or client doesn't exist, create new client
     if (apiKey && (!this._client || this._lastApiKey !== apiKey)) {
+      const OpenAI = await loadOpenAI();
       this._client = new OpenAI({ apiKey });
       this._lastApiKey = apiKey;
     }
@@ -66,7 +67,7 @@ class TTSService {
   }
 
   isAvailable() {
-    return this._getClient() !== null;
+    return Boolean(getOpenAIApiKey());
   }
 
   /**
@@ -96,9 +97,10 @@ class TTSService {
       if (apiKey) clientOpts.apiKey = apiKey;
       if (!apiKey) clientOpts.apiKey = 'not-required';
       if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;
+      const OpenAI = await loadOpenAI();
       client = new OpenAI(clientOpts);
     } else {
-      client = this._getClient();
+      client = await this._getClient();
     }
 
     if (!client) {
@@ -141,7 +143,7 @@ class TTSService {
    * Generate speech and return as a buffer (for caching)
    */
   async generateSpeechBuffer(options) {
-    const client = this._getClient();
+    const client = await this._getClient();
     if (!client) {
       throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY environment variable or configure OpenAI in OpenCode.');
     }

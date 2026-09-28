@@ -58,8 +58,11 @@ export type SessionSnapshot = {
   agent?: string;
 };
 
-/** Which host chrome mounted this iframe. Not `openSurface`. */
-export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background';
+/**
+ * Which host chrome mounted this iframe. Not `openSurface`. `status` is the
+ * extension's section in the chat's Work Status panel.
+ */
+export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status';
 
 export type GuestConnection = {
   connected: boolean;
@@ -275,6 +278,21 @@ export type BadgeRequest = {
   count: number | null;
 };
 
+/** A commit the guest asks the host to show in its Diff view. */
+export type OpenCommitRequest = {
+  sha: string;
+};
+
+/** Abbreviated or full hex commit id: 7 to 64 characters. The host resolves it in the open project. */
+export const GUEST_COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
+
+export const isGuestCommitSha = (value: string): boolean => GUEST_COMMIT_SHA.test(value);
+
+/** The content height the guest would like, in CSS px. Only the `status` surface sizes its frame from it. */
+export type ResizeRequest = {
+  height: number;
+};
+
 export type ToastKind = 'info' | 'success' | 'error';
 
 export type ToastRequest = {
@@ -369,6 +387,8 @@ export const GUEST_ITEM_MESSAGE_TEXT_MAX = 200_000;
 export const GUEST_ITEM_SESSION_MAX = 2_000_000;
 /** Largest count a rail badge shows. */
 export const GUEST_BADGE_MAX = 999;
+/** Largest height a `resize` message may carry; the host clamps further per surface. */
+export const GUEST_FRAME_HEIGHT_MAX = 10_000;
 /** Characters in a `resolve-result` error string. */
 export const GUEST_RESOLVE_ERROR_MAX = 500;
 
@@ -391,6 +411,7 @@ export const HOST_REQUEST_ERROR_CODES = [
   'DENIED',
   'NO_MODEL',
   'MODEL_FAILED',
+  'UNSUPPORTED',
 ] as const;
 
 export const SERVICE_STATUS_VALUES = ['stopped', 'starting', 'ready', 'failed'] as const;
@@ -495,6 +516,12 @@ export const clampBadgeCount = (count: number | null): number | null => {
   return Math.min(GUEST_BADGE_MAX, Math.max(0, Math.round(count)));
 };
 
+/** Resize heights are whole CSS pixels from 0 to `GUEST_FRAME_HEIGHT_MAX`; a non-number asks for 0. */
+export const clampFrameHeight = (height: number): number => {
+  if (!Number.isFinite(height)) return 0;
+  return Math.min(GUEST_FRAME_HEIGHT_MAX, Math.max(0, Math.ceil(height)));
+};
+
 /**
  * Which grant a file path needs. `/…` and `~/…` are outside the project and
  * go through the declared `filesystem` patterns; anything else is joined to
@@ -593,6 +620,8 @@ export type GuestFileListMessage = GuestCall<'file-list', FileListRequest>;
 export type GuestFileStatMessage = GuestCall<'file-stat', FileStatRequest>;
 export type GuestGenerateMessage = GuestCall<'generate', GenerateRequest>;
 export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
+export type GuestResizeMessage = GuestCall<'resize', ResizeRequest>;
+export type GuestOpenCommitMessage = GuestCall<'open-commit', OpenCommitRequest>;
 /** Answers a host `resolve` by `id`. The host sends no `result` back for it. */
 export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
 /** Completes a host `action`. The host sends no `result` back. */
@@ -626,6 +655,8 @@ export type GuestMessage =
   | GuestFileStatMessage
   | GuestGenerateMessage
   | GuestBadgeMessage
+  | GuestResizeMessage
+  | GuestOpenCommitMessage
   | GuestActionResultMessage
   | GuestResolveResultMessage;
 

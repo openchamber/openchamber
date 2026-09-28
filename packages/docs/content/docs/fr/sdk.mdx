@@ -89,7 +89,7 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` ouvre dans la fenêtre une page séparée à vous, pour que le sélecteur n'ait pas à partager de code avec le panneau de la barre latérale
 - sans cette clé, l'extension n'apparaît pas dans ce menu
 
-`ctx.surface` vaut `panel`, `dialog` ou `page`. Un clic sur un élément attaché place ses données dans `ctx.item`, sinon cette valeur est `null`.
+`ctx.surface` vaut `panel`, `dialog`, `page` ou `status`. Un clic sur un élément attaché place ses données dans `ctx.item`, sinon cette valeur est `null`.
 
 `contributes.page: true` propose votre panneau en plein écran dans le menu Pages des extensions au-dessus des sessions. `{ "entry": "panel/page.html", "title": "Board" }` utilise un HTML distinct et un titre facultatif. `panel.entry` reste obligatoire, avec le même bac à sable et les mêmes permissions. Seul l'utilisateur ouvre la page. Recharger, mettre en pause, supprimer ou changer de serveur la ferme.
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 Les écritures sont atomiques : OpenChamber écrit un fichier temporaire puis le renomme, donc un lecteur ne voit jamais un fichier à moitié écrit. Les fichiers sont lus et écrits en texte UTF-8, jusqu'à 2 Mo.
 
+## Une section dans Work Status
+
+`contributes.statusSection` ajoute votre propre section au panneau Work Status à côté du chat. Les utilisateurs l'activent, la désactivent et la déplacent dans la liste des sections de ce panneau, comme les sections intégrées.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` réutilise `panel.entry`.
+- `entry` est une page HTML séparée dans votre dossier. Avec elle, `panel.entry` n'est pas nécessaire, et l'extension peut n'être que cette section, sans icône dans la barre latérale.
+- `title` remplace le nom du panneau dans l'en-tête de la section, jusqu'à 60 caractères.
+- `height` est la hauteur de départ en pixels, de 24 à 320 (120 par défaut). Appelez [`host.setHeight()`](/sdk/host/) quand la taille de votre contenu change.
+
+Votre page voit `ctx.surface` à `status`. OpenChamber ne la charge que tant que le panneau Work Status est visible et votre section dépliée, et la décharge quand l'utilisateur replie la section. N'y gardez donc rien que vous ne puissiez reconstruire. Une extension réduite à une section peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `git-graph-status` est une section complète.
+
 ## Actions, commandes et le badge
 
 Au-delà de la barre latérale et du menu +, une extension peut apparaître à trois autres endroits. Tous transmettent à l'extension un `item`, de la même façon qu'un clic sur une puce.
@@ -219,7 +234,7 @@ Quand votre plugin OpenCode ou serveur MCP ajoute un outil, le chat affiche ses 
 
 `match` est le nom de l'outil tel qu'OpenCode le rapporte ; un `*` final correspond à un préfixe. `icon` est un nom Remixicon ou un fichier `.svg` dans votre paquet, comme `panel.icon`. `title` et `subtitle` sont des gabarits sur `input`, `output` et `metadata` de l'appel. `output` choisit comment le corps est rendu : `text`, `json` (un arbre), `markdown`, `code` avec un `language`, `table` avec `columns` (les lignes viennent du tableau de sortie ou de `output.items`) ou `auto` pour le rendu par défaut. Un `match` exact l'emporte sur un joker, et en cas d'égalité la première extension installée gagne. Aucune permission n'est nécessaire : cela ne change que la façon dont des données déjà dans le chat sont dessinées.
 
-Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et rien d'autre.
+Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et rien d'autre. L'autre exception est une section Work Status avec son propre `entry`, voir plus haut.
 
 ## Premières lignes dans le panneau
 

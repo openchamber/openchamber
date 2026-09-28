@@ -297,7 +297,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   // Cross-project seed for clients that do not initialize every directory:
-  // live status per session plus the permission and question requests still
+  // live status per session plus the permission requests and forms still
   // waiting for an answer. Both come from the server's single upstream stream.
   app.get('/api/sessions/status', async (_req, res) => {
     await ensureSessionWatcher();

@@ -16,6 +16,8 @@ import {
   isGuestRequestPath,
   clampAttachRequest,
   clampBadgeCount,
+  clampFrameHeight,
+  isGuestCommitSha,
   clampPromptRequest,
   clampStartSessionRequest,
   readHostMessage,
@@ -118,6 +120,13 @@ export type HostClient = {
   onAction: (handler: (item: GuestActionItem) => void | Promise<void>) => () => void;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
+  /**
+   * Show a commit of the open project in the host's Diff view (commit scope).
+   * `sha` is 7 to 64 hex characters; the host reads the commit itself. No open
+   * project is `NO_DIRECTORY`, an unknown commit `NOT_FOUND`, a host without a
+   * Diff view `UNSUPPORTED`.
+   */
+  openCommit: (sha: string) => Promise<void>;
   openSurface: (surfaceId: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
@@ -159,6 +168,14 @@ export type HostClient = {
   generate: (request: GenerateRequest) => Promise<GenerateResult>;
   /** Number on this guest's rail icon (0 to `GUEST_BADGE_MAX`); `null` clears it. Opening the panel clears it too. */
   setBadge: (count: number | null) => Promise<void>;
+  /**
+   * The height the guest's content needs, in CSS px. On the Work Status
+   * `status` surface the host sizes the frame to it, clamped to
+   * `GUEST_STATUS_SECTION_HEIGHT_MIN`..`GUEST_STATUS_SECTION_HEIGHT_MAX`;
+   * taller content scrolls inside the frame. Other surfaces fill their host
+   * chrome and ignore it.
+   */
+  setHeight: (height: number) => Promise<void>;
   dispose: () => void;
 };
 
@@ -565,6 +582,13 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { url },
     }),
+    openCommit: (sha) => (isGuestCommitSha(sha) ? request({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'open-commit',
+      id: nextId(ids),
+      payload: { sha },
+    }) : Promise.reject(new HostRequestError('HOST_REJECTED', 'Commit id must be 7 to 64 hex characters.'))),
     openSurface: (surfaceId) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
@@ -781,6 +805,13 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       type: 'badge',
       id: nextId(ids),
       payload: { count: clampBadgeCount(count) },
+    }),
+    setHeight: (height) => request({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'resize',
+      id: nextId(ids),
+      payload: { height: clampFrameHeight(height) },
     }),
     dispose: () => {
       for (const subscriptionId of workspaceListeners.keys()) {

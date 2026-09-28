@@ -3,7 +3,6 @@ import { clearChatDraft, createChatDraftIdentity } from '@/lib/chatDraftPersiste
 import { createMessageQueueTarget, isServerOwnedMessageQueue, useMessageQueueStore } from '@/stores/messageQueueStore';
 import { createInputHistoryIdentity, useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
-import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -22,7 +21,6 @@ export const cleanupPersistedSessionState = (identity: {
     if (isServerOwnedMessageQueue()) useMessageQueueStore.getState().forgetQueue(queueTarget);
     else useMessageQueueStore.getState().clearQueue(queueTarget);
   }
-  useTodosPersistStore.getState().clearSessionTodos(identity.runtimeKey, identity.directory, identity.sessionId);
   useSessionFoldersStore.getState().removeSessionEverywhere(identity.runtimeKey, identity.sessionId);
   useSessionMultiSelectStore.getState().removeMany([identity.sessionId]);
   useInlineCommentDraftStore.getState().clearSessionDrafts(identity.runtimeKey, identity.directory, identity.sessionId);

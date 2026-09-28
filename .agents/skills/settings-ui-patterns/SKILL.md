@@ -22,7 +22,7 @@ chrome, section headers, field rows, checkbox rows, or info tooltips with raw
 divs — use the primitives, and extend them (in the shared file) when a new
 shape is genuinely missing.
 
-- Flat hierarchy through spacing and typography; no cards, boxed backgrounds, or row chrome.
+- Flat hierarchy through spacing and typography; no boxed backgrounds or row chrome. Card grids are the one exception, for browse pages (see `references/layout.md`).
 - Secondary helper text is hidden behind an info icon (`info` prop) by default; the default view stays quiet.
 - Controls have one standard size (`h-9` / select `size="settings"`) and capped widths — no full-bleed inputs.
 - Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
@@ -58,7 +58,7 @@ Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, 
 ## Description Policy (info hints)
 
 - Explanatory prose goes behind the info icon via the `info` prop by default.
-- When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Large-text paste modes and send shortcuts with expanded-composer exceptions need this explanation. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
+- When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Option lists whose labels already read as complete choices (large-text paste modes, send shortcut) keep the explanation behind `info` even when it carries an exception. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
 - Stays visible: security/data-loss warnings, destructive consequences, required syntax/placeholder lists the user reads while typing, dynamic status, empty states, validation errors, active-flow wizard instructions.
 - Mixed text: keep the warning sentence visible, move the explanation to `info`.
 

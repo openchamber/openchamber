@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { z } from 'zod';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { getDeviceInfo } from '@/lib/device';
 import { useUIStore } from './useUIStore';
@@ -138,6 +139,35 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   return params;
 }
 
+function parseUpdateCheckResponse(data: {
+  available?: boolean;
+  version?: string;
+  currentVersion?: string;
+  body?: string;
+  releaseUrl?: string;
+  downloadUrl?: string;
+  nextSuggestedCheckInSec?: number;
+  packageManager?: string;
+  updateCommand?: string;
+  installBlocked?: string;
+}): UpdateInfo {
+  return {
+    available: data.available ?? false,
+    version: data.version,
+    currentVersion: data.currentVersion ?? 'unknown',
+    body: data.body,
+    releaseUrl: data.releaseUrl,
+    downloadUrl: data.downloadUrl,
+    nextSuggestedCheckInSec:
+      typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
+        ? data.nextSuggestedCheckInSec
+        : undefined,
+    packageManager: data.packageManager,
+    updateCommand: data.updateCommand,
+    installBlocked: data.installBlocked === 'service-manager' ? 'service-manager' : undefined,
+  };
+}
+
 async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: string): Promise<UpdateInfo | null> {
   try {
     const params = mapRuntimeParams(runtime);
@@ -157,25 +187,40 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
       throw new Error(`Server responded with ${response.status}`);
     }
 
-    const data = await response.json();
-    return {
-      available: data.available ?? false,
-      version: data.version,
-      currentVersion: data.currentVersion ?? 'unknown',
-      body: data.body,
-      releaseUrl: data.releaseUrl,
-      downloadUrl: data.downloadUrl,
-      nextSuggestedCheckInSec:
-        typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
-          ? data.nextSuggestedCheckInSec
-          : undefined,
-      packageManager: data.packageManager,
-      updateCommand: data.updateCommand,
-    };
+    return parseUpdateCheckResponse(await response.json());
   } catch (error) {
     console.warn('Failed to check for updates:', error);
     return null;
   }
+}
+
+const updateCheckFailure = z.object({ error: z.string().trim().min(1) });
+
+/**
+ * Checks the OpenChamber server the native app is connected to, not the app
+ * itself. The shared store's `mobile` check is about the app build (store or
+ * APK updates); this asks the server about its own version, exactly like a
+ * browser on that server would, so the result can be installed through the
+ * server's own update route. Throws on failure so callers never read a failed
+ * check as "up to date".
+ */
+export async function checkConnectedServerForUpdates(): Promise<UpdateInfo> {
+  const params = mapRuntimeParams('web');
+  // The app's own check already reports usage for this install; asking about
+  // the server must not count the phone a second time as a web client.
+  params.set('reportUsage', 'false');
+  const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    // A desktop host that cannot update itself (for example a Linux build
+    // outside its AppImage) explains why in `error`; keep that reason.
+    const failure = updateCheckFailure.safeParse(payload);
+    throw new Error(failure.success ? failure.data.error : `Server responded with ${response.status}`);
+  }
+  return parseUpdateCheckResponse(payload ?? {});
 }
 
 function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {

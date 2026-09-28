@@ -1,4 +1,4 @@
-import { readAuthFile, writeAuthFile } from '../../opencode/auth.js';
+import { readAuthFile } from '../../opencode/auth.js';
 import { buildResult, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'xai';
@@ -104,9 +104,9 @@ const refreshXaiOauth = async (entry) => {
         expires
       };
 
-      const auth = readAuthFile();
-      auth.xai = refreshed;
-      writeAuthFile(auth);
+      // The refreshed token is kept in memory for this process only: OpenCode
+      // 2.x owns `auth.json` (it imports it once and never reads it again), so
+      // writing it back would drift from the credential OpenCode actually uses.
       return refreshed;
     })().finally(() => {
       refreshPromise = null;

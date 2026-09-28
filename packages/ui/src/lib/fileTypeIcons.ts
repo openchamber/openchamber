@@ -213,6 +213,9 @@ const resolveIconName = (filePath: string, extension?: string): string => {
   if (fileName.startsWith('.env')) {
     return 'settings';
   }
+  if (fileName.endsWith('.excalidraw.md')) {
+    return 'excalidraw';
+  }
 
   const language = getLanguageFromExtension(filePath);
   if (language && languageIconMap[language]) {

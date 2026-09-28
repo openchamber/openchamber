@@ -23,6 +23,7 @@ const ALLOWED_CALLERS = new Set([
   "initial-page",
   "known-project",
   "known-worktree",
+  "location-shutdown",
   "older",
   "pagination",
   "prefetch",

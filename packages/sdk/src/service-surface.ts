@@ -15,9 +15,19 @@
  *   is "the current picture, now". The host asks for one frame at a time per
  *   viewer, so a slow viewer never piles up frames: that is the backpressure.
  * - `POST /surface/input`: `{ events: SurfaceInputEvent[] }`, coordinates in
- *   frame pixels. Sent only while the user holds control.
- * - `POST /surface/control`: `{ controller }` whenever control changes, so the
- *   service can pause its own automation while the user is in.
+ *   frame pixels. Sent only while the user holds control. Headers name the
+ *   viewer (`x-surface-viewer`) and the frame it last drew
+ *   (`x-surface-frame-seq`, the service's own sequence number, `0` before the
+ *   first). Answer 409 to refuse input made on a picture you no longer show.
+ * - `POST /surface/control`: `{ controller, viewer? }` whenever control
+ *   changes, so the service can pause its own automation while the user is
+ *   in. `viewer` is the controlling viewer's id when `controller` is `user`.
+ *
+ * A page of the same extension open in the same window as a viewer (a
+ * docked toolbar, an extension page) reaches the service with that viewer's
+ * `x-surface-viewer`, `x-surface-viewer-controls` (`1` while it holds
+ * control), and `x-surface-frame-seq` on every `serviceRequest`. The host
+ * sets all three itself; without a viewer in that window they are absent.
  * - `POST /surface/resize`: `{ width, height }` the panel can show; the
  *   service answers the size it settled on, or 400 to keep its own.
  * - `GET /surface/clipboard`: `{ text }`, what the user copied inside the
@@ -36,6 +46,12 @@ export const SURFACE_HEIGHT_HEADER = 'x-surface-height';
 export const SURFACE_TITLE_HEADER = 'x-surface-title';
 /** `1` while the service's own automation (an agent) is driving the surface. */
 export const SURFACE_AGENT_ACTIVE_HEADER = 'x-surface-agent-active';
+/** Host → service: the host-issued id of the viewer a request comes from. */
+export const SURFACE_VIEWER_HEADER = 'x-surface-viewer';
+/** Host → service: the service's sequence number of the frame that viewer last drew; `0` before its first. */
+export const SURFACE_FRAME_SEQ_HEADER = 'x-surface-frame-seq';
+/** Host → service, on page `serviceRequest`s only: `1` while that viewer holds control, else `0`. */
+export const SURFACE_VIEWER_CONTROLS_HEADER = 'x-surface-viewer-controls';
 
 export const SURFACE_FRAME_MIMES = ['image/jpeg', 'image/png'] as const;
 export type SurfaceFrameMime = (typeof SURFACE_FRAME_MIMES)[number];
@@ -93,7 +109,11 @@ export type SurfaceInputBatch = { events: SurfaceInputEvent[] };
 export const SURFACE_CONTROLLERS = ['none', 'agent', 'user'] as const;
 export type SurfaceController = (typeof SURFACE_CONTROLLERS)[number];
 
-export type SurfaceControlNotice = { controller: SurfaceController };
+export type SurfaceControlNotice = {
+  controller: SurfaceController;
+  /** The controlling viewer's id (`x-surface-viewer`), present only when `controller` is `user`. */
+  viewer?: string;
+};
 
 export type SurfaceResizeRequest = { width: number; height: number };
 export type SurfaceResizeAnswer = { width: number; height: number };
@@ -183,17 +203,19 @@ const CONTROLLERS: ReadonlySet<string> = new Set(SURFACE_CONTROLLERS);
 
 /** A service's read of the `POST /surface/control` body. */
 export const readSurfaceControlNotice = (body: string): SurfaceControlNotice | null => {
-  let parsed: { controller?: unknown } | null;
+  let parsed: { controller?: unknown; viewer?: unknown } | null;
   try {
     parsed = JSON.parse(body);
   } catch {
     return null;
   }
   if (Object(parsed) !== parsed || parsed === null) return null;
-  const { controller } = parsed;
+  const { controller, viewer } = parsed;
   if (!isText(controller) || !CONTROLLERS.has(controller)) return null;
   // SAFETY: membership in SURFACE_CONTROLLERS was just checked.
-  return { controller: controller as SurfaceController };
+  const notice: SurfaceControlNotice = { controller: controller as SurfaceController };
+  if (controller === 'user' && isText(viewer) && viewer.length > 0) notice.viewer = viewer;
+  return notice;
 };
 
 /** A service's read of the `POST /surface/resize` body. */

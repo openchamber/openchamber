@@ -45,6 +45,7 @@
     },
     "packages/electron": {
       "entry": [
+        "entry.mjs",
         "main.mjs",
         "preload.mjs",
         "tray.mjs",

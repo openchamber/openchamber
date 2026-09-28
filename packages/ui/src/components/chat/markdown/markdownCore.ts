@@ -8,6 +8,7 @@ import { isAppLinkUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
+import { streamTuning } from '../lib/streamTuningFlags';
 import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
@@ -192,6 +193,9 @@ type MarkdownBlock = {
   // very large open fence falls back to plain text until it closes, keeping
   // the repeated worker re-tokenization bounded.
   highlight: boolean;
+  // Set when the lexer already failed on this text. Parsing runs the same
+  // lexer and would fail the same way, after the same cost.
+  plainText?: true;
 };
 
 const hasReferenceDefinitions = (text: string): boolean =>
@@ -224,6 +228,73 @@ const heal = (text: string): string => {
   }
 };
 
+// While a fence stays open, every new line of code used to lex the whole
+// message again, although nothing above the fence can change and everything
+// after its opening line is code. The previous split is remembered, and text
+// that only extends an open trailing fence reuses it: the blocks above are
+// returned as they were and the fence block grows by the added text. Anything
+// that could change the split (a closing fence, a reference definition) takes
+// the full path. A few entries cover parts that stream side by side.
+type LiveSplit = { text: string; blocks: MarkdownBlock[]; fence: { char: string; size: number } };
+
+const LIVE_SPLIT_MEMO_MAX = 4;
+let liveSplits: LiveSplit[] = [];
+const liveSplitStats = { reused: 0, lexed: 0 };
+
+const openFenceMarker = (raw: string): { char: string; size: number } | null => {
+  if (!hasOpenFence(raw)) return null;
+  const mark = raw.match(/^[ \t]{0,3}(`{3,}|~{3,})/)?.[1];
+  return mark ? { char: mark[0] ?? '`', size: mark.length } : null;
+};
+
+const rememberLiveSplit = (text: string, blocks: MarkdownBlock[]): void => {
+  // The lexer path keeps a text with reference definitions as one healed
+  // block; extending it as a plain fence would render it differently.
+  if (hasReferenceDefinitions(text)) return;
+  const last = blocks.at(-1);
+  const fence = last ? openFenceMarker(last.raw) : null;
+  // The fence block has to be exactly the tail of the text for the added text
+  // to belong to it, and a block the lexer failed on is not a split at all.
+  if (!last || last.plainText || !fence || !text.endsWith(last.raw)) return;
+  liveSplits = [{ text, blocks, fence }, ...liveSplits.filter((entry) => entry.text !== text)].slice(0, LIVE_SPLIT_MEMO_MAX);
+};
+
+const extendOpenFence = (text: string): MarkdownBlock[] | null => {
+  let base: LiveSplit | undefined;
+  for (const entry of liveSplits) {
+    if (entry.text.length >= text.length || (base && base.text.length >= entry.text.length)) continue;
+    if (text.startsWith(entry.text)) base = entry;
+  }
+  if (!base) return null;
+
+  // Judge whole lines: the line the previous text ended in may only now have
+  // become a closing fence or a reference definition.
+  const region = text.slice(base.text.lastIndexOf('\n') + 1);
+  if (hasReferenceDefinitions(region)) return null;
+  const closing = new RegExp(`^[\\t ]{0,3}${base.fence.char}{${base.fence.size},}[\\t ]*$`, 'm');
+  if (closing.test(region)) return null;
+
+  const previous = base.blocks.at(-1);
+  if (!previous) return null;
+  const raw = previous.raw + text.slice(base.text.length);
+  const blocks = [
+    ...base.blocks.slice(0, -1),
+    { raw, src: raw, mode: 'live' as const, highlight: raw.split('\n').length <= OPEN_FENCE_HIGHLIGHT_LINE_LIMIT },
+  ];
+  liveSplits = [{ text, blocks, fence: base.fence }, ...liveSplits.filter((entry) => entry !== base)].slice(0, LIVE_SPLIT_MEMO_MAX);
+  return blocks;
+};
+
+/** Test-only: forget remembered splits and read how many were reused. */
+export const resetLiveSplitMemoForTests = (): void => {
+  liveSplits = [];
+  liveSplitStats.reused = 0;
+  liveSplitStats.lexed = 0;
+};
+export const __liveSplitStatsForTests = () => ({ ...liveSplitStats });
+export const __streamBlocksForTests = (text: string, live: boolean): Array<Pick<MarkdownBlock, 'raw' | 'src' | 'mode' | 'highlight'>> =>
+  streamBlocks(text, live).map(({ raw, src, mode, highlight }) => ({ raw, src, mode, highlight }));
+
 /**
  * Split markdown into render blocks. When not streaming, returns a single
  * `full` block. While streaming, heals incomplete syntax and isolates an
@@ -232,6 +303,18 @@ const heal = (text: string): string => {
  */
 const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
   if (!live) return [{ raw: text, src: text, mode: 'full', highlight: true }];
+  const extended = streamTuning.reuseLiveSplit() ? extendOpenFence(text) : null;
+  if (extended) {
+    liveSplitStats.reused += 1;
+    return extended;
+  }
+  liveSplitStats.lexed += 1;
+  const blocks = lexStreamBlocks(text);
+  rememberLiveSplit(text, blocks);
+  return blocks;
+};
+
+const lexStreamBlocks = (text: string): MarkdownBlock[] => {
   // Reference-style links/footnotes span multiple tokens (definition elsewhere);
   // keep them as a single block so per-block parsing doesn't break the refs.
   if (hasReferenceDefinitions(text)) {
@@ -242,7 +325,7 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
   try {
     tokens = inlineImageParser.lexer(text);
   } catch {
-    return [{ raw: text, src: heal(text), mode: 'live', highlight: true }];
+    return [{ raw: text, src: text, mode: 'live', highlight: true, plainText: true }];
   }
 
   let tail = -1;
@@ -497,7 +580,8 @@ const renderMathInText = (text: string): string =>
     if (display !== undefined) {
       return renderKatex(unescapeHtml(display), match, true);
     }
-    if (inline !== undefined && !DOLLAR_AMOUNT_RE.test(inline)) {
+    // The quote guard also runs on the decoded text, where `&quot;` is a quote.
+    if (inline !== undefined && !unescapeHtml(inline).includes('"') && !DOLLAR_AMOUNT_RE.test(inline)) {
       return renderKatex(unescapeHtml(inline), match, false);
     }
     return match;
@@ -709,6 +793,7 @@ const renderPlainText = (text: string): string =>
   `<div class="whitespace-pre-wrap break-words">${escapeRawMarkdownHtml(text)}</div>`;
 
 const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
+  if (block.plainText) return renderPlainText(block.raw);
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   let parsed: string;
   try {

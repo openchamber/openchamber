@@ -9,6 +9,7 @@ import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useSmallModelAvailability } from '@/hooks/useSmallModelAvailability';
 
 interface SessionGoalButtonProps {
   sessionId: string | null;
@@ -38,6 +39,11 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
   const armed = useSessionGoalArmStore((state) => state.armed);
   const setArmed = useSessionGoalArmStore((state) => state.setArmed);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  // The goal loop audits every turn with the small model; without one a goal
+  // would stop after two failed audits, so arming is disabled with the reason.
+  // A goal that already exists stays manageable.
+  const smallModel = useSmallModelAvailability(directory, !isVSCodeRuntime() && enabled);
+  const noSmallModel = smallModel === 'unavailable' && !goal;
 
   // The goal loop runs in the web server; the VS Code extension only renders
   // goal state. Arming a goal there would create one nothing drives, so the
@@ -61,7 +67,9 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
 
   const label = goal
     ? t('chat.goal.button.manageAria')
-    : (armed ? t('chat.goal.button.disarmAria') : t('chat.goal.button.armAria'));
+    : noSmallModel
+      ? t('chat.goal.button.noSmallModel')
+      : (armed ? t('chat.goal.button.disarmAria') : t('chat.goal.button.armAria'));
 
   // Any existing goal (live or completed) opens the manage dialog — a
   // completed goal must be removed there before a new one can be armed.
@@ -70,15 +78,17 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
       setDialogOpen(true);
       return;
     }
+    if (noSmallModel) return;
     setArmed(!armed);
   };
 
   const button = (
     <button
       type="button"
-      className={footerIconButtonClass}
+      className={cn(footerIconButtonClass, noSmallModel && 'opacity-50')}
       style={iconColor ? { color: iconColor } : undefined}
       onClick={handleClick}
+      aria-disabled={noSmallModel || undefined}
       // Same guard as PermissionAutoAcceptButton, but only for the ARM
       // toggle: arming happens mid-typing (the next message IS the
       // objective), so that tap must not dismiss the soft keyboard or

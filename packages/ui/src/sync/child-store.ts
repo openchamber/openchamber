@@ -18,7 +18,7 @@ export type DirectoryStore = State & {
 type BlockingRequestSubscriber = () => void
 type BlockingRequestSubscribers = WeakMap<StoreApi<DirectoryStore>, Map<string, Set<BlockingRequestSubscriber>>>
 const permissionSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
-const questionSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
+const formSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
 
 type SessionMessageChange = {
   messagesChanged: boolean
@@ -80,21 +80,21 @@ export function subscribeDirectoryPermission(
   return subscribeBlockingRequest(permissionSubscribersByStore, store, sessionID, listener)
 }
 
-export function subscribeDirectoryQuestion(
+export function subscribeDirectoryForm(
   store: StoreApi<DirectoryStore>,
   sessionID: string,
   listener: BlockingRequestSubscriber,
 ): () => void {
-  return subscribeBlockingRequest(questionSubscribersByStore, store, sessionID, listener)
+  return subscribeBlockingRequest(formSubscribersByStore, store, sessionID, listener)
 }
 
-export function subscribeDirectoryQuestions(
+export function subscribeDirectoryForms(
   store: StoreApi<DirectoryStore>,
   sessionIDs: readonly string[],
   listener: BlockingRequestSubscriber,
 ): () => void {
   const unsubscribers = [...new Set(sessionIDs.filter(Boolean))].map((sessionID) => (
-    subscribeBlockingRequest(questionSubscribersByStore, store, sessionID, listener)
+    subscribeBlockingRequest(formSubscribersByStore, store, sessionID, listener)
   ))
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe()
@@ -127,7 +127,7 @@ function subscribeBlockingRequest(
 
 const notifyChangedBlockingRequests = <T,>(
   subscribersByStore: BlockingRequestSubscribers,
-  counter: "permissionChangeCallbacks" | "questionChangeCallbacks",
+  counter: "permissionChangeCallbacks" | "formChangeCallbacks",
   store: StoreApi<DirectoryStore>,
   current: Record<string, T>,
   previous: Record<string, T>,
@@ -207,6 +207,7 @@ export type DirectoryBootstrapReason =
   | "project-expanded"
   | "worktree-expanded"
   | "server-connected"
+  | "location-shutdown"
   | "action-demand"
 
 export type DirectoryBootstrapDemand = {
@@ -283,7 +284,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     if (state.icon !== prev.icon) persistIcon(directory, state.icon)
     if (state.session !== prev.session) persistSessions(directory, state.session)
     notifyChangedBlockingRequests(permissionSubscribersByStore, "permissionChangeCallbacks", store, state.permission, prev.permission)
-    notifyChangedBlockingRequests(questionSubscribersByStore, "questionChangeCallbacks", store, state.question, prev.question)
+    notifyChangedBlockingRequests(formSubscribersByStore, "formChangeCallbacks", store, state.form, prev.form)
     notifyChangedSessionMessages(store, state, prev)
   })
 

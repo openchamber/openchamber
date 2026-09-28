@@ -15,7 +15,8 @@ export const createPushRuntime = (deps) => {
   const {
     fsPromises,
     path,
-    webPush,
+    // Resolves the web-push module; it is loaded on first use, not with the server.
+    loadWebPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
@@ -86,6 +87,7 @@ export const createPushRuntime = (deps) => {
       return { publicKey: existing.publicKey, privateKey: existing.privateKey };
     }
 
+    const webPush = await loadWebPush();
     const generated = webPush.generateVAPIDKeys();
     const next = {
       ...settings,
@@ -210,6 +212,7 @@ export const createPushRuntime = (deps) => {
     };
 
     try {
+      const webPush = await loadWebPush();
       await webPush.sendNotification(pushSubscription, body);
     } catch (error) {
       const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : null;
@@ -344,6 +347,7 @@ export const createPushRuntime = (deps) => {
       console.warn('[Push] No public origin configured for VAPID; set OPENCHAMBER_VAPID_SUBJECT or enable push once from a real origin.');
     }
 
+    const webPush = await loadWebPush();
     webPush.setVapidDetails(subject, keys.publicKey, keys.privateKey);
     pushInitialized = true;
   };

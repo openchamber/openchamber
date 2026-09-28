@@ -1,9 +1,11 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import type { Message, Part, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
+import { readSubagentRun } from '@/lib/opencode/subagent-run';
 import type { State } from '@/sync/types';
 import { findMessageIndex } from '@/sync/message-ordering';
 
 type RevertedMessageRecord = {
-    message: Message & { role: 'user' };
+    /** A prompt, or a background subagent run report (it stands where a prompt would). */
+    message: UserMessage | SyntheticMessage;
     parts: Part[];
 };
 
@@ -20,8 +22,8 @@ export const EMPTY_REVERTED_MESSAGE_DOCK_STATE: RevertedMessageDockState = {
     records: EMPTY_REVERTED_RECORDS,
 };
 
-const isUserMessage = (message: Message): message is Message & { role: 'user' } => {
-    return message.role === 'user';
+const isRevertedEntry = (message: Message): message is UserMessage | SyntheticMessage => {
+    return message.role === 'user' || readSubagentRun(message) !== undefined;
 };
 
 const areRecordsEqual = (left: RevertedMessageRecord[], right: RevertedMessageRecord[]): boolean => {
@@ -45,7 +47,7 @@ export const buildRevertedMessageDockState = (
     }
 
     const session = state.session.find((item) => item.id === sessionId);
-    const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+    const revertMessageID = session?.revert?.messageID;
     if (!revertMessageID) {
         return EMPTY_REVERTED_MESSAGE_DOCK_STATE;
     }
@@ -58,7 +60,7 @@ export const buildRevertedMessageDockState = (
     const records: RevertedMessageRecord[] = [];
     for (let index = revertIndex; index < messages.length; index += 1) {
         const message = messages[index];
-        if (!isUserMessage(message)) {
+        if (!isRevertedEntry(message)) {
             continue;
         }
         records.push({

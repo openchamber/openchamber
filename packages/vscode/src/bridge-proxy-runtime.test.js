@@ -15,7 +15,7 @@ describe('bridge proxy runtime', () => {
     const deps = createDeps();
 
     const response = await handleProxyBridgeMessage(
-      { id: '1', type: 'api:proxy', payload: { method: 'GET', path: '/global/event?lastEventId=evt-1' } },
+      { id: '1', type: 'api:proxy', payload: { method: 'GET', path: '/api/event?lastEventId=evt-1' } },
       undefined,
       deps,
     );

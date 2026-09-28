@@ -175,7 +175,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // context, so counting it here contradicts the MCP section right above,
   // which shows the same servers switched off.
   const mcpCount = React.useMemo(
-    () => Object.values(mcpStatus ?? {}).filter((entry) => entry?.status === 'connected').length,
+    () => Object.values(mcpStatus ?? {}).filter((entry) => entry?.status.status === 'connected').length,
     [mcpStatus],
   );
 

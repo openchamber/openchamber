@@ -1,6 +1,6 @@
 ---
 title: Entegrasyonlar
-description: GitHub ve Linear’ı OpenChamber’a bağlayın.
+description: OpenChamber’ın birlikte çalıştığı hizmetleri ve abonelikleri bağlayın.
 ---
 
 # Entegrasyonlar
@@ -45,6 +45,31 @@ Sohbet yazma alanında **Link Linear Issue** seçin. Issue, bir sonraki mesajın
 ### Oturum yorumları
 
 Linear kartında **Session comments** açın; bir issue’dan başlatılan oturum başladığında, bittiğinde ya da başarısız olduğunda o issue’ya oturumu açan bir bağlantıyla yorum bırakır. Yorumlar yalnızca bu OpenChamber sunucusunun herkese açık bir adresi olduğunda gönderilir; böylece bağlantı issue’daki herkes için çalışır. Yerel ya da özel bir adreste hiçbir şey gönderilmez.
+
+## Bir entegrasyon kurun
+
+1. **Settings → Integrations** bölümünü açın.
+2. Integration'ı bulun ve **Install** seçin.
+3. İstenince OpenCode'u yeniden başlatın. Provider yeniden başlatmadan sonra görünür.
+4. **Set up** seçin ve giriş yapın. Modeller sonra sohbet model seçicisinde görünür.
+
+Integration'lar kullanıcı düzeyinde kurulur, bu yüzden her projede çalışır. Aynı karttan istediğiniz zaman güncelleyebilir ya da kaldırabilirsiniz.
+
+## Claude Code
+
+Claude Code, Claude Pro ya da Max planınızı bilgisayarınızdaki Claude Code CLI üzerinden kullanır. API anahtarı gerekmez.
+
+1. Integration'ı kurun. Yukarıya bakın.
+2. **Set up** seçin ve giriş yapın. Henüz Claude Code CLI'nız yoksa kurulum önce onu yüklemeyi önerir, sonra giriş yaptırır.
+
+**Claude hesabınız nasıl güvende kalır:** Bu integration, Anthropic'in resmi Claude Agent SDK'sını ve kurulu Claude Code CLI'nızı kullanır. OAuth'u kaçırmaz, tarayıcı token'larını çıkarmaz ya da yeniden oynatmaz, desteklenmeyen bir istemciyi taklit etmez ve Anthropic'in kimlik doğrulama akışını atlamaz. Anthropic'in desteklediği erişim yolunda kalır. Bu yüzden token kaçırma ya da yetkisiz kimlik doğrulama kestirmelerinin hesap banı riskini taşımaz.
+
+## Güncelleme ya da kaldırma
+
+- **Update** eklentinin en son yayımlanmış sürümünü kurar.
+- **Remove** eklentiyi OpenCode config'inizden siler. OpenCode yenilendikten sonra provider yüklenmeyi bırakır.
+
+Bir kartta girdilerin elle yönetilmesi gerektiği yazıyorsa, **Manage plugins** seçin ve kopyaları orada temizleyin.
 
 ## İlgili
 

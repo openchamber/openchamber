@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | 应用的语言标签 |
 | `directory` | 当前项目目录，或 `null` |
 | `session` | `{ id, title, busy }` 或 `null`。没有标题时回退为会话 id。`busy` 是实时状态。会话有 `model` 和 `agent`（OpenCode 的 agent）时也会出现。 |
-| `surface` | 侧栏为 `panel`，附加窗口为 `dialog`，全屏为 `page` |
+| `surface` | 侧栏为 `panel`，附加窗口为 `dialog`，全屏为 `page`，Work Status 面板中为 `status` |
 | `item` | 此界面因何而打开，或 `null`：用户点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`）、来自你声明的某个操作的消息（`kind: "message"`）或会话（`kind: "session"`）。见[操作](/sdk/#操作命令和徽标)。 |
 | `connection` | 你的集成的 `{ connected, account }` |
 | `settings` | 你在 `integration.settings` 中声明的字段的值 |
@@ -65,6 +65,8 @@ const host = connectHost();
 | `generate({ prompt, system?, maxOutputTokens? })` | 来自用户 Small Model 的一次性文本。返回 `{ text }`。需要 `model` 能力。 |
 | `onResolve(handler)` | 注册你的斜杠命令处理函数。它收到 `{ command, args }`，返回一个要附加的条目或 `null`。 |
 | `setBadge(count)` | 在你的侧栏图标上显示一个数字（0 到 999），或传 `null` 清除 |
+| `openCommit(sha)` | 在当前项目的该提交上打开 Diff 视图。`sha` 为 7 到 64 个十六进制字符；OpenChamber 自己读取提交。 |
+| `setHeight(px)` | 设置你的 Work Status 分区的高度。OpenChamber 会把它限制在 24 到 320 像素之间；更高的内容在你的页面内滚动。其他位置会忽略它。 |
 
 ## attach、startSession 和 sessionLink
 
@@ -217,12 +219,13 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `NO_SERVICE` | 未声明本地服务、未批准或未运行 |
 | `NOT_GRANTED` | 用户尚未批准此调用所需的能力 |
 | `SERVICE_FAILED` | 本地服务崩溃或从未就绪 |
-| `NO_DIRECTORY` | 在没有打开项目的情况下使用了相对文件路径 |
-| `NOT_FOUND` | 对不存在的文件调用 `readFile` |
+| `NO_DIRECTORY` | 在没有打开项目的情况下使用了相对文件路径，或在没有打开项目时调用 `openCommit` |
+| `NOT_FOUND` | 对不存在的文件调用 `readFile`，或对项目中不存在的提交调用 `openCommit` |
 | `FILE_TOO_LARGE` | 读取或写入时文件内容超出限制 |
 | `DENIED` | 操作系统拒绝了该文件操作 |
 | `NO_MODEL` | 没有可用的 Small Model 时调用 `generate` |
 | `MODEL_FAILED` | Small Model 返回了错误 |
+| `UNSUPPORTED` | 这个 OpenChamber 无法执行该调用，例如在没有 Diff 视图的地方调用 `openCommit` |
 
 ## 相关页面
 

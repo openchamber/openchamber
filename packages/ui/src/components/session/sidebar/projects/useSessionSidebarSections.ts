@@ -1,12 +1,13 @@
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
+import { countSessionSearchMatches } from '../sessionSidebarRowModel';
 
 type ProjectItem = {
   id: string;
@@ -198,13 +199,10 @@ export const useSessionSidebarSections = (args: Args) => {
 
     const idQuery = normalizedSessionSearchQuery.trim().toLowerCase();
     const isIdQuery = idQuery.startsWith('ses_');
-    const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => (
-      total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + countNodes(node.children)
-    ), 0);
 
     const addSearchData = (group: SessionGroup) => {
       const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
-      const matchedSessionCount = countNodes(filteredNodes);
+      const matchedSessionCount = countSessionSearchMatches(filteredNodes, normalizedSessionSearchQuery);
       const groupMatches = !isIdQuery && matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
       const scopeFolders = getSessionFolderScopes(group).flatMap(({ scopeKey }) => foldersMap[scopeKey] ?? []);
       const folderNameMatchCount = isIdQuery ? 0 : scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;

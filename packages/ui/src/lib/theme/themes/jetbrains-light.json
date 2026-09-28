@@ -109,7 +109,7 @@
     },
     "chat": {
       "userMessageBackground": "#eff4fd",
-      "divider": "#C9CCD6"
+      "divider": "#E1E4EB"
     },
     "markdown": {
       "link": "#006DCC",
@@ -117,7 +117,7 @@
       "inlineCode": "#067D17",
       "inlineCodeBackground": "#F2F2F2",
       "blockquote": "#8C8C8C",
-      "blockquoteBorder": "#C9CCD6",
+      "blockquoteBorder": "#E1E4EB",
       "listMarker": "#9E880D99"
     },
     "tools": {

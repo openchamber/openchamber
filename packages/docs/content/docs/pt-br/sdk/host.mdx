@@ -28,7 +28,7 @@ Não é um callback de montagem única. Monte a UI e registre assinaturas uma ve
 | `locale` | a tag de idioma do app |
 | `directory` | o diretório do projeto atual, ou `null` |
 | `session` | `{ id, title, busy }` ou `null`. Sem título, o id da sessão é usado no lugar. `busy` é o status ao vivo. `model` e `agent` (o agente do OpenCode) aparecem quando a sessão os tem. |
-| `surface` | `panel` na barra lateral, `dialog` na janela de anexar, `page` em tela cheia |
+| `surface` | `panel` na barra lateral, `dialog` na janela de anexar, `page` em tela cheia, `status` no painel Work Status |
 | `item` | para que esta superfície foi aberta, ou `null`: o item anexado em que o usuário clicou (os mesmos campos que você passou para `attach`, incluindo `data`), uma mensagem (`kind: "message"`) ou uma sessão (`kind: "session"`) vinda de uma das suas ações declaradas. Veja [Ações](/sdk/#ações-comandos-e-o-selo). |
 | `connection` | `{ connected, account }` da sua integração |
 | `settings` | os valores dos campos que você declarou em `integration.settings` |
@@ -65,6 +65,8 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | `generate({ prompt, system?, maxOutputTokens? })` | texto avulso do Small Model do usuário. Retorna `{ text }`. Precisa da capacidade `model`. |
 | `onResolve(handler)` | registra o handler dos seus comandos de barra. Ele recebe `{ command, args }` e devolve um item para anexar ou `null`. |
 | `setBadge(count)` | mostra um número (0 a 999) no seu ícone da barra lateral, ou `null` para limpá-lo |
+| `openCommit(sha)` | abrir a visualização Diff nesse commit do projeto atual. `sha` tem de 7 a 64 caracteres hexadecimais; o OpenChamber lê o commit sozinho. |
+| `setHeight(px)` | definir a altura da sua seção do Work Status. O OpenChamber a mantém entre 24 e 320 pixels; conteúdo mais alto rola dentro da sua página. Em outros lugares é ignorado. |
 
 ## attach, startSession e sessionLink
 
@@ -217,12 +219,13 @@ Chamadas que falham lançam `HostRequestError`. `code` é um destes; `message` t
 | `NO_SERVICE` | nenhum serviço local declarado, não aprovado ou não está rodando |
 | `NOT_GRANTED` | o usuário não aprovou a capacidade que esta chamada precisa |
 | `SERVICE_FAILED` | o serviço local travou ou nunca ficou pronto |
-| `NO_DIRECTORY` | um caminho de arquivo relativo foi usado sem projeto aberto |
-| `NOT_FOUND` | `readFile` em um arquivo que não existe |
+| `NO_DIRECTORY` | um caminho de arquivo relativo foi usado sem projeto aberto, ou `openCommit` sem projeto aberto |
+| `NOT_FOUND` | `readFile` em um arquivo que não existe, ou `openCommit` em um commit que não está no projeto |
 | `FILE_TOO_LARGE` | conteúdo do arquivo acima do limite, na leitura ou na escrita |
 | `DENIED` | o sistema operacional recusou a operação no arquivo |
 | `NO_MODEL` | `generate` sem Small Model disponível |
 | `MODEL_FAILED` | o Small Model retornou um erro |
+| `UNSUPPORTED` | este OpenChamber não consegue fazer a chamada, por exemplo `openCommit` onde não há visualização Diff |
 
 ## Relacionado
 

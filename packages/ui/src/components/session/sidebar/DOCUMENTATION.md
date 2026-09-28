@@ -18,8 +18,11 @@ kept at this root in `types.ts` and `utils.tsx`.
   model and the same `@tanstack/react-virtual` instance.
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
   directories together. Chats uses the same `activity:chats` identity for status
-  and row projection, including a Chats-only sidebar. A successful list stops
-  loading independently of initialization; failures keep their retry/access actions.
+  and row projection, including a Chats-only sidebar. An unresolved global list
+  keeps unopened groups loading; a global failure exposes Retry against the global
+  loader, without bootstrapping a directory. A complete global snapshot or complete
+  active-directory coverage stops loading independently of initialization. Archived
+  groups require global coverage. Directory failures keep their retry/access actions.
 - Root session right-click and overflow menus expose `Move to worktree`: a submenu
   listing the canonical primary and linked worktree destinations, with the current
   target disabled and a separate `New worktree...` action. Opening the submenu
@@ -41,8 +44,8 @@ unconditionally. The hook is the only bootstrap demand owner and publishes
 only the current directory and the selected session's directory; it also
 refreshes newly added topology, coalesces control events, and performs
 authoritative cleanup. Root-level `useGlobalSessionsPolling` remains the only
-initial and 45-second global poller. `useSessionListSync` must not create a
-second global polling lifecycle.
+initial and 45-second global poller, with bounded startup recovery.
+`useSessionListSync` must not create a second global polling lifecycle.
 
 The global sessions cache is the complete source for active and archived
 coverage. Initialized directory stores only supply sessions missing from that
@@ -50,14 +53,50 @@ cache. Live busy and retry state comes from `global-session-status`, never from
 the global cache or persisted history. A failed global or directory fetch keeps
 existing data; it is never treated as an authoritative empty list.
 
-Web and desktop show managed Chats before optional Recent activity. Chats use
+Activity indicators use `SessionActivityIndicator` in project and timeline rows,
+header tabs, switchers and collapsed aggregates. Running uses the info color;
+unread uses success. The local Appearance preference `animatedActivityIndicators`
+is off by default. Enabling it swaps running dots for a stepped spinner, even
+when the OS requests reduced motion. Permission/question badges and per-session
+elapsed counters retain their existing precedence and behavior. The display
+store is at version 9: missing preferences inherit the default during hydration,
+while an explicitly saved choice survives reload.
+
+Full-app active records remain in the collection when their directory is no
+longer in known topology, such as a deleted worktree. Grouping first uses exact
+configured project/worktree ownership. It may then use authoritative OpenCode
+project metadata only when that project's canonical worktree maps to a
+configured project root. This fallback changes display ownership, not the
+session's real directory used for routing. Records with no resolved owner have
+no guaranteed project group. VS Code keeps exact workspace-directory scope and
+does not use the fallback. The mobile sheet, Recent, and Timeline use this
+same ownership resolver; rows keep the session's own directory while
+taking display ownership (project id, labels) from the index.
+
+Web and desktop show managed Chats before optional Recent activity (off by
+default since the timeline view exists; the display menu toggles it). Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
 `partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree, with no Recent projection. VS Code excludes worktrees and managed
+project tree. In the grouped view its display panel offers the same Recent
+toggle (`sidebarShowRecentSection`, per surface, so the phone and the desktop
+choose separately): a collapsible section under In work with the desktop's
+membership (`useRecentSessionCollection`), subsessions kept for expansion,
+compact rows labelled "project · branch" through `resolveSidebarSessionLocations`
+with the desktop Recent policy (live root branch included, a branch equal to
+the project label hidden; the branch map is held while the drawer closes),
+seven rows before Show more. The
+timeline never shows Recent. VS Code excludes worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
+
+Worktree groups inside a project follow `worktreeSortOrder` (profile setting
+`sidebarWorktreeSortOrder`, default `manual`). `recent` floats worktrees by session activity, so
+they move while sessions run. `manual` and `a-z` never read activity: both start
+alphabetical, and only `manual` applies the saved drag order
+(`oc.sessions.groupOrder`) and enables worktree dragging. The mobile sheet keeps
+its own manual worktree order (`useWorktreeOrderStore`).
 
 Hosted mobile and Capacitor use their separate `MobileSessionsSheet` renderer.
 The shared directory-cache rules apply there, but this sidebar virtualizer does not.
@@ -94,10 +133,126 @@ the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
 
-Run fusion eligibility comes from `lib/multirun/identity.ts`, with title parsing
-only for unmarked legacy sessions. Row memoization compares those same semantics
-so metadata-only membership changes update the menu. See
-`lib/multirun/DOCUMENTATION.md` for source selection and fork rules.
+## Multi-run rows
+
+A multi-run (`lib/multirun/runs.ts`, two or more active members) renders as one
+`run` row instead of one row per lane. `SessionProjectCollection` builds the
+run index from the active root sessions and hands it to the row model; grouping
+only receives `runKeyBySessionId`, kept referentially stable while membership is
+unchanged so ordinary session updates do not invalidate project sections.
+
+- Grouping lists every member under the project root, so a lane's worktree
+  does not form its own group while it belongs to a run. After "Keep" the
+  survivor is no longer a run member and falls back into its worktree group.
+- The row model collapses members into one entry at the first member's
+  position (`collapseRunEntries`) in every container: project groups, folders,
+  Recent, Work and Timeline. A run spends one slot of a reveal limit.
+- The run row is not a session: it never enters selection or the selection
+  pool. Expanded (`runExpansionKey`, same `expandedParents` store) it lists its
+  lanes as session rows one level deeper; search forces it open. In Timeline
+  it never expands and renders through `SessionTimelineRowBody` like the
+  session rows around it (project and time, title, lane count and model
+  logos); the overview lists the lanes.
+- Its activity indicator aggregates the lanes through
+  `CollapsedSessionActivityIndicator`. Clicking it opens the run overview
+  (`useUIStore.runOverviewKey`); a lane's context menu offers the same.
+
+The mobile sheet does not use the row model: `MobileSessionsSheet` builds the
+same index, moves members to the project root bucket and renders one
+`MobileRunRow` per run that opens the overview. Row memoization compares
+membership semantics (`sameMultiRunIdentity`, including the run title) so
+metadata-only changes update rows. See `lib/multirun/DOCUMENTATION.md`.
+
+## In work
+
+Sessions in work (`metadata.openchamber.work.state === 'open'`, see
+`packages/web/server/lib/session-work/DOCUMENTATION.md`) render in their own
+`work` activity zone under Chats and above Recent / the timeline, in both view
+modes, while `sessionWorkEnabled` is on. `list/SessionProjectCollection.tsx`
+selects them from the ordered collection (top-level, unarchived, not managed
+Chats, shared lifecycle order) and
+passes `workItems` plus `workSessionIds` to the row model. A session in work
+MOVES: the row model drops it from Recent, the Timeline list, project groups,
+and folders, so it appears once. Chats are never in work and offer no Track
+action. An empty zone is not rendered. Rows use
+`renderContext: 'timeline'` in the timeline view and `recent` (project and
+branch shown) in the projects view. Search in the projects view keeps a tree
+whose subsession matches (`sessionTreeMatchesSidebarQuery`): those subsessions
+are nowhere else in the sidebar. The zone counts only sessions that match
+themselves (`countSessionTreeQueryMatches`), and a group subtracts the trees
+that moved out of it with the same counter its search data used
+(`countSessionSearchMatches`), so one exact id is one match; a group or project
+whose only matches moved renders nothing. Track / Done captures the runtime key at the
+click (`setSessionWorkState`), so a server switch mid-request writes nothing to
+the new server.
+
+Row actions revealed on hover are the same three in both views: Track / Done
+(eye in the muted action color like its neighbours / check in
+`status.success`, one icon size up because the glyph draws small), quick
+archive/delete, the menu. Pin/unpin lives in the menu only. Touch layouts (`alwaysShowActions`)
+keep Track / Done in the menu. At rest a row in work shows a grey check only
+while Jev's done hint is current (`isDoneSuggested`); the composer shows the
+same hint as a top row (`components/chat/SessionDoneHintRow.tsx`). The
+whole-row tooltip in the projects view shows the current recap. The mobile
+sheet (`apps/MobileSessionsSheet.tsx`) mirrors it: an "In work" section under
+Chats takes the sessions in work with their subsessions out of the project
+buckets and the timeline, and Track / Done is a swipe action on top-level
+rows. Mobile swipe actions run left to right by how often they are used on a
+phone, because a short drag exposes the leftmost first: archive, pin (top-level
+rows), Track / Done (top-level rows, feature on), delete, rename; AI rename sits
+inside the rename editor. Top-level rows also show a pin marker beside the
+time; pins are the same device-local `useSessionPinnedStore` the desktop menu
+writes, so a pin set on one device does not appear on another. Row memoization
+compares `metadata` by reference and `time.idle`, so metadata-only changes
+(work, goal, recap) re-render the row.
+
+## Timeline view
+
+`sidebarViewMode` (profile-scoped, per surface) switches the desktop and web
+sidebar between `projects` and `timeline`. VS Code has no switch and always
+renders `projects`.
+
+- Timeline keeps the managed Chats zone, with an initial reveal of 3 instead of
+  the usual Chats limit. Pinned chats are always shown and never spend that
+  limit, so Show more/Show fewer count only unpinned rows. Chats rows render
+  with `renderContext: 'timeline-chat'`: one line, no left gutter, pin marker
+  and status dot on the right beside the time. Collapsing a zone header resets its
+  Show more state.
+- Zone headers are sticky in the projects view and never in the timeline; there
+  is no user toggle. Timeline zone headers drop the leading icon and use a
+  taller band.
+- Below Chats it renders one `timeline` activity header (a sticky zone header
+  like `chats` and `active-now`) followed by every non-archived root project
+  session from all projects and worktrees in one flat list, in the shared
+  lifecycle order, with pinned sessions floating first. There is no reveal
+  limit: the list is virtualized.
+- Timeline rows carry `renderContext: 'timeline'`, depth 0 and empty children.
+  They never expand, show no chevron, no folders, no project headers, no
+  worktree groups and no Recent projection. Folders are not projected, so the
+  row menu hides `Move to folder`. Their archive/delete actions still
+  cover the full subtree, because `collectSessionSubtreeIds` resolves
+  descendants from the global cache at action time.
+- `worktreeIndex.ts` is the shared exact worktree index (normalized keys,
+  project-root exclusion, first-wins dedupe) for Recent/Timeline, project
+  grouping, and the session switcher. `recent/sessionLocation.ts` is the single
+  owner of a session's project, directory, worktree and branch label: it resolves
+  the project through the session ownership index first (managed worktrees live
+  outside the project path), falls back to a path-prefix match, and finds the
+  containing worktree by longest prefix so a session in `<worktree>/sub` keeps
+  that worktree's branch and PR key. Branch labels are live-first: live git
+  status wins over discovered worktree metadata. Recent hides a branch equal to
+  the project label; Timeline shows the branch on every row, using the live
+  project root branch for root-directory sessions and the worktree branch
+  otherwise.
+- Recent resolves each root and active descendant against its own directory and
+  owner. Its projection attaches that worktree at every depth, including children
+  under worktree subdirectories; an unresolved worktree stays null. Each visible
+  row also resolves its own tooltip metadata rather than inheriting its parent's
+  branch, preserving the resolver's deliberate branch suppression. The full
+  subtree remains available to archive/delete actions, and managed Chats keep
+  their separate projection.
+- Search filters Timeline with the same rule as Recent (exact `ses_` id, else
+  title contains) and counts one match per listed row.
 
 ## Search
 
@@ -127,14 +282,21 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 
 ## Loading rules
 
-- Publish bootstrap demand only for the current directory and the selected session's directory. Known project roots and worktrees are topology, not demand: rows and sessions come from the global session list, activity from the global status index and the host status seed. Every directory bootstrap makes OpenCode create an instance, so demanding the whole topology created one per project at startup.
+- Publish bootstrap demand only for the current directory and the selected session's directory. Known project roots and worktrees are topology, not demand: rows and sessions come from the global session list, activity from the global status index and the host status seed. Every directory-scoped read makes OpenCode create and initialize a location, so demanding the whole topology created one per project at startup.
 - Directory demand and refresh requests preserve path case after separator and drive-letter normalization. Case-insensitive sidebar membership keys stay inside the collection projection; sending those keys as paths creates duplicate directory stores and can address a different directory on case-sensitive filesystems.
-- A never-bootstrapped directory shows as ready. Load failures and denied folder access surface when it is selected; the group notice retry still forces a bootstrap.
+- A never-bootstrapped directory is ready only after a complete global snapshot. Before that, the group shows global loading or failure, and Retry reloads the global list. Previously loaded groups stay ready during background polling. Directory failures and denied folder access still use forced bootstrap or native access recovery for the affected directory.
 - The sync scheduler deduplicates, promotes, retries, and limits work. Sidebar components must not reproduce that lifecycle with mount effects.
 - Hide speculative work when the sidebar/chat surface is hidden: message prefetch, Git/PR enrichment and subscriptions, search listeners, sticky-header observation, and archived-folder derivation stop. The session row tree unmounts so row-owned status, permission, unseen, and viewport subscriptions do no background work. The outer sidebar remains mounted, preserving UI state and authoritative directory refresh for an immediate reopen; deferred derived work reruns from current state when visibility returns.
 - The sidebar does not subscribe its whole tree to the cross-directory live-session aggregate. Global create/structural/lifecycle snapshots drive rendered session metadata; the cached sync index only fills sessions not yet present globally and provides refresh fallback data. Row activity continues to come from the session-keyed live status index.
 - Session selection does not invalidate the sidebar orchestration component. Each mounted row selects only whether its own session ID is active, while parent expansion, project selection memory, and neighbor prefetch run in small effect-only subscribers.
 - Parent expansion is exclusively manual. Selecting or navigating to a subsession never expands its parent automatically. Project/worktree and `recent` trees use independent persisted context keys and receive separate stable projections, so expansion changes in one context neither invalidate nor change the other. The persisted storage key remains `v3`; older state mixed contexts and is not migrated into this contract.
+- `SessionTreeItem` is memoized with a comparator over the props it actually
+  reads: the row list re-renders on every virtualizer frame while scrolling and
+  on every model rebuild, spreading a shared props bag and a fresh
+  `renderExtras` object onto each row, so identity comparison would never
+  match. Sessions and secondary metadata compare by value; a scroll therefore
+  renders only rows entering the viewport, and a model rebuild only rows whose
+  session changed.
 - The sidebar model flattens parent/child sessions into occurrence-keyed rows.
   `SessionTreeItem` renders one row with `renderChildren={false}`; it must never
   recursively mount descendants in the shared scroller. One preorder ID pool
@@ -184,11 +346,12 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. Recent and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the mobile sessions sheet resolves the same lineage with `getDescendantIds` over its full active list rather than the rendered bucket. `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with a walk over the global active-plus-archived cache, so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
 - Sidebar selection holds the clicked row's viewport position across navigation-driven sidebar updates. Wheel or touch input cancels the hold immediately, so programmatic compensation never fights intentional scrolling.
-- Global session subscriptions are structural: create/delete, title, share, archive, directory, parent, and slug changes invalidate the tree. Recency-only `time.updated` changes do not trigger a rebuild. The separate lifecycle rank invalidates ordering only on `settled ↔ active` transitions, with root sessions ranked among roots and child sessions only among siblings of the same parent.
-- A worktree Git still registers but whose directory is gone (`prunable` in `git worktree list`) stays in the topology with `worktreeStatus: 'missing'` and a warning icon on its group header. Its sessions remain accessible for manual movement or archiving through worktree deletion. Opening a session does not move it. The ordinary worktree delete action accepts a missing directory. Topology discovery remains event-driven, including `session-created` and server `worktree-changed` control events, with no idle polling. The server sends `worktree-changed` after its own worktree create/remove and when a status or listing request notices that a repository's worktree set changed (see `packages/web/server/lib/git/DOCUMENTATION.md`); the event names every directory of that repository the server has seen, and the sidebar refreshes each registered project among them once, bypassing the 30-second list cache. A worktree this client created and is still bootstrapping keeps its `pending`/`invalid` status through that refresh. Hosted mobile and the desktop mini chat handle the same control event through `lib/worktrees/worktreeTopologyRefresh.ts`; VS Code intentionally excludes worktree topology.
-- Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree.
+- Global session subscriptions are structural: create/delete, title, archive, directory, parent, and slug changes invalidate the tree. Recency-only `time.updated` changes do not trigger a rebuild. The separate lifecycle rank invalidates ordering only on `settled ↔ active` transitions, with root sessions ranked among roots and child sessions only among siblings of the same parent.
+- A worktree Git still registers but whose directory is gone (`prunable` in `git worktree list`) stays in the topology with `worktreeStatus: 'missing'` and a warning icon on its group header. Its sessions remain accessible for manual movement or archiving through worktree deletion. Opening a session does not move it. The ordinary worktree delete action accepts a missing directory. Topology discovery remains event-driven, including `session-created` and server `worktree-changed` control events, with no idle polling. After an instance switch the project list comes from the local cache, so discovery can run before the instance answers: projects whose discovery failed are discovered again once when the connection comes up. The worktree list and project-root caches are keyed by path, so a runtime switch clears them. The server sends `worktree-changed` after its own worktree create/remove and when a status or listing request notices that a repository's worktree set changed (see `packages/web/server/lib/git/DOCUMENTATION.md`); the event names every directory of that repository the server has seen, and the sidebar refreshes each registered project among them once, bypassing the 30-second list cache. A worktree this client created and is still bootstrapping keeps its `pending`/`invalid` status through that refresh. Hosted mobile and the desktop mini chat handle the same control event through `lib/worktrees/worktreeTopologyRefresh.ts`; VS Code intentionally excludes worktree topology.
+- Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree. The owning project resolves from the row's project id, then from the session's directory, then from the session's worktree metadata `projectDirectory` — the last step keeps sibling destinations listed for a restored session whose own worktree directory was deleted, which matters because relocation out of a dead directory is manual.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event retriggers bounded worktree discovery so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
 - Recent membership includes active root sessions immediately even when their last committed `time.updated` falls outside the 48-hour window. Children and archived sessions remain excluded, and inactive roots remain timestamp-based. The active-ID subscription is disabled while the sidebar is hidden and ignores retry/status detail changes, avoiding streaming-frequency rerenders.
+- A successful restore on the current runtime promotes only the session's ephemeral list-order rank. It does not change timestamps or live status, and it resets on a runtime switch. Restore does not change Recent's existing active/48-hour membership rule.
 - Structural updates rebuild grouped nodes only for projects whose local sessions, worktrees, repository state, or branch changed; unchanged project sections preserve references so memoized group/session descendants skip the update wave.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
 - List loading and workspace initialization have separate states. The spinner follows only the list queue; config, MCP, LSP, and live-state recovery cannot keep a successful empty list spinning. A core initialization failure has a separate localized notice and reuses the retry/native-access actions without clearing loaded sessions.

@@ -1,5 +1,6 @@
 import React from 'react';
 import { toast } from 'sonner';
+import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useDirectorySync, useEnsureSessionMessages, useSession } from '@/sync/sync-context';
@@ -23,20 +24,22 @@ type Props = {
 export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const session = useSession(sessionId ?? '', directory ?? undefined);
-  const parts = useDirectorySync(React.useCallback((state: State) => state.part, []));
+  const entries = React.useMemo(() => getContextObligatoryMessages(session), [session]);
+  // Select only the pinned texts. Selecting the whole part map would re-render
+  // on every streamed part and, through this render's closures, keep every
+  // evicted transcript's parts alive for as long as the section is mounted.
+  const pinnedTexts = useDirectorySync(useShallow((state: State) => entries.map((entry) => {
+    const text = (state.part[entry.id] ?? []).find(
+      (part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text',
+    )?.text?.trim();
+    return text || null;
+  })));
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
-  const pinned = React.useMemo(() => {
-    const entries = getContextObligatoryMessages(session);
-    if (entries.length === 0) return [];
-    return entries.map((entry) => {
-      const messageParts = parts[entry.id] ?? [];
-      const text = messageParts.find(
-        (part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text',
-      )?.text?.trim();
-      return { id: entry.id, text: text || null };
-    });
-  }, [session, parts]);
+  const pinned = React.useMemo(
+    () => entries.map((entry, index) => ({ id: entry.id, text: pinnedTexts[index] ?? null })),
+    [entries, pinnedTexts],
+  );
 
   // Pinned messages are most useful on a long session — which is exactly when
   // the pinned message has scrolled far enough back not to be loaded, leaving

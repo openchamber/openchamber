@@ -1,8 +1,7 @@
 import React from 'react';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 
-import { deriveMessageRole } from '@/components/chat/message/messageRole';
 import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -202,10 +201,8 @@ const addBuckets = (target: ContextBuckets, value: ContextBuckets): ContextBucke
 });
 
 const deriveRoleBucket = (message: SessionMessage): 'user' | 'assistant' | 'tool' | 'other' => {
-  const roleInfo = deriveMessageRole(message.info);
-  if (roleInfo.isUser) return 'user';
-  if (roleInfo.role === 'assistant') return 'assistant';
-  if (roleInfo.role === 'tool') return 'tool';
+  if (message.info.role === 'user') return 'user';
+  if (message.info.role === 'assistant') return 'assistant';
   return 'other';
 };
 
@@ -316,8 +313,8 @@ export const ContextPanelContent: React.FC = () => {
   const viewModel = React.useMemo(() => {
     const currentSession = currentSessionId ? sessions.find((session) => session.id === currentSessionId) ?? null : null;
 
-    const assistantMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).role === 'assistant');
-    const userMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).isUser);
+    const assistantMessages = sessionMessages.filter((entry) => entry.info.role === 'assistant');
+    const userMessages = sessionMessages.filter((entry) => entry.info.role === 'user');
 
     // After a compaction the fill is unknown until a response reports tokens;
     // the compaction record itself still supplies the last-turn breakdown.
@@ -354,9 +351,10 @@ export const ContextPanelContent: React.FC = () => {
         ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
         : 0;
 
-    const systemPrompt = ([...sessionMessages].reverse().find(
-      (entry) => deriveMessageRole(entry.info).isUser && typeof (entry.info as { system?: unknown }).system === 'string',
-    )?.info as { system?: string } | undefined)?.system || '';
+    // OpenCode v2 delivers instruction text as its own `system` message
+    // instead of hanging a `system` string off the first user message.
+    const systemMessage = [...sessionMessages].reverse().find((entry) => entry.info.role === 'system');
+    const systemPrompt = systemMessage?.info.role === 'system' ? systemMessage.info.text : '';
 
     const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
 
@@ -535,8 +533,7 @@ export const ContextPanelContent: React.FC = () => {
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
             {[...sessionMessages].reverse().map((message) => {
-              const roleInfo = deriveMessageRole(message.info);
-              const role = roleInfo.role;
+              const role = message.info.role;
               const isAssistant = role === 'assistant';
               const isUser = role === 'user';
               const isExpanded = expandedRawMessages[message.info.id] === true;

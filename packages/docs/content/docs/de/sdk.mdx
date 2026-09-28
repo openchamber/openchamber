@@ -89,7 +89,7 @@ Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repos
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` öffnet eine separate Seite von dir im Fenster, damit die Auswahl keinen Code mit dem Panel in der Leiste teilen muss
 - lässt du es weg, bleibt die Erweiterung aus diesem Menü draußen
 
-`ctx.surface` ist `panel`, `dialog` oder `page`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
+`ctx.surface` ist `panel`, `dialog`, `page` oder `status`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
 
 `contributes.page: true` bietet die Panel-Seite im Menü Erweiterungsseiten über der Sitzungsliste an. `{ "entry": "panel/page.html", "title": "Board" }` verwendet eigene HTML-Dateien und einen optionalen Titel. `panel.entry` bleibt erforderlich; Sandbox und Berechtigungen bleiben gleich. Nur der Nutzer öffnet die Seite. Neuladen, Pause, Entfernen oder Serverwechsel schließen sie.
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 Schreibvorgänge sind atomar: OpenChamber schreibt eine temporäre Datei und benennt sie um, ein Leser sieht also nie eine halb geschriebene Datei. Dateien werden als UTF-8-Text gelesen und geschrieben, bis 2 MB.
 
+## Ein Abschnitt in Work Status
+
+`contributes.statusSection` fügt dem Work-Status-Panel neben dem Chat einen eigenen Abschnitt hinzu. Nutzer schalten ihn in der Abschnittsliste dieses Panels ein und aus und verschieben ihn dort, wie die eingebauten Abschnitte.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` verwendet `panel.entry`.
+- `entry` ist eine eigene HTML-Seite in deinem Ordner. Damit brauchst du kein `panel.entry`, die Erweiterung kann also nur aus diesem Abschnitt bestehen, ohne Icon in der Leiste.
+- `title` ersetzt den Panel-Namen in der Abschnittsüberschrift, bis zu 60 Zeichen.
+- `height` ist die Anfangshöhe in Pixeln, 24 bis 320 (Standard 120). Rufe [`host.setHeight()`](/sdk/host/) auf, wenn sich die Größe deines Inhalts ändert.
+
+Deine Seite sieht `ctx.surface` als `status`. OpenChamber lädt sie nur, solange das Work-Status-Panel sichtbar und dein Abschnitt aufgeklappt ist, und entlädt sie, wenn der Nutzer ihn zuklappt. Halte dort also nichts, was du nicht neu aufbauen kannst. Eine Erweiterung nur mit Abschnitt darf Berechtigungen, einen Dienst, eine Integration und Dateien nutzen, aber nicht `page`, `attach`, `actions` oder `commands`. Nur Web und Desktop. Das Beispiel `git-graph-status` ist ein vollständiger Abschnitt.
+
 ## Aktionen, Befehle und das Badge
 
 Neben der Leiste und dem +-Menü kann eine Erweiterung an drei weiteren Stellen erscheinen. Alle übergeben der Erweiterung ein `item`, genau wie ein Klick auf einen Chip.
@@ -219,7 +234,7 @@ Wenn dein OpenCode-Plugin oder MCP-Server ein Tool hinzufügt, zeigt der Chat de
 
 `match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
 
-Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und sonst nichts deklarieren.
+Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt mit eigenem `entry`, siehe oben.
 
 ## Die ersten Zeilen im Panel
 

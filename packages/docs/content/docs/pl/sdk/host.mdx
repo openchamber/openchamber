@@ -28,7 +28,7 @@ To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypc
 | `locale` | tag języka aplikacji |
 | `directory` | katalog bieżącego projektu albo `null` |
 | `session` | `{ id, title, busy }` albo `null`. Tytuł wraca do id sesji, gdy go brak. `busy` to status na żywo. `model` i `agent` (agent OpenCode) pojawiają się, gdy sesja je ma. |
-| `surface` | `panel` na pasku bocznym, `dialog` w oknie dołączania, `page` na pełnym ekranie |
+| `surface` | `panel` na pasku bocznym, `dialog` w oknie dołączania, `page` na pełnym ekranie, `status` w panelu Work Status |
 | `item` | to, dla czego otwarto tę powierzchnię, albo `null`: dołączony element, który użytkownik kliknął (te same pola, które przekazałeś do `attach`, łącznie z `data`), wiadomość (`kind: "message"`) albo sesja (`kind: "session"`) z jednej z zadeklarowanych przez Ciebie akcji. Zobacz [Akcje](/sdk/#akcje-polecenia-i-odznaka). |
 | `connection` | `{ connected, account }` dla Twojej integracji |
 | `settings` | wartości pól zadeklarowanych w `integration.settings` |
@@ -65,6 +65,8 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `generate({ prompt, system?, maxOutputTokens? })` | jednorazowy tekst od Small Model użytkownika. Zwraca `{ text }`. Wymaga uprawnienia `model`. |
 | `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
 | `setBadge(count)` | pokazuje liczbę (0 do 999) na Twojej ikonie na pasku bocznym, albo `null`, żeby ją usunąć |
+| `openCommit(sha)` | otworzyć widok Diff na tym commicie bieżącego projektu. `sha` ma od 7 do 64 znaków szesnastkowych; OpenChamber sam odczytuje commit. |
+| `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 320 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
 
 ## attach, startSession i sessionLink
 
@@ -217,12 +219,13 @@ Nieudane wywołania rzucają `HostRequestError`. `code` to jeden z poniższych; 
 | `NO_SERVICE` | usługa lokalna niezadeklarowana, niezatwierdzona albo nieuruchomiona |
 | `NOT_GRANTED` | użytkownik nie zatwierdził uprawnienia, którego wymaga to wywołanie |
 | `SERVICE_FAILED` | usługa lokalna padła albo nigdy nie osiągnęła gotowości |
-| `NO_DIRECTORY` | względna ścieżka pliku użyta bez otwartego projektu |
-| `NOT_FOUND` | `readFile` na pliku, który nie istnieje |
+| `NO_DIRECTORY` | względna ścieżka pliku użyta bez otwartego projektu albo `openCommit` bez otwartego projektu |
+| `NOT_FOUND` | `readFile` na pliku, który nie istnieje, albo `openCommit` na commicie, którego nie ma w projekcie |
 | `FILE_TOO_LARGE` | treść pliku ponad limit, przy odczycie lub zapisie |
 | `DENIED` | system operacyjny odmówił operacji na pliku |
 | `NO_MODEL` | `generate` bez dostępnego Small Model |
 | `MODEL_FAILED` | Small Model zwrócił błąd |
+| `UNSUPPORTED` | ten OpenChamber nie potrafi wykonać wywołania, na przykład `openCommit` tam, gdzie nie ma widoku Diff |
 
 ## Zobacz też
 

@@ -734,7 +734,6 @@ export const ExtensionsPage: React.FC = () => {
     <SettingsPageLayout
       title={t('settings.page.extensions.title')}
       description={t('settings.page.extensions.description')}
-      outerClassName="extensions-settings-page"
     >
       {unsupported ? null : (
         <SettingsSection

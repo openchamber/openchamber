@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, toPublicService, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, toPublicService, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -197,6 +197,12 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.entry) {
     guest.entry = panel.entry;
   }
+  if (panel.dock !== undefined) {
+    guest.entryDock = panel.dock;
+  }
+  if (panel.size !== undefined) {
+    guest.entrySize = panel.size;
+  }
   const backgroundEntry = parsed.manifest.contributes.background?.entry;
   if (backgroundEntry) {
     if (!await resolveGuestAssetPath(packageRoot, backgroundEntry)) {
@@ -240,6 +246,21 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     guest.pageEntry = pageEntry;
     const page = parsed.manifest.contributes.page;
     if (page !== true && page?.title) guest.pageTitle = page.title;
+  }
+  // The Work Status section is checked like any other entry, and may be the
+  // package's only frame.
+  const statusEntry = resolveStatusSectionEntry(parsed.manifest.contributes);
+  if (statusEntry) {
+    if (!await resolveGuestAssetPath(packageRoot, statusEntry)) {
+      return { ok: false, code: 'invalid-manifest' };
+    }
+    if (!await guestBuiltScriptsReady(packageRoot, statusEntry)) {
+      return { ok: false, code: 'missing-build' };
+    }
+    guest.statusEntry = statusEntry;
+    const section = parsed.manifest.contributes.statusSection;
+    if (section !== true && section?.title) guest.statusTitle = section.title;
+    if (section !== true && section?.height !== undefined) guest.statusHeight = section.height;
   }
   if (parsed.manifest.contributes.capabilities?.length) {
     guest.capabilities = [...parsed.manifest.contributes.capabilities];
@@ -293,6 +314,12 @@ export const toPublicGuest = (guest) => {
   if (guest.entry) {
     row.entry = guest.entry;
   }
+  if (guest.entryDock) {
+    row.entryDock = guest.entryDock;
+  }
+  if (typeof guest.entrySize === 'number') {
+    row.entrySize = guest.entrySize;
+  }
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;
   }
@@ -312,6 +339,9 @@ export const toPublicGuest = (guest) => {
   const attach = resolveAttachMode(guest.attach);
   if (guest.pageEntry) row.pageEntry = guest.pageEntry;
   if (guest.pageTitle) row.pageTitle = guest.pageTitle;
+  if (guest.statusEntry) row.statusEntry = guest.statusEntry;
+  if (guest.statusTitle) row.statusTitle = guest.statusTitle;
+  if (Number.isInteger(guest.statusHeight)) row.statusHeight = guest.statusHeight;
   if (attach) {
     row.attach = attach;
   }

@@ -19,11 +19,16 @@ export const beginLargeTextPasteOffer = (activeOfferId: number): number => (
 export const resolveLargeTextPasteOffer = (
     activeOfferId: number,
     offerId: number,
+    choice: { isMobile: boolean; explicitlyChosen: boolean },
 ) => {
     if (offerId !== activeOfferId) {
-        return { accepted: false, nextOfferId: activeOfferId };
+        return { accepted: false, nextOfferId: activeOfferId, restoreFocus: false };
     }
-    return { accepted: true, nextOfferId: activeOfferId + 1 };
+    return {
+        accepted: true,
+        nextOfferId: activeOfferId + 1,
+        restoreFocus: choice.isMobile && choice.explicitlyChosen,
+    };
 };
 
 /** Toast chrome: widen on desktop only; leave mobile full-width to Sonner. */

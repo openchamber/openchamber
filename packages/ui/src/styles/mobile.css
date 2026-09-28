@@ -41,7 +41,7 @@
     font-size: var(--text-code) !important;
   }
 
-  :root.mobile-pointer:not(.desktop-runtime) .question-markdown > .markdown-content.markdown-tool {
+  :root.mobile-pointer:not(.desktop-runtime) .form-markdown > .markdown-content.markdown-tool {
     font-size: inherit !important;
   }
 

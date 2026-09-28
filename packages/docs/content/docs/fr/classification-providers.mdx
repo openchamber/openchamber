@@ -1,0 +1,91 @@
+---
+title: Fournisseurs de classification (Jev)
+description: Configurez Jev, le petit modèle de classification qui prend des décisions dans différents workflows d’OpenChamber.
+---
+
+# Fournisseurs de classification (Jev)
+
+Certaines fonctions d’OpenChamber ont besoin d’une décision rapide avant d’agir : cette commande est-elle risquée, de quel type de tâche relève ce prompt, l’utilisateur vient-il de commencer un vrai travail ? C’est Jev, un petit modèle de décision conçu par TypeSafe, qui répond à ces questions. Cette page explique comment donner à OpenChamber l’accès à Jev.
+
+Jev n’écrit jamais de code et ne répond pas dans votre chat. Il renvoie seulement un verdict, et OpenChamber agit en conséquence. OpenChamber attend une réponse quatre secondes au plus.
+
+## Ce qui utilise Jev
+
+| Fonction | La question à laquelle Jev répond |
+| --- | --- |
+| [Permissions et filet de sécurité](/fr/permissions/) | L’agent doit-il vous demander avant de lancer cette action ? |
+| [Routage automatique des modèles](/fr/auto-model-routing/) | À laquelle de vos catégories appartient ce prompt ? |
+| [Sessions en cours](/fr/sessions-in-work/) | Venez-vous de demander un vrai travail ? Ce tour ressemble-t-il à sa fin ? |
+| [Récapitulatif et suggestion du prochain message](/fr/sessions-in-work/) | Un récapitulatif ou une suggestion vaut-il la peine d’être généré après ce tour ? |
+
+Sans fournisseur, le filet de sécurité et Auto sont masqués, et les sessions ne passent en cours que si vous les y placez vous-même. Les récapitulatifs et les suggestions fonctionnent toujours, simplement sans le filtre.
+
+## Configuration
+
+Ouvrez **Paramètres → Fournisseurs → Fournisseurs de classification** et choisissez où partent les requêtes vers Jev. Il y a cinq options.
+
+### Promotion OpenCode Zen
+
+Gratuit pendant une durée limitée, sans clé. Tant que la promotion dure, OpenCode laisse OpenChamber utiliser Jev gratuitement via OpenCode Zen. Si vous n’avez jamais touché à cette page, c’est ce que vous utilisez déjà.
+
+À la fin de la promotion, l’option disparaît et OpenChamber passe à l’une des clés ci-dessous si vous en avez une.
+
+### Clé OpenCode Zen
+
+Utilise la clé API Zen enregistrée dans OpenCode, payée sur votre solde Zen.
+
+1. Ouvrez **Paramètres → Fournisseurs** et ajoutez une clé API au fournisseur **OpenCode Zen** (voir [Fournisseurs, modèles et agents](/fr/providers/)).
+2. Revenez à **Fournisseurs de classification** et choisissez **Clé OpenCode Zen**.
+
+Se connecter avec un compte OpenCode ne suffit pas. Pour Jev, Zen n’accepte qu’une clé API.
+
+### Clé OpenRouter
+
+Utilise la clé API OpenRouter enregistrée dans OpenCode, facturée sur votre compte OpenRouter. Si vous utilisez déjà des modèles OpenRouter dans OpenCode, il n’y a rien à configurer. Une clé dans la variable d’environnement `OPENROUTER_API_KEY` fonctionne aussi. Si les deux existent, la clé enregistrée dans OpenCode l’emporte.
+
+1. Ouvrez **Paramètres → Fournisseurs** et ajoutez une clé API au fournisseur **OpenRouter**.
+2. Revenez dans **Fournisseurs de classification** et choisissez **Clé OpenRouter**.
+
+### Clé Vercel AI Gateway
+
+Utilise la clé API AI Gateway enregistrée dans OpenCode, facturée sur votre compte Vercel. Une clé dans la variable d’environnement `AI_GATEWAY_API_KEY` fonctionne aussi. Si les deux existent, la clé enregistrée dans OpenCode l’emporte.
+
+1. Ouvrez **Paramètres → Fournisseurs** et ajoutez une clé API au fournisseur **Vercel AI Gateway**.
+2. Revenez dans **Fournisseurs de classification** et choisissez **Clé Vercel AI Gateway**.
+
+### Clé API TypeSafe
+
+Votre propre clé et votre propre quota TypeSafe.
+
+1. Obtenez une clé API auprès de [TypeSafe](https://docs.typesafe.ai).
+2. Collez-la dans le champ **Clé API TypeSafe** et cliquez sur **Enregistrer**.
+
+Enregistrer une clé la sélectionne aussi. Elle reste sur le serveur OpenChamber, dans son propre fichier, et n’est jamais envoyée au navigateur.
+
+Dès qu’un fournisseur fonctionne, la carte dans **Paramètres → Fournisseurs** affiche **Prêt**.
+
+## Quand votre choix ne fonctionne plus
+
+Si le fournisseur choisi n’est plus utilisable (la promotion est terminée, une clé a été supprimée), OpenChamber se rabat sur le premier qui fonctionne, vos propres clés d’abord : clé TypeSafe, puis OpenRouter, puis Vercel AI Gateway, puis clé Zen, puis la promotion. La page indique lequel est utilisé en ce moment.
+
+Si Jev est lent ou échoue sur une requête, rien ne casse. Chaque fonction a une réponse sûre pour ce cas :
+
+- Le filet de sécurité laisse l’action en attente de votre décision.
+- Auto envoie le prompt à votre modèle de repli.
+- Les sessions en cours restent comme elles sont.
+- Le récapitulatif et la suggestion sont générés comme si Jev n’existait pas.
+
+## Ce que Jev voit
+
+Jev reçoit de courts extraits de votre conversation : votre dernier message et, pour le contexte, jusqu’à trois tours précédents, coupés à leurs quelques centaines de premiers caractères. Pour le filet de sécurité, il reçoit aussi l’action vérifiée, telle qu’OpenCode la décrit : la commande que l’agent veut lancer, ou le fichier et la modification pour une édition. Il ne reçoit jamais de fichiers entiers ni d’images.
+
+Les requêtes partent du serveur OpenChamber directement vers OpenCode Zen, OpenRouter, Vercel AI Gateway ou TypeSafe, selon votre choix.
+
+## Où ça fonctionne
+
+Jev tourne dans le serveur OpenChamber : il fonctionne donc dans l’application desktop, dans l’application web et sur votre téléphone connecté à l’une des deux. L’extension VS Code parle directement à OpenCode et n’a pas Jev : pas de filet de sécurité, pas d’Auto, et les sessions ne passent en cours qu’à la main.
+
+## Voir aussi
+
+- [Fournisseurs, modèles et agents](/fr/providers/) : où se trouvent les clés OpenCode Zen, OpenRouter et Vercel AI Gateway
+- [Sécurité](/fr/security/) : comment OpenChamber gère les clés et l’accès

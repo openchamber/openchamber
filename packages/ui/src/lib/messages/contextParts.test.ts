@@ -99,6 +99,11 @@ describe('round-trip through part metadata', () => {
             contextPayloadFromDraft(draft({ source: 'pr-comment' })),
             contextPayloadFromDraft(draft({ source: 'pr-check' })),
             contextPayloadFromDraft(draft({ source: 'chat-quote', fileLabel: 'msg_1' })),
+            contextPayloadFromDraft(draft({
+                source: 'chat-quote',
+                fileLabel: 'msg_1',
+                anchor: { text: 'quoted', prefix: 'before ', suffix: ' after', start: 7 },
+            })),
             contextPayloadFromDraft(draft({ source: 'file-quote', startLine: 3, endLine: 5 })),
             contextPayloadFromDraft(draft({ source: 'file-quote', startLine: 0, endLine: 0 })),
         ];

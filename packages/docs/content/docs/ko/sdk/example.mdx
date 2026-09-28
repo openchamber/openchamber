@@ -118,4 +118,4 @@ host.onConnection((connection) => {
 
 Git URL로 설치하고 업데이트하려면 빌드한 `panel/main.js`를 HTML, 매니페스트와 함께 커밋하세요. OpenChamber는 설치 중 npm 의존성을 설치하거나 TypeScript를 빌드하지 않습니다. lockfile은 커밋하고 `node_modules/`는 `.gitignore`에 넣으며 브라우저 의존성은 IIFE에 포함하세요. 업데이트하려면 확장 자체의 `package.json` 버전을 올리고 다시 빌드한 뒤 커밋하고 push하세요. Settings → Extensions에서 Update를 선택하세요. Git 태그로 고정한 URL은 해당 태그를 유지합니다.
 
-폴더에서 `bunx openchamber-guest-bundle panel/main.ts panel/main.js`로 빌드한 다음, 설정 → 확장 에서 그 폴더를 추가하세요. 예제 다섯 개(모든 UI 컨트롤, 작업과 슬래시 명령이 있는 작업 목록, 로컬 서비스, 설정 파일 편집기, 도구 전용 패키지)가 [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples)에 더 있습니다.
+폴더에서 `bunx openchamber-guest-bundle panel/main.ts panel/main.js`로 빌드한 다음, 설정 → 확장 에서 그 폴더를 추가하세요. 예제 여섯 개(모든 UI 컨트롤, 작업과 슬래시 명령이 있는 작업 목록, 로컬 서비스, 설정 파일 편집기, 도구 전용 패키지, git 그래프가 있는 Work Status 섹션)가 [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples)에 더 있습니다.

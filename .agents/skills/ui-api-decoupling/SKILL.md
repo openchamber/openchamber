@@ -7,7 +7,7 @@ description: Use when creating or modifying OpenChamber shared UI data access, O
 
 ## Core Boundary
 
-- Official OpenCode API calls use `@opencode-ai/sdk/v2` through `opencodeClient`.
+- Official OpenCode API calls use `@opencode/client` (OpenCode 2.x, `/api/*` routes) through `opencodeClient`; only `packages/ui/src/lib/opencode/` may see wire types, everything else uses the domain model in `lib/opencode/model.ts`.
 - OpenChamber-owned HTTP capabilities use `RuntimeAPIs` where runtime-specific behavior exists, otherwise explicit OpenChamber routes through `runtimeFetch`.
 - Browser/realtime consumers use shared runtime URL/socket helpers.
 - Shared UI never hardcodes localhost, ports, API origins, credentials, or one runtime's transport assumptions.

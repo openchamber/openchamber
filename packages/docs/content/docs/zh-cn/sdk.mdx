@@ -89,7 +89,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` 在窗口中打开你的另一个页面，这样选择器就不必和侧栏面板共用代码
 - 省略它，扩展就不会出现在该菜单中
 
-`ctx.surface` 为 `panel`、`dialog` 或 `page`。点击附加条目时，`ctx.item` 包含其数据；其他情况下为 `null`。
+`ctx.surface` 为 `panel`、`dialog`、`page` 或 `status`。点击附加条目时，`ctx.item` 包含其数据；其他情况下为 `null`。
 
 `contributes.page: true` 将面板作为全屏页面加入会话列表上方的扩展页面菜单。`{ "entry": "panel/page.html", "title": "Board" }` 使用独立 HTML 和可选标题。仍需 `panel.entry`，并使用相同沙箱和权限。只有用户可以打开页面。重新加载、暂停、移除或切换服务器时会关闭页面。
 
@@ -167,6 +167,21 @@ const { entries } = await host.listDir(".");
 
 写入是原子的：OpenChamber 先写入临时文件再重命名，读取方永远不会看到写了一半的文件。文件以 UTF-8 文本读写，最大 2 MB。
 
+## Work Status 中的分区
+
+`contributes.statusSection` 会在聊天旁的 Work Status 面板里添加你自己的分区。用户可以在该面板的分区列表中开关和移动它，就像内置分区一样。
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` 复用 `panel.entry`。
+- `entry` 是你文件夹里单独的 HTML 页面。有了它就不需要 `panel.entry`，扩展可以只有这个分区，没有侧栏图标。
+- `title` 替换分区标题中的面板名称，最多 60 个字符。
+- `height` 是初始高度（像素），24 到 320，默认 120。内容尺寸变化时调用 [`host.setHeight()`](/sdk/host/)。
+
+你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成和文件，但不能用 `page`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `git-graph-status` 就是一个完整的分区。
+
 ## 操作、命令和徽标
 
 除了侧栏和 + 菜单，扩展还可以出现在另外三个地方。它们都以和点击标签相同的方式把 `item` 交给扩展。
@@ -219,7 +234,7 @@ host.onResolve(async ({ command, args }) => {
 
 `match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
 
-只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它可以只声明 `tools`，别的什么都不写。
+只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它可以只声明 `tools`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区，见上文。
 
 ## 面板里的前几行代码
 

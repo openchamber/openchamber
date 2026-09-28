@@ -17,6 +17,7 @@
 
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
+import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { appendInlineText } from '../text';
 
 export interface MobileCommentScope {
@@ -32,6 +33,8 @@ export interface MobileCommentQuote {
     markdownText: string;
     /** `data-message-id` the selection came from, when known. */
     messageId: string | null;
+    /** Where the quote sits in that message, when it could be captured. */
+    anchor?: ChatQuoteAnchor | null;
 }
 
 export type MobileCommentDraft =
@@ -56,6 +59,7 @@ export interface MobileCommentAttachPlan {
         code: string;
         language: string;
         text: string;
+        anchor?: ChatQuoteAnchor;
     };
 }
 
@@ -122,6 +126,7 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
             language: '',
             // The comment itself is optional; whitespace-only means none.
             text: open.text.trim(),
+            anchor: open.quote.anchor ?? undefined,
         },
     });
 

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { Session } from "@/lib/opencode/model"
 import { selectNewChildSessions } from "./child-session-discovery"
 
 const session = (id: string, parentID?: string): Session => {
-  // SAFETY: discovery reads only id and parentID from listed sessions.
-  return { id, parentID } as Session
+  return {
+    id, parentID, projectID: "project", directory: "/repo", title: id, cost: 0,
+    time: { created: 1, updated: 1 },
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  }
 }
 
 describe("selectNewChildSessions", () => {

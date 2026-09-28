@@ -28,7 +28,7 @@ Das ist kein einmaliger Mount-Callback. Mounte die UI und registriere Abonnement
 | `locale` | das Sprach-Tag der App |
 | `directory` | aktuelles Projektverzeichnis oder `null` |
 | `session` | `{ id, title, busy }` oder `null`. Fehlt der Titel, steht dort die Session-ID. `busy` ist der Live-Status. `model` und `agent` (der OpenCode-Agent) erscheinen, wenn die Session sie hat. |
-| `surface` | `panel` in der Leiste, `dialog` im Anhängen-Fenster, `page` im Vollbild |
+| `surface` | `panel` in der Leiste, `dialog` im Anhängen-Fenster, `page` im Vollbild, `status` im Work-Status-Panel |
 | `item` | wofür diese Oberfläche geöffnet wurde, oder `null`: der angehängte Eintrag, den der Nutzer angeklickt hat (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), eine Nachricht (`kind: "message"`) oder eine Session (`kind: "session"`) aus einer deiner deklarierten Aktionen. Siehe [Aktionen](/sdk/#aktionen-befehle-und-das-badge). |
 | `connection` | `{ connected, account }` für deine Integration |
 | `settings` | Werte der Felder, die du in `integration.settings` deklariert hast |
@@ -65,6 +65,8 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | `generate({ prompt, system?, maxOutputTokens? })` | einmaliger Text vom Small Model des Nutzers. Liefert `{ text }`. Braucht die Berechtigung `model`. |
 | `onResolve(handler)` | den Handler für deine Slash-Befehle registrieren. Er bekommt `{ command, args }` und liefert einen Eintrag zum Anhängen oder `null`. |
 | `setBadge(count)` | eine Zahl (0 bis 999) auf deinem Symbol in der Leiste zeigen, oder `null`, um sie zu entfernen |
+| `openCommit(sha)` | die Diff-Ansicht für diesen Commit des aktuellen Projekts öffnen. `sha` hat 7 bis 64 Hex-Zeichen; OpenChamber liest den Commit selbst. |
+| `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 320 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
 
 ## attach, startSession und sessionLink
 
@@ -217,12 +219,13 @@ Fehlgeschlagene Aufrufe werfen `HostRequestError`. `code` ist einer der folgende
 | `NO_SERVICE` | kein Dienst deklariert, nicht bestätigt oder nicht gestartet |
 | `NOT_GRANTED` | der Nutzer hat die für diesen Aufruf nötige Berechtigung nicht bestätigt |
 | `SERVICE_FAILED` | der Dienst ist abgestürzt oder nie bereit geworden |
-| `NO_DIRECTORY` | ein relativer Dateipfad wurde ohne offenes Projekt verwendet |
-| `NOT_FOUND` | `readFile` auf eine Datei, die nicht existiert |
+| `NO_DIRECTORY` | ein relativer Dateipfad wurde ohne offenes Projekt verwendet, oder `openCommit` ohne offenes Projekt |
+| `NOT_FOUND` | `readFile` auf eine Datei, die nicht existiert, oder `openCommit` auf einen Commit, den es im Projekt nicht gibt |
 | `FILE_TOO_LARGE` | Dateiinhalt über der Grenze, beim Lesen oder Schreiben |
 | `DENIED` | das Betriebssystem hat die Dateioperation verweigert |
 | `NO_MODEL` | `generate` ohne verfügbares Small Model |
 | `MODEL_FAILED` | das Small Model hat einen Fehler zurückgegeben |
+| `UNSUPPORTED` | dieses OpenChamber kann den Aufruf nicht ausführen, zum Beispiel `openCommit` ohne Diff-Ansicht |
 
 ## Verwandt
 

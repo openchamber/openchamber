@@ -1,5 +1,5 @@
 import { HostRequestError, type GuestLoadState, type GuestSessionRecord, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestWorktree } from '@openchamber/sdk';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -40,13 +40,16 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   const worktree = worktrees.get(normalizePath(directory) ?? directory)
     ?? (attached && normalizePath(attached.path) === normalizePath(directory) ? toWorktree(attached) : null);
   const connected = useConfigStore.getState().isConnected;
+  const statusInvalidated = child?.sessionStatusInvalidated?.[session.id] === true;
   let activity: GuestSessionRecord['activity'] = 'unknown';
   if (connected) {
     if (status?.type === 'busy') activity = 'running';
     else if (status?.type === 'retry') activity = 'retrying';
-    else if (status?.type === 'idle' || child?.sessionStatusReady || observed) activity = 'idle';
+    else if (status?.type === 'idle' || (!statusInvalidated && (child?.sessionStatusReady || observed))) activity = 'idle';
     if (child?.permission[session.id]?.length) activity = 'waiting-permission';
-    else if (child?.question[session.id]?.length) activity = 'waiting-question';
+    // v2 replaced the v1 question tool with typed forms; both are "the agent
+    // is waiting for the user to answer", so the public activity value stays.
+    else if (child?.form[session.id]?.length) activity = 'waiting-question';
   }
   return {
     id: session.id, title: session.title || session.id, projectId, directory,
@@ -148,8 +151,9 @@ export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: strin
         manager.subscribeBootstrap(update),
         manager.subscribeAllSelected((state) => state.session, update),
         manager.subscribeAllSelected((state) => state.permission, update),
-        manager.subscribeAllSelected((state) => state.question, update),
+        manager.subscribeAllSelected((state) => state.form, update),
         manager.subscribeAllSelected((state) => state.sessionStatusReady, update),
+        manager.subscribeAllSelected((state) => state.sessionStatusInvalidated, update),
       );
     }
     current.dispose = () => { disposed = true; for (const unsubscribe of unsubs) unsubscribe(); observers.delete(key); };

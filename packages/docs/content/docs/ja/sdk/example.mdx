@@ -118,4 +118,4 @@ host.onConnection((connection) => {
 
 Git URL でのインストールと更新には、ビルド済みの `panel/main.js` を HTML とマニフェストと一緒にコミットしてください。OpenChamber はインストール時に npm 依存関係を導入したり TypeScript をビルドしたりしません。ロックファイルをコミットし、`node_modules/` を `.gitignore` に追加し、ブラウザー用の依存関係を IIFE に含めます。更新を公開するには、拡張機能自身の `package.json` のバージョンを上げ、再ビルド、コミット、push を行い、Settings → Extensions で Update を選びます。Git タグに固定した URL はそのタグに留まります。
 
-フォルダ内で `bunx openchamber-guest-bundle panel/main.ts panel/main.js` を実行してビルドし、設定 → 拡張機能 でそのフォルダを追加します。さらに 5 つの例(すべての UI コントロール、アクションとスラッシュコマンド付きのタスク一覧、ローカルサービス、設定ファイルエディタ、ツールのみのパッケージ)が [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples) にあります。
+フォルダ内で `bunx openchamber-guest-bundle panel/main.ts panel/main.js` を実行してビルドし、設定 → 拡張機能 でそのフォルダを追加します。さらに 6 つの例(すべての UI コントロール、アクションとスラッシュコマンド付きのタスク一覧、ローカルサービス、設定ファイルエディタ、ツールのみのパッケージ、git グラフ付きの Work Status セクション)が [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples) にあります。

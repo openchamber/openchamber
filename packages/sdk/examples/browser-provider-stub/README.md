@@ -13,9 +13,16 @@ that shifts on every key. Click the picture to take control, press "Hand back
 to agent" to give it back; while you hold it, an agent's browser action is
 refused with a message telling it to wait.
 
+Above the picture sits the extension's own page (`panel/`, docked with
+`panel.dock: "top"` and `panel.size: 40`): an address field and a Go button
+that drive the fake page through `host.serviceRequest`. The address follows what the agent opens.
+Every request from the host carries `context.directory` and
+`context.sessionId`; the stub only remembers the last caller, but a real
+provider can keep one browser per project or chat on them.
+
 Use it to see the host side work before writing a real provider:
 
-1. `bunx openchamber-guest-bundle --node service/main.ts service/main.js` in this folder.
+1. `bunx openchamber-guest-bundle --node service/main.ts service/main.js` and `bunx openchamber-guest-bundle panel/main.ts panel/main.js` in this folder.
 2. Install the folder from Settings → Extensions and allow the local service.
 3. Settings → General → OpenChamber Tools → Browser provider: pick "Browser Provider Stub".
 4. Ask an agent to open a page and read it. The snapshot says it came from the stub.

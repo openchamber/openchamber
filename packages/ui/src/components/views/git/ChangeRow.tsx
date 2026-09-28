@@ -50,6 +50,8 @@ interface ChangeRowProps {
   indentPx?: number;
   /** Place the stage/unstage action at the row start (flat view) instead of the end (tree view). */
   actionAtStart?: boolean;
+  /** Tree view: the directory rows above already say where the file lives. */
+  nameOnly?: boolean;
   showRevert?: boolean;
 }
 
@@ -65,6 +67,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   rowPaddingClassName,
   indentPx = 0,
   actionAtStart = false,
+  nameOnly = false,
   showRevert = true,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
@@ -137,14 +140,14 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
         <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 shrink-0" />
         {(() => {
           const lastSlash = file.path.lastIndexOf('/');
-          if (lastSlash === -1) {
+          if (lastSlash === -1 || nameOnly) {
             return (
               <span
                 className="flex-1 min-w-0 truncate typography-ui-label text-foreground"
                 style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                 title={file.path}
               >
-                {file.path}
+                {file.path.slice(lastSlash + 1)}
               </span>
             );
           }

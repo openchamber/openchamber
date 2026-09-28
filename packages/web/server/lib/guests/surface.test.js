@@ -35,8 +35,9 @@ const createFakeService = () => {
   };
   const nextFrameAfter = (seq) => frames.find((frame) => frame.seq > seq) ?? null;
   const completed = [];
-  const openServiceRequest = async ({ path, method, body, query, signal }) => {
-    calls.push({ path, method, body: body ? JSON.parse(body) : undefined, query });
+  let inputStatus = 204;
+  const openServiceRequest = async ({ path, method, body, query, headers, signal }) => {
+    calls.push({ path, method, body: body ? JSON.parse(body) : undefined, query, headers });
     if (failWith) throw failWith;
     if (path === SURFACE_INPUT_PATH && inputGate) {
       const gate = inputGate;
@@ -75,6 +76,8 @@ const createFakeService = () => {
       response = Response.json({ width: 640, height: 400 });
     } else if (path === SURFACE_CLIPBOARD_PATH) {
       response = Response.json({ text: 'copied inside' });
+    } else if (path === SURFACE_INPUT_PATH) {
+      response = new Response(null, { status: inputStatus });
     } else {
       response = new Response(null, { status: 204 });
     }
@@ -85,6 +88,7 @@ const createFakeService = () => {
     completed,
     pushFrame,
     gateNextInput: (promise) => { inputGate = promise; },
+    answerInputWith: (status) => { inputStatus = status; },
     fail: (error) => { failWith = error; for (const wake of waiters.splice(0)) wake(); },
     openServiceRequest,
     callsTo: (path) => calls.filter((call) => call.path === path),
@@ -101,7 +105,8 @@ const openViewer = (port, guestId = 'sim') => new Promise((resolve, reject) => {
   const inbox = [];
   const waiting = [];
   ws.on('message', (data, isBinary) => {
-    const item = isBinary ? { binary: Buffer.from(data) } : JSON.parse(data.toString());
+    // Bun's `ws` hands text frames over as a Uint8Array, not a Buffer.
+    const item = isBinary ? { binary: Buffer.from(data) } : JSON.parse(Buffer.from(data).toString('utf8'));
     const waiter = waiting.shift();
     if (waiter) waiter(item);
     else inbox.push(item);
@@ -214,13 +219,13 @@ describe('guest surface runtime', () => {
     await settle();
     expect(runtime.userControls('sim')).toBe(true);
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].body).toEqual({ events: [click] });
-    expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user' }]);
+    expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user', viewer: 'viewer-1' }]);
 
     viewer.send({ type: 'release' });
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'none', mine: false });
     await settle();
     expect(runtime.userControls('sim')).toBe(false);
-    expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user' }, { controller: 'none' }]);
+    expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user', viewer: 'viewer-1' }, { controller: 'none' }]);
   });
 
   test('a second viewer cannot take control from the first and is told who has it', async () => {
@@ -367,7 +372,7 @@ describe('guest surface runtime', () => {
     viewer.ws.close();
     await viewer.closed;
     await settle();
-    expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user' }, { controller: 'none' }]);
+    expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user', viewer: 'viewer-1' }, { controller: 'none' }]);
   });
 
   test('a queued input from before a hand-back does not take control again', async () => {
@@ -482,5 +487,50 @@ describe('guest surface runtime', () => {
     expect(await again.next()).toEqual({ type: 'ended', reason: 'extension-unavailable' });
     await again.closed;
     expect(runtime.sessionOf('sim')).toBeNull();
+  });
+
+  test('stamps input with the viewer and the service frame it last drew', async () => {
+    const { port, service, runtime } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next(); // hello
+    await viewer.next(); // control
+    const click = { type: 'pointer', action: 'down', x: 1, y: 1, button: 0, buttons: 1, modifiers: { alt: false, ctrl: false, meta: false, shift: false } };
+
+    // Nothing drawn yet: frame 0.
+    viewer.send({ type: 'input', events: [click] });
+    await settle();
+    expect(service.callsTo(SURFACE_INPUT_PATH)[0].headers).toEqual({ 'x-surface-viewer': 'viewer-1', 'x-surface-frame-seq': '0' });
+    expect(service.callsTo(SURFACE_CONTROL_PATH).at(-1).body).toEqual({ controller: 'user', viewer: 'viewer-1' });
+    await viewer.next(); // control: mine
+
+    service.pushFrame({ seq: 7, bytes: Buffer.from('frame-7') });
+    await viewer.next();
+    await viewer.next();
+    // Sent but not yet drawn: input still counts as made on the old picture.
+    viewer.send({ type: 'input', events: [click] });
+    viewer.send({ type: 'ack', seq: 7 });
+    viewer.send({ type: 'input', events: [click] });
+    await settle();
+    const stamped = service.callsTo(SURFACE_INPUT_PATH).map((call) => call.headers['x-surface-frame-seq']);
+    expect(stamped).toEqual(['0', '0', '7']);
+
+    expect(runtime.viewerHeaders('sim', 'viewer-1')).toEqual({ 'x-surface-viewer': 'viewer-1', 'x-surface-viewer-controls': '1', 'x-surface-frame-seq': '7' });
+    expect(runtime.viewerHeaders('sim', 'viewer-2')).toBeNull();
+    expect(runtime.viewerHeaders('other', 'viewer-1')).toBeNull();
+
+    viewer.send({ type: 'release' });
+    await settle();
+    expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-viewer-controls']).toBe('0');
+  });
+
+  test('tells the viewer when the service refuses input made on an old picture', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next();
+    await viewer.next();
+    service.answerInputWith(409);
+    viewer.send({ type: 'input', events: [{ type: 'text', text: 'hi' }] });
+    await viewer.next(); // control: mine
+    expect(await viewer.next()).toMatchObject({ type: 'error', code: 'INPUT_STALE' });
   });
 });
