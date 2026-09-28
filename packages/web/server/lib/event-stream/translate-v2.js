@@ -225,18 +225,26 @@ export function translateWireEvent(payload) {
       const messageID = trimmed(data.assistantMessageID);
       if (!sessionID || !messageID) return [];
       const model = isRecord(data.model) ? data.model : {};
-      return [event('message.updated', {
-        sessionID,
-        info: compact({
-          id: messageID,
+      return [
+        event('message.updated', {
           sessionID,
-          role: 'assistant',
-          agent: trimmed(data.agent) || undefined,
-          providerID: trimmed(model.providerID) || undefined,
-          modelID: trimmed(model.id) || undefined,
-          time: { created },
+          info: compact({
+            id: messageID,
+            sessionID,
+            role: 'assistant',
+            agent: trimmed(data.agent) || undefined,
+            providerID: trimmed(model.providerID) || undefined,
+            modelID: trimmed(model.id) || undefined,
+            time: { created },
+          }),
         }),
-      })];
+        // A retry re-runs its step inside the same execution, so no execution
+        // event marks the wait ending. The step start is that signal: it clears
+        // the synthesized retry status back to busy while the attempt runs.
+        // session-runtime's 5s same-status dedup absorbs the repeats for
+        // ordinary multi-step turns.
+        status({ type: 'busy' }),
+      ];
     }
 
     case 'session.step.ended': {

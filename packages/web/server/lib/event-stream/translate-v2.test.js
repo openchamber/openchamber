@@ -153,16 +153,18 @@ describe('translateWireEvent', () => {
     }))).toEqual([]);
   });
 
-  test('steps become assistant message updates', () => {
-    const [started] = translateWireEvent(wire('session.step.started', {
+  test('steps become assistant message updates; a step start clears a pending retry', () => {
+    const startedEvents = translateWireEvent(wire('session.step.started', {
       sessionID: 's1',
       assistantMessageID: 'msg_2',
       agent: 'build',
       model: { id: 'gpt-5.6-luna', providerID: 'openai' },
     }));
-    expect(started.properties.info).toMatchObject({
+    expect(startedEvents.map((entry) => entry.type)).toEqual(['message.updated', 'session.status']);
+    expect(startedEvents[0].properties.info).toMatchObject({
       id: 'msg_2', role: 'assistant', agent: 'build', providerID: 'openai', modelID: 'gpt-5.6-luna',
     });
+    expect(startedEvents[1].properties.status).toEqual({ type: 'busy' });
 
     const [ended] = translateWireEvent(wire('session.step.ended', {
       sessionID: 's1', assistantMessageID: 'msg_2', finish: 'stop', cost: 1, tokens: { input: 2 },
@@ -175,6 +177,28 @@ describe('translateWireEvent', () => {
     }));
     expect(failed.properties.info).toMatchObject({ finish: 'error' });
     expect(failed.properties.info.error.name).toBe('Overloaded');
+  });
+
+  test('a retried turn reads retry -> busy -> retry -> idle as attempts restart', () => {
+    const statuses = [
+      wire('session.execution.started', { sessionID: 's1' }),
+      wire('session.retry.scheduled', {
+        sessionID: 's1', assistantMessageID: 'msg_2', attempt: 1, at: 5000,
+        error: { type: 'RateLimit', message: 'busy' },
+      }),
+      wire('session.step.started', { sessionID: 's1', assistantMessageID: 'msg_2' }),
+      wire('session.retry.scheduled', {
+        sessionID: 's1', assistantMessageID: 'msg_2', attempt: 2, at: 9000,
+        error: { type: 'RateLimit', message: 'busy' },
+      }),
+      wire('session.step.started', { sessionID: 's1', assistantMessageID: 'msg_2' }),
+      wire('session.execution.succeeded', { sessionID: 's1' }),
+    ]
+      .flatMap((payload) => translateWireEvent(payload))
+      .filter((entry) => entry.type === 'session.status')
+      .map((entry) => entry.properties.status.type);
+
+    expect(statuses).toEqual(['busy', 'retry', 'busy', 'retry', 'busy', 'idle']);
   });
 
   test('permission requests keep the v2 action and resources', () => {
