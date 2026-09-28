@@ -13,6 +13,7 @@ type FakeElement = {
     innerHTML: string;
     setAttribute: (name: string, value: string) => void;
     getAttribute: (name: string) => string | null;
+    hasAttribute: (name: string) => boolean;
     appendChild: (child: FakeElement) => FakeElement;
     replaceWith: (replacement: FakeElement) => void;
     remove: () => void;
@@ -67,6 +68,9 @@ const makeFakeElement = (ownerDocument: { createElement: () => FakeElement }): F
         },
         getAttribute(name) {
             return this.attributes.get(name) ?? null;
+        },
+        hasAttribute(name) {
+            return this.attributes.has(name);
         },
         appendChild(child) {
             child.parentNode = this;
