@@ -22,7 +22,7 @@ import {
 } from '@/components/chat/lib/turns/sessionChanges';
 import type { ChatMessageEntry } from '@/components/chat/lib/turns/types';
 import type { Part, Session } from '@/lib/opencode/model';
-import { getImperativeSessionMessageLoader } from '@/sync/session-message-loader';
+import { getImperativeSessionMessageLoader, type SessionMessageLoader } from '@/sync/session-message-loader';
 import { useDirectorySync, useSessionMessageRecords } from '@/sync/sync-context';
 import type { State } from '@/sync/types';
 
@@ -51,6 +51,35 @@ const sameEntries = (left: readonly ChatMessageEntry[], right: readonly ChatMess
 /** Side chains run during the parent turn; timestamp order reads as chronology. */
 const byCreatedAt = (left: ChatMessageEntry, right: ChatMessageEntry): number =>
     (left.info.time?.created ?? 0) - (right.info.time?.created ?? 0);
+
+type ReviewHistoryLoader = Pick<SessionMessageLoader, 'ensure' | 'retainSessionHistory'>;
+
+/**
+ * Load every descendant's transcript and hold it for as long as the review is
+ * on screen, returning the release that drops the holds.
+ *
+ * `ensure` on its own only marks recency, so the cache is free to evict an
+ * unheld child once its idle grace elapses — or as soon as the directory is over
+ * its count limit — and the panel would silently drop that subagent's edits
+ * until it was reopened. A read hold is the cache's contract for an imperative
+ * reader like this one; hold before loading so a cleanup pass scheduled by the
+ * load already sees the hold.
+ */
+export const retainReviewHistories = (
+    loader: ReviewHistoryLoader,
+    directory: string,
+    sessionIDs: readonly string[],
+): (() => void) => {
+    const releases = sessionIDs.map((sessionID) => (
+        loader.retainSessionHistory({ directory, sessionID }, 'read')
+    ));
+    for (const sessionID of sessionIDs) {
+        void loader.ensure({ directory, sessionID });
+    }
+    return () => {
+        for (const release of releases) release();
+    };
+};
 
 export function useSessionReviewChanges(
     sessionID: string | null | undefined,
@@ -96,9 +125,7 @@ export function useSessionReviewChanges(
         if (!enabled || !directory || descendantSessionIds.length === 0) return;
         const loader = getImperativeSessionMessageLoader();
         if (!loader) return;
-        for (const childId of descendantSessionIds) {
-            void loader.ensure({ directory, sessionID: childId });
-        }
+        return retainReviewHistories(loader, directory, descendantSessionIds);
     }, [descendantSessionIds, directory, enabled]);
 
     return React.useMemo(() => {
