@@ -3,7 +3,8 @@ import { LegendList, type LegendListRef } from '@legendapp/list/react';
 
 import ChatMessage from './ChatMessage';
 import { TimelineNotice } from './message/TimelineNotice';
-import { isSkippedTimelineRole, isTimelineNoticeRole } from './lib/timelineRoles';
+import { useRunningSubagentRuns, withRunningSubagentRuns } from './lib/runningSubagentRuns';
+import { isSkippedTimelineMessage, isSubagentRunEntry, isTimelineNoticeRole } from './lib/timelineRoles';
 import { filterVisibleParts, isEmptyTextPart } from './message/partUtils';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
@@ -197,8 +198,8 @@ const MessageRow = React.memo<MessageRowProps>(({
     // Roles that are not a conversation turn render as their own timeline row
     // (or as nothing); only user and assistant go through ChatMessage.
     const role = message.info.role;
-    if (isSkippedTimelineRole(role)) return null;
-    if (isTimelineNoticeRole(role)) return <TimelineNotice message={message.info} />;
+    if (isSkippedTimelineMessage(message.info)) return null;
+    if (isTimelineNoticeRole(role) || isSubagentRunEntry(message.info)) return <TimelineNotice message={message.info} />;
 
     return (
         <ChatMessage
@@ -273,8 +274,10 @@ const TurnBlock = React.memo(({
 }: TurnBlockProps) => {
 
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const userMessageHidden = React.useMemo(
-        () => isHiddenUserMessage(turn.userMessage),
+    // A hidden prompt has nothing to pin, and a subagent run opens its turn as
+    // a notice row, which never sticks.
+    const turnHeaderCanStick = React.useMemo(
+        () => !isHiddenUserMessage(turn.userMessage) && !isSubagentRunEntry(turn.userMessage.info),
         [turn.userMessage]
     );
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
@@ -556,7 +559,7 @@ const TurnBlock = React.memo(({
     return (
         <TurnItem
             turn={renderableTurn}
-            stickyUserHeader={stickyUserHeader && !userMessageHidden}
+            stickyUserHeader={stickyUserHeader && turnHeaderCanStick}
             renderMessage={renderMessage}
             assistantContent={chatRenderMode === 'live' && !defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces) ? (
                 <LiveTurnActivity
@@ -1047,19 +1050,22 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [defaultActivityExpanded]);
 
 
+    const runningSubagentRuns = useRunningSubagentRuns(sessionKey, directory);
+
     const baseDisplayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.base_display_ms', () => {
+        const timeline = withRunningSubagentRuns(messages, runningSubagentRuns);
         const seenIds = new Set<string>();
         const latestById = new Map<string, ChatMessageEntry>();
         const dedupedMessages: ChatMessageEntry[] = [];
-        for (const message of messages) {
+        for (const message of timeline) {
             const messageId = message.info?.id;
             if (typeof messageId === 'string') latestById.set(messageId, message);
         }
 
         // Preserve the first occurrence's chronological position, but use the last
         // value because prepended history can overlap with newer live store data.
-        for (let index = 0; index < messages.length; index += 1) {
-            const message = messages[index];
+        for (let index = 0; index < timeline.length; index += 1) {
+            const message = timeline[index];
             const messageId = message.info?.id;
             if (typeof messageId === 'string') {
                 if (seenIds.has(messageId)) {
@@ -1078,7 +1084,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // prompt back where they belong: composer context onto its user
         // message, plumbing out of the list entirely.
         return attachSyntheticContext(dedupedMessages);
-    }), [messages]);
+    }), [messages, runningSubagentRuns]);
 
     // The list owns the scroll container. The DOM fallback covers the window
     // between mount and the list handing us its node.
@@ -1148,6 +1154,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             if (!staticEntryUngroupedIds.has(message.info.id)) {
                 return;
             }
+            // Without a live turn the trailing entry renders the last message.
+            if (!streamingTurn && index === staticEntryMessages.length - 1) {
+                return;
+            }
 
             orderedEntries.push({
                 kind: 'ungrouped',
@@ -1159,7 +1169,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
 
         return orderedEntries;
-    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, turnsWithLaterAssistant]);
+    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, streamingTurn, turnsWithLaterAssistant]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1225,9 +1235,42 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         registerList?.(list);
     }, [registerList]);
 
+    // Notices that belong to the open turn are ungrouped, while the open turn
+    // itself renders as the trailing entry. Appending the trailing entry after
+    // every static row made those notices float above the turn they belong to;
+    // place it at its own position in the message order instead.
+    const messageOrderIndex = React.useMemo(() => {
+        const index = new Map<string, number>();
+        displayMessages.forEach((message, position) => {
+            index.set(message.info.id, position);
+        });
+        return index;
+    }, [displayMessages]);
+
     const allEntries = React.useMemo(() => {
-        return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
-    }, [historyEntries, trailingStreamingEntry]);
+        if (!trailingStreamingEntry) {
+            return historyEntries;
+        }
+        const trailingOrder = trailingEntryFirstMessage
+            ? messageOrderIndex.get(trailingEntryFirstMessage.info.id)
+            : undefined;
+        if (trailingOrder === undefined) {
+            return [...historyEntries, trailingStreamingEntry];
+        }
+        const insertAt = historyEntries.findIndex((entry) => {
+            const message = entry.kind === 'turn' ? entry.turn.userMessage : entry.message;
+            const order = messageOrderIndex.get(message.info.id);
+            return order !== undefined && order > trailingOrder;
+        });
+        if (insertAt === -1) {
+            return [...historyEntries, trailingStreamingEntry];
+        }
+        return [
+            ...historyEntries.slice(0, insertAt),
+            trailingStreamingEntry,
+            ...historyEntries.slice(insertAt),
+        ];
+    }, [historyEntries, trailingStreamingEntry, trailingEntryFirstMessage, messageOrderIndex]);
 
     // Stable identities: these reach the list, where a changing callback would
     // re-render every mounted row.
