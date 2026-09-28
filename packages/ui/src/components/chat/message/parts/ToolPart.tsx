@@ -1884,8 +1884,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return undefined;
         }
 
-        // Current OpenCode publishes this authoritative join while the Task is
-        // running. The remaining sources only support older persisted parts.
+        // Progress/result metadata is the canonical join. Older parts keep
+        // their metadata/output IDs, and a resumed call can name its child in
+        // input.sessionID before the discovery fallback runs.
         const metadataSessionId = readTaskSessionIdFromRecord(metadata);
         if (metadataSessionId) {
             return metadataSessionId;
@@ -1899,8 +1900,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         if (parsedTaskMetadata.sessionId) {
             return parsedTaskMetadata.sessionId;
         }
-        return readTaskSessionIdFromOutput(taskOutputString);
-    }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
+        const outputSessionId = readTaskSessionIdFromOutput(taskOutputString);
+        if (outputSessionId) {
+            return outputSessionId;
+        }
+
+        return readTaskSessionIdFromRecord({ sessionID: input?.sessionID });
+    }, [input, isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
     // A parent message loaded over REST mid-run lacks the progress-only join
     // (see resolveRunningTaskChildSessionId); recover it from the child

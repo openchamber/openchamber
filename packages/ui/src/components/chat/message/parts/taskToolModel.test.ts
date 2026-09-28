@@ -15,6 +15,8 @@ describe('taskToolModel', () => {
     test('reads the current OpenCode running-state identity contract', () => {
         expect(readTaskSessionIdFromRecord({ sessionId: 'child-live' })).toBe('child-live');
         expect(readTaskSessionIdFromRecord({})).toBe(undefined);
+        expect(readTaskSessionIdFromRecord({ sessionID: '  ' })).toBe(undefined);
+        expect(readTaskSessionIdFromRecord(undefined)).toBe(undefined);
     });
 
     test('reads authoritative session and summary metadata', () => {
