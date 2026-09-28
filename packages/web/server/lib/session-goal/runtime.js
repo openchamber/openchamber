@@ -579,8 +579,9 @@ export const createSessionGoalRuntime = ({
     // subagent runs in a child session while its parent stays idle. Re-read
     // authoritative live status after the quiet window. If the parent resumed,
     // its next idle event will arm a fresh tick. If a child is still working,
-    // OpenCode will inject its result into the parent and produce the same
-    // busy→idle cycle, so do not poll or audit the interim parent reply.
+    // recheck after another quiet window: OpenCode normally runs the parent
+    // again when the child finishes, but a missed parent idle event must not
+    // strand the goal.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) {
       armTimer(sessionId, directory, idleQuietMs);
@@ -593,7 +594,10 @@ export const createSessionGoalRuntime = ({
       armTimer(sessionId, directory, idleQuietMs);
       return;
     }
-    if (childrenWorking) return;
+    if (childrenWorking) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
 
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
