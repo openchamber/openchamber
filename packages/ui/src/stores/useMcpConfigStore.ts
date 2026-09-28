@@ -6,6 +6,7 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 export type McpScope = 'user' | 'project';
 
@@ -311,6 +312,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             invalidateMcpCache(configDirectory);
+            trackTelemetryEvent('mcp_changed', { action: 'create' });
 
             if (payload?.requiresManualRestart) {
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
@@ -372,6 +374,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             invalidateMcpCache(configDirectory);
+            trackTelemetryEvent('mcp_changed', { action: 'update' });
 
             if (payload?.requiresManualRestart) {
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
@@ -428,6 +431,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             invalidateMcpCache(configDirectory);
+            trackTelemetryEvent('mcp_changed', { action: 'delete' });
 
             if (get().selectedMcpName === name) {
               set({ selectedMcpName: null });

@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import {
   resolveOpenCodeUpdateVersion,
   shouldShowOpenCodeUpdateToast,
@@ -54,6 +55,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
     try {
       const version = await runOpenCodeUpgrade(t('opencodeUpdate.toast.failed.description'));
 
+      trackTelemetryEvent('opencode_update_installed', { targetVersion: version || '' });
       toast.success(t('opencodeUpdate.toast.updated.title'), {
         id: UPGRADE_TOAST_ID,
         description: version
@@ -97,6 +99,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
         return;
       }
       seenVersionsRef.current.add(version);
+      trackTelemetryEvent('opencode_update_available', { targetVersion: version });
 
       const dismiss = {
         label: t('opencodeUpdate.toast.actions.dismiss'),

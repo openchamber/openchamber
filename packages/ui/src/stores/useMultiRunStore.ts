@@ -21,6 +21,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { RUN_LAUNCHER_ID } from '@/lib/multirun/launcher';
 import { multiRunVariantLabel } from '@/lib/multirun/runs';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 export const toGitSafeSlug = (value: string): string => {
   return value
@@ -349,6 +350,8 @@ export const useMultiRunStore = create<MultiRunStore>()(
             set({ error: 'Failed to create any sessions', isLoading: false });
             return null;
           }
+
+          trackTelemetryEvent('multi_run_created', { runCount: sessionIds.length, isolatedRuns: shouldIsolateRuns });
 
           const filesForMessage = files?.map((f) => ({
             type: 'file' as const,

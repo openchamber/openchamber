@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 import type { TerminalServerSession } from '@/lib/api/types';
 import { normalizeTerminalDirectory } from '@/lib/pathNormalization';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 export type TerminalChunkSize = { cols: number; rows: number };
 
@@ -448,6 +449,7 @@ export const useTerminalStore = create<TerminalStore>()(
             return 'tab-invalid';
           }
 
+          trackTelemetryEvent('terminal_started');
           const tabId = createTerminalTabId();
 
           set((state) => {
@@ -747,6 +749,8 @@ export const useTerminalStore = create<TerminalStore>()(
 
         closeTab: (directory: string, tabId: string) => {
           const key = normalizeDirectory(directory);
+          const existingBeforeClose = get().sessions.get(key);
+          const tabWasOpen = existingBeforeClose ? findTabIndex(existingBeforeClose, tabId) >= 0 : false;
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -808,6 +812,7 @@ export const useTerminalStore = create<TerminalStore>()(
             }
             return { ...nextState, ...mutationState };
           });
+          if (tabWasOpen) trackTelemetryEvent('terminal_tab_closed');
         },
 
         setTabPurpose: (directory, tabId, purpose) => {

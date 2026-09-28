@@ -8,6 +8,7 @@ import { persist } from "zustand/middleware"
 import { z } from "zod"
 import { createDeferredSafeJSONStorage } from "@/stores/utils/safeStorage"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { trackTelemetryEvent } from "@/lib/telemetry"
 
 type ModelSelection = { providerId: string; modelId: string }
 type LastUsedProvider = { providerID: string; modelID: string }
@@ -64,24 +65,28 @@ export const useSelectionStore = create<SelectionState>()(
       agentModelVariantSelections: new Map(),
       lastUsedProvider: null,
 
-      saveSessionModelSelection: (sessionId, providerId, modelId) =>
+      saveSessionModelSelection: (sessionId, providerId, modelId) => {
+        trackTelemetryEvent('model_changed', { providerID: providerId, modelID: modelId })
         set((s) => {
           const map = new Map(s.sessionModelSelections)
           map.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
           map.set(sessionId, { providerId, modelId })
           return { sessionModelSelections: map, lastUsedProvider: { providerID: providerId, modelID: modelId } }
-        }),
+        })
+      },
 
       getSessionModelSelection: (sessionId) => get().sessionModelSelections.get(sessionId) ?? null,
 
-      saveSessionAgentSelection: (sessionId, agentName) =>
+      saveSessionAgentSelection: (sessionId, agentName) => {
+        trackTelemetryEvent('agent_changed', { agent: agentName })
         set((s) => {
           if (s.sessionAgentSelections.get(sessionId) === agentName) return s
           const map = new Map(s.sessionAgentSelections)
           map.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
           map.set(sessionId, agentName)
           return { sessionAgentSelections: map }
-        }),
+        })
+      },
 
       getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
 

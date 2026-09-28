@@ -3,6 +3,7 @@ import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 // Newest pending card owns the keyboard; older cards wait their turn.
 const activePermissionCardIds: string[] = [];
@@ -37,6 +38,7 @@ export const usePermissionResponse = (
       await respondToPermission(permission.sessionID, permission.id, response);
       setHasResponded(true);
       onResponse?.(response);
+      trackTelemetryEvent('permission_responded', { decision: response });
     } catch (error) {
       console.error('[PermissionCard] Failed to respond to permission:', error);
     } finally {

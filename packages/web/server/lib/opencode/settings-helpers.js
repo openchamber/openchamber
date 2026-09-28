@@ -923,6 +923,16 @@ export const createSettingsHelpers = (dependencies) => {
       result.reportUsage = candidate.reportUsage;
     }
 
+    // Telemetry consent marker: the version of the consent copy the user
+    // answered. Absent or 0 means the prompt was never answered.
+    if (
+      typeof candidate.telemetryConsentVersion === 'number'
+      && Number.isInteger(candidate.telemetryConsentVersion)
+      && candidate.telemetryConsentVersion >= 0
+    ) {
+      result.telemetryConsentVersion = candidate.telemetryConsentVersion;
+    }
+
     // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
     if (typeof candidate.globalBehaviorPrompt === 'string') {
       const value = candidate.globalBehaviorPrompt;

@@ -25,6 +25,8 @@
  * ```
  */
 
+import { trackTelemetryEvent } from '@/lib/telemetry';
+
 // Extend Window interface for SpeechRecognition
 declare global {
   interface Window {
@@ -213,6 +215,8 @@ class BrowserVoiceService {
       throw new Error(errorMsg);
     }
 
+    trackTelemetryEvent('voice_input_started');
+
     // Stop any existing recognition
     this.stopListening();
 
@@ -281,6 +285,7 @@ class BrowserVoiceService {
 
       const errorMessage = this.getErrorMessage(event.error);
       this.onErrorCallback?.(errorMessage);
+      trackTelemetryEvent('voice_input_error', { errorType: event.error });
 
       // Don't restart on fatal / unrecoverable errors.
       // "network" in Electron/Chromium means Google's speech servers are unreachable;
@@ -337,6 +342,7 @@ class BrowserVoiceService {
    * Stop speech recognition
    */
   stopListening(): void {
+    const wasListening = this.isListening;
     this.restartOnEnd = false;
     
     if (this.recognition) {
@@ -349,6 +355,7 @@ class BrowserVoiceService {
     }
     
     this.isListening = false;
+    if (wasListening) trackTelemetryEvent('voice_input_stopped');
   }
 
   /**
@@ -493,6 +500,7 @@ class BrowserVoiceService {
       utterance.onstart = () => {
         hasStarted = true;
         console.log('[BrowserVoiceService] Speech started');
+        trackTelemetryEvent('voice_tts_played', { lang });
         resolve();
       };
 

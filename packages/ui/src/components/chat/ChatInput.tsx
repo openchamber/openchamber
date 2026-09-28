@@ -1,4 +1,5 @@
 import React from 'react';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -2505,6 +2506,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // btw mode: the stop button stops the fork's turn, not the main
         // session's.
         const abortTarget = isBtwActive && btwSessionId ? btwSessionId : currentSessionId;
+        trackTelemetryEvent('generation_stopped');
         void abortCurrentOperation(abortTarget || undefined);
     }, [abortCurrentOperation, btwSessionId, clearAbortPrompt, currentSessionId, isBtwActive]);
 

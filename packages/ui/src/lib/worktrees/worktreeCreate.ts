@@ -3,6 +3,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktree } from '@/lib/worktrees/worktreeManager';
 import { getRootBranch, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 export class WorktreeRequiresGitRepositoryError extends Error {
   constructor() {
@@ -184,7 +185,9 @@ export const createWorktreeWithDefaults = async (
     assertCurrent();
     const resolvedArgs = await withWorktreeUpstreamDefaults(project.path, remoteArgs, options);
     assertCurrent();
-    return await createWorktree(project, resolvedArgs);
+    const result = await createWorktree(project, resolvedArgs);
+    trackTelemetryEvent('worktree_created');
+    return result;
   } finally {
     unsubscribe();
   }

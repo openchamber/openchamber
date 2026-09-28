@@ -14,6 +14,7 @@ import { useProjectsStore } from "@/stores/useProjectsStore";
 
 import { opencodeClient } from '@/lib/opencode/client';
 import { filterSkillsByRuntimeFlags } from './skillVisibility';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 // Prefer the active project path so Settings/Skills discovery matches the
 // project selector (and Commands/Agents). Falling back only to the session
@@ -481,6 +482,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             invalidateSkillsLoadCache(directory);
+            trackTelemetryEvent('skill_changed', { action: 'create' });
 
             if (payload?.requiresManualRestart) {
               upsertSkillLocal(set, get, config.name, config, directory);
@@ -534,6 +536,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             invalidateSkillsLoadCache(directory);
+            trackTelemetryEvent('skill_changed', { action: 'update' });
 
             if (payload?.requiresManualRestart) {
               upsertSkillLocal(set, get, name, config, directory);
@@ -616,6 +619,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             invalidateSkillsLoadCache(directory);
+            trackTelemetryEvent('skill_changed', { action: 'delete' });
 
             if (payload?.requiresManualRestart) {
               removeSkillLocal(set, get, name);

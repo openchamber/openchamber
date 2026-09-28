@@ -509,6 +509,11 @@ export const SETTINGS_REGISTRY = {
   }),
   showOpenCodeUpdateNotifications: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showOpenCodeUpdateNotifications', (v) => useUIStore.getState().setShowOpenCodeUpdateNotifications(v)) }),
   reportUsage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('reportUsage', (v) => useUIStore.getState().setReportUsage(v)) }),
+  // Which consent copy the user answered. The auto-save mirrors it beside
+  // reportUsage, so every surface of the instance — and the desktop main
+  // process, which reads the persisted settings for its own captures — sees
+  // the same explicit consent. Absent or 0 means the prompt was never answered.
+  telemetryConsentVersion: field({ scope: 'profile', parse: parseIntegerAtLeast(0), ui: uiStore('telemetryConsentVersion', (v) => useUIStore.getState().setTelemetryConsentVersion(v)) }),
 
   // ── Usage page (profile; the page reads and writes these itself) ──
   usageDisplayMode: field({ scope: 'profile', parse: parseOneOf(['usage', 'remaining']) }),

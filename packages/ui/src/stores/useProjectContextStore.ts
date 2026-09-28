@@ -30,6 +30,7 @@ import {
   type ProjectRef,
   type ProjectTodoItem,
 } from '@/lib/projectContextApi';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 interface ProjectContextEntry {
   notes: ProjectNote[];
@@ -205,6 +206,11 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       try {
         const committed = await enqueueWrite(projectId, () => saveProjectTodos(project, todos));
         patchEntry(projectId, { todos: committed.todos, loaded: true });
+        if (todos.length > previous.length) {
+          trackTelemetryEvent('project_todo_added');
+        } else if (todos.length === previous.length) {
+          trackTelemetryEvent('project_todo_toggled');
+        }
         return true;
       } catch (error) {
         patchEntry(projectId, {
@@ -240,6 +246,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
           () => createProjectNote(project, { ...value, body }),
         );
         patchEntry(projectId, { notes: context.notes, loaded: true, error: null });
+        trackTelemetryEvent('project_note_added');
         return note;
       } catch (error) {
         patchEntry(projectId, { error: errorMessage(error, 'Failed to create note') });

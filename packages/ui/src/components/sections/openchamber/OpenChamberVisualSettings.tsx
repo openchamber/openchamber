@@ -32,6 +32,7 @@ import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
+import { CURRENT_TELEMETRY_CONSENT_VERSION, isTelemetryDisabledByEnv } from '@/lib/telemetry';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import {
@@ -471,10 +472,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const reportUsage = useUIStore(state => state.reportUsage);
     const setReportUsage = useUIStore(state => state.setReportUsage);
 
-    // Sync reportUsage changes to server settings
+    // Sync reportUsage changes to server settings; a toggle is an explicit
+    // consent answer, so it also records the consent version.
     const handleReportUsageChange = React.useCallback((enabled: boolean) => {
         setReportUsage(enabled);
-        void updateDesktopSettings({ reportUsage: enabled });
+        useUIStore.getState().setTelemetryConsentVersion(CURRENT_TELEMETRY_CONSENT_VERSION);
+        void updateDesktopSettings({ reportUsage: enabled, telemetryConsentVersion: CURRENT_TELEMETRY_CONSENT_VERSION });
     }, [setReportUsage]);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
@@ -2207,10 +2210,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {shouldShow('reportUsage') && (
                     <SettingsSection title={t('settings.openchamber.visual.section.privacy')}>
                         <SettingsCheckboxRow
-                            checked={reportUsage}
+                            checked={!isTelemetryDisabledByEnv() && reportUsage}
+                            disabled={isTelemetryDisabledByEnv()}
                             onChange={handleReportUsageChange}
                             label={t('settings.openchamber.visual.field.sendAnonymousUsageReports')}
-                            info={t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
+                            info={isTelemetryDisabledByEnv() ? `${t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')} (Disabled by environment variable)` : t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
                             ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
                             settingsItem="appearance.usage-reports"
                         />

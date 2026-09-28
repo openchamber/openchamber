@@ -11,6 +11,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
+import { PostHog } from 'posthog-node';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
@@ -34,6 +35,7 @@ import {
   isMacMenuBarEnabled,
   macosMajorVersion,
   readLoginItemSettings,
+  readPreferencesValues,
   readSettingsRoot,
   readThemeSource,
   resolveMainWindowBounds,
@@ -54,6 +56,7 @@ import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
+import { isDesktopTelemetryConsented, isDesktopTelemetryDisabledByEnv } from './telemetry-consent.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
@@ -81,6 +84,100 @@ const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+// Desktop telemetry: renderer events arrive through the desktop_telemetry_track
+// IPC; main-side captures (updater lifecycle) are gated on the persisted
+// consent, which the shared UI syncs as a profile setting.
+function loadDotenvFile() {
+  try {
+    const envPaths = [
+      path.join(process.cwd(), '.env'),
+      path.join(__dirname, '.env'),
+      path.join(__dirname, '..', '..', '.env'),
+    ];
+    for (const envPath of envPaths) {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx > 0) {
+            const key = trimmed.slice(0, eqIdx).trim();
+            let val = trimmed.slice(eqIdx + 1).trim();
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.slice(1, -1);
+            }
+            if (process.env[key] === undefined) {
+              process.env[key] = val;
+            }
+          }
+        }
+        break;
+      }
+    }
+  } catch {
+    // Ignore error
+  }
+}
+
+loadDotenvFile();
+
+const POSTHOG_APP_KEY = process.env.POSTHOG_APP_KEY || process.env.VITE_POSTHOG_APP_KEY || '';
+const POSTHOG_HOST_URL = process.env.POSTHOG_HOST_URL || process.env.VITE_POSTHOG_HOST_URL || 'https://eu.i.posthog.com';
+
+let posthogClient = null;
+if (POSTHOG_APP_KEY) {
+  try {
+    posthogClient = new PostHog(POSTHOG_APP_KEY, {
+      host: POSTHOG_HOST_URL,
+      flushAt: 1,
+    });
+    log.info(`[PostHog Desktop] Initialized with host ${POSTHOG_HOST_URL}`);
+  } catch (err) {
+    log.warn('[PostHog Desktop] Failed to initialize:', err);
+  }
+} else {
+  log.info('[PostHog Desktop] No POSTHOG_APP_KEY configured in environment');
+}
+
+const getDesktopOS = () => {
+  if (process.platform === 'darwin') return 'macOS';
+  if (process.platform === 'win32') return 'Windows';
+  if (process.platform === 'linux') return 'Linux';
+  return process.platform || 'unknown';
+};
+
+const captureTelemetryEvent = async (eventName, properties = {}) => {
+  if (!posthogClient) return;
+  // Main-side captures (updater lifecycle) run without the renderer, so they
+  // re-derive the consent the shared UI enforces at the event source.
+  if (isDesktopTelemetryDisabledByEnv() || !isDesktopTelemetryConsented({
+    settingsRoot: readSettingsRoot(),
+    preferencesValues: readPreferencesValues(),
+  })) {
+    return;
+  }
+  try {
+    const distinctId = await getOrCreateDesktopInstallId();
+    const resolvedVersion = (app.isPackaged && app.getVersion()) ? app.getVersion() : APP_VERSION;
+    log.info(`[PostHog Desktop] Tracking event "${eventName}" for distinctId ${distinctId}`);
+    posthogClient.capture({
+      distinctId: distinctId || 'desktop_anonymous',
+      event: eventName,
+      properties: {
+        surface: 'desktop',
+        os: getDesktopOS(),
+        channel: app.isPackaged ? 'stable' : 'beta',
+        connection: 'local',
+        appVersion: resolvedVersion,
+        ...properties,
+      },
+    });
+    posthogClient.flush();
+  } catch (err) {
+    log.warn('[PostHog Desktop] Failed to capture event:', err);
+  }
+};
 // This process runs quota/provider fetches under Node/undici, whose happy-eyeballs
 // default aborts each connect attempt after 250ms — distant provider endpoints
 // routinely need longer handshakes, surfacing as "fetch failed" (#3399). No-op on
@@ -2783,6 +2880,7 @@ const setupAutoUpdater = () => {
     if (state.pendingUpdate) {
       state.pendingUpdate.downloaded = true;
     }
+    void captureTelemetryEvent('app_update_downloaded', { targetVersion: info?.version || 'unknown' });
   });
 
   autoUpdater.on('error', (err) => {
@@ -2867,6 +2965,7 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
       state.installingUpdate = true;
       state.quitConfirmationPending = false;
       log.info('[electron] handing control to the platform installer');
+      void captureTelemetryEvent('app_update_installed', { targetVersion: state.pendingUpdate?.version || 'unknown' });
       autoUpdater.quitAndInstall();
       // The installer owns the exit from here; other quit paths may run again.
       state.updateInstallPending = false;
@@ -4121,6 +4220,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_install_id_get':
       return getOrCreateDesktopInstallId();
 
+    case 'desktop_telemetry_track': {
+      const eventName = String(args?.name || '');
+      if (eventName) {
+        const customProps = args?.properties && typeof args.properties === 'object' ? args.properties : {};
+        await captureTelemetryEvent(eventName, customProps);
+      }
+      return { success: true };
+    }
+
     case 'desktop_host_probe':
       return probeDirectHostWithRetry((timeoutMs) => probeHostWithTimeout(
         String(args.url || ''),
@@ -4198,6 +4306,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
       state.pendingUpdate = pendingUpdate;
+      if (available) {
+        void captureTelemetryEvent('app_update_available', { currentVersion, targetVersion: nextVersion });
+      }
       return {
         available,
         currentVersion,
@@ -4824,6 +4935,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
   'desktop_tray_update',
+  'desktop_telemetry_track',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {

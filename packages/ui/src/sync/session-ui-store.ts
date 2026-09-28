@@ -41,6 +41,7 @@ import { noteDraftSendWaiting, waitForPendingDraftWorktreeRequest } from "@/lib/
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
+import { trackTelemetryEvent } from "@/lib/telemetry"
 import {
   getSyncSessions,
   getAllSyncSessions,
@@ -294,6 +295,7 @@ export async function routeMessage(params: {
   }
 
   // Normal prompt — optimistic insert so message appears instantly
+  trackTelemetryEvent('prompt_sent')
   await optimisticSend({
     runtimeKey: params.runtimeKey,
     sessionId: params.sessionId,
@@ -952,6 +954,7 @@ const createSessionWithDraftLifecycle = async (
     const session = await createSessionAction(title, directory, metadata, selectionTransition, selection)
     if (!session) return null
 
+    trackTelemetryEvent('session_created')
     useSessionUIStore.getState().closeNewSessionDraft()
 
     if (targetFolderId) {
@@ -1997,21 +2000,37 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // deleteSession — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
-  deleteSession: async (id, options) => deleteSessionAction(id, options),
+  deleteSession: async (id, options) => {
+    trackTelemetryEvent('session_deleted')
+    return deleteSessionAction(id, options)
+  },
 
   deleteSessions: async (ids, options) => {
+    trackTelemetryEvent('session_deleted', { count: ids.length })
     const result = await deleteSessionsAction(ids, options)
 
     return result
   },
 
-  archiveSession: (id) => archiveSessionAction(id),
+  archiveSession: (id) => {
+    trackTelemetryEvent('session_archived')
+    return archiveSessionAction(id)
+  },
 
-  archiveSessions: (ids, options) => archiveSessionsAction(ids, options),
+  archiveSessions: (ids, options) => {
+    trackTelemetryEvent('session_archived', { count: ids.length })
+    return archiveSessionsAction(ids, options)
+  },
 
-  unarchiveSession: (id) => unarchiveSessionAction(id),
+  unarchiveSession: (id) => {
+    trackTelemetryEvent('session_restored')
+    return unarchiveSessionAction(id)
+  },
 
-  unarchiveSessions: (ids, options) => unarchiveSessionsAction(ids, options),
+  unarchiveSessions: (ids, options) => {
+    trackTelemetryEvent('session_restored', { count: ids.length })
+    return unarchiveSessionsAction(ids, options)
+  },
 
   // ---------------------------------------------------------------------------
   // updateSessionTitle — calls SDK, SSE event updates child store
@@ -2026,6 +2045,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   revertToMessage: async (sessionId, messageId) => {
     // Ensure the complete message range is present before applying the revert
     // marker. Reverted UI is derived from session.revert + stored messages.
+    trackTelemetryEvent('turn_rewound')
     await refetchSessionMessages(sessionId)
     await revertToMessageAction(sessionId, messageId)
   },
@@ -2073,7 +2093,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // handleSlashRedo — moves the authoritative revert marker forward
   // ---------------------------------------------------------------------------
-  handleSlashRedo: async (sessionId) => {
+handleSlashRedo: async (sessionId) => {
     const sessions = getSyncSessions()
     const currentSession = sessions.find((s) => s.id === sessionId)
     const revertToId = currentSession?.revert?.messageID

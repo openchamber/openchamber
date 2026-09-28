@@ -9,6 +9,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { getDeferredSafeStorage } from './utils/safeStorage';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 interface DirectoryStore {
 
@@ -245,6 +246,9 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
         set((state) => {
           const alreadyCurrent = state.directoryHistory[state.historyIndex] === resolvedPath;
+          if (!alreadyCurrent) {
+            trackTelemetryEvent('directory_changed');
+          }
           const newHistory = alreadyCurrent ? state.directoryHistory : [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
 
           safeStorage.setItem('lastDirectory', resolvedPath);

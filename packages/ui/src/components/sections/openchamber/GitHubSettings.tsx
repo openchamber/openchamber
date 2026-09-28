@@ -1,4 +1,5 @@
 import React from 'react';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -152,6 +153,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false
               toast.success(t('settings.github.page.toast.connected'));
               setFlow(null);
               stopPolling();
+              trackTelemetryEvent('github_auth_connected');
               await refreshStatus(runtimeGitHub, { force: true });
               return;
             }
@@ -220,6 +222,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false
         }
       }
       toast.success(t('settings.github.page.toast.disconnected'));
+      trackTelemetryEvent('github_auth_disconnected');
       await refreshStatus(runtimeGitHub, { force: true });
     } catch (error) {
       console.error('Failed to disconnect GitHub:', error);

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 
 import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 /**
  * The header's working set of sessions, shown as tabs on web/desktop.
@@ -61,6 +62,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           const { tabIds } = get();
           if (!tabIds.includes(sessionId)) return;
           set({ tabIds: tabIds.filter((id) => id !== sessionId) });
+          trackTelemetryEvent('session_tab_closed');
         },
 
         closeOtherTabs: (sessionId) => {

@@ -17,6 +17,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -612,7 +613,11 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (runtimeApis?.vscode?.addWorkspaceFolder) {
           try {
             const folders = await runtimeApis.vscode.addWorkspaceFolder(normalizedPath);
-            return get().syncVSCodeWorkspaceFolders(folders, normalizedPath);
+            const addedEntry = get().syncVSCodeWorkspaceFolders(folders, normalizedPath);
+            if (addedEntry) {
+              trackTelemetryEvent('project_added', { via: 'vscode-workspace' });
+            }
+            return addedEntry;
           } catch {
             return null;
           }
@@ -653,6 +658,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       get().setActiveProject(entry.id);
       void get().discoverProjectIcon(entry.id);
+      trackTelemetryEvent('project_added');
       return entry;
     },
 
@@ -716,6 +722,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       for (const entry of entries) {
         void get().discoverProjectIcon(entry.id);
       }
+      trackTelemetryEvent('project_added', { count: entries.length, bulk: true });
       return entries;
     },
 
@@ -735,6 +742,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
       persistProjects(nextProjects, nextActiveId, nextManualOrder);
+      trackTelemetryEvent('project_removed');
 
       // Clean up worktree entries for the removed project
       if (project) {

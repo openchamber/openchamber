@@ -95,6 +95,8 @@ describe('OpenCode global config paths', () => {
       put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
       post() {},
       delete() {},
+      // Enterprise mode registers a global middleware in registerOpenCodeRoutes.
+      use() {},
     };
     routes.registerOpenCodeRoutes(app, {});
 

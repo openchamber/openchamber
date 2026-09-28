@@ -14,6 +14,7 @@
     "electron-context-menu": "^4.1.2",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3",
+    "posthog-node": "^5.53.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

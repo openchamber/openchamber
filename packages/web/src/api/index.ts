@@ -17,6 +17,7 @@ import { createWebPushAPI } from './push';
 import { createWebGitHubAPI } from './github';
 import { createWebLinearAPI } from './linear';
 import { createWebClientAuthAPI } from './clientAuth';
+import { createWebTelemetryAPI } from './telemetry';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -39,7 +40,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   const activeUrls = createActiveRuntimeUrlResolver();
 
   return {
-   themeFiles: createDesktopThemeFileAPI(),
+  themeFiles: createDesktopThemeFileAPI(),
   runtime: { platform: 'web', isDesktop: false, isVSCode: false, label: 'web' },
   terminal: createWebTerminalAPI(),
   git: createWebGitAPI(),
@@ -51,5 +52,6 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   linear: createWebLinearAPI(),
   push: createWebPushAPI(),
   clientAuth: createWebClientAuthAPI(),
+  telemetry: createWebTelemetryAPI(),
   };
 };

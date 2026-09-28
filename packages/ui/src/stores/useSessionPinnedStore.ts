@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getDeferredSafeStorage } from './utils/safeStorage';
@@ -100,6 +101,7 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     if (!key) return;
     const ids = new Set(get().ids);
     const touchedAt = { ...get().touchedAt };
+    const wasPinned = ids.has(key);
     if (ids.has(key)) {
       ids.delete(key);
       delete touchedAt[key];
@@ -110,6 +112,7 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     const pinnedState = boundPinnedState(ids, touchedAt);
     set(pinnedState);
     persistPinned(pinnedState);
+    trackTelemetryEvent('session_pin_changed', { pinned: !wasPinned });
   },
   clearPinnedSession: (runtimeKey, directory, sessionId) => {
     const key = getPinnedSessionKey(runtimeKey, directory, sessionId);

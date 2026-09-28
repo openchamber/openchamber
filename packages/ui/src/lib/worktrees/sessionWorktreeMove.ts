@@ -11,6 +11,7 @@ import { getSessionLiveActivity, isSessionBusyNow, moveSessionToDirectory } from
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { create } from 'zustand';
 
 export type SessionTreeMoveMessages = {
@@ -222,6 +223,7 @@ const moveSessionTreeTransaction = async (
         assertSessionsIdle(sessions.slice(index));
         try {
           await moveSessionToDirectory(session, input.sourceDirectory, destination.directory);
+          trackTelemetryEvent('worktree_switched');
         } catch (error) {
           // A transport failure leaves the outcome unknown: the server may have
           // moved the session before the response was lost. Definite rejections

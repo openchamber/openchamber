@@ -30,6 +30,7 @@ mock.module('./utils/safeStorage', () => ({
 
 mock.module('@/lib/desktop', () => ({
   isVSCodeRuntime: () => false,
+  isElectronShell: () => false,
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import {
   createDesktopSshInstance,
   desktopSshConnect,
@@ -144,6 +145,7 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
       instance.nickname = nickname.trim();
     }
     await get().upsertInstance(instance);
+    trackTelemetryEvent('ssh_host_changed', { action: 'created' });
   },
 
   removeInstance: async (id) => {
@@ -155,6 +157,7 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
       delete statusesById[id];
       return { statusesById };
     });
+    trackTelemetryEvent('ssh_host_changed', { action: 'removed' });
   },
 
   connect: async (id) => {
@@ -162,6 +165,7 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
     try {
       await desktopSshConnect(id);
       await get().refreshStatuses();
+      trackTelemetryEvent('ssh_connection_changed', { action: 'connect' });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
       throw error;
@@ -173,6 +177,7 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
     try {
       await desktopSshDisconnect(id);
       await get().refreshStatuses();
+      trackTelemetryEvent('ssh_connection_changed', { action: 'disconnect' });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
       throw error;

@@ -31,6 +31,7 @@ import {
 } from './theme-embedded-bootstrap';
 import { themeSchema, themeListSchema, type ThemeDefinition } from '@/lib/theme/definition';
 import { ThemeImportError } from '@/lib/theme/importErrors';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
@@ -786,6 +787,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       throw new ThemeImportError('save');
     }
     if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
+    trackTelemetryEvent('theme_imported');
     // A reload started before the save must not erase the new authoritative item.
     customThemesRequestRef.current += 1;
     setCustomThemesLoading(false);
@@ -811,6 +813,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (!response.ok) throw new Error('delete');
     z.object({ success: z.literal(true) }).parse(await response.json());
     if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
+    trackTelemetryEvent('theme_deleted');
     customThemesRequestRef.current += 1;
     setCustomThemesLoading(false);
     setCustomThemes((current) => current.filter((theme) => theme.metadata.id !== themeId));

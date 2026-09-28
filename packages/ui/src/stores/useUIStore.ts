@@ -17,6 +17,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
+import { setTelemetryConsentState, trackTelemetryEvent } from '@/lib/telemetry';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
 export type { ContextPanelMode };
@@ -1050,10 +1051,12 @@ interface UIStore {
   allowPromptingSubagentSessions: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
+  telemetryConsentVersion: number;
   shortcutOverrides: Record<string, ShortcutCombo>;
   fileEditorKeymap: FileEditorKeymap;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setTelemetryConsentVersion: (version: number) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
@@ -1453,12 +1456,19 @@ export const useUIStore = create<UIStore>()(
         draftStartersVisible: true,
         isExpandedInput: false,
         reportUsage: true,
+        telemetryConsentVersion: 0,
         shortcutOverrides: {},
         fileEditorKeymap: 'default',
+
+        setTelemetryConsentVersion: (version) => {
+          set({ telemetryConsentVersion: version });
+          setTelemetryConsentState({ reportUsage: get().reportUsage, consentVersion: version });
+        },
 
         setTheme: (theme) => {
           set({ theme });
           get().applyTheme();
+          trackTelemetryEvent('theme_changed', { theme });
         },
 
         toggleSidebar: () => {
@@ -1608,6 +1618,7 @@ export const useUIStore = create<UIStore>()(
             stagedDiff: diffScope === 'staged',
             diffScope,
           });
+          trackTelemetryEvent('diff_opened');
         },
 
         openContextFile: (directory, filePath) => {
@@ -2136,6 +2147,9 @@ export const useUIStore = create<UIStore>()(
             }
             return { isSettingsDialogOpen: true, settingsHasOpenedOnce: true };
           });
+          if (open) {
+            trackTelemetryEvent('settings_opened', { tab: get().settingsPage });
+          }
         },
 
         setNewWorktreeDialogOpen: (open) => {
@@ -2148,10 +2162,12 @@ export const useUIStore = create<UIStore>()(
 
         setSidebarSection: (section) => {
           set({ sidebarSection: section });
+          trackTelemetryEvent('sidebar_section_changed', { section });
         },
 
         setSettingsPage: (slug) => {
           set({ settingsPage: slug });
+          trackTelemetryEvent('settings_page_changed', { page: slug });
         },
 
         setSettingsProvidersClassificationRequested: (requested) => {
@@ -2889,6 +2905,7 @@ export const useUIStore = create<UIStore>()(
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
+          setTelemetryConsentState({ reportUsage: value, consentVersion: get().telemetryConsentVersion });
         },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
@@ -2933,6 +2950,13 @@ export const useUIStore = create<UIStore>()(
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
         version: 21,
+        onRehydrateStorage: () => (state) => {
+          // Telemetry keeps a pushed copy of consent (it must not import this
+          // store); publish the hydrated values before any event can fire.
+          if (state) {
+            setTelemetryConsentState({ reportUsage: state.reportUsage === true, consentVersion: state.telemetryConsentVersion });
+          }
+        },
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3304,6 +3328,8 @@ export const useUIStore = create<UIStore>()(
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,
+          reportUsage: state.reportUsage,
+          telemetryConsentVersion: state.telemetryConsentVersion,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
         })

@@ -47,6 +47,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { readPairingResponse } from '@/lib/pairingResponse';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -990,6 +991,7 @@ export const RemoteInstancesPage: React.FC = () => {
         includeRelay,
         includeDirect,
       });
+      trackTelemetryEvent('pairing_link_created');
       const payload = buildPairingConnectionPayload({
         pairingId: pairing.id,
         secret: pairing.secret,

@@ -182,6 +182,7 @@ const desktopBridge = {
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
   grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
+  trackTelemetryEvent: (name, properties) => ipcRenderer.invoke('openchamber:invoke', 'desktop_telemetry_track', { name, properties }),
   listen: async (event, handler) => addListener(event, handler),
   // Resolves the on-disk path of a File dropped from Finder/Explorer. Only
   // the path string crosses the bridge; shared UI gates use on the local page.

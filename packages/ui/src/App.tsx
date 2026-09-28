@@ -7,6 +7,8 @@ import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
+import { TelemetryConsentBanner } from '@/components/TelemetryConsentBanner';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { Button } from '@/components/ui/button';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
 import { setStreamPerfMemoryDebugEnabled } from '@/stores/utils/streamDebug';
@@ -333,6 +335,10 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
   }, [apis.runtime.isVSCode]);
+
+  React.useEffect(() => {
+    trackTelemetryEvent('app_started');
+  }, []);
 
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
@@ -991,6 +997,7 @@ function App({ apis }: AppProps) {
                   <MainLayout />
                   <AppStartupOverlay ready={isInitialized && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))} />
                   <Toaster />
+                  <TelemetryConsentBanner />
                   <AppLinkConfirmDialog />
                   <SharedTrustConfirmDialog />
                   {!isBootShell && (

@@ -19,6 +19,7 @@ import {
   type AgentMemoryEntry,
   type AgentMemoryScope,
 } from '@/lib/agentMemoryApi';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 interface AgentMemoryState {
   global: AgentMemoryEntry[];
@@ -167,8 +168,12 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
   saveEntry: async (scope, memoryId, patch) => enqueueWrite(async () => {
     const previous = listFor(get(), scope);
     try {
+      const isNew = !previous.some((entry) => entry.id === memoryId);
       const saved = await updateAgentMemory(scope, get().projectPath, memoryId, patch);
       set(withList(scope, listFor(get(), scope).map((entry) => (entry.id === memoryId ? saved : entry))));
+      if (isNew) {
+        trackTelemetryEvent('memory_item_added', { scope });
+      }
       return true;
     } catch (error) {
       set({ ...withList(scope, previous), error: errorMessage(error, 'Failed to save memory') });

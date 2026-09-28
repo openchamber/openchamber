@@ -16,6 +16,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import {
   desktopHostProbe,
   desktopHostsGet,
@@ -440,6 +441,10 @@ export function DesktopHostSwitcherDialog({
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
     const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) return;
+
+    trackTelemetryEvent('host_switched', {
+      target: host.id === LOCAL_HOST_ID ? 'local' : (host.relay ? 'relay' : 'remote'),
+    });
 
     if (isElectronShell()) {
       if (!apiOrigin && !host.relay) return;

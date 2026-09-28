@@ -3,6 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { z } from 'zod';
 
 import { parseInstalledGuestJson } from './parse.ts';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import type { InstalledGuest } from './types.ts';
 import type { GuestRequestFailure } from './request-failure.ts';
 
@@ -135,7 +136,11 @@ export const installGuest = async (
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
     });
-    return await readInstallResponse(response, '/api/guests');
+    const result = await readInstallResponse(response, '/api/guests');
+    if (result.ok) {
+      trackTelemetryEvent('extension_installed', { via: 'url-or-path', replaced: result.replaced === true });
+    }
+    return result;
   } catch {
     return { ok: false, code: 'failed', diagnostic: { method: 'POST', path: '/api/guests', kind: 'network' } };
   }
@@ -161,7 +166,11 @@ export const uploadGuestZip = async (
       headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' },
       body: file,
     });
-    return await readInstallResponse(response, '/api/guests/upload');
+    const result = await readInstallResponse(response, '/api/guests/upload');
+    if (result.ok) {
+      trackTelemetryEvent('extension_installed', { via: 'zip', replaced: result.replaced === true });
+    }
+    return result;
   } catch {
     return { ok: false, code: 'failed', diagnostic: { method: 'POST', path: '/api/guests/upload', kind: 'network' } };
   }
@@ -171,6 +180,7 @@ export const uninstallGuest = async (id: string): Promise<UninstallGuestResult> 
   try {
     const response = await runtimeFetch(`/api/guests/${id}`, { method: 'DELETE' });
     if (response.status === 204) {
+      trackTelemetryEvent('extension_uninstalled');
       return { ok: true };
     }
     const error = await readInstallError(response);

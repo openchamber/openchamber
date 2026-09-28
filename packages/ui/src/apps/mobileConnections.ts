@@ -25,6 +25,7 @@ import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel'
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 
 import { recordMobileConnectDebug } from './mobileConnectionDebug';
 
@@ -1545,6 +1546,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         setError(t('mobile.connect.error.authRequired'));
         return;
       }
+      trackTelemetryEvent('pairing_completed', { transport: chosen.kind });
       // Name the connection by the issuing server (its hostname), not the
       // per-device pairing label — that label is the operator's name for THIS
       // phone in their device list, not a name for the server we connect to.

@@ -94,6 +94,9 @@ mock.module('@/lib/runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
   getRuntimeApiBaseUrl: () => 'http://127.0.0.1:9',
   getRuntimeKey: () => 'test',
+  // useUIStore imports this too; a partial mock that drops it fails module
+  // linking ("export not found") before any test code runs.
+  isTransientRuntimeKey: (runtimeKey: string) => runtimeKey === '' || runtimeKey === 'url:default' || runtimeKey === 'mobile-disconnected',
 }));
 
 mock.module('@/stores/useFileSearchStore', () => ({

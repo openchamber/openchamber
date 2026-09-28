@@ -126,7 +126,7 @@ export const readSettingsRoot = () => {
 // settings.json since the settings split; each entry is { value, updatedAt }.
 // Installs that predate the split still carry those keys in settings.json, so
 // readers merge both, preferences winning.
-const readPreferencesValues = () => {
+export const readPreferencesValues = () => {
   const root = readJsonFile(path.join(path.dirname(settingsFilePath()), 'preferences.json'));
   const fields = root && typeof root === 'object' && root.version === 1 && root.fields && typeof root.fields === 'object'
     ? root.fields

@@ -3,6 +3,7 @@ import type { Session } from '@/lib/opencode/model';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -121,6 +122,7 @@ export const useSessionActions = (args: Args) => {
     if (trimmed) {
       try {
         await updateSessionTitle(editingSessionId, trimmed);
+        trackTelemetryEvent('session_renamed');
       } catch (error) {
         // The form closes either way: a rename that silently stays open
         // reads as "Enter does nothing". The toast says what OpenCode

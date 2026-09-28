@@ -13,6 +13,7 @@ import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
 import { ascendingId } from "@/lib/opencode/ids"
+import { trackTelemetryEvent } from "@/lib/telemetry"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
@@ -1964,6 +1965,12 @@ export async function optimisticSend(input: {
       reason: error instanceof Error ? error.message : String(error),
     }
     recordSendFailure(failureRecord)
+    // Failure telemetry mirrors prompt_sent: coarse outcome only — no reason
+    // text (it echoes provider response bodies) and no directory.
+    trackTelemetryEvent("prompt_send_failed", {
+      status: status ?? "transport",
+      ambiguous: ambiguousFailure,
+    })
     console.warn("[session-actions] prompt send rejected; rolling back optimistic message", failureRecord)
 
     // Rollback via optimistic infrastructure
@@ -2598,6 +2605,9 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     directory,
   })
   if (isStaleRuntime(expectedRuntimeKey)) return
+  // Fork-from-message bypasses the store's createSession path (2.x: the
+  // forkSession endpoint) — report the fork here.
+  trackTelemetryEvent("session_forked")
   const target = createChatDraftIdentity(expectedRuntimeKey, resolveSessionOwnedDirectory(forkedSession) ?? directory, forkedSession.id)
   if (!target) throw new Error("Forked session has no composer directory")
 

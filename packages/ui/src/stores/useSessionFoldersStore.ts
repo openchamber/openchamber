@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { getDeferredSafeStorage, getSafeStorage } from './utils/safeStorage';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -370,6 +371,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         };
         set({ foldersMap: nextMap });
         persistState(nextMap, get().collapsedFolderIds);
+        trackTelemetryEvent('session_folder_changed', { action: 'create' });
         return folder;
       },
 
@@ -385,6 +387,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         const nextMap: SessionFoldersMap = { ...current, [scopeKey]: nextFolders };
         set({ foldersMap: nextMap });
         persistState(nextMap, get().collapsedFolderIds);
+        trackTelemetryEvent('session_folder_changed', { action: 'rename' });
       },
 
       deleteFolder: (scopeKey: string, folderId: string): void => {
@@ -412,6 +415,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
           : { foldersMap: nextMap });
         persistState(nextMap, nextCollapsed ?? collapsed);
+        trackTelemetryEvent('session_folder_changed', { action: 'delete' });
       },
 
       addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string): void => {

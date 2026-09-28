@@ -8,6 +8,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { trackTelemetryEvent } from '@/lib/telemetry';
 import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
 
 export type {
@@ -28,6 +29,19 @@ const getRuntimeGit = () => {
 const runtimeStatusMutation = async <T>(directory: string, mutation: Promise<T>): Promise<T> => {
   const result = await mutation;
   notifyGitStatusInvalidated(directory);
+  return result;
+};
+
+// Fire a telemetry event once a mutation promise resolves. Events stay at the
+// dispatch layer (not in the adapters) so a user action is reported exactly
+// once, on either the runtime or HTTP path.
+const trackAfter = async <T>(
+  mutation: Promise<T>,
+  event: string,
+  props?: Record<string, string | number | boolean>,
+): Promise<T> => {
+  const result = await mutation;
+  trackTelemetryEvent(event, props);
   return result;
 };
 
@@ -139,50 +153,50 @@ export async function revertGitFile(
   options?: { scope?: 'all' | 'working' }
 ): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.revertGitFile(directory, filePath, options));
-  return gitHttp.revertGitFile(directory, filePath, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.revertGitFile(directory, filePath, options)), 'git_changes_discarded');
+  return trackAfter(gitHttp.revertGitFile(directory, filePath, options), 'git_changes_discarded');
 }
 
 export async function stageGitFile(directory: string, filePath: string): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.stageGitFile) return runtimeStatusMutation(directory, runtime.stageGitFile(directory, filePath));
-  return gitHttp.stageGitFile(directory, filePath);
+  if (runtime?.stageGitFile) return trackAfter(runtimeStatusMutation(directory, runtime.stageGitFile(directory, filePath)), 'git_staged', { staged: true });
+  return trackAfter(gitHttp.stageGitFile(directory, filePath), 'git_staged', { staged: true });
 }
 
 export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.stageGitFiles) return runtimeStatusMutation(directory, runtime.stageGitFiles(directory, filePaths));
-  return gitHttp.stageGitFiles(directory, filePaths);
+  if (runtime?.stageGitFiles) return trackAfter(runtimeStatusMutation(directory, runtime.stageGitFiles(directory, filePaths)), 'git_staged', { staged: true, fileCount: filePaths.length });
+  return trackAfter(gitHttp.stageGitFiles(directory, filePaths), 'git_staged', { staged: true, fileCount: filePaths.length });
 }
 
 export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.unstageGitFile) return runtimeStatusMutation(directory, runtime.unstageGitFile(directory, filePath));
-  return gitHttp.unstageGitFile(directory, filePath);
+  if (runtime?.unstageGitFile) return trackAfter(runtimeStatusMutation(directory, runtime.unstageGitFile(directory, filePath)), 'git_staged', { staged: false });
+  return trackAfter(gitHttp.unstageGitFile(directory, filePath), 'git_staged', { staged: false });
 }
 
 export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.unstageGitFiles) return runtimeStatusMutation(directory, runtime.unstageGitFiles(directory, filePaths));
-  return gitHttp.unstageGitFiles(directory, filePaths);
+  if (runtime?.unstageGitFiles) return trackAfter(runtimeStatusMutation(directory, runtime.unstageGitFiles(directory, filePaths)), 'git_staged', { staged: false, fileCount: filePaths.length });
+  return trackAfter(gitHttp.unstageGitFiles(directory, filePaths), 'git_staged', { staged: false, fileCount: filePaths.length });
 }
 
 export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.stageGitHunk) return runtimeStatusMutation(directory, runtime.stageGitHunk(directory, filePath, patch));
-  return gitHttp.stageGitHunk(directory, filePath, patch);
+  if (runtime?.stageGitHunk) return trackAfter(runtimeStatusMutation(directory, runtime.stageGitHunk(directory, filePath, patch)), 'git_staged', { staged: true, hunk: true });
+  return trackAfter(gitHttp.stageGitHunk(directory, filePath, patch), 'git_staged', { staged: true, hunk: true });
 }
 
 export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.unstageGitHunk) return runtimeStatusMutation(directory, runtime.unstageGitHunk(directory, filePath, patch));
-  return gitHttp.unstageGitHunk(directory, filePath, patch);
+  if (runtime?.unstageGitHunk) return trackAfter(runtimeStatusMutation(directory, runtime.unstageGitHunk(directory, filePath, patch)), 'git_staged', { staged: false, hunk: true });
+  return trackAfter(gitHttp.unstageGitHunk(directory, filePath, patch), 'git_staged', { staged: false, hunk: true });
 }
 
 export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime?.revertGitHunk) return runtimeStatusMutation(directory, runtime.revertGitHunk(directory, filePath, patch));
-  return gitHttp.revertGitHunk(directory, filePath, patch);
+  if (runtime?.revertGitHunk) return trackAfter(runtimeStatusMutation(directory, runtime.revertGitHunk(directory, filePath, patch)), 'git_changes_discarded', { hunk: true });
+  return trackAfter(gitHttp.revertGitHunk(directory, filePath, patch), 'git_changes_discarded', { hunk: true });
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
@@ -205,14 +219,14 @@ export async function getGitUnpushedBranchCounts(directory: string, branches: st
 
 export async function deleteGitBranch(directory: string, payload: import('./api/types').GitDeleteBranchPayload): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.deleteGitBranch(directory, payload));
-  return gitHttp.deleteGitBranch(directory, payload);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.deleteGitBranch(directory, payload)), 'git_branch_changed', { action: 'delete' });
+  return trackAfter(gitHttp.deleteGitBranch(directory, payload), 'git_branch_changed', { action: 'delete' });
 }
 
 export async function deleteRemoteBranch(directory: string, payload: import('./api/types').GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.deleteRemoteBranch(directory, payload));
-  return gitHttp.deleteRemoteBranch(directory, payload);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.deleteRemoteBranch(directory, payload)), 'git_branch_changed', { action: 'delete-remote' });
+  return trackAfter(gitHttp.deleteRemoteBranch(directory, payload), 'git_branch_changed', { action: 'delete-remote' });
 }
 
 const COMMIT_DIFF_FILE_LIMIT = 30;
@@ -353,6 +367,7 @@ export async function generateCommitMessage(
         subjectLength: result.message.subject.length,
         highlightsCount: result.message.highlights.length,
       });
+      trackTelemetryEvent('git_commit_message_generated', { fileCount: files.length, transport: 'session-fallback' });
       return result;
     }
 
@@ -370,6 +385,7 @@ export async function generateCommitMessage(
       subjectLength: result.message.subject.length,
       highlightsCount: result.message.highlights.length,
     });
+    trackTelemetryEvent('git_commit_message_generated', { fileCount: files.length, transport: 'small-model' });
     return result;
   } catch (error) {
     console.error('[git-generation][browser] failed', {
@@ -556,6 +572,7 @@ export async function generatePullRequestDescription(
         titleLength: result.title.length,
         bodyLength: result.body.length,
       });
+      trackTelemetryEvent('git_pr_description_generated', { transport: 'session-fallback' });
       return result;
     }
 
@@ -573,6 +590,7 @@ export async function generatePullRequestDescription(
       titleLength: result.title.length,
       bodyLength: result.body.length,
     });
+    trackTelemetryEvent('git_pr_description_generated', { transport: 'small-model' });
     return result;
   } catch (error) {
     console.error('[git-generation][browser] failed', {
@@ -842,8 +860,8 @@ export async function createGitCommit(
   options: import('./api/types').CreateGitCommitOptions = {}
 ): Promise<import('./api/types').GitCommitResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.createGitCommit(directory, message, options));
-  return gitHttp.createGitCommit(directory, message, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.createGitCommit(directory, message, options)), 'git_committed');
+  return trackAfter(gitHttp.createGitCommit(directory, message, options), 'git_committed');
 }
 
 export async function gitPush(
@@ -851,8 +869,8 @@ export async function gitPush(
   options: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> } = {}
 ): Promise<import('./api/types').GitPushResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.gitPush(directory, options));
-  return gitHttp.gitPush(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.gitPush(directory, options)), 'git_pushed');
+  return trackAfter(gitHttp.gitPush(directory, options), 'git_pushed');
 }
 
 export async function gitPull(
@@ -860,8 +878,8 @@ export async function gitPull(
   options: import('./api/types').GitPullOptions = {}
 ): Promise<import('./api/types').GitPullResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.gitPull(directory, options));
-  return gitHttp.gitPull(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.gitPull(directory, options)), 'git_pulled');
+  return trackAfter(gitHttp.gitPull(directory, options), 'git_pulled');
 }
 
 export async function gitFetch(
@@ -887,32 +905,32 @@ export async function countGitStashFiles(directory: string, refs: string[]): Pro
 
 export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.stashGitChanges(directory, options));
-  return gitHttp.stashGitChanges(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.stashGitChanges(directory, options)), 'git_stash_changed', { action: 'create' });
+  return trackAfter(gitHttp.stashGitChanges(directory, options), 'git_stash_changed', { action: 'create' });
 }
 
 export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.applyGitStash(directory, options));
-  return gitHttp.applyGitStash(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.applyGitStash(directory, options)), 'git_stash_changed', { action: 'apply' });
+  return trackAfter(gitHttp.applyGitStash(directory, options), 'git_stash_changed', { action: 'apply' });
 }
 
 export async function popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.popGitStash(directory, options));
-  return gitHttp.popGitStash(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.popGitStash(directory, options)), 'git_stash_changed', { action: 'pop' });
+  return trackAfter(gitHttp.popGitStash(directory, options), 'git_stash_changed', { action: 'pop' });
 }
 
 export async function dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.dropGitStash(directory, options));
-  return gitHttp.dropGitStash(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.dropGitStash(directory, options)), 'git_stash_changed', { action: 'drop' });
+  return trackAfter(gitHttp.dropGitStash(directory, options), 'git_stash_changed', { action: 'drop' });
 }
 
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.checkoutBranch(directory, branch));
-  return gitHttp.checkoutBranch(directory, branch);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.checkoutBranch(directory, branch)), 'git_branch_changed', { action: 'checkout' });
+  return trackAfter(gitHttp.checkoutBranch(directory, branch), 'git_branch_changed', { action: 'checkout' });
 }
 
 export async function createBranch(
@@ -921,8 +939,8 @@ export async function createBranch(
   startPoint?: string
 ): Promise<{ success: boolean; branch: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.createBranch(directory, name, startPoint));
-  return gitHttp.createBranch(directory, name, startPoint);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.createBranch(directory, name, startPoint)), 'git_branch_changed', { action: 'create' });
+  return trackAfter(gitHttp.createBranch(directory, name, startPoint), 'git_branch_changed', { action: 'create' });
 }
 
 export async function renameBranch(
@@ -931,8 +949,8 @@ export async function renameBranch(
   newName: string
 ): Promise<{ success: boolean; branch: string }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.renameBranch(directory, oldName, newName));
-  return gitHttp.renameBranch(directory, oldName, newName);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.renameBranch(directory, oldName, newName)), 'git_branch_changed', { action: 'rename' });
+  return trackAfter(gitHttp.renameBranch(directory, oldName, newName), 'git_branch_changed', { action: 'rename' });
 }
 
 export async function getGitLog(
@@ -981,20 +999,20 @@ export async function getGitIdentities(): Promise<import('./api/types').GitIdent
 
 export async function createGitIdentity(profile: import('./api/types').GitIdentityProfile): Promise<import('./api/types').GitIdentityProfile> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.createGitIdentity(profile);
-  return gitHttp.createGitIdentity(profile);
+  if (runtime) return trackAfter(runtime.createGitIdentity(profile), 'git_identity_changed', { action: 'create' });
+  return trackAfter(gitHttp.createGitIdentity(profile), 'git_identity_changed', { action: 'create' });
 }
 
 export async function updateGitIdentity(id: string, updates: import('./api/types').GitIdentityProfile): Promise<import('./api/types').GitIdentityProfile> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.updateGitIdentity(id, updates);
-  return gitHttp.updateGitIdentity(id, updates);
+  if (runtime) return trackAfter(runtime.updateGitIdentity(id, updates), 'git_identity_changed', { action: 'update' });
+  return trackAfter(gitHttp.updateGitIdentity(id, updates), 'git_identity_changed', { action: 'update' });
 }
 
 export async function deleteGitIdentity(id: string): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.deleteGitIdentity(id);
-  return gitHttp.deleteGitIdentity(id);
+  if (runtime) return trackAfter(runtime.deleteGitIdentity(id), 'git_identity_changed', { action: 'delete' });
+  return trackAfter(gitHttp.deleteGitIdentity(id), 'git_identity_changed', { action: 'delete' });
 }
 
 export async function getCurrentGitIdentity(directory: string): Promise<import('./api/types').GitIdentitySummary | null> {
@@ -1014,8 +1032,8 @@ export async function setGitIdentity(
   profileId: string
 ): Promise<{ success: boolean; profile: import('./api/types').GitIdentityProfile }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.setGitIdentity(directory, profileId);
-  return gitHttp.setGitIdentity(directory, profileId);
+  if (runtime) return trackAfter(runtime.setGitIdentity(directory, profileId), 'git_identity_changed', { action: 'apply' });
+  return trackAfter(gitHttp.setGitIdentity(directory, profileId), 'git_identity_changed', { action: 'apply' });
 }
 
 export async function discoverGitCredentials(): Promise<import('./api/types').DiscoveredGitCredential[]> {
@@ -1056,14 +1074,14 @@ export async function rebase(
   options: { onto: string }
 ): Promise<import('./api/types').GitRebaseResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.rebase(directory, options));
-  return gitHttp.rebase(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.rebase(directory, options)), 'git_history_changed', { action: 'rebase' });
+  return trackAfter(gitHttp.rebase(directory, options), 'git_history_changed', { action: 'rebase' });
 }
 
 export async function abortRebase(directory: string): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.abortRebase(directory));
-  return gitHttp.abortRebase(directory);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.abortRebase(directory)), 'git_history_changed', { action: 'rebase-abort' });
+  return trackAfter(gitHttp.abortRebase(directory), 'git_history_changed', { action: 'rebase-abort' });
 }
 
 export async function merge(
@@ -1071,8 +1089,8 @@ export async function merge(
   options: { branch: string }
 ): Promise<import('./api/types').GitMergeResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.merge(directory, options));
-  return gitHttp.merge(directory, options);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.merge(directory, options)), 'git_history_changed', { action: 'merge' });
+  return trackAfter(gitHttp.merge(directory, options), 'git_history_changed', { action: 'merge' });
 }
 
 export async function checkoutCommit(
@@ -1080,8 +1098,8 @@ export async function checkoutCommit(
   hash: string
 ): Promise<import('./api/types').CheckoutCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash));
-  return gitHttp.checkoutCommit(directory, hash);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash)), 'git_history_changed', { action: 'checkout-commit' });
+  return trackAfter(gitHttp.checkoutCommit(directory, hash), 'git_history_changed', { action: 'checkout-commit' });
 }
 
 export async function cherryPick(
@@ -1089,8 +1107,8 @@ export async function cherryPick(
   hash: string
 ): Promise<import('./api/types').CherryPickResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.cherryPick(directory, hash));
-  return gitHttp.cherryPick(directory, hash);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.cherryPick(directory, hash)), 'git_history_changed', { action: 'cherry-pick' });
+  return trackAfter(gitHttp.cherryPick(directory, hash), 'git_history_changed', { action: 'cherry-pick' });
 }
 
 export async function revertCommit(
@@ -1098,8 +1116,8 @@ export async function revertCommit(
   hash: string
 ): Promise<import('./api/types').RevertCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.revertCommit(directory, hash));
-  return gitHttp.revertCommit(directory, hash);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.revertCommit(directory, hash)), 'git_history_changed', { action: 'revert' });
+  return trackAfter(gitHttp.revertCommit(directory, hash), 'git_history_changed', { action: 'revert' });
 }
 
 export async function resetToCommit(
@@ -1109,26 +1127,26 @@ export async function resetToCommit(
   force?: boolean
 ): Promise<import('./api/types').ResetToCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force));
-  return gitHttp.resetToCommit(directory, hash, mode, force);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force)), 'git_history_changed', { action: 'reset', mode });
+  return trackAfter(gitHttp.resetToCommit(directory, hash, mode, force), 'git_history_changed', { action: 'reset', mode });
 }
 
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.abortMerge(directory));
-  return gitHttp.abortMerge(directory);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.abortMerge(directory)), 'git_history_changed', { action: 'merge-abort' });
+  return trackAfter(gitHttp.abortMerge(directory), 'git_history_changed', { action: 'merge-abort' });
 }
 
 export async function continueRebase(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.continueRebase(directory));
-  return gitHttp.continueRebase(directory);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.continueRebase(directory)), 'git_history_changed', { action: 'rebase-continue' });
+  return trackAfter(gitHttp.continueRebase(directory), 'git_history_changed', { action: 'rebase-continue' });
 }
 
 export async function continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.continueMerge(directory));
-  return gitHttp.continueMerge(directory);
+  if (runtime) return trackAfter(runtimeStatusMutation(directory, runtime.continueMerge(directory)), 'git_history_changed', { action: 'merge-continue' });
+  return trackAfter(gitHttp.continueMerge(directory), 'git_history_changed', { action: 'merge-continue' });
 }
 
 export async function stash(

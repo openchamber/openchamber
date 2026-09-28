@@ -27,6 +27,7 @@ import { isVSCodeRuntime } from "@/lib/desktop"
 import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
+import { trackTelemetryEvent } from "@/lib/telemetry"
 
 // Paces a sustained event stream only: the first event after a quiet spell is
 // flushed at once, so a lone permission or status event is not delayed. Every
@@ -513,8 +514,19 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const markConnected = (replayReset = false) => {
+    // A re-connect after a disconnection cycle (drop, sleep/wake, manual
+    // repair) — transport-health telemetry. The first connect is not a
+    // reconnect; WS→SSE transport flips never mark a disconnection.
+    const wasDisconnected = disconnected
+    const failedAttempts = consecutiveFailures
     disconnected = false
     consecutiveFailures = 0
+    if (wasDisconnected) {
+      trackTelemetryEvent("stream_reconnected", {
+        transport: activeTransport,
+        attempts: failedAttempts,
+      })
+    }
     // Fire onReconnect on every successful connect — including the very
     // first one. Consumer state (isConnected) starts at false and needs
     // to be flipped positively; without this the send button throws
