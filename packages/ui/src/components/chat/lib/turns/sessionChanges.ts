@@ -27,8 +27,6 @@ import type { Session } from '@/lib/opencode/model';
 import { summarizeLiveActivity, type SessionFileChangeDetail } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
 
-export type { SessionFileChangeDetail, SessionFileChangeStatus } from './liveActivitySummary';
-
 /** What the diff panel calls a reviewable session change. */
 export type SessionFileChange = SessionFileChangeDetail;
 
