@@ -90,7 +90,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     descriptionKey: 'contextRail.surface.sessionDiff.description',
     defaultWidthFraction: 3 / 5,
     mode: 'session-diff',
-    icon: 'file-list-2',
+    icon: 'increase-decrease',
     labelKey: 'contextPanel.mode.sessionDiff',
     availability: 'always',
   },

@@ -274,7 +274,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'session-diff') {
-    return <Icon name="file-list-2" className="h-3.5 w-3.5" />;
+    return <Icon name="increase-decrease" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'walkthrough') {
