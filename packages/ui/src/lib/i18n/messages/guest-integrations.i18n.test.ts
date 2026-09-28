@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'ru', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
   'settings.integrations.guests.title',

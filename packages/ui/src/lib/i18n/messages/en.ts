@@ -111,6 +111,7 @@ export const dict = {
   'common.language.polish': 'Polish',
   'common.language.japanese': 'Japanese',
   'common.language.turkish': 'Turkish',
+  'common.language.russian': 'Russian',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',
   'common.revealPath.fileManager': 'Open in File Manager',

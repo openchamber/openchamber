@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { surfacePanelI18n } from './surface-panel.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'ru', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 describe('shared surface panel translations', () => {
   test('provides every key in every supported locale, translated', () => {

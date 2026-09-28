@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'ru', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 describe('extension catalog translations', () => {
   test('every locale has exactly the English keys, each translated', () => {

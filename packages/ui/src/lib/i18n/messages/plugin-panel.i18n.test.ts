@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { pluginPanelI18n } from './plugin-panel.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'ru', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
   'chat.chatInput.toast.guestHasNoPanel',

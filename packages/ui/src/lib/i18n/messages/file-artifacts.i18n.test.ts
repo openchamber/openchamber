@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'ru', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 describe('file artifact translations', () => {
   test('provides every key in every supported locale, translated', () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { usageStatsI18n } from './usage-stats.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'ru', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 // Words that are the correct translation and happen to match English.
 const SAME_AS_ENGLISH = new Set(['Sessions', 'Prompts', 'Tokens', 'Tokens: {tokens} · {cost}', '{value} · {share}']);
