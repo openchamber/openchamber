@@ -4,4 +4,9 @@
  * or a reload shows "Fuse now" in the overview instead of racing to start a
  * second fusion.
  */
-export const RUN_LAUNCHER_ID = crypto.randomUUID();
+// This module evaluates during app bootstrap, and `randomUUID` only exists in a
+// secure context: a plain-HTTP LAN origin does not expose it, so an unguarded
+// call would blank the whole UI. The id only has to be unique per page, so the
+// timestamp fallback is enough.
+export const RUN_LAUNCHER_ID = globalThis.crypto?.randomUUID?.()
+  ?? `launcher_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
