@@ -1,0 +1,263 @@
+---
+title: Host API
+description: Каждый метод connectHost, который может вызвать расширение, что OpenChamber ему передаёт, ограничения и коды ошибок.
+---
+
+# Host API
+
+Эта страница пригодится, когда нужны точные методы `connectHost`, ограничения и коды ошибок. О структуре папок, манифесте и установке читайте в разделе [Создание расширения](/ru/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` выбрасывает `HOST_UNAVAILABLE`, если нет `window`. Вне OpenChamber он возвращает клиент, в котором каждый вызов отклоняется с `HOST_UNAVAILABLE`. Вызывайте `dispose()`, когда убираете страницу; вызовы, которые ещё выполняются, отклоняются с тем же кодом.
+
+## Что OpenChamber отправляет вам
+
+`onReady` срабатывает с первым снимком и затем каждый раз, когда OpenChamber его обновляет.
+
+Это не одноразовый колбэк монтирования. Смонтируйте интерфейс и зарегистрируйте подписки один раз; более поздние снимки используйте, чтобы обновлять тему и контекст, не заменяя поля ввода и черновики. Пример с защитой от повторного монтирования смотрите в разделе [UI kit](/ru/sdk/ui/). Слушатели полей, например `onConnection`, сразу передают текущее значение и могут получить его снова с обновлённым снимком. Сравнивайте поля, от которых зависят ваши данные, прежде чем запускать новый запрос, и игнорируйте ответы устаревших запросов.
+
+| Поле | Что это |
+| --- | --- |
+| `theme.mode` | `light` или `dark` |
+| `theme.tokens` | цвета приложения (поверхности, текст, состояния взаимодействия, primary, success/warning/error/info), `font`, `mono` и `radius`. Передайте это в `applyHostReady` перед монтированием интерфейса. |
+| `locale` | тег языка приложения |
+| `directory` | папка текущего проекта или `null` |
+| `session` | `{ id, title, busy }` или `null`. Если заголовка нет, используется id сессии. `busy` — текущий статус. `model` и `agent` (агент OpenCode) появляются, когда они есть у сессии. |
+| `surface` | `panel` на рейке, `dialog` в окне прикрепления, `page` на весь экран, `status` в панели Work Status, `file` как редактор файлов в Files |
+| `item` | для чего открыта эта поверхность, или `null`: прикреплённый элемент, по которому нажал пользователь (те же поля, что вы передали в `attach`, включая `data`), сообщение (`kind: "message"`) или сессия (`kind: "session"`) из одного из объявленных вами действий. Смотрите [Действия](/ru/sdk/#действия-команды-и-счётчик). |
+| `connection` | `{ connected, account }` для вашей интеграции |
+| `settings` | значения полей, которые вы объявили в `integration.settings` |
+
+Токены доступа здесь никогда не появляются — как и в результате `request`.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` и `onItem` при поздней подписке сразу отдают последнее значение, а затем продолжают срабатывать при каждом изменении.
+
+`theme.tokens` включает `primaryText`, `successText`, `warningText`, `errorText` и `infoText`. Эти обязательные поля содержат вычисленные хостом цвета текста для нейтрального фона и тонированных элементов UI-набора, а не сплошные заливки. `applyHostReady` применяет их при каждом снимке. CSS-переменные описаны в разделе [UI kit](/ru/sdk/ui/).
+
+## Методы
+
+| Вызов | Что делает |
+| --- | --- |
+| `toast({ kind, message })` | показать тост в приложении. `kind` — `info`, `success` или `error`. |
+| `openUrl(url)` | открыть URL в браузере пользователя |
+| `openSurface(surfaceId)` | переключить приложение на этот экран |
+| `writeClipboard(text)` | скопировать текст. От 1 до 32000 символов. |
+| `compose({ text, mode? })` | вставить текст в поле чата без отправки. `mode` — `append` (по умолчанию) или `replace`. От 1 до 16000 символов после обрезки пробелов. |
+| `attach({ ... })` | поставить чип на поле чата — туда же, куда попадают элементы GitHub и Linear. Только один чип за раз. |
+| `startSession({ ... })` | создать сессию с прикреплённым элементом. Возвращает `{ sessionId, sent }`. Требует разрешения `sessions`. |
+| `prompt({ text, send? })` | написать в текущую сессию или отправить в ней. Возвращает `{ sent }`. Для отправки нужно разрешение `prompt`. |
+| `sessionLink({ ... })` | прикрепить элемент к текущей сессии, не создавая новую |
+| `close()` | закрыть окно прикрепления. На рейке ничего не делает. |
+| `oauthStart()` | открыть страницу авторизации провайдера или страницу Linear для интеграции с `host: { provider: "linear" }` |
+| `oauthDisconnect()` | забыть сохранённый токен или подключение Linear |
+| `request({ method, path, query?, body? })` | вызвать `apiOrigin` вашей интеграции с прикреплённым токеном пользователя |
+| `serviceRequest({ method, path, query?, body? })` | вызвать локальный сервис вашего расширения (смотрите `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready` или `failed` |
+| `readFile(path)` | прочитать текстовый файл. Возвращает `{ content }`. |
+| `writeFile(path, content)` | атомарно записать текстовый файл, создавая родительские папки. Возвращает `{ written: true }`. |
+| `listDir(path)` | перечислить содержимое папки. Возвращает `{ entries: [{ name, kind }] }`, `kind` — `file`, `directory` или `other`. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` — `file`, `directory`, `other` или `missing`. |
+| `generate({ prompt, system?, maxOutputTokens? })` | одноразовый текст от Small Model пользователя. Возвращает `{ text }`. Требует разрешения `model`. |
+| `onResolve(handler)` | зарегистрировать обработчик ваших слеш-команд. Он получает `{ command, args }` и возвращает элемент для прикрепления или `null`. |
+| `setBadge(count)` | показать число (от 0 до 999) на вашей иконке в рейке или `null`, чтобы убрать его |
+| `openCommit(sha)` | открыть представление Diff на этом коммите текущего проекта. `sha` — от 7 до 64 шестнадцатеричных символов; OpenChamber сам читает коммит. |
+| `setHeight(px)` | задать высоту вашей секции Work Status. OpenChamber держит её в пределах от 24 до 320 пикселей; более высокое содержимое прокручивается внутри вашей страницы. В других местах это игнорируется. |
+| `onFileOpen(listener)` | редакторы файлов: получить файл для редактирования — `{ path, name, readOnly }` плюс `encoding: "text"` с `content` или `encoding: "binary"` с `bytes`. Также включает сохранение по Cmd/Ctrl+S на вашей странице. |
+| `onFileSnapshot(handler)` | редакторы файлов: вернуть `{ content, version }` (или `{ bytes, version }` для бинарного редактора) — весь отредактированный файл. OpenChamber вызывает его для сохранения и перед переключением на просмотр исходного кода или полноэкранный режим. |
+| `onFileSaved(listener)` | редакторы файлов: снимок с этой `version` уже на диске. Ответьте через `reportFileChange`. |
+| `reportFileChange({ dirty, edited })` | редакторы файлов: сообщить OpenChamber, есть ли несохранённые изменения и изменился ли только что документ |
+| `requestFileSave()` | редакторы файлов: сохранить сейчас, как по Cmd/Ctrl+S |
+| `reportFileUnsupported()` | редакторы файлов: этот файл нельзя открыть здесь, покажите вместо него исходный код |
+
+## attach, startSession и sessionLink
+
+Все три принимают одни и те же поля элемента:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` — это id вашей панели; OpenChamber всё равно перезаписывает его вашим id. `id` — ваш собственный идентификатор элемента. `kind` — `issue` (по умолчанию) или `pull`. `text` — необязательный контекст для модели, от 1 до 16000 символов после обрезки пробелов. `data` — необязательный JSON на ваше усмотрение (статус, комментарии, что угодно), до 16000 символов в сериализованном виде. OpenChamber хранит его вместе с чипом и возвращает без изменений в `ctx.item`, когда пользователь нажимает на чип; в модель он никогда не попадает.
+
+`startSession` принимает `projectId`, не переключая текущий проект. Опустите `worktree` для целевой папки, укажите `true` для созданного worktree, `{ kind: "existing", directory }` для известного worktree или `{ kind: "new", name?, baseBranch? }` для нового с именем. Имя задаёт и ветку, и worktree. `navigation` по умолчанию равно `"preserve"`; `"open"` выбирает новый чат. Модель, агент и вариант для первого сообщения фиксируются в момент начала создания.
+
+Результат включает `sessionId`, `directory`, `sent`, `linked` и необязательный `worktree`. `sent` бывает `sent`, `no-model`, `skipped` или `failed`; `linked: false` означает, что элемент не сохранился в созданной сессии. Если после сбоя начальной настройки или создания сессии остался worktree, возвращается `sessionId: null` и `failure: "bootstrap-failed" | "session-create-failed"`, а также его папка/worktree. Проверьте этот результат, прежде чем повторять попытку. Вызов ждёт до 180 секунд; тайм-аут не означает, что создание откатили.
+
+`sessionLink` прикрепляет элемент к сессии, которая открыта сейчас. Если нет проекта или сессии — ошибка `NO_SESSION`.
+
+Ограничения, которые клиент применяет до отправки:
+
+| Поле | Макс. символов |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (в сериализованном виде) | 16000 |
+| `author` | 80 |
+| имя каждой ветки | 200 |
+
+## prompt и жизненный цикл сессии
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Без `send` `prompt` заменяет текст в поле чата. С `send: true` он отправляет сообщение моделью и агентом, которые выбрал пользователь. Расширение их никогда не выбирает. Нет открытой сессии — `NO_SESSION`. Отправка, пока сессия занята, — `SESSION_BUSY`; писать в поле во время занятости можно. Результат — `{ sent }` с теми же значениями, что и у `startSession`.
+
+`onSessionLifecycle` сообщает, что делает сессия. `phase` равен `started`, пока модель работает, `completed`, когда она переходит в простой, и `failure` при неожиданном статусе. Поздний слушатель сразу получает текущую фазу.
+
+## Проекты, worktree и живые сессии
+
+Эти методы используют существующее разрешение `sessions` и общие хранилища приложения. Они не запускают обход Git на каждый запрос и не раскрывают содержимое переписки.
+
+```ts
+const projects = await host.listProjects();
+const projectId = projects.projects[0]?.id;
+if (projectId) {
+  const worktrees = await host.listWorktrees(projectId);
+  const sessions = await host.listSessions(projectId);
+  const stop = await host.onSessions(projectId, (snapshot) => {
+    renderSessions(snapshot.sessions, snapshot.state);
+  });
+  // Call stop() when this view closes.
+}
+```
+
+`onProjects(listener)` и `onWorktrees(projectId, listener)` работают так же. Дождитесь регистрации, чтобы поймать ошибки разрешений; результатом будет функция отписки. Каждый сначала отправляет начальный снимок, а затем изменения. `dispose()` освобождает все подписки. Хост допускает не более 32 на фрейм и очищает их при размонтировании, паузе, удалении или переключении сервера.
+
+У снимков есть `state: "loading" | "ready" | "error"`. Состояния загрузки и ошибки могут сохранять данные; только `ready` подтверждает полный успешный результат, в том числе пустой. Снимки сессий включают `coverage` по папкам и известные архивные сессии. Проекты показывают ID, имя и папку; worktree — папку, имя, ветку и доступность. Сессии включают свой проект/папку/worktree, временные метки, ID родителя и ID/данные прикреплённых элементов этого расширения.
+
+`activity` сессии бывает `unknown`, `idle`, `running`, `retrying`, `waiting-permission` или `waiting-question`. `outcome` — это наблюдаемый ход `completed`/`failed` или `null`. Он не восстанавливается из истории и хранится в памяти не более чем для 2 000 наблюдаемых сессий. Простой после ошибки сохраняет результат `failed` до следующего запуска. Ни `idle`, ни `completed` не помечают вашу задачу как выполненную. Используйте `host.openSession(sessionId)` для явного перехода от карточки к её чату.
+
+## Постоянные данные расширения
+
+```ts
+await host.storage.set("board", { columns: ["Todo", "Review"] });
+const board = await host.storage.get("board");
+const keys = await host.storage.keys();
+await host.storage.delete("board");
+```
+
+Дополнительное разрешение не нужно. Хранилище принадлежит этому расширению на подключённом сервере, переживает перезагрузки и удаляется при удалении расширения. `get` возвращает `undefined` для отсутствующего ключа; сохранённый JSON null остаётся null. Ключи содержат от 1 до 128 символов. Каждое сериализованное значение JSON — не более 64 КиБ в UTF-8, а всё пространство имён — не более 2 МиБ или 2 000 ключей. Для данных конкретного проекта добавляйте его ID в ключ. Записи выполняются последовательно и атомарно; при сбое существующие данные сохраняются.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` начинается с `/` и не содержит схемы или хоста; OpenChamber присоединяет его к `apiOrigin` из вашего манифеста и добавляет заголовок `Authorization`. Интеграции с токеном отправляют вставленный токен как есть: в виде `Bearer <token>`, если в манифесте задано `token.scheme: "bearer"`, или в виде `Basic base64(username:token)`, если задано `"basic"`. Интеграции OAuth и Linear всегда отправляют `Bearer`. Результат — `{ status, body }`. Тело приходит текстом; разбирайте JSON сами.
+
+Интеграция с Linear также может выполнить `GET /api/linear/issues/get`, на который OpenChamber отвечает через собственный маршрут Linear.
+
+Если ответа нет в течение 20 секунд — `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Когда манифест объявляет `contributes.service`, OpenChamber запускает этот процесс, а ваша страница общается с ним через такой же вызов. Страница никогда не открывает сокет сама.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` подчиняется тем же правилам, что и в `request`. Объявление сервиса добавляет `service` к разрешениям, которые пользователь подтверждает при установке; до этого каждый `serviceRequest` — `NO_SERVICE`. Полный контракт: файл пакета `GUEST_SERVICES.md`.
+
+## Файлы
+
+Относительный путь указывает внутрь открытого проекта и требует разрешения `files`. Путь, начинающийся с `/` или `~/`, должен соответствовать объявленному шаблону `contributes.filesystem` и требует разрешения `filesystem`. Правила смотрите в разделе [Создание расширения](/ru/sdk/#файлы).
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Ограничения: путь до 1024 символов, содержимое до 2,000,000 символов, список до 2000 записей. Превышение лимита содержимого — `FILE_TOO_LARGE`.
+
+## generate
+
+```ts
+const { text } = await host.generate({ prompt: notes, system: "Summarize in one sentence." });
+```
+
+`prompt` — от 1 до 64,000 символов после обрезки, `system` — до 8,000, `maxOutputTokens` — от 1 до 4,000. Ничего не попадает в сессию и история не сохраняется; расширение никогда не выбирает модель. Вызов ждёт до 90 секунд. Если подходящей Small Model нет — `NO_MODEL`; ошибка модели — `MODEL_FAILED`. Смотрите [Генерация текста](/ru/sdk/#генерация-текста).
+
+## Коды ошибок
+
+Неудачные вызовы выбрасывают `HostRequestError`. `code` — один из перечисленных; `message` поясняет подробнее.
+
+| Код | Когда |
+| --- | --- |
+| `HOST_UNAVAILABLE` | нет `window`, страница не внутри OpenChamber или уже выполнен `dispose()` |
+| `HOST_TIMEOUT` | нет ответа 20 секунд |
+| `HOST_REJECTED` | OpenChamber отказал или ответил кодом, которого этот SDK не знает |
+| `DISCONNECTED` | для вашей интеграции нет токена или подключения Linear |
+| `BAD_PATH` | `path` был некорректным или пытался выйти за пределы разрешённого источника |
+| `NO_INTEGRATION` | в манифесте нет `integration` |
+| `NO_SESSION` | `prompt` или `sessionLink` без открытой сессии |
+| `SESSION_BUSY` | `prompt({ send: true })`, пока сессия была занята |
+| `DISABLED` | пользователь приостановил расширение в разделе «Настройки → Расширения» |
+| `NO_SERVICE` | сервис не объявлен, не подтверждён или не запущен |
+| `NOT_GRANTED` | пользователь не подтвердил разрешение, которое нужно этому вызову |
+| `SERVICE_FAILED` | сервис упал или так и не стал готов |
+| `NO_DIRECTORY` | относительный путь к файлу использован без открытого проекта, или `openCommit` без открытого проекта |
+| `NOT_FOUND` | `readFile` для несуществующего файла или `openCommit` для коммита, которого нет в проекте |
+| `FILE_TOO_LARGE` | содержимое файла превышает лимит — при чтении или записи |
+| `DENIED` | операционная система отказала в файловой операции |
+| `NO_MODEL` | `generate` без доступной Small Model |
+| `MODEL_FAILED` | Small Model вернула ошибку |
+| `UNSUPPORTED` | этот OpenChamber не умеет выполнить вызов, например `openCommit` там, где нет представления Diff |
+
+## Смотрите также
+
+- [Создание расширения](/ru/sdk/) — папка, манифест, установка и разрешения
+- [UI kit](/ru/sdk/ui/) — кнопки, поля, списки и другие готовые элементы

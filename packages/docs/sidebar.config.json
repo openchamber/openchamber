@@ -12,7 +12,8 @@
         "fr": "Commencer ici",
         "ja": "ここから開始",
         "de": "Hier starten",
-        "tr": "Buradan başlayın"
+        "tr": "Buradan başlayın",
+        "ru": "С чего начать"
       },
       "items": [
         {
@@ -28,7 +29,8 @@
             "fr": "Vue d’ensemble",
             "ja": "概要",
             "de": "Übersicht",
-            "tr": "Genel bakış"
+            "tr": "Genel bakış",
+            "ru": "Обзор"
           }
         },
         {
@@ -44,7 +46,8 @@
             "fr": "Installation",
             "ja": "インストール",
             "de": "Installation",
-            "tr": "Kurulum"
+            "tr": "Kurulum",
+            "ru": "Установка"
           }
         },
         {
@@ -60,7 +63,8 @@
             "fr": "Démarrage rapide",
             "ja": "クイックスタート",
             "de": "Schnellstart",
-            "tr": "Hızlı başlangıç"
+            "tr": "Hızlı başlangıç",
+            "ru": "Быстрый старт"
           }
         },
         {
@@ -76,7 +80,8 @@
             "fr": "Serveur OpenCode",
             "ja": "OpenCode サーバー",
             "de": "OpenCode-Server",
-            "tr": "OpenCode Sunucusu"
+            "tr": "OpenCode Sunucusu",
+            "ru": "Сервер OpenCode"
           }
         },
         {
@@ -92,7 +97,8 @@
             "fr": "Variables d’environnement",
             "ja": "環境変数",
             "de": "Umgebungsvariablen",
-            "tr": "Ortam değişkenleri"
+            "tr": "Ortam değişkenleri",
+            "ru": "Переменные окружения"
           }
         }
       ]
@@ -109,7 +115,8 @@
         "fr": "Workflows",
         "ja": "ワークフロー",
         "de": "Abläufe",
-        "tr": "İş akışları"
+        "tr": "İş akışları",
+        "ru": "Рабочие процессы"
       },
       "items": [
         {
@@ -125,7 +132,8 @@
             "fr": "Projets",
             "ja": "プロジェクト",
             "de": "Projekte",
-            "tr": "Projeler"
+            "tr": "Projeler",
+            "ru": "Проекты"
           }
         },
         {
@@ -141,7 +149,8 @@
             "fr": "Discussions",
             "ja": "チャット",
             "de": "Chats",
-            "tr": "Sohbetler"
+            "tr": "Sohbetler",
+            "ru": "Чаты"
           }
         },
         {
@@ -157,7 +166,8 @@
             "fr": "Contexte",
             "ja": "コンテキスト",
             "de": "Kontext",
-            "tr": "Bağlam"
+            "tr": "Bağlam",
+            "ru": "Контекст"
           }
         },
         {
@@ -173,7 +183,8 @@
             "fr": "Notes, todos et plans",
             "ja": "メモ、Todo、計画",
             "de": "Notizen, Aufgaben und Pläne",
-            "tr": "Notlar, yapılacaklar ve planlar"
+            "tr": "Notlar, yapılacaklar ve planlar",
+            "ru": "Заметки, дела и планы"
           }
         },
         {
@@ -189,7 +200,8 @@
             "fr": "Tâches planifiées",
             "ja": "スケジュールタスク",
             "de": "Geplante Aufgaben",
-            "tr": "Zamanlanmış görevler"
+            "tr": "Zamanlanmış görevler",
+            "ru": "Запланированные задачи"
           }
         },
         {
@@ -205,7 +217,8 @@
             "fr": "Outil de contrôle pour les agents",
             "ja": "エージェント制御ツール",
             "de": "Agenten-Steuerungstool",
-            "tr": "Agent kontrol aracı"
+            "tr": "Agent kontrol aracı",
+            "ru": "Инструмент управления агентом"
           }
         },
         {
@@ -221,7 +234,8 @@
             "fr": "Objectifs de session",
             "ja": "セッションゴール",
             "de": "Sitzungsziele",
-            "tr": "Oturum hedefleri"
+            "tr": "Oturum hedefleri",
+            "ru": "Цели сессии"
           }
         },
         {
@@ -237,7 +251,8 @@
             "fr": "Sessions en cours",
             "ja": "作業中のセッション",
             "de": "Sitzungen in Arbeit",
-            "tr": "Devam eden oturumlar"
+            "tr": "Devam eden oturumlar",
+            "ru": "Сессии в работе"
           }
         },
         {
@@ -253,7 +268,8 @@
             "fr": "Permissions et filet de sécurité",
             "ja": "権限とセーフティネット",
             "de": "Berechtigungen und Sicherheitsnetz",
-            "tr": "İzinler ve güvenlik ağı"
+            "tr": "İzinler ve güvenlik ağı",
+            "ru": "Разрешения и предохранитель"
           }
         },
         {
@@ -269,7 +285,8 @@
             "fr": "Routage automatique des modèles",
             "ja": "自動モデルルーティング",
             "de": "Automatische Modellwahl",
-            "tr": "Otomatik model yönlendirme"
+            "tr": "Otomatik model yönlendirme",
+            "ru": "Автоматическая маршрутизация моделей"
           }
         },
         {
@@ -285,7 +302,8 @@
             "fr": "Actions de projet",
             "ja": "プロジェクトアクション",
             "de": "Projektaktionen",
-            "tr": "Proje işlemleri"
+            "tr": "Proje işlemleri",
+            "ru": "Действия проекта"
           }
         },
         {
@@ -301,7 +319,8 @@
             "fr": "Configuration du dépôt",
             "ja": "リポジトリ設定",
             "de": "Repository-Konfiguration",
-            "tr": "Depo yapılandırması"
+            "tr": "Depo yapılandırması",
+            "ru": "Конфигурация репозитория"
           }
         },
         {
@@ -317,7 +336,8 @@
             "fr": "Aperçu et serveurs de dev",
             "ja": "プレビューと開発サーバー",
             "de": "Vorschau und Entwicklungsserver",
-            "tr": "Önizleme ve geliştirme sunucuları"
+            "tr": "Önizleme ve geliştirme sunucuları",
+            "ru": "Preview и dev-серверы"
           }
         },
         {
@@ -333,7 +353,8 @@
             "fr": "Sessions worktree",
             "ja": "Worktree セッション",
             "de": "Worktree-Sitzungen",
-            "tr": "Worktree oturumları"
+            "tr": "Worktree oturumları",
+            "ru": "Сессии в worktree"
           }
         },
         {
@@ -343,7 +364,8 @@
             "fr": "Multi-run",
             "ja": "Multi-run",
             "de": "Mehrfachausführung",
-            "tr": "Çoklu çalıştırma"
+            "tr": "Çoklu çalıştırma",
+            "ru": "Multi-run"
           }
         },
         {
@@ -353,7 +375,8 @@
             "fr": "Git et GitHub",
             "ja": "Git と GitHub",
             "de": "Git und GitHub",
-            "tr": "Git ve GitHub"
+            "tr": "Git ve GitHub",
+            "ru": "Git и GitHub"
           }
         },
         {
@@ -369,7 +392,8 @@
             "fr": "Parcours des modifications",
             "ja": "変更のウォークスルー",
             "de": "Änderungsrundgang",
-            "tr": "Değişiklik incelemesi"
+            "tr": "Değişiklik incelemesi",
+            "ru": "Обзорный тур по изменениям"
           }
         },
         {
@@ -385,7 +409,8 @@
             "fr": "Issues et PR GitHub",
             "ja": "GitHub Issues と PR",
             "de": "GitHub-Issues und PRs",
-            "tr": "GitHub issue'ları ve PR'lar"
+            "tr": "GitHub issue'ları ve PR'lar",
+            "ru": "GitHub: задачи и PR"
           }
         },
         {
@@ -401,7 +426,8 @@
             "fr": "Magic Prompts",
             "ja": "マジックプロンプト",
             "de": "Magische Prompts",
-            "tr": "Sihirli istemler"
+            "tr": "Sihirli istemler",
+            "ru": "Волшебные промпты"
           }
         },
         {
@@ -417,7 +443,8 @@
             "fr": "Identités Git",
             "ja": "Git ID",
             "de": "Git-Identitäten",
-            "tr": "Git kimlikleri"
+            "tr": "Git kimlikleri",
+            "ru": "Идентификации Git"
           }
         }
       ]
@@ -434,7 +461,8 @@
         "fr": "Configuration OpenCode",
         "ja": "OpenCode 設定",
         "de": "OpenCode-Einrichtung",
-        "tr": "OpenCode kurulumu"
+        "tr": "OpenCode kurulumu",
+        "ru": "Настройка OpenCode"
       },
       "items": [
         {
@@ -450,7 +478,8 @@
             "fr": "Fournisseurs, modèles et agents",
             "ja": "プロバイダー、モデル、エージェント",
             "de": "Anbieter, Modelle und Agenten",
-            "tr": "Sağlayıcılar, modeller ve agentlar"
+            "tr": "Sağlayıcılar, modeller ve agentlar",
+            "ru": "Провайдеры, модели и агенты"
           }
         },
         {
@@ -466,7 +495,8 @@
             "fr": "Fournisseurs de classification (Jev)",
             "ja": "分類プロバイダー（Jev）",
             "de": "Klassifizierungsanbieter (Jev)",
-            "tr": "Sınıflandırma sağlayıcıları (Jev)"
+            "tr": "Sınıflandırma sağlayıcıları (Jev)",
+            "ru": "Провайдеры классификации (Jev)"
           }
         },
         {
@@ -482,7 +512,8 @@
             "fr": "Intégrations",
             "ja": "統合機能",
             "de": "Integrationen",
-            "tr": "Entegrasyonlar"
+            "tr": "Entegrasyonlar",
+            "ru": "Интеграции"
           }
         },
         {
@@ -498,7 +529,8 @@
             "fr": "Serveurs MCP",
             "ja": "MCP サーバー",
             "de": "MCP-Server",
-            "tr": "MCP sunucuları"
+            "tr": "MCP sunucuları",
+            "ru": "MCP-серверы"
           }
         },
         {
@@ -514,7 +546,8 @@
             "fr": "Skills",
             "ja": "スキル",
             "de": "Fähigkeiten",
-            "tr": "Beceriler"
+            "tr": "Beceriler",
+            "ru": "Навыки"
           }
         },
         {
@@ -530,7 +563,8 @@
             "fr": "Catalogue de skills",
             "ja": "スキルカタログ",
             "de": "Fähigkeitenkatalog",
-            "tr": "Beceri kataloğu"
+            "tr": "Beceri kataloğu",
+            "ru": "Каталог навыков"
           }
         },
         {
@@ -546,7 +580,8 @@
             "fr": "Commandes et snippets",
             "ja": "コマンドとスニペット",
             "de": "Befehle und Snippets",
-            "tr": "Komutlar ve parçacıklar"
+            "tr": "Komutlar ve parçacıklar",
+            "ru": "Команды и сниппеты"
           }
         },
         {
@@ -562,7 +597,8 @@
             "fr": "Utilisation et quotas",
             "ja": "使用量とクォータ",
             "de": "Nutzung und Kontingente",
-            "tr": "Kullanım ve kotalar"
+            "tr": "Kullanım ve kotalar",
+            "ru": "Использование и квоты"
           }
         }
       ]
@@ -579,7 +615,8 @@
         "fr": "Accès distant",
         "ja": "リモートアクセス",
         "de": "Zugriff von außen",
-        "tr": "Uzaktan erişim"
+        "tr": "Uzaktan erişim",
+        "ru": "Удалённый доступ"
       },
       "items": [
         {
@@ -595,7 +632,8 @@
             "fr": "Connecter un appareil",
             "ja": "デバイスを接続",
             "de": "Gerät verbinden",
-            "tr": "Cihaz bağlama"
+            "tr": "Cihaz bağlama",
+            "ru": "Подключение устройства"
           }
         },
         {
@@ -611,7 +649,8 @@
             "fr": "Relay privé",
             "ja": "プライベートリレー",
             "de": "Privates Relay",
-            "tr": "Özel relay"
+            "tr": "Özel relay",
+            "ru": "Private Relay"
           }
         },
         {
@@ -627,7 +666,8 @@
             "fr": "Tunnels",
             "ja": "トンネル",
             "de": "Tunnel",
-            "tr": "Tüneller"
+            "tr": "Tüneller",
+            "ru": "Туннели"
           }
         },
         {
@@ -643,7 +683,8 @@
             "fr": "Reverse proxy",
             "ja": "リバースプロキシ",
             "de": "Reverse Proxy",
-            "tr": "Ters proxy"
+            "tr": "Ters proxy",
+            "ru": "Обратный прокси"
           }
         },
         {
@@ -659,7 +700,8 @@
             "fr": "Apps mobiles et PWA",
             "ja": "モバイルアプリと PWA",
             "de": "Mobile Apps und PWA",
-            "tr": "Mobil uygulamalar ve PWA"
+            "tr": "Mobil uygulamalar ve PWA",
+            "ru": "Мобильные приложения и PWA"
           }
         },
         {
@@ -675,7 +717,8 @@
             "fr": "Sécurité",
             "ja": "セキュリティ",
             "de": "Sicherheit",
-            "tr": "Güvenlik"
+            "tr": "Güvenlik",
+            "ru": "Безопасность"
           }
         }
       ]
@@ -692,7 +735,8 @@
         "fr": "Personnaliser",
         "ja": "カスタマイズ",
         "de": "Anpassen",
-        "tr": "Özelleştirme"
+        "tr": "Özelleştirme",
+        "ru": "Персонализация"
       },
       "items": [
         {
@@ -708,7 +752,8 @@
             "fr": "Thèmes",
             "ja": "テーマ",
             "de": "Designs",
-            "tr": "Temalar"
+            "tr": "Temalar",
+            "ru": "Темы"
           }
         },
         {
@@ -724,7 +769,8 @@
             "fr": "Notifications",
             "ja": "通知",
             "de": "Benachrichtigungen",
-            "tr": "Bildirimler"
+            "tr": "Bildirimler",
+            "ru": "Уведомления"
           }
         },
         {
@@ -740,7 +786,8 @@
             "fr": "Mode vocal",
             "ja": "音声モード",
             "de": "Sprachmodus",
-            "tr": "Ses modu"
+            "tr": "Ses modu",
+            "ru": "Голосовой режим"
           }
         },
         {
@@ -756,7 +803,8 @@
             "fr": "Icônes de projet",
             "ja": "プロジェクトアイコン",
             "de": "Projektsymbole",
-            "tr": "Proje simgeleri"
+            "tr": "Proje simgeleri",
+            "ru": "Иконки проектов"
           }
         }
       ]
@@ -773,7 +821,8 @@
         "fr": "Extensions",
         "ja": "拡張機能",
         "de": "Erweiterungen",
-        "tr": "Eklentiler"
+        "tr": "Eklentiler",
+        "ru": "Расширения"
       },
       "items": [
         {
@@ -789,7 +838,8 @@
             "fr": "Utiliser les extensions",
             "ja": "拡張機能を使う",
             "de": "Erweiterungen verwenden",
-            "tr": "Eklentileri kullanma"
+            "tr": "Eklentileri kullanma",
+            "ru": "Использование расширений"
           }
         },
         {
@@ -805,7 +855,8 @@
             "fr": "Créer une extension",
             "ja": "拡張機能を作る",
             "de": "Eine Erweiterung bauen",
-            "tr": "Eklenti oluştur"
+            "tr": "Eklenti oluştur",
+            "ru": "Создание расширения"
           }
         },
         {
@@ -821,7 +872,8 @@
             "fr": "API host",
             "ja": "ホスト API",
             "de": "Host-API",
-            "tr": "Host API"
+            "tr": "Host API",
+            "ru": "Host API"
           }
         },
         {
@@ -837,7 +889,8 @@
             "fr": "Kit UI",
             "ja": "UI キット",
             "de": "UI-Kit",
-            "tr": "UI kiti"
+            "tr": "UI kiti",
+            "ru": "UI-набор"
           }
         },
         {
@@ -853,7 +906,8 @@
             "fr": "Exemple",
             "ja": "サンプル",
             "de": "Beispiel",
-            "tr": "Örnek"
+            "tr": "Örnek",
+            "ru": "Пример"
           }
         }
       ]
@@ -870,7 +924,8 @@
         "fr": "Desktop",
         "ja": "デスクトップ",
         "de": "Desktop",
-        "tr": "Masaüstü"
+        "tr": "Masaüstü",
+        "ru": "Десктоп"
       },
       "items": [
         {
@@ -886,7 +941,8 @@
             "fr": "Instances distantes",
             "ja": "リモートインスタンス",
             "de": "Entfernte Instanzen",
-            "tr": "Uzak örnekler"
+            "tr": "Uzak örnekler",
+            "ru": "Удалённые экземпляры"
           }
         },
         {
@@ -902,7 +958,8 @@
             "fr": "Panneau navigateur",
             "ja": "ブラウザパネル",
             "de": "Browser-Panel",
-            "tr": "Tarayıcı paneli"
+            "tr": "Tarayıcı paneli",
+            "ru": "Панель браузера"
           }
         },
         {
@@ -918,7 +975,8 @@
             "fr": "Tunnels desktop",
             "ja": "デスクトップトンネル",
             "de": "Desktop-Tunnel",
-            "tr": "Masaüstü tünelleri"
+            "tr": "Masaüstü tünelleri",
+            "ru": "Туннели десктопа"
           }
         },
         {
@@ -934,7 +992,8 @@
             "fr": "Hosts SSH et proxy",
             "ja": "SSH ホストとプロキシ",
             "de": "SSH-Hosts und Proxying",
-            "tr": "SSH hostları ve proxy"
+            "tr": "SSH hostları ve proxy",
+            "ru": "SSH-хосты и проксирование"
           }
         },
         {
@@ -950,7 +1009,8 @@
             "fr": "Mises à jour",
             "ja": "更新",
             "de": "Aktualisierungen",
-            "tr": "Güncellemeler"
+            "tr": "Güncellemeler",
+            "ru": "Обновления"
           }
         }
       ]
@@ -967,7 +1027,8 @@
         "fr": "Aide",
         "ja": "ヘルプ",
         "de": "Hilfe",
-        "tr": "Yardım"
+        "tr": "Yardım",
+        "ru": "Помощь"
       },
       "items": [
         {
@@ -983,7 +1044,8 @@
             "fr": "Dépannage",
             "ja": "トラブルシューティング",
             "de": "Fehlerbehebung",
-            "tr": "Sorun giderme"
+            "tr": "Sorun giderme",
+            "ru": "Устранение неполадок"
           }
         },
         {
@@ -999,7 +1061,8 @@
             "fr": "Connexion à OpenCode",
             "ja": "OpenCode 接続",
             "de": "OpenCode-Verbindung",
-            "tr": "OpenCode bağlantısı"
+            "tr": "OpenCode bağlantısı",
+            "ru": "Подключение к OpenCode"
           }
         },
         {
@@ -1015,7 +1078,8 @@
             "fr": "Worktrees et Git",
             "ja": "Worktrees と Git",
             "de": "Worktrees und Git",
-            "tr": "Worktree'ler ve Git"
+            "tr": "Worktree'ler ve Git",
+            "ru": "Worktree и Git"
           }
         },
         {
@@ -1031,7 +1095,8 @@
             "fr": "Accès distant",
             "ja": "リモートアクセス",
             "de": "Externer Zugriff",
-            "tr": "Uzaktan erişim"
+            "tr": "Uzaktan erişim",
+            "ru": "Удалённый доступ"
           }
         }
       ]
