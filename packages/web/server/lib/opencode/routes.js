@@ -11,6 +11,7 @@ import { OPENCODE_CONFIG_DIR } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
 import { parseWebSearchSelection } from './config-v2.js';
 import { getWebSearchSource, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, isProviderConnectRequest } from '../enterprise-mode.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -295,7 +296,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  app.put('/api/provider', async (req, res) => {
+  // Enterprise mode: model providers come from the OpenCode config the
+  // administrator controls, so nothing in the app may connect a new one or
+  // add a key. These OpenCode routes otherwise reach it through the generic
+  // proxy; removing or switching an existing account stays allowed, it only
+  // narrows access. The real lock is OpenCode's `provider.use` policy.
+  const refuseInEnterpriseMode = (_req, res, next) => (
+    isEnterpriseMode() ? res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }) : next()
+  );
+  app.use((req, res, next) => (
+    isProviderConnectRequest(req.method, req.path) ? refuseInEnterpriseMode(req, res, next) : next()
+  ));
+
+  app.put('/api/provider', refuseInEnterpriseMode, async (req, res) => {
     try {
       const providerID = typeof req.body?.providerID === 'string'
         ? req.body.providerID.trim()
@@ -333,8 +346,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         }
       }
 
+      // OpenCode 2 keeps credentials in its own store, out of this server's
+      // sight, so the form states whether one exists or follows this write.
       const { getProviderAuth } = await getAuthLibrary();
-      const hasStoredAuth = Boolean(getProviderAuth(providerID));
+      const hasStoredAuth = req.body?.hasCredential === true || Boolean(getProviderAuth(providerID));
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
 
       return res.json({
@@ -543,6 +558,24 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       if (content.length > MAX_BEHAVIOR_PROMPT_SIZE) {
         return res.status(413).json({ error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
+      }
+
+      // `expectedContent` is what the editor loaded (null: no file). A file
+      // changed on disk since then is not overwritten with the stale copy.
+      if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'expectedContent')) {
+        const expected = req.body.expectedContent;
+        let current = null;
+        try {
+          current = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+        if (current !== expected) {
+          return res.status(409).json({
+            error: 'AGENTS.md changed on disk since it was loaded',
+            code: 'AGENTS_MD_CONFLICT',
+          });
+        }
       }
 
       // Ensure parent directory exists

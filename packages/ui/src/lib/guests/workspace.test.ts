@@ -71,6 +71,24 @@ describe('extension workspace projection', () => {
     useConfigStore.setState({ isConnected: false });
     expect(readB().sessions[0]).toMatchObject({ activity: 'unknown', outcome: null });
   });
+  test('archive invalidation prevents old idle coverage and notifies guest subscribers', async () => {
+    const child = manager.ensureChild('/b-tree', { bootstrap: false });
+    child.setState({ sessionStatusReady: true });
+    const activity: string[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (snapshot) => {
+      if (snapshot.kind === 'sessions') activity.push(snapshot.sessions[0].activity);
+    });
+    try {
+      expect(activity).toEqual(['idle']);
+      child.setState({ sessionStatusInvalidated: { 'b-session': true } });
+      await Promise.resolve();
+      expect(readB().sessions[0]).toMatchObject({ activity: 'unknown', outcome: null });
+      expect(activity).toEqual(['idle', 'unknown']);
+      child.setState({ sessionStatusInvalidated: {} });
+      await Promise.resolve();
+      expect(activity).toEqual(['idle', 'unknown', 'idle']);
+    } finally { stop(); }
+  });
   test('worktree loading and errors retain data, and token updates do not publish', async () => {
     const snapshots: number[] = [];
     const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', () => snapshots.push(1));

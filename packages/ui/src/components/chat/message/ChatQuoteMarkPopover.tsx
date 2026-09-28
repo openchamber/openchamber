@@ -77,7 +77,12 @@ export function ChatQuoteMarkPopover({
     return createPortal(
         <div
             ref={ref}
-            className="app-region-no-drag fixed z-50"
+            // The glass card's shadow lives here, off its backdrop-filter
+            // element; this box hugs the card, so the radius matches it.
+            className={cn(
+                'app-region-no-drag fixed z-50 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                editing ? 'rounded-3xl' : 'rounded-2xl',
+            )}
             style={{
                 left,
                 top: placeBelow ? anchorRect.bottom + POPOVER_GAP_PX : anchorRect.top - POPOVER_GAP_PX,
@@ -85,7 +90,7 @@ export function ChatQuoteMarkPopover({
             }}
         >
             {editing ? (
-                <div className="oc-glass-popover flex items-end gap-2 rounded-3xl border border-[var(--interactive-border)] py-1 pl-4 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+                <div className="oc-glass-popover flex items-end gap-2 rounded-3xl border border-[var(--interactive-border)] py-1 pl-4 pr-1">
                     <textarea
                         ref={inputRef}
                         rows={1}
@@ -119,7 +124,7 @@ export function ChatQuoteMarkPopover({
                     </button>
                 </div>
             ) : (
-                <div className="oc-glass-popover flex max-w-[min(360px,80vw)] items-start gap-1 rounded-2xl border border-[var(--interactive-border)] py-1 pl-3 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+                <div className="oc-glass-popover flex max-w-[min(360px,80vw)] items-start gap-1 rounded-2xl border border-[var(--interactive-border)] py-1 pl-3 pr-1">
                     {comment ? (
                         <div className="min-w-0 flex-1 whitespace-pre-wrap break-words py-1 text-sm text-foreground">{comment}</div>
                     ) : null}

@@ -25,6 +25,8 @@ import { cn } from '@/lib/utils';
 import type { Agent } from '@/lib/opencode/model';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { SettingsSidebarNoMatches, SettingsSidebarSearch } from '@/components/sections/shared/SettingsSidebarSearch';
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -36,6 +38,7 @@ interface AgentsSidebarProps {
 
 export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
   const [renameDialogAgent, setRenameDialogAgent] = React.useState<Agent | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [confirmActionAgent, setConfirmActionAgent] = React.useState<Agent | null>(null);
@@ -258,8 +261,9 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   // Filter out hidden agents (internal agents like title, compaction, summary)
   const visibleAgents = agents.filter((agent) => !isAgentHidden(agent));
-  const builtInAgents = visibleAgents.filter(isAgentBuiltIn);
-  const customAgents = visibleAgents.filter((agent) => !isAgentBuiltIn(agent));
+  const shownAgents = visibleAgents.filter((agent) => matchesRankQuery([agent.name, agent.description], query));
+  const builtInAgents = shownAgents.filter(isAgentBuiltIn);
+  const customAgents = shownAgents.filter((agent) => !isAgentBuiltIn(agent));
 
   // Group custom agents by subfolder
   const { groupedCustomAgents, ungroupedCustomAgents } = useMemo(() => {
@@ -296,6 +300,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
+        {visibleAgents.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
@@ -305,6 +310,8 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.empty.description')}</p>
           </div>
+        ) : shownAgents.length === 0 ? (
+          <SettingsSidebarNoMatches query={query} />
         ) : (
           <>
             {builtInAgents.length > 0 && (

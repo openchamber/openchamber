@@ -139,7 +139,7 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
   const critical = Promise.allSettled([
     read(async () => {
       const session_status = await readDirectoryStatusSnapshot(store, async () => {
-        const statuses = await opencodeClient.getActiveSessionStatuses()
+        const statuses = await opencodeClient.getActiveSessionStatuses(directory)
         if (statuses === null) throw new Error("session.active failed")
         return statuses
       })

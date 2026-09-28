@@ -1,0 +1,49 @@
+---
+title: Chats
+description: Gewone gesprekken met de agent, buiten een project.
+---
+
+# Chats
+
+Een chat is een gewoon gesprek met de agent, buiten een project. Gebruik chats voor zaken die losstaan van uw codebases: hoe u KDE voor FreeBSD aanpast, wat een reguliere expressie doet of een opzet voor een e-mail. De agent werkt in een tijdelijke map, zonder repository, branch of projectcontext die het gesprek beïnvloedt.
+
+## Een chat starten
+
+Klik op **+** bij **Chats** in de zijbalk. Op uw telefoon tikt u op **Nieuwe chat** bovenaan de sessielijst of op **+** bij Chats.
+
+**Mod+N**, dus Cmd+N op macOS en Ctrl+N elders, en **Nieuwe sessie** in het opdrachtenpalet openen een sessie op de plek waar u de vorige nieuwe sessie begon. Was dat een chat, dan wordt het weer een chat; anders wordt het een projectsessie. Voordat u het eerste bericht verstuurt, kunt u nog naar Chats wisselen.
+
+## Waar u chats vindt
+
+Chats staan in een eigen gedeelte bovenaan de zijbalk, boven [In bewerking](/nl/sessions-in-work/) en uw projecten. Net als andere sessies worden ze op meest recente activiteit gesorteerd. Vastgezette chats blijven bovenaan staan. In de tijdlijnweergave ziet u de drie recentste chats; met **Meer tonen** laadt u de rest. U kunt dit gedeelte net als andere gedeelten inklappen.
+
+Op uw telefoon staan Chats boven de projectlijst in het sessievenster.
+
+## Wat een chat wel en niet kan
+
+Elke chat krijgt een eigen lege map. De agent kan daarin bestanden aanmaken en bewerken, zoals een script, een snel prototype of een omgezet document. Een chat heeft geen:
+
+- Git-status, branches of worktrees
+- mogelijkheid om naar werk te verplaatsen: chats verschijnen nooit bij [In bewerking](/nl/sessions-in-work/)
+- mogelijkheid om een plan in een nieuwe sessie uit te voeren
+- mogelijkheid om vanuit een Linear-issue te beginnen
+
+Notities, taken en plannen zijn wel beschikbaar. Alle chats delen één verzameling, los van uw projecten.
+
+Een chat blijft een chat. U kunt een afgeronde chat niet naar een project verplaatsen. Als een gesprek uitgroeit tot projectwerk, start u een sessie in het project en neemt u het bruikbare deel mee.
+
+## Archiveren en verwijderen
+
+Archiveer een chat om die uit de lijst te verbergen. Verwijderen wist de chat definitief, samen met de bijbehorende map zodra geen andere sessie, zoals een fork of subagent, die map nog gebruikt.
+
+## Waar de mappen staan
+
+Chatmappen staan in `~/.config/openchamber/chats`, met één gedateerde map per dag. Als u de gegevensmap van OpenChamber hebt verplaatst met `OPENCHAMBER_DATA_DIR`, staan ze daaronder. Stel `OPENCHAMBER_CHATS_DIR` in om chats ergens anders te bewaren. Zie [Omgevingsvariabelen](/nl/environment/). Dit is van belang als OpenCode onder een andere gebruiker draait en uw thuismap niet kan lezen.
+
+> VS Code heeft geen chats. De extensie werkt altijd in de geopende map.
+
+## Zie ook
+
+- [Projecten](/nl/projects/) voor sessies die bij een codebase horen
+- [Sessies in uitvoering](/nl/sessions-in-work/) om lopend werk in beeld te houden
+- [Notities, taken en plannen](/nl/notes-todos-plans/), die ook in chats werken

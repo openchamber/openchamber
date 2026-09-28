@@ -1,10 +1,12 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { getEventListeners } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { SpaceError } from './errors.js';
 import { killLiveTrees, killProcessTree, liveTreeCount, runCommand } from './run-command.js';
 
 const node = process.execPath;
@@ -94,6 +96,16 @@ describe('runCommand', () => {
     await expect(runCommand(node, ['-e', flood], { maxOutputBytes: 100_000, timeoutMs: 20_000 })).rejects.toMatchObject({
       code: 'command_output_too_large',
     });
+  });
+
+  // A failing `git apply --check` prints a line or two per path; its exit code is the answer.
+  it('keeps only the last bytes of each stream past the cap with keepTail, and still answers with the exit code', async () => {
+    const flood = 'for (let i = 0; i < 4000; i += 1) process.stderr.write(`line ${i}\\n`.padStart(100, "x")); process.stdout.write("out"); process.exitCode = 3;';
+    const done = await runCommand(node, ['-e', flood], { maxOutputBytes: 10_000, keepTail: true, timeoutMs: 20_000 });
+    expect(done.code).toBe(3);
+    expect(done.stdout).toBe('out');
+    expect(Buffer.byteLength(done.stderr)).toBe(10_000);
+    expect(done.stderr.endsWith(`${'line 3999\n'.padStart(100, 'x')}`)).toBe(true);
   });
 
   it('rejects when the executable does not exist', async () => {
@@ -230,11 +242,11 @@ const [pidFile, mode] = process.argv.slice(2);
 if (mode === 'sigint') process.on('SIGINT', () => process.exit(130));
 // An exit listener registered before ours that throws, as the serve command registers one earlier.
 if (mode === 'throwing') process.on('exit', () => { throw new Error('an earlier exit listener'); });
-runCommand(process.execPath, ['-e', ${JSON.stringify(parentScript)}], { killTree: true, timeoutMs: 120000 }).catch(() => {});
+runCommand(process.execPath, ['-e', ${JSON.stringify(parentScript)}], { killTree: true, keepAtExit: mode === 'keep', timeoutMs: 120000 }).catch(() => {});
 const ready = setInterval(() => {
   if (!fs.existsSync(pidFile)) return;
   clearInterval(ready);
-  if (mode === 'exit' || mode === 'throwing') process.exit(0);
+  if (mode === 'exit' || mode === 'throwing' || mode === 'keep') process.exit(0);
   fs.writeFileSync(pidFile + '.ready', '');
   setInterval(() => {}, 1000);
 }, 50);
@@ -269,6 +281,77 @@ const ready = setInterval(() => {
     const { child, grandchild } = await runWrapper('exit');
     expect(isRealPid(child) && isRealPid(grandchild)).toBe(true);
     expect(await waitFor(() => !isAlive(child) && !isAlive(grandchild), 5000)).toBe(true);
+  });
+
+  // `keepAtExit`, for `git apply`: killed in the middle it leaves a part written, so an exit leaves it.
+  // Windows has no such test: there libuv's job object ends the child with this process whatever we do.
+  it.skipIf(process.platform === 'win32')('leaves the tree of a keepAtExit child alive when the process leaves with process.exit', async () => {
+    const { child, grandchild } = await runWrapper('keep');
+    expect(isRealPid(child) && isRealPid(grandchild)).toBe(true);
+    expect(await waitFor(() => !isAlive(child) || !isAlive(grandchild), 1500)).toBe(false);
+  });
+
+  // The reviewer's probe: a `git apply` kept at exit whose smudge filter prints on stderr after the host
+  // left. Through a pipe to the dead host the print was SIGPIPE, and the apply stopped with files
+  // deleted; with the output in a file of its own it finishes, every file changed.
+  it.skipIf(process.platform === 'win32')('lets a keepAtExit git apply finish after the process left, while its filter prints', { timeout: 40_000 }, async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-kept-apply-'));
+    try {
+      const repo = path.join(directory, 'repo');
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
+      const git = (args) => {
+        const done = spawnSync('git', ['-C', repo, ...args], { env, encoding: 'utf8' });
+        if (done.status !== 0) throw new Error(`git ${args.join(' ')}: ${done.stderr}`);
+        return done.stdout;
+      };
+      fs.mkdirSync(repo);
+      git(['init', '--quiet']);
+      const names = Array.from({ length: 20 }, (_, index) => `f${String(index).padStart(2, '0')}.txt`);
+      for (const name of names) fs.writeFileSync(path.join(repo, name), 'as it was\n');
+      git(['add', '.']);
+      git(['commit', '--quiet', '-m', 'files']);
+      for (const name of names) fs.writeFileSync(path.join(repo, name), 'changed\n');
+      const patch = path.join(directory, 'change.patch');
+      fs.writeFileSync(patch, git(['diff', '--binary']));
+      git(['checkout', '--quiet', '--', '.']);
+      const noisy = path.join(directory, 'noisy-smudge.sh');
+      fs.writeFileSync(noisy, '#!/bin/sh\nsleep 0.2\necho "a smudge filter that talks" >&2\ncat\n', { mode: 0o755 });
+      git(['config', 'filter.noisy.smudge', noisy]);
+      git(['config', 'filter.noisy.clean', 'cat']);
+      fs.writeFileSync(path.join(repo, '.git', 'info', 'attributes'), '*.txt filter=noisy\n');
+      const wrapper = path.join(directory, 'host.mjs');
+      fs.writeFileSync(wrapper, `
+import { runCommand } from ${JSON.stringify(new URL('./run-command.js', import.meta.url).href)};
+runCommand('git', ['-C', ${JSON.stringify(repo)}, 'apply', '--binary', ${JSON.stringify(patch)}], { env: ${JSON.stringify(env)}, killTree: true, keepAtExit: true, keepTail: true, maxOutputBytes: 65536, timeoutMs: 60000 }).catch(() => {});
+setTimeout(() => process.exit(0), 1000);
+`);
+      const host = spawn(node, [wrapper], { stdio: 'ignore' });
+      await new Promise((resolve) => { host.on('exit', resolve); });
+      const holds = (name) => fs.existsSync(path.join(repo, name)) && fs.readFileSync(path.join(repo, name), 'utf8') === 'changed\n';
+      // Four seconds of smudging in all, most of it after the host left.
+      expect(await waitFor(() => names.every(holds), 20_000)).toBe(true);
+      expect(git(['status', '--porcelain']).split('\n').filter(Boolean)).toEqual(names.map((name) => ` M ${name}`));
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the stderr of a keepAtExit child back, its last maxOutputBytes with keepTail, and refuses more without it', async () => {
+    const script = 'process.stderr.write("x".repeat(5000) + "end"); process.stdout.write("gone"); process.exitCode = 2;';
+    expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, keepTail: true, maxOutputBytes: 10 })).toEqual({ code: 2, stdout: '', stderr: 'xxxxxxxend' });
+    await expect(runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, maxOutputBytes: 10 })).rejects.toMatchObject({ code: 'command_output_too_large' });
+    expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true })).toMatchObject({ code: 2, stderr: `${'x'.repeat(5000)}end` });
+    expect(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('openchamber-stderr-'))).toEqual([]);
+  });
+
+  it('keeps a keepAtExit child out of the live set, and still kills its tree at the timeout', async () => {
+    const running = runCommand(node, ['-e', 'setInterval(() => {}, 1000)'], { killTree: true, keepAtExit: true, timeoutMs: 1500 }).catch((error) => error);
+    try {
+      expect(liveTreeCount()).toBe(0);
+    } finally {
+      // Out of the set, only its timeout ends it: waited for even when the assertion failed.
+      expect(await running).toMatchObject({ code: 'command_timeout' });
+    }
   });
 
   it('still kills the tree when an exit listener registered before ours throws', async () => {
@@ -394,3 +477,110 @@ setTimeout(() => process.exit(0), 200);
   }, 20_000);
 });
 
+
+// The caller stops a running child from outside, as code out does when the quarantine passes its
+// size cap. The rejection is the caller's own reason, whatever the child's exit looked like.
+describe('runCommand with an abort signal', () => {
+  const leftovers = [];
+  afterEach(() => {
+    for (const pid of leftovers.splice(0)) {
+      if (isRealPid(pid) && isAlive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
+  const abortListeners = (signal) => getEventListeners(signal, 'abort').length;
+  const stopReason = () => new SpaceError('stopped_by_caller', 'the caller stopped it');
+
+  it('starts nothing when the signal is already aborted, and rejects with its reason', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-abort-before-'));
+    const marker = path.join(directory, 'started');
+    try {
+      const reason = stopReason();
+      const error = await runCommand(node, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`], { killTree: true, signal: AbortSignal.abort(reason) }).catch((caught) => caught);
+      expect(error).toBe(reason);
+      // The control: the same command without the signal does start and leave its marker.
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(liveTreeCount()).toBe(0);
+      await runCommand(node, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`]);
+      expect(fs.existsSync(marker)).toBe(true);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // On Windows this runs the real `taskkill /T`, whose child exits with code 1 and no signal.
+  it('kills the whole tree while it runs, rejects with the reason once the child is gone, and forgets the tree', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-abort-during-'));
+    const pidFile = path.join(directory, 'pids.json');
+    try {
+      const controller = new AbortController();
+      const reason = stopReason();
+      const started = Date.now();
+      const running = runCommand(node, ['-e', parentOfSleeper(pidFile)], { killTree: true, timeoutMs: 60_000, signal: controller.signal }).catch((caught) => caught);
+      expect(await waitFor(() => fs.existsSync(pidFile) && fs.statSync(pidFile).size > 0)).toBe(true);
+      const pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      leftovers.push(pids.grandchild, pids.child);
+      expect(isAlive(pids.child) && isAlive(pids.grandchild)).toBe(true);
+      expect(abortListeners(controller.signal)).toBe(1);
+      controller.abort(reason);
+      expect(await running).toBe(reason);
+      expect(isAlive(pids.child)).toBe(false);
+      expect(await waitFor(() => !isAlive(pids.grandchild))).toBe(true);
+      expect(Date.now() - started).toBeLessThan(30_000);
+      expect(liveTreeCount()).toBe(0);
+      expect(abortListeners(controller.signal)).toBe(0);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('kills the child alone without killTree, and rejects with the reason', async () => {
+    const controller = new AbortController();
+    const reason = stopReason();
+    const running = runCommand(node, ['-e', 'process.stdout.write("up"); setInterval(() => {}, 1000)'], { timeoutMs: 60_000, signal: controller.signal }).catch((caught) => caught);
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    controller.abort(reason);
+    expect(await running).toBe(reason);
+    expect(abortListeners(controller.signal)).toBe(0);
+  });
+
+  it('changes nothing about a run that already closed, and leaves no listener behind', async () => {
+    const controller = new AbortController();
+    expect(await runCommand(node, ['-e', 'process.stdout.write("ok")'], { killTree: true, signal: controller.signal })).toEqual({ code: 0, stdout: 'ok', stderr: '' });
+    expect(abortListeners(controller.signal)).toBe(0);
+    controller.abort(stopReason());
+    expect(liveTreeCount()).toBe(0);
+  });
+
+  // The timeout came first: its kill is the only one, and a late abort neither kills again nor
+  // replaces the error.
+  it('keeps the timeout as the error when the abort comes after it', async () => {
+    const controller = new AbortController();
+    const running = runCommand(node, ['-e', 'setInterval(() => {}, 1000)'], { killTree: true, timeoutMs: 500, signal: controller.signal }).catch((caught) => caught);
+    await new Promise((resolve) => { setTimeout(resolve, 700); });
+    expect(abortListeners(controller.signal)).toBe(0);
+    controller.abort(stopReason());
+    expect(await running).toMatchObject({ code: 'command_timeout' });
+    expect(liveTreeCount()).toBe(0);
+  });
+
+  // Whatever the caller aborts with, the rejection is a SpaceError: a string, null or nothing at all
+  // would otherwise reach a caller that catches SpaceErrors.
+  it.each([['a string', 'stopped'], ['null', null], ['nothing', undefined]])('rejects with a SpaceError when the reason is %s', async (_, reason) => {
+    const controller = new AbortController();
+    const running = runCommand(node, ['-e', 'setInterval(() => {}, 1000)'], { killTree: true, timeoutMs: 60_000, signal: controller.signal }).catch((caught) => caught);
+    await new Promise((resolve) => { setTimeout(resolve, 200); });
+    if (reason === undefined) controller.abort(); else controller.abort(reason);
+    const error = await running;
+    expect(error).toBeInstanceOf(SpaceError);
+    expect(error).toMatchObject({ code: 'command_aborted' });
+    expect(await runCommand(node, ['-e', ''], { signal: AbortSignal.abort(reason) }).catch((caught) => caught)).toMatchObject({ code: 'command_aborted' });
+  });
+
+  it('leaves no listener after a spawn failure', async () => {
+    const controller = new AbortController();
+    await expect(runCommand('/nonexistent/openchamber-no-such-binary', [], { killTree: true, signal: controller.signal })).rejects.toMatchObject({ code: 'command_spawn_failed' });
+    expect(abortListeners(controller.signal)).toBe(0);
+    expect(liveTreeCount()).toBe(0);
+  });
+});

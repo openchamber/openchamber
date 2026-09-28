@@ -2,22 +2,26 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
+import type { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /** Inline title editor shown in place of a mobile session row's content while
     renaming. Mirrors the desktop sidebar rename: a bare transparent input at
     the row's own typography (no bordered field — the row keeps its exact
-    height) with explicit save/cancel icon buttons. */
+    height) with explicit icon buttons: generate with AI, save, cancel. */
 export const MobileSessionRenameForm: React.FC<{
   initialTitle: string;
   /** Left padding, so the input starts where the row's title did. */
   indent: number;
   /** Extra classes for the form; multi-line rows pin their own height. */
   className?: string;
+  /** The row's AI rename; passed in so the row shows its pending spinner
+      without running the hook twice. */
+  aiRename: ReturnType<typeof useSessionAiRenameAction>;
   onSubmit: (title: string) => void;
   onCancel: () => void;
-}> = ({ initialTitle, indent, className, onSubmit, onCancel }) => {
+}> = ({ initialTitle, indent, className, aiRename, onSubmit, onCancel }) => {
   const { t } = useI18n();
   const [value, setValue] = React.useState(initialTitle);
 
@@ -67,6 +71,20 @@ export const MobileSessionRenameForm: React.FC<{
         style={{ minHeight: 0 }}
         enterKeyHint="done"
       />
+      {/* Generating closes the editor: the row's own spinner shows the
+          pending rename, and the new title lands in the row. */}
+      <button
+        type="button"
+        disabled={aiRename.disabled}
+        onClick={() => { aiRename.run(); onCancel(); }}
+        aria-label={t('sessions.aiRename.action')}
+        aria-description={aiRename.hint}
+        title={aiRename.hint}
+        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        style={{ touchAction: 'manipulation', minHeight: 0, minWidth: 0 }}
+      >
+        <Icon name="ai-generate-2" className="size-4" />
+      </button>
       <button
         type="submit"
         aria-label={t('sessions.sidebar.session.rename.save')}

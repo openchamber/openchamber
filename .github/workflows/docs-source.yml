@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   validate-and-package:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       archive_name: ${{ steps.archive.outputs.archive_name }}
     steps:

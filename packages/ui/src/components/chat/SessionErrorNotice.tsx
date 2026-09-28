@@ -124,7 +124,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
   const { t } = useI18n();
   const latestError = useLatestSessionError(sessionId);
   const status = useSessionStatus(sessionId, directory);
-  const statusSnapshotReady = useSessionStatusSnapshotReady(directory);
+  const statusSnapshotReady = useSessionStatusSnapshotReady(directory, sessionId);
   const lastMessage = useLastMessageState(sessionId, directory);
   const storedFailure = useStoredFailure(sessionId, directory);
 

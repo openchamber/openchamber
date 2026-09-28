@@ -20,6 +20,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
@@ -216,7 +217,6 @@ const formatReleaseDate = (value: Date) => new Intl.DateTimeFormat(getCurrentInt
     year: 'numeric',
 }).format(value);
 
-const ADD_PROVIDER_ID = '__add_provider__';
 
 const IconBadge: React.FC<{ iconName: IconComponent; label: string }> = ({ iconName, label }) => (
     <span
@@ -313,12 +313,15 @@ type ModelControlsProps = {
     className?: string;
     mobilePanel?: MobileControlsPanel;
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
+    /** Offers "Run on several models" at the top of the desktop model picker. */
+    onRunInParallel?: () => void;
 } & ({ selection?: never; sessionId?: never } | { selection: BtwSelection; sessionId: string | null });
 
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
     mobilePanel,
     onMobilePanelChange,
+    onRunInParallel,
     selection,
     sessionId: controlledSessionId,
 }) => {
@@ -349,7 +352,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const modelSelectionReady = Boolean(currentModelId) || (selection ? isReady : defaultsLoaded && providersResolved && agentsResolved);
     const agentSelectionReady = Boolean(currentAgentName) || (selection ? canSelectAgent : defaultsLoaded && agentsResolved);
     const setProvider = useConfigStore((state) => state.setProvider);
-    const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
+    const requestProviderConnect = useUIStore((state) => state.setSettingsProvidersConnectRequested);
     const setModel = useConfigStore((state) => state.setModel);
     const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
     const setCurrentVariantOverride = useConfigStore((state) => state.setCurrentVariantOverride);
@@ -482,12 +485,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const agentMenuOpen = isModelSelectorOpen;
     const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
     const openAddProviderSettings = React.useCallback(() => {
-        setSelectedProvider(ADD_PROVIDER_ID);
+        requestProviderConnect(true);
         setSettingsPage('providers');
         setSettingsDialogOpen(true);
         setAgentMenuOpen(false);
         closeMobilePanel();
-    }, [setSelectedProvider, setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
+    }, [requestProviderConnect, setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
     const keyboardOwnsModelSelectionRef = React.useRef(false);
     const lastModelPointerPositionRef = React.useRef<{ x: number; y: number } | null>(null);
@@ -2529,6 +2532,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 labels={modelPickerLabels}
                                 selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
                                 leadingEntry={autoEntry}
+                                leadingAction={onRunInParallel ? {
+                                    label: t('chat.modelControls.runInParallel'),
+                                    icon: <ArrowsMerge className="h-3.5 w-3.5 flex-shrink-0" />,
+                                    onSelect: () => {
+                                        setModelSelectorOpen(false);
+                                        onRunInParallel();
+                                    },
+                                } : null}
                                 hiddenModels={hiddenModels}
                                 onActiveKeyDown={handleModelPickerKeyDown}
                                 onActiveEntryChange={(entry) => { activeModelPickerEntryRef.current = entry; }}

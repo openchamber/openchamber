@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
   'settings.extensions.builtIn.info',
@@ -76,6 +76,8 @@ const requiredKeys = [
   'settings.extensions.capability.model.detail',
   'settings.extensions.capability.filesystem',
   'settings.extensions.capability.filesystem.detail',
+  'settings.extensions.capability.origins',
+  'settings.extensions.capability.origins.detail',
   'settings.extensions.capability.conversation',
   'settings.extensions.capability.conversation.detail',
   'settings.extensions.toast.approved',
@@ -121,6 +123,9 @@ const allowEnglishLoanword = new Set([
   'settings.page.extensions.title',
   'settings.extensions.source.path',
   'settings.extensions.add.placeholder',
+  // "ZIP" is a file format and "Git" a product name; both stay as they are.
+  'settings.extensions.source.zip',
+  'settings.extensions.source.git',
 ]);
 
 describe('extensions settings translations', () => {

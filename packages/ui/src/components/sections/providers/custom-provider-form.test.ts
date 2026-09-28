@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildIntegrationKeyRequest,
   buildProviderUpsertRequest,
+  storeKeyAfterConfigWrite,
   isConfigDefinedCustomProvider,
   isCustomOpenAICompatibleProvider,
   providerToCustomFormState,
@@ -218,7 +219,48 @@ describe('request construction', () => {
       providerID: 'custom-provider',
       config: plan.config,
       scope: 'user',
+      hasCredential: true,
     });
+  });
+
+  test('vouches for a credential only when a key is stored or kept', () => {
+    const envPlan = validateCustomProvider({
+      form: baseForm({ apiKey: '{env:MY_KEY}' }),
+      t,
+      existingProviderIDs: new Set(),
+    }).result!;
+    expect(buildProviderUpsertRequest(envPlan).hasCredential).toBe(false);
+
+    const keptPlan = validateCustomProvider({
+      form: baseForm({ apiKey: '' }),
+      t,
+      existingProviderIDs: new Set(['custom-provider']),
+      editingProviderID: 'custom-provider',
+      allowExistingAuth: true,
+    }).result!;
+    expect(buildProviderUpsertRequest(keptPlan).hasCredential).toBe(true);
+  });
+
+  test('retries the key only while OpenCode has not registered the provider yet', async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    await storeKeyAfterConfigWrite(async () => {
+      calls += 1;
+      if (calls < 3) throw new Error('Integration not found: custom-provider');
+    }, async (ms) => { waits.push(ms); });
+    expect(calls).toBe(3);
+    expect(waits).toEqual([250, 500]);
+
+    let otherCalls = 0;
+    await expect(storeKeyAfterConfigWrite(async () => {
+      otherCalls += 1;
+      throw new Error('Network down');
+    }, async () => {})).rejects.toThrow('Network down');
+    expect(otherCalls).toBe(1);
+
+    await expect(storeKeyAfterConfigWrite(async () => {
+      throw new Error('Integration not found: custom-provider');
+    }, async () => {})).rejects.toThrow('Integration not found');
   });
 
   test('includes explicit project/custom scope on upsert requests', () => {

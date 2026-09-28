@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Message, Part } from '@/lib/opencode/model';
+import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
 import { useShallow } from 'zustand/react/shallow';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
@@ -266,11 +266,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (isUser) return false;
         if (!providerID || !modelID) return false;
 
-        // v2 keys catalog models by the bare `modelID` an assistant message
-        // reports and lists variants as records, not as a keyed map.
-        const model = providers
-            .find((provider) => provider.id === providerID)
-            ?.models.find((entry) => entry.modelID === modelID);
+        // v2 lists variants as records, not as a keyed map.
+        const model = findCatalogModel(providers.find((provider) => provider.id === providerID)?.models, modelID);
         return (model?.variants.length ?? 0) > 0;
     }, [isUser, modelID, providerID, providers]);
 

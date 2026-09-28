@@ -44,7 +44,7 @@ export const SharedTrustConfirmDialog = () => {
         }
       }}
     >
-      <DialogContent>
+      <DialogContent layerClassName="z-[70]" backdropProps={{ className: 'z-[70]' }}>
         <DialogHeader>
           <DialogTitle>{t('projects.sharedTrust.title')}</DialogTitle>
           <DialogDescription>

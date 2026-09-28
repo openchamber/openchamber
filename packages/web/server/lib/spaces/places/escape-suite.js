@@ -10,6 +10,7 @@
 //   spaceMetadata(spaceId)   resolves, as text, everything the place's own records show about the space container
 //   gatekeeperMetadata(spaceId)   the same for the gatekeeper container
 //   gatekeeperAddresses(spaceId)  resolves { inner, outer }, the gatekeeper's own addresses
+//   probeFromOuterNetwork(spaceId, script)  runs a Node script in a helper on the space's outer network
 //   startWindowUpstream(spaceId)  a stand-in provider on the space's outer network. It answers with
 //                                 the sha256 of the credentials it saw, never with the credentials
 
@@ -190,15 +191,49 @@ Promise.all(Array.from({ length: 80 }, attempt)).then((outcomes) => {
 const LONG_LIVED_CREDENTIAL = '"refresh"[[:space:]]*:[[:space:]]*"|BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{16}|sk-[A-Za-z0-9_-]{20}|xox[baprs]-';
 
 /** Everything the space holds that could be a long-lived credential, as text for the host to read.
- * HOME, the work directory and /tmp, which is writable and 256 MiB. */
+ * HOME, the work directory and /tmp, which is writable and 256 MiB. `-a` reads binary files as
+ * text: OpenCode 2 keeps its logins in the SQLite database `opencode.db` under HOME, and `-I`
+ * skipped that file. `-o` prints the matched shape and its file, never the binary around it. */
 const credentialSearch = (spaceId) => `
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin;
 echo "auth-record: $([ -e "$HOME/.local/share/opencode/auth.json" ] && echo present || echo absent)";
 echo "--- files";
-grep -rIsE '${LONG_LIVED_CREDENTIAL}' "$HOME" /tmp /spaces/${spaceId} 2>/dev/null | head -20;
+grep -raosE '${LONG_LIVED_CREDENTIAL}' "$HOME" /tmp /spaces/${spaceId} 2>/dev/null | head -20;
 echo "--- environments";
 for process in /proc/[0-9]*/environ; do tr '\\0' '\\n' < "$process" 2>/dev/null; done | grep -E '${LONG_LIVED_CREDENTIAL}' | head -20;
 echo "--- end";
+`;
+
+// OpenCode 2's own login store: rows in the `credential` table of `opencode.db`. The control
+// writes two the way OpenCode stores them: an OpenAI browser login, and a key for a provider of the
+// user's own that OpenCode's catalog does not know, which no integration route lists and no key
+// pattern matches. No route can create an OAuth record without a real login, so the rows are
+// written with Node's built-in SQLite into the database the running OpenCode uses. The timeout
+// waits for OpenCode's own lock instead of failing on it.
+const DECOY_CREDENTIAL_ID = 'cred_decoy000000000000000000';
+const DECOY_CUSTOM_CREDENTIAL_ID = 'cred_decoy000000000000000001';
+const openDatabase = (databasePath, options = '{ timeout: 5000 }') => `
+const { DatabaseSync } = require('node:sqlite');
+const db = new DatabaseSync(${JSON.stringify(databasePath)}, ${options});
+`;
+const plantCredential = (databasePath) => `${openDatabase(databasePath)}
+const now = Date.now();
+const insert = db.prepare('INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)');
+insert.run('${DECOY_CREDENTIAL_ID}', 'openai', 'default', JSON.stringify({ type: 'oauth', methodID: 'chatgpt-browser', refresh: 'decoy-refresh-value', access: 'decoy-access-value', expires: now + 3600000 }), 1, now, now);
+insert.run('${DECOY_CUSTOM_CREDENTIAL_ID}', 'acme-llm', 'default', JSON.stringify({ type: 'key', key: 'acme_live_decoy' }), 1, now, now);
+db.close();
+`;
+const removeCredential = (databasePath) => `${openDatabase(databasePath)}
+const { changes } = db.prepare('DELETE FROM credential WHERE id IN (?, ?)').run('${DECOY_CREDENTIAL_ID}', '${DECOY_CUSTOM_CREDENTIAL_ID}');
+db.close();
+console.log('removed:' + changes);
+`;
+// Every stored login, by integration and kind, read straight from the table. OpenCode lists only
+// the integrations its catalog knows, so this is the check that sees a custom provider's key.
+const readCredentials = (databasePath) => `${openDatabase(databasePath, '{ readOnly: true, timeout: 5000 }')}
+const rows = db.prepare("SELECT integration_id AS integration, json_extract(value, '$.type') AS type FROM credential ORDER BY id").all();
+db.close();
+console.log(JSON.stringify(rows.map((row) => ({ integration: row.integration, type: row.type }))));
 `;
 
 const sleep = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
@@ -458,7 +493,6 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
       // Positive control: the metadata is real and complete enough to show the environment.
       expect(metadata).toContain('OPENCODE_DISABLE_AUTOUPDATE=1');
       expect(metadata).not.toContain(token);
-      expect(metadata).not.toContain('OPENCODE_AUTH_CONTENT');
     });
 
     it('cannot steer the requests of the host through its own ~/.curlrc', async () => {
@@ -796,6 +830,37 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
           expect(JSON.stringify(journal)).not.toContain(MODEL_KEY);
         }, 120_000);
 
+        // The obligation of STAGES.md on the first real credential behind the window: on a Linux
+        // Docker host every local process can reach the outer bridge, so the corridor and the
+        // window listen on the gatekeeper's inner address only. A neighbour on the outer network
+        // stands in for such a process here; the same measurement from a Linux host itself is in
+        // the module documentation.
+        it('cannot be reached on its outer address: the corridor and the window listen on the inner network only', async () => {
+          const addresses = await host.gatekeeperAddresses(spec.id);
+          expect(addresses.outer).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+          const fromOutside = async (address, port) => (await host.probeFromOuterNetwork(spec.id, tcpProbe(address, port))).stdout.trim();
+          // Positive control: the neighbour's networking works, it reaches the stand-in upstream beside it.
+          expect(await fromOutside('upstream', 9000)).toMatch(/^connected:/);
+          for (const port of [GATEKEEPER_CORRIDOR_PORT, GATEKEEPER_WINDOW_PORT, GATEKEEPER_CONTROL_PORT]) {
+            expect(await fromOutside(addresses.outer, port), `outer address, port ${port}`).toBe('failed:ECONNREFUSED');
+          }
+          // And the space still reaches both by the gatekeeper's name, which resolves to the inner address.
+          expect(await probe(tcpProbe(GATEKEEPER_ALIAS, GATEKEEPER_CORRIDOR_PORT))).toBe(`connected:${addresses.inner}`);
+          expect(await probe(tcpProbe(GATEKEEPER_ALIAS, GATEKEEPER_WINDOW_PORT))).toBe(`connected:${addresses.inner}`);
+        }, 180_000);
+
+        it('gets no credential from the window for an opened domain, and none of its own reaches the upstream', async () => {
+          await channel().addGrant(spec.id, { id: 'open-registry', upstream: upstream.url });
+          const answer = await probe(windowProbe('/model/open-registry/-/package/left-pad', { 'x-api-key': 'sk-fake-inside', authorization: 'Bearer sk-fake-inside' }));
+          expect(answer).toMatch(/^200 /);
+          const seen = JSON.parse(answer.slice(4));
+          expect(seen.path).toBe('/v1/-/package/left-pad');
+          expect(seen.apiKey).toBe('none');
+          expect(seen.authorization).toBe('none');
+          expect(seen.headerNames.filter((name) => /key|auth|token/i.test(name))).toEqual([]);
+          expect(answer).not.toContain(MODEL_KEY);
+        }, 120_000);
+
         it('reaches a real upstream over TLS, with no credential of anyone\'s', async () => {
           publicAddress();
           await channel().addGrant(spec.id, { id: 'tls', upstream: 'https://example.com/', header: 'authorization', secret: 'not-a-credential' });
@@ -877,28 +942,30 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
       // ever inside a space. Stage 2 puts none there, and this fails the day something does.
       it('holds no long-lived credential of the user\'s, anywhere the space can read', async () => {
         const search = () => shell(credentialSearch(spec.id));
+        const server = createSpaceServerChannel({ exec: place.exec });
+        const login = await server.request(spec.id, { method: 'POST', path: '/auth/session', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: await server.readToken(spec.id) }) });
+        expect(login.status).toBe(200);
+        const cookie = login.headers['set-cookie'][0].split(';')[0];
+        // What OpenCode itself holds: every connection of every integration, a stored login or a
+        // provider key it found in its own environment under one of its catalog's names.
+        const connections = async () => {
+          const answer = await server.request(spec.id, { path: '/api/integration', headers: { Cookie: cookie } });
+          expect(answer.status).toBe(200);
+          const integrations = JSON.parse(answer.body).data;
+          expect(integrations.length).toBeGreaterThan(0);
+          return integrations.flatMap((integration) => integration.connections.map((connection) => ({ integration: integration.id, ...connection })));
+        };
+        const database = `${SPACE_HOME}/.local/share/opencode/opencode.db`;
+        const storedCredentials = async () => {
+          const answer = await inside(['node', '--no-warnings', '-e', readCredentials(database)]);
+          expect(answer.code, answer.stderr).toBe(0);
+          return JSON.parse(answer.stdout);
+        };
         const decoyRecord = `${SPACE_HOME}/.local/share/opencode/auth.json`;
         const decoy = 'sk-decoy00000000000000000000';
 
-        // Positive control: the same search, with a credential of each shape planted where one
-        // would live. It must find all three, or a clean answer below would mean nothing.
-        const planted = await shell([
-          `mkdir -p "$(dirname ${decoyRecord})"`,
-          `printf '{"openai":{"type":"oauth","refresh":"decoy-refresh-value"}}' > ${decoyRecord}`,
-          `printf -- '-----BEGIN OPENSSH PRIVATE KEY-----' > "$HOME/decoy-key"`,
-          `DECOY_TOKEN=${decoy} sleep 30 & echo "decoy-pid:$!"`,
-        ].join('; '));
-        const decoyPid = /decoy-pid:(\d+)/.exec(planted.stdout)?.[1];
-        try {
-          const control = (await search()).stdout;
-          expect(control).toContain('auth-record: present');
-          expect(control).toMatch(/"refresh"\s*:\s*"/);
-          expect(control).toContain('BEGIN OPENSSH PRIVATE KEY');
-          expect(control).toContain(decoy);
-        } finally {
-          await shell(`rm -f ${decoyRecord} "$HOME/decoy-key"; ${decoyPid ? `kill ${decoyPid} 2>/dev/null` : 'true'}; true`);
-        }
-
+        // The clean search runs first. SQLite keeps a deleted row's bytes in its write-ahead log,
+        // so after the control below the database would hold the decoy's text for good.
         const found = (await search()).stdout;
         // Positive control of its own: the search ran and looked in all three places.
         expect(found).toContain('--- files');
@@ -906,6 +973,43 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
         expect(found).toContain('--- end');
         expect(found).toContain('auth-record: absent');
         expect(found.slice(found.indexOf('--- files'))).toBe('--- files\n--- environments\n--- end\n');
+        expect(await connections()).toEqual([]);
+        expect(await storedCredentials()).toEqual([]);
+
+        // Positive control: the same search, with a credential of each shape planted where one
+        // would live. The oauth refresh record goes only into OpenCode's database, so a search
+        // that skips binary files fails here. The legacy auth.json, which OpenCode 2 imports once,
+        // holds nothing and only shows that its path is checked.
+        const planted = await shell([
+          `mkdir -p "$(dirname ${decoyRecord})"`,
+          `printf '{}' > ${decoyRecord}`,
+          `printf -- '-----BEGIN OPENSSH PRIVATE KEY-----' > "$HOME/decoy-key"`,
+          `DECOY_TOKEN=${decoy} sleep 30 & echo "decoy-pid:$!"`,
+        ].join('; '));
+        const decoyPid = /decoy-pid:(\d+)/.exec(planted.stdout)?.[1];
+        let removal;
+        try {
+          const row = await inside(['node', '--no-warnings', '-e', plantCredential(database)]);
+          expect(row.code, row.stderr).toBe(0);
+          // OpenCode reads the row as a login, so this is where OpenCode 2 keeps them.
+          expect(await connections()).toEqual([{ integration: 'openai', type: 'credential', id: DECOY_CREDENTIAL_ID, label: 'default', method: 'oauth' }]);
+          // The custom provider's key is invisible to that listing, and the table read sees it.
+          expect(await storedCredentials()).toEqual([{ integration: 'openai', type: 'oauth' }, { integration: 'acme-llm', type: 'key' }]);
+
+          const control = (await search()).stdout;
+          expect(control).toContain('auth-record: present');
+          expect(control).toMatch(/opencode\.db(-wal)?:"refresh"\s*:\s*"/);
+          expect(control).toContain('BEGIN OPENSSH PRIVATE KEY');
+          expect(control).toContain(decoy);
+        } finally {
+          removal = await inside(['node', '--no-warnings', '-e', removeCredential(database)]);
+          await shell(`rm -f ${decoyRecord} "$HOME/decoy-key"; ${decoyPid ? `kill ${decoyPid} 2>/dev/null` : 'true'}; true`);
+        }
+        // Checked after the finally, so a failed control above is the error that gets reported.
+        expect(removal.code, removal.stderr).toBe(0);
+        expect(removal.stdout).toBe('removed:2\n');
+        expect(await connections()).toEqual([]);
+        expect(await storedCredentials()).toEqual([]);
       }, 180_000);
 
       // One space is not enough to say anything about two. This makes a second one and looks

@@ -1,0 +1,43 @@
+---
+title: Mobiele apps en PWA
+description: Installeer OpenChamber op iOS of Android en verbind de app met uw server.
+---
+
+# Mobiele apps en PWA
+
+OpenChamber heeft native apps voor iPhone en Android. Daarmee volgt u sessies, antwoordt u agents en beheert u werk vanaf uw telefoon, thuis via wifi of overal via de [Privérelay](/nl/private-relay/).
+
+## De app installeren
+
+- **iPhone/iPad:** neem deel aan de [TestFlight-bèta](https://testflight.apple.com/join/5ek6GU1E)
+- **Android:** download de APK uit de [nieuwste release](https://github.com/openchamber/openchamber/releases/latest)
+
+## Met uw server verbinden
+
+1. Open op de computer met OpenChamber **Instellingen → Remote-instanties → Verbinden met deze server** en klik op **Apparaat toevoegen**.
+2. Kies **Overal**, of **Alleen thuisnetwerk** als u de telefoon alleen thuis gebruikt, en klik op **QR-code maken**.
+3. Tik in de mobiele app op **QR-code scannen** en richt de camera erop.
+
+De app verbindt en onthoudt de server. De QR-code is eenmalig en elk apparaat krijgt een eigen intrekbaar token. Zie [Een apparaat verbinden](/nl/connect-devices/) voor de beveiliging van de koppeling.
+
+U kunt meerdere servers koppelen en ertussen wisselen in de instantielijst. Per server toont de app of deze bereikbaar is en of u via het lokale netwerk of de relay verbonden bent.
+
+## PWA: installeren vanuit de browser
+
+Liever geen appwinkel? Installeer de webapp rechtstreeks vanuit de browser:
+
+- **desktopbrowser:** gebruik **Installeren** in de adresbalk
+- **iPhone/iPad met Safari:** Delen → **Zet op beginscherm**
+- **Android met Chrome:** menu → **App installeren** / **Toevoegen aan startscherm**
+
+Om de PWA buiten uw netwerk te bereiken hebt u een [tunnel](/nl/tunnels/) en een sterk [interfacewachtwoord](/nl/security/) nodig. De native apps regelen dit via de relay.
+
+## Mobiele instellingen
+
+Bij **Instellingen → OpenChamber** staan opties voor mobiel en geïnstalleerd gebruik, zoals de geïnstalleerde appnaam, schermoriëntatie en het gedrag van het schermtoetsenbord.
+
+## Zie ook
+
+- [Een apparaat verbinden](/nl/connect-devices/) voor koppelingen, eenmalige QR-codes en apparaatbeheer
+- [Privérelay](/nl/private-relay/) voor toegang via Overal
+- [Beveiliging](/nl/security/) om de interface te beschermen voordat u haar bereikbaar maakt

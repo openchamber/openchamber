@@ -7,6 +7,7 @@ import {
   getKeyMethod,
   getOAuthMethods,
   getProviderConnections,
+  getProviderCardStatus,
   getSignInIntegrationId,
   providerHasCredentials,
   shouldAutoOpenAuthPanel,
@@ -212,5 +213,33 @@ describe('provider credential state helpers', () => {
       integrationsLoaded: false,
       hasCredentials: false,
     })).toBe(true);
+  });
+});
+
+describe('getProviderCardStatus', () => {
+  const second: ConnectionInfo = { type: 'credential', id: 'cred_2', label: 'Work', method: 'oauth' };
+  const status = (integrations: IntegrationInfo[] | null, optionsApiKey?: string | null) =>
+    getProviderCardStatus({ integrations, providerId: 'anthropic', optionsApiKey });
+
+  test('shows nothing until integrations load', () => {
+    expect(status(null)).toBe(null);
+  });
+
+  test('counts accounts only when there is more than one to switch between', () => {
+    expect(status([integration({ connections: [credential, second, envConnection] })])).toEqual({ kind: 'accounts', count: 2 });
+    expect(status([integration({ connections: [credential, envConnection] })])).toEqual({ kind: 'connected' });
+  });
+
+  test('an inline config key counts as connected', () => {
+    expect(status([integration()], 'sk-inline')).toEqual({ kind: 'connected' });
+  });
+
+  test('separates environment-only connections from missing sign-in', () => {
+    expect(status([integration({ connections: [envConnection] })])).toEqual({ kind: 'environment' });
+    expect(status([integration()])).toEqual({ kind: 'signInNeeded' });
+  });
+
+  test('a provider with no integration gets no status instead of a false warning', () => {
+    expect(status([integration({ id: 'openai' })])).toBe(null);
   });
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useSessionGoal } from '@/hooks/useSessionGoal';
+import { useGoalCheckAvailable, useSessionGoal } from '@/hooks/useSessionGoal';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
@@ -9,7 +9,6 @@ import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useSmallModelAvailability } from '@/hooks/useSmallModelAvailability';
 
 interface SessionGoalButtonProps {
   sessionId: string | null;
@@ -39,11 +38,11 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
   const armed = useSessionGoalArmStore((state) => state.armed);
   const setArmed = useSessionGoalArmStore((state) => state.setArmed);
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  // The goal loop audits every turn with the small model; without one a goal
-  // would stop after two failed audits, so arming is disabled with the reason.
-  // A goal that already exists stays manageable.
-  const smallModel = useSmallModelAvailability(directory, !isVSCodeRuntime() && enabled);
-  const noSmallModel = smallModel === 'unavailable' && !goal;
+  // The goal loop checks every turn with Jev or the small model; with neither
+  // a goal would stop after two failed checks, so arming is disabled with the
+  // reason. A goal that already exists stays manageable.
+  const canCheck = useGoalCheckAvailable(directory, !isVSCodeRuntime() && enabled);
+  const cannotCheck = !canCheck && !goal;
 
   // The goal loop runs in the web server; the VS Code extension only renders
   // goal state. Arming a goal there would create one nothing drives, so the
@@ -67,7 +66,7 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
 
   const label = goal
     ? t('chat.goal.button.manageAria')
-    : noSmallModel
+    : cannotCheck
       ? t('chat.goal.button.noSmallModel')
       : (armed ? t('chat.goal.button.disarmAria') : t('chat.goal.button.armAria'));
 
@@ -78,17 +77,17 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
       setDialogOpen(true);
       return;
     }
-    if (noSmallModel) return;
+    if (cannotCheck) return;
     setArmed(!armed);
   };
 
   const button = (
     <button
       type="button"
-      className={cn(footerIconButtonClass, noSmallModel && 'opacity-50')}
+      className={cn(footerIconButtonClass, cannotCheck && 'opacity-50')}
       style={iconColor ? { color: iconColor } : undefined}
       onClick={handleClick}
-      aria-disabled={noSmallModel || undefined}
+      aria-disabled={cannotCheck || undefined}
       // Same guard as PermissionAutoAcceptButton, but only for the ARM
       // toggle: arming happens mid-typing (the next message IS the
       // objective), so that tap must not dismiss the soft keyboard or

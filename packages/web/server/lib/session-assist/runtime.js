@@ -96,8 +96,17 @@ export const createSessionAssistRuntime = ({
   // Archive state is OpenChamber's own in v2 (no OpenCode route sets it), so
   // the runtime asks rather than reading `time.archived` off the record.
   isSessionArchived = async () => false,
+  // Asked once when a turn ends, before the quiet window is armed: which of
+  // the enabled fields are worth the Small Model (`{ recap, suggestion }`), or
+  // null for "unknown", which keeps every enabled field. See session-work.
+  evaluateTurn = null,
+  // `../session-lineage.js`: a known subsession never gets an assist, so its
+  // turn end arms nothing and reads nothing.
+  lineage = null,
 }) => {
   const timers = new Map();
+  // Turn ends waiting for `evaluateTurn`; a newer event replaces or drops the entry.
+  const gates = new Map();
   const inflight = new Map();
   const ready = new Map();
   // Sessions holding an assist this process wrote, keyed to their directory.
@@ -114,6 +123,7 @@ export const createSessionAssistRuntime = ({
 
   const invalidate = (sessionId) => {
     clearTimer(sessionId);
+    gates.delete(sessionId);
     ready.delete(sessionId);
     inflight.get(sessionId)?.controller.abort();
   };
@@ -128,8 +138,12 @@ export const createSessionAssistRuntime = ({
       .catch(() => console.warn('[session-assist] failed to retire a stale assist'));
   };
 
-  const generateAssist = async (sessionId, directory, signal) => {
-    const targets = getTargets();
+  const generateAssist = async (sessionId, directory, signal, allowed) => {
+    const enabledTargets = getTargets();
+    const targets = {
+      recap: enabledTargets.recap && allowed.recap,
+      suggestion: enabledTargets.suggestion && allowed.suggestion,
+    };
     if (!targets.recap && !targets.suggestion) return;
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const client = OpenCode.make({
@@ -149,6 +163,7 @@ export const createSessionAssistRuntime = ({
     checkCurrent();
     // Reverted history is not the active conversation. A new prompt clears
     // the revert boundary before its next idle event.
+    if (session?.id === sessionId) lineage?.remember(sessionId, session.parentID ?? null);
     if (session?.id !== sessionId || session.parentID || session.revert?.messageID) return;
     // An archived session is put away: no recap or suggestion is generated for it.
     if (await isSessionArchived(sessionId)) return;
@@ -210,8 +225,8 @@ export const createSessionAssistRuntime = ({
     if (freshSession?.id !== sessionId || freshSession.revert?.messageID || freshSession.location?.directory !== session.location?.directory) return;
     if (await isSessionArchived(sessionId)) return;
     const enabled = getTargets();
-    if (!enabled.recap) recap = '';
-    if (!enabled.suggestion) suggestion = '';
+    if (!enabled.recap || !allowed.recap) recap = '';
+    if (!enabled.suggestion || !allowed.suggestion) suggestion = '';
     if (!recap && !suggestion) return;
     await persistSessionAssist(sessionId, directory, {
       recap,
@@ -222,15 +237,15 @@ export const createSessionAssistRuntime = ({
     persisted.set(sessionId, directory);
   };
 
-  const startGeneration = (sessionId, directory, armedAt) => {
+  const startGeneration = (sessionId, directory, armedAt, allowed) => {
     if (stopped) return;
     if (inflight.has(sessionId)) {
-      ready.set(sessionId, { directory, armedAt });
+      ready.set(sessionId, { directory, armedAt, allowed });
       return;
     }
     const controller = new AbortController();
     inflight.set(sessionId, { controller, armedAt });
-    generateAssist(sessionId, directory, controller.signal)
+    generateAssist(sessionId, directory, controller.signal, allowed)
       .catch(() => {
         if (!controller.signal.aborted) console.warn('[session-assist] failed to read or save assistance');
       })
@@ -239,20 +254,44 @@ export const createSessionAssistRuntime = ({
         if (ready.has(sessionId)) {
           const next = ready.get(sessionId);
           ready.delete(sessionId);
-          startGeneration(sessionId, next.directory, next.armedAt);
+          startGeneration(sessionId, next.directory, next.armedAt, next.allowed);
         }
       });
   };
 
-  const armTimer = (sessionId, directory) => {
+  const armTimer = (sessionId, directory, armedAt, allowed) => {
     clearTimer(sessionId);
-    const armedAt = Date.now();
     const timer = setTimeout(() => {
       timers.delete(sessionId);
-      startGeneration(sessionId, directory, armedAt);
+      startGeneration(sessionId, directory, armedAt, allowed);
     }, quietMs);
     timer.unref?.();
     timers.set(sessionId, { timer, armedAt });
+  };
+
+  const ALL_FIELDS = { recap: true, suggestion: true };
+
+  // The quiet window is armed only for fields Jev did not rule out; with
+  // nothing left there is no timer and no Small Model call at all.
+  const onTurnEnd = (sessionId, directory) => {
+    clearTimer(sessionId);
+    const armedAt = Date.now();
+    if (typeof evaluateTurn !== 'function') {
+      armTimer(sessionId, directory, armedAt, ALL_FIELDS);
+      return;
+    }
+    const gate = { armedAt };
+    gates.set(sessionId, gate);
+    Promise.resolve()
+      .then(() => evaluateTurn({ sessionId, directory, assist: getTargets() }))
+      .catch(() => null)
+      .then((allowed) => {
+        if (stopped || gates.get(sessionId) !== gate) return;
+        gates.delete(sessionId);
+        const fields = allowed ?? ALL_FIELDS;
+        if (!fields.recap && !fields.suggestion) return;
+        armTimer(sessionId, directory, armedAt, fields);
+      });
   };
 
   let parkedNoticeLogged = false;
@@ -267,7 +306,9 @@ export const createSessionAssistRuntime = ({
     }
     const status = extractSessionStatus(payload);
     if (status) {
-      if (status.type === 'idle') armTimer(status.sessionId, status.directory || directoryHint);
+      if (status.type === 'idle') {
+        if (lineage?.isChild(status.sessionId) !== true) onTurnEnd(status.sessionId, status.directory || directoryHint);
+      }
       else {
         invalidate(status.sessionId);
         retireStored(status.sessionId, status.directory || directoryHint);
@@ -277,7 +318,9 @@ export const createSessionAssistRuntime = ({
     const userMessage = extractUserMessage(payload);
     if (userMessage) {
       // Ignore old message.updated events re-emitted after completion.
-      const since = timers.get(userMessage.sessionId)?.armedAt ?? inflight.get(userMessage.sessionId)?.armedAt;
+      const since = timers.get(userMessage.sessionId)?.armedAt
+        ?? gates.get(userMessage.sessionId)?.armedAt
+        ?? inflight.get(userMessage.sessionId)?.armedAt;
       if (since !== undefined && userMessage.createdAt >= since) invalidate(userMessage.sessionId);
     }
   };
@@ -285,6 +328,7 @@ export const createSessionAssistRuntime = ({
   const stop = () => {
     stopped = true;
     for (const sessionId of timers.keys()) clearTimer(sessionId);
+    gates.clear();
     ready.clear();
     for (const { controller } of inflight.values()) controller.abort();
   };

@@ -225,6 +225,7 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
     if (patch.shell) {
       next.status = patch.shell.status
       if (patch.shell.exit !== undefined) next.exit = patch.shell.exit
+      if (patch.shell.signal !== undefined) next.signal = patch.shell.signal
       if (patch.shell.output !== undefined) next.output = patch.shell.output
     }
     return next
@@ -358,6 +359,7 @@ export function applyDirectoryEvent(
       if (next.time.archived && !sessions[result.index].time.archived) {
         sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, sessionID)
+        draft.sessionStatusInvalidated = { ...draft.sessionStatusInvalidated, [sessionID]: true }
         if (!next.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
         markSessionEvent(sessionID, true)
         return true
@@ -406,6 +408,10 @@ export function applyDirectoryEvent(
       const info = result.found ? sessions[result.index] : undefined
       if (result.found) sessions.splice(result.index, 1)
       cleanupSessionCaches(draft, sessionID)
+      if (draft.sessionStatusInvalidated?.[sessionID]) {
+        draft.sessionStatusInvalidated = { ...draft.sessionStatusInvalidated }
+        delete draft.sessionStatusInvalidated[sessionID]
+      }
       if (!info?.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
       markSessionEvent(sessionID, true)
       return true
@@ -413,8 +419,13 @@ export function applyDirectoryEvent(
 
     case "session.status": {
       const { sessionID, status } = event.properties
+      const wasInvalidated = draft.sessionStatusInvalidated?.[sessionID] === true
+      if (wasInvalidated) {
+        draft.sessionStatusInvalidated = { ...draft.sessionStatusInvalidated }
+        delete draft.sessionStatusInvalidated[sessionID]
+      }
       if (areSessionStatusesEqual(draft.session_status[sessionID], status)) {
-        return false
+        return wasInvalidated
       }
       draft.session_status[sessionID] = status
       return true
@@ -425,8 +436,13 @@ export function applyDirectoryEvent(
       // An error ends the turn; it is not a lasting status.
       const { sessionID } = event.properties
       const status = { type: "idle" } as const
+      const wasInvalidated = draft.sessionStatusInvalidated?.[sessionID] === true
+      if (wasInvalidated) {
+        draft.sessionStatusInvalidated = { ...draft.sessionStatusInvalidated }
+        delete draft.sessionStatusInvalidated[sessionID]
+      }
       if (areSessionStatusesEqual(draft.session_status[sessionID], status)) {
-        return false
+        return wasInvalidated
       }
       draft.session_status[sessionID] = status
       return true

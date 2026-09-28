@@ -408,14 +408,21 @@ describe('settings helpers', () => {
 
     expect(helpers.sanitizeSettingsUpdate({
       permissionAutoAccept: {
-        sessions: { root: true, child: false, invalid: 'true' },
+        sessions: { root: true, child: false, guarded: 'safety', open: 'auto', manual: 'ask', invalid: 'true' },
       },
     })).toEqual({
       permissionAutoAccept: {
-        sessions: { root: true, child: false },
+        sessions: { root: true, child: false, guarded: 'safety', open: 'auto', manual: 'ask' },
         revision: 0,
       },
     });
+  });
+
+  it('accepts only a known default permission mode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'safety' })).toEqual({ permissionDefaultMode: 'safety' });
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'always' })).toEqual({});
   });
 
   it('accepts desktopUiPassword as a persisted shared setting', () => {
@@ -763,8 +770,8 @@ describe('settings registry gate', () => {
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
-    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 },
-    agentControlToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentNotifyToolEnabled: true, openCodeUpdateToastDismissedVersion: '1.0.0',
+    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety',
+    agentControlToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentNotifyToolEnabled: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive', terminalShell: 'zsh', terminalLoginShells: ['zsh'],
     openInAppId: 'vscode', dictationEnabled: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en',
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
@@ -788,7 +795,7 @@ describe('settings registry gate', () => {
     walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], recentAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionGoalEnabled: true, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkAutoOpen: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,

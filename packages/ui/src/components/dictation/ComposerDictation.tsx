@@ -407,9 +407,13 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         // desktop mounts the overlay inside the glass box and
                         // hides the box's other contents, so the overlay is
                         // transparent; mobile mounts it beside the pill/box,
-                        // hides those, and the overlay is the glass itself.
+                        // hides those, and the overlay carries the glass. The
+                        // glass sits on an inner layer, off this element's
+                        // shadow (see "Floating composer" in
+                        // composer/DOCUMENTATION.md); this element keeps the
+                        // surface's text context.
                         'oc-dictation-overlay absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
-                        isMobile && 'oc-glass-composer border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                        isMobile && 'oc-surface-elevated border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
                         // Mobile: the overlay surface shows instantly (riding the
                         // pill → voice morph), its content fades in only after the
                         // shape has grown — otherwise the controls paint clipped
@@ -420,6 +424,9 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                     role="dialog"
                     aria-label={t('chat.dictation.overlayAria')}
                 >
+                    {isMobile ? (
+                        <div aria-hidden="true" data-dictation-glass="true" className="oc-glass-composer pointer-events-none absolute inset-0 -z-10" />
+                    ) : null}
                     {topAccessory}
                     <div
                         ref={transcriptAreaRef}

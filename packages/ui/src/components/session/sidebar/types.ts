@@ -1,5 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { SpaceMark } from '@/lib/spaces/spaces-store';
 
 export type SessionNode = {
   session: Session;
@@ -20,6 +21,8 @@ export type SessionGroup = {
   isMain: boolean;
   isArchivedBucket?: boolean;
   worktree: WorktreeMetadata | null;
+  /** The isolated space this group shows, with the state of its last answer. */
+  space?: SpaceMark;
   directory: string | null;
   folderScopeKey?: string | null;
   /**

@@ -120,6 +120,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({
       PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
       SHELL_ONLY: 'yes',
+      OPENCODE_PASSWORD: 'shell-password',
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
     ...overrides,
@@ -267,7 +268,7 @@ describe('OpenCode lifecycle', () => {
     expect(runtime.testState.lastOpenCodeError).toContain('1.18.32');
   });
 
-  it('warms recently used directories after a successful bootstrap', async () => {
+  it('warms only the last-used directory after a successful bootstrap', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
@@ -291,9 +292,9 @@ describe('OpenCode lifecycle', () => {
     const warmupUrls = fetchMock.mock.calls
       .map(([url]) => String(url))
       .filter((url) => url.includes('/api/session?'));
+    // Each warmed directory boots its whole MCP fleet on OpenCode 2 (#4018).
     expect(warmupUrls).toEqual([
       'http://127.0.0.1:45678/api/session?directory=%2Ftmp%2Fworktree-a&limit=1',
-      'http://127.0.0.1:45678/api/session?directory=%2Ftmp%2Fproject-b&limit=1',
     ]);
   });
 
@@ -663,6 +664,7 @@ describe('OpenCode lifecycle', () => {
     expect(args).toEqual(['serve', '--hostname', '127.0.0.1', '--port', '45678']);
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.SHELL_ONLY).toBe('yes');
+    expect(options.env.OPENCODE_PASSWORD).toBe('password');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
     expect(server.exitCode).toBeNull();
     expect(server.signalCode).toBeNull();
@@ -738,6 +740,7 @@ describe('OpenCode lifecycle', () => {
       OPENCODE_CONFIG_CONTENT: '{"plugin":["file:///tool.js"]}',
       OPENCHAMBER_AGENT_TOOL_TOKEN: 'ephemeral',
       PATH: '/untrusted/path',
+      OPENCODE_PASSWORD: 'untrusted-password',
       OPENCODE_SERVER_PASSWORD: 'untrusted-password',
     }));
 
@@ -749,6 +752,7 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.OPENCODE_CONFIG_CONTENT).toBe('{"plugin":["file:///tool.js"]}');
     expect(options.env.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('ephemeral');
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
+    expect(options.env.OPENCODE_PASSWORD).toBe('password');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
 
     await server.close();

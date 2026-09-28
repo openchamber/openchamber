@@ -14,6 +14,7 @@ import {
   SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { getWebSearchScopeKey, useWebSearchStore, type WebSearchSnapshot } from '@/stores/useWebSearchStore';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
 /**
  * Settings → Web search: which provider OpenCode's `websearch` tool uses, and
@@ -108,7 +109,7 @@ const SelectionSection: React.FC<{ snapshot: WebSearchSnapshot }> = ({ snapshot 
   );
 };
 
-const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchProviderAccess }> = ({ provider, access }) => {
+const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchProviderAccess; locked: boolean }> = ({ provider, access, locked }) => {
   const { t } = useI18n();
   const saveKey = useWebSearchStore((store) => store.saveKey);
   const removeKey = useWebSearchStore((store) => store.removeKey);
@@ -151,7 +152,7 @@ const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchP
         <span className="typography-meta text-muted-foreground">
           {t('settings.webSearch.keys.fromEnv', { name: status.name })}
         </span>
-      ) : (
+      ) : locked ? null : (
         <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} flex items-center gap-2`}>
           <Input
             type="password"
@@ -175,6 +176,9 @@ const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchP
 
 const KeysSection: React.FC<{ snapshot: WebSearchSnapshot }> = ({ snapshot }) => {
   const { t } = useI18n();
+  // Enterprise mode: the server refuses new keys (they connect through the
+  // same OpenCode route as model providers); saved ones can still be removed.
+  const locked = useEnterpriseMode();
   const access = snapshot.access;
   const keyed = access
     ? snapshot.providers.flatMap((provider) => {
@@ -191,11 +195,12 @@ const KeysSection: React.FC<{ snapshot: WebSearchSnapshot }> = ({ snapshot }) =>
       settingsItem="web-search.keys"
     >
       <div className="space-y-4">
+        {locked ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.webSearch.keys.enterpriseMode')}</p> : null}
         {access === null ? (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.webSearch.state.keysUnavailable')}</p>
         ) : (
           keyed.map(({ provider, access: entry }) => (
-            <ProviderKeyRow key={provider.id} provider={provider} access={entry} />
+            <ProviderKeyRow key={provider.id} provider={provider} access={entry} locked={locked} />
           ))
         )}
       </div>

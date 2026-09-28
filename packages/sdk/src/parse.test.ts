@@ -218,6 +218,27 @@ describe('parseManifest', () => {
     }
   });
 
+  test('accepts declared https origins and derives the origins grant', () => {
+    const result = parseManifest({
+      apiVersion: 1,
+      contributes: { panel: validBlock.contributes.panel, origins: ['https://fonts.example.com', 'https://api.example.com:8443'] },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.origins).toEqual(['https://fonts.example.com', 'https://api.example.com:8443']);
+      expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['origins']);
+    }
+  });
+
+  test('rejects origins that are not plain unique https origins', () => {
+    for (const bad of [['http://fonts.example.com'], ['https://fonts.example.com/path'], ['https://*.example.com'], ['https://a.test', 'https://a.test'], [], ['https://u:p@a.test'], new Array(9).fill(0).map((_, i) => `https://a${i}.test`)]) {
+      // Junk on purpose: this is what an untrusted package.json may carry.
+      const result = parseManifest({ apiVersion: 1, contributes: { panel: validBlock.contributes.panel, origins: bad as string[] } });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('invalid-origins');
+    }
+  });
+
   test('accepts object socket bindings with per-platform candidates', () => {
     const result = parseManifest({
       apiVersion: 1,

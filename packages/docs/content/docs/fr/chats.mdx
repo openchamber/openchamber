@@ -1,0 +1,49 @@
+---
+title: Discussions
+description: De simples conversations avec l’agent, en dehors de tout projet.
+---
+
+# Discussions
+
+Une discussion est une simple conversation avec l’agent, en dehors de tout projet. Elle sert pour tout ce qui n’a rien à voir avec vos bases de code : comment patcher KDE pour FreeBSD, ce que fait une expression régulière, le brouillon d’un e-mail. L’agent travaille dans un dossier jetable, sans dépôt, sans branche, et sans que le contexte de vos projets pèse sur la conversation.
+
+## Démarrer une discussion
+
+Le plus direct est le bouton **+** de la section **Discussions** dans la barre latérale. Sur le téléphone, touchez **Nouveau chat** en haut de la liste des sessions ou **+** sur les discussions.
+
+**Mod+N** (Cmd+N sur macOS, Ctrl+N ailleurs) et **Nouvelle session** dans la palette de commandes ouvrent une nouvelle session du côté que vous avez utilisé en dernier : une discussion si votre dernière nouvelle session en était une, sinon votre projet. Vous pouvez la basculer vers les discussions avant d’envoyer le premier message.
+
+## Où se trouvent les discussions
+
+Les discussions ont leur propre section en haut de la barre latérale, au-dessus de [En cours](/fr/sessions-in-work/) et de vos projets. Elles sont triées comme les autres sessions, activité la plus récente d’abord, et les discussions épinglées restent en haut. En mode Timeline, la section montre les trois discussions les plus récentes ; **Afficher plus de sessions** charge le reste. La section se replie comme n’importe quelle autre.
+
+Sur le téléphone, les discussions sont au-dessus de la liste des projets dans le panneau des sessions.
+
+## Ce qu’une discussion peut faire, et ce qu’elle ne peut pas faire
+
+Chaque discussion a son propre dossier vide, l’agent peut donc quand même y créer et modifier des fichiers : un script, un prototype rapide, un document converti. Ce qu’une discussion n’a pas :
+
+- statut git, branches ou worktrees
+- le passage en cours : les discussions n’apparaissent jamais dans [En cours](/fr/sessions-in-work/)
+- la mise en œuvre d’un plan dans une nouvelle session
+- le démarrage depuis une issue Linear
+
+Les notes, todos et plans fonctionnent. Toutes les discussions partagent un même ensemble, séparé de vos projets.
+
+Une discussion reste une discussion. Impossible de déplacer une discussion terminée dans un projet ; si une conversation devient un vrai travail, démarrez une session dans le projet et emportez-y ce qui est utile.
+
+## Archiver et supprimer
+
+Archivez une discussion pour la masquer de la liste. Supprimez-la pour l’effacer définitivement, avec son dossier, dès qu’aucune autre session (un fork ou un sous-agent) n’utilise plus ce dossier.
+
+## Où sont les dossiers
+
+Les dossiers des discussions se trouvent dans `~/.config/openchamber/chats`, un dossier daté par jour. Si vous avez déplacé les données d’OpenChamber avec `OPENCHAMBER_DATA_DIR`, ils sont dans ce dossier-là. Pour ranger les discussions ailleurs, définissez `OPENCHAMBER_CHATS_DIR` ; voir [Variables d’environnement](/fr/environment/). C’est utile quand OpenCode tourne sous un autre utilisateur et ne peut pas lire votre dossier personnel.
+
+> VS Code n’a pas de discussions. L’extension travaille toujours dans le dossier que vous avez ouvert.
+
+## Voir aussi
+
+- [Projets](/fr/projects/) : des sessions liées à une base de code
+- [Sessions en cours](/fr/sessions-in-work/) : garder le vrai travail en vue
+- [Notes, todos et plans](/fr/notes-todos-plans/) : des notes qui marchent aussi dans les discussions

@@ -1,3 +1,6 @@
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
+import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -28,7 +31,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
-import { useAgentGroupsStore } from '@/stores/useAgentGroupsStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
@@ -72,7 +74,9 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
-  useAgentGroupsStore.getState().resetForRuntimeSwitch();
+  useSpacesStore.getState().resetForRuntimeSwitch();
+  resetSpaceModelAccess();
+  resetSpaceCreationRequests();
   useMultiRunStore.getState().resetForRuntimeSwitch();
   useSessionMultiSelectStore.getState().disable();
   useCommandsStore.getState().resetForRuntimeSwitch();

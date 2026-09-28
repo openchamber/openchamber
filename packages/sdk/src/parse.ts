@@ -11,6 +11,7 @@ import {
   GUEST_COMMAND_NAME,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   GUEST_FILESYSTEM_PATTERN_MAX,
+  GUEST_ORIGINS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_COLUMNS_MAX,
@@ -40,6 +41,12 @@ import {
   GUEST_STATUS_SECTION_HEIGHT_MIN,
   GUEST_STATUS_SECTION_TITLE_MAX,
 } from './manifest.ts';
+import {
+  GUEST_FILE_EDITORS_MAX,
+  GUEST_FILE_EDITOR_PATTERNS_MAX,
+  GUEST_FILE_EDITOR_TITLE_MAX,
+  isFileEditorPattern,
+} from './file-editor.ts';
 
 const isPanelIcon = (value: string): boolean => (
   PANEL_ID.test(value) || isGuestPackageSvgIcon(value)
@@ -52,6 +59,14 @@ const isHttpsUrl = (value: string): boolean => {
   } catch {
     return false;
   }
+};
+
+// An origin the host writes into the frame's CSP as is: a literal hostname,
+// so no `*` or other CSP syntax can widen what the user approved.
+const APPROVABLE_HOSTNAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
+const isApprovableOrigin = (value: string): boolean => {
+  if (!isHttpsOrigin(value)) return false;
+  return APPROVABLE_HOSTNAME.test(new URL(value).hostname);
 };
 
 const isHttpsOrigin = (value: string): boolean => {
@@ -257,6 +272,17 @@ const toolSchema = z.object({
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
+const fileEditorSchema = z.object({
+  id: z.string().trim().regex(PANEL_ID),
+  title: z.string().trim().min(1).max(GUEST_FILE_EDITOR_TITLE_MAX),
+  match: z.array(z.string().trim().refine(isFileEditorPattern)).min(1).max(GUEST_FILE_EDITOR_PATTERNS_MAX),
+  entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
+  content: z.enum(['text', 'binary']).optional(),
+});
+
+const fileEditorsSchema = z.array(fileEditorSchema).min(1).max(GUEST_FILE_EDITORS_MAX)
+  .refine((editors) => uniqueBy(editors, (editor) => editor.id), { message: 'file editor ids must be unique' });
+
 const contributesSchema = z.object({
   panel: panelSchema,
   background: z.object({
@@ -278,9 +304,13 @@ const contributesSchema = z.object({
   filesystem: z.array(
     z.string().max(GUEST_FILESYSTEM_PATTERN_MAX).refine(isGuestFilesystemPattern),
   ).min(1).max(GUEST_FILESYSTEM_PATTERNS_MAX).optional(),
+  origins: z.array(z.string().trim().refine(isApprovableOrigin)).min(1).max(GUEST_ORIGINS_MAX)
+    .refine((origins) => new Set(origins).size === origins.length, { message: 'origins must be unique' })
+    .optional(),
   actions: actionsSchema.optional(),
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
+  fileEditors: fileEditorsSchema.optional(),
 });
 
 /**
@@ -297,6 +327,7 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   // without one.
   if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
+  if (contributes.origins !== undefined) declared.push('origins');
   if (contributes.actions !== undefined) declared.push('actions');
   if (contributes.commands !== undefined) declared.push('commands');
   return declared;
@@ -337,10 +368,10 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    if (contributes.statusSection) {
-      // The section frame runs code and may use what the package is granted,
-      // but it only hosts itself: things the host opens or invokes elsewhere
-      // need a panel or background entry.
+    if (contributes.statusSection || contributes.fileEditors) {
+      // A status section or file editor frame runs code and may use what the
+      // package is granted, but it only hosts itself: things the host opens or
+      // invokes elsewhere need a panel or background entry.
       const needsFrame = [];
       if (contributes.page !== undefined) needsFrame.push('page');
       if (contributes.attach !== undefined && contributes.attach !== false) needsFrame.push('attach');
@@ -348,7 +379,7 @@ export const openChamberManifestSchema = z.object({
       if (contributes.commands !== undefined) needsFrame.push('commands');
       if (needsFrame.length > 0) ctx.addIssue({
         code: 'custom', path: ['panel'],
-        message: `${needsFrame.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; a status section only hosts itself.`,
+        message: `${needsFrame.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; a status section or file editor only hosts itself.`,
       });
       return;
     }
@@ -459,6 +490,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       'contributes.filesystem lists 1 to 16 patterns starting with "/" or "~/", without "..", empty segments, or backslashes.',
     );
   }
+  if (path.startsWith('contributes.origins')) {
+    return fail(
+      'invalid-origins',
+      `contributes.origins lists 1 to ${GUEST_ORIGINS_MAX} unique https origins like "https://fonts.example.com", without a path.`,
+    );
+  }
   if (path.startsWith('contributes.actions')) {
     return fail(
       'invalid-actions',
@@ -475,6 +512,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-tools',
       'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
+    );
+  }
+  if (path.startsWith('contributes.fileEditors')) {
+    return fail(
+      'invalid-file-editors',
+      `contributes.fileEditors lists 1 to ${GUEST_FILE_EDITORS_MAX} editors with a unique kebab-case id, a title of 1 to ${GUEST_FILE_EDITOR_TITLE_MAX} characters, match: 1 to ${GUEST_FILE_EDITOR_PATTERNS_MAX} file-name patterns (no "/", not only wildcards, like "*.excalidraw"), an entry ending in .html inside the package, and optional content "text" or "binary".`,
     );
   }
   if (path.startsWith('contributes.integration')) {

@@ -491,6 +491,17 @@ export function mergeConfigDocuments(entries: readonly ConfigEntry[]): Config {
   return merged as Config
 }
 
+/**
+ * Whether any config document denies a provider through a `provider.use`
+ * policy. Read per document: the folded config keeps only the last
+ * document's `experimental`, and policies from every layer apply. Statements
+ * from a connected OpenCode Console workspace are not part of `/api/config`.
+ */
+export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
+  return entries.some((entry) => isDocument(entry)
+    && (entry.info.experimental?.policies ?? []).some((policy) => policy.action === "provider.use" && policy.effect === "deny"))
+}
+
 function isPlainRecord(value: Config[keyof Config]): value is Record<string, JsonValue> {
   return Object.prototype.toString.call(value) === "[object Object]"
 }

@@ -10,6 +10,24 @@ import { mergePathValues } from './path-utils.js';
 // hostage: a probe that overruns is abandoned and resolution falls through
 // to the next candidate. Electron's own login-shell probe uses the same bound.
 const SHELL_PROBE_TIMEOUT_MS = 5_000;
+// Windows probes run synchronously on the startup path; an unbounded one (a
+// PowerShell profile on a stuck OneDrive folder, `where` walking a dead
+// network drive in PATH) hangs the whole process with no output.
+const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
+
+// Interactive rc files may print a banner, motd or other text to stdout before
+// the shell runs the probe command. That text would otherwise fuse with the
+// first `env -0` entry, so a marker line is echoed right before `env -0` and
+// only what follows the last marker line is parsed. Electron's probe does the
+// same.
+const LOGIN_SHELL_ENV_MARKER = '__OPENCHAMBER_ENV__';
+const LOGIN_SHELL_ENV_COMMAND = `echo ${LOGIN_SHELL_ENV_MARKER}; env -0`;
+
+const stripShellStartupOutput = (text) => {
+  const markerLine = `${LOGIN_SHELL_ENV_MARKER}\n`;
+  const markerIndex = text.lastIndexOf(markerLine);
+  return markerIndex === -1 ? text : text.slice(markerIndex + markerLine.length);
+};
 
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
@@ -159,11 +177,12 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     for (const shellPath of powershellCandidates) {
       try {
-        const result = runSpawnSync(shellPath, ['-NoLogo', '-Command', psScript], {
+        const result = runSpawnSync(shellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', psScript], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status !== 0) {
           continue;
@@ -183,6 +202,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
         windowsHide: true,
+        timeout: WINDOWS_PROBE_TIMEOUT_MS,
       });
       if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
         return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
@@ -220,7 +240,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
 
       try {
-        const result = runSpawnSync(shellPath, ['-lic', 'env -0'], {
+        const result = runSpawnSync(shellPath, ['-lic', LOGIN_SHELL_ENV_COMMAND], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
@@ -232,7 +252,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           continue;
         }
 
-        const parsed = parseNullSeparatedEnvSnapshot(result.stdout || '');
+        const parsed = parseNullSeparatedEnvSnapshot(stripShellStartupOutput(result.stdout || ''));
         if (parsed) {
           state.cachedLoginShellEnvSnapshot = parsed;
           return parsed;
@@ -449,6 +469,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const lines = (result.stdout || '')
@@ -524,6 +545,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const lines = (result.stdout || '')
@@ -606,6 +628,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const lines = (result.stdout || '')

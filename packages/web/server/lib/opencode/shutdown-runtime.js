@@ -9,6 +9,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     openCodeWatcherRuntime,
     sessionRuntime,
     sessionAssistRuntime,
+    sessionWorkRuntime,
     sessionGoalRuntime,
     contextObligatoryRuntime,
     messageQueueRuntime,
@@ -38,6 +39,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getDictationRuntime,
     getRelayService,
     getRelayReconcileTimer,
+    getSpacesHost = () => null,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -74,11 +76,14 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => clearInterval(getRelayReconcileTimer()),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
+      // The isolated-spaces host, when the switch is on: its connections into spaces end here.
+      () => getSpacesHost()?.close(),
       () => getRelayService()?.stop(),
       () => getDictationRuntime()?.stop(),
       () => openCodeWatcherRuntime.stop(),
       () => sessionRuntime.dispose(),
       () => sessionAssistRuntime?.stop?.(),
+      () => sessionWorkRuntime?.stop?.(),
       () => sessionGoalRuntime?.stop?.(),
       () => contextObligatoryRuntime?.stop?.(),
       () => messageQueueRuntime?.stop?.(),

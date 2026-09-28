@@ -16,6 +16,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { CrossfadeZoneHeader } from './CrossfadeZoneHeaders';
+import { useProjectFolderMissing } from './useProjectFolderMissing';
 
 export type SortableDragHandleProps = {
   listeners: ReturnType<typeof useSortable>['listeners'];
@@ -157,6 +158,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onProjectSelect,
 }) => {
   const { t } = useI18n();
+  const folderMissing = useProjectFolderMissing(projectDirectory);
   // Project headers only exist in the projects view, which always pins them.
   const stickyZoneHeaders = true;
   const {
@@ -325,6 +327,15 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       isCollapsed={isCollapsed}
                       alwaysShowActions={alwaysShowActions}
                     />
+                    {folderMissing ? (
+                      <span
+                        className="inline-flex flex-shrink-0 items-center text-status-warning"
+                        title={t('sessions.sidebar.project.folderMissing')}
+                        aria-label={t('sessions.sidebar.project.folderMissing')}
+                      >
+                        <Icon name="alert" className="h-3 w-3" />
+                      </span>
+                    ) : null}
                     {statusIndicator ? (
                       <span className="ml-1 inline-flex flex-shrink-0 items-center">{statusIndicator}</span>
                     ) : null}

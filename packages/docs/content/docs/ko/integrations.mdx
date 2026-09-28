@@ -1,6 +1,6 @@
 ---
 title: 통합 기능
-description: GitHub와 Linear를 OpenChamber에 연결합니다.
+description: OpenChamber와 함께 쓰는 서비스와 구독을 연결합니다.
 ---
 
 # 통합 기능
@@ -45,6 +45,40 @@ description: GitHub와 Linear를 OpenChamber에 연결합니다.
 ### 세션 댓글
 
 Linear 카드에서 **Session comments**를 켜면 이슈에서 시작한 세션이 시작, 완료, 실패 시 해당 이슈에 댓글을 남기며, 각 댓글에는 세션을 여는 링크가 포함됩니다. 댓글은 이 OpenChamber 서버에 공개 주소가 있을 때만 게시되어 이슈의 모든 사람이 링크를 열 수 있습니다. 로컬이나 사설 주소에서는 아무것도 게시되지 않습니다.
+
+## 통합 기능 설치
+
+1. **Settings → Integrations**를 엽니다.
+2. 통합 기능을 찾아 **Install**을 선택합니다.
+3. 요청되면 OpenCode를 다시 시작합니다 — 재시작 후 공급자가 나타납니다.
+4. **Set up**를 선택하고 로그인합니다. 그러면 채팅의 모델 선택기에 모델이 나타납니다.
+
+통합 기능은 사용자 단위로 설치되므로 모든 프로젝트에서 작동합니다. 같은 카드에서 언제든 업데이트하거나 제거할 수 있습니다.
+
+## Claude Code
+
+Claude Code는 컴퓨터에 설치된 Claude Code CLI를 통해 Claude Pro 또는 Max 플랜을 사용합니다 — API 키는 필요 없습니다.
+
+1. 통합 기능을 설치합니다(위 참고).
+2. **Set up**를 선택하고 로그인합니다. Claude Code CLI가 아직 없으면 설정에서 먼저 설치를 제안한 뒤 로그인을 진행합니다.
+
+**Claude 계정이 안전하게 유지되는 방식:** 이 통합 기능은 Anthropic의 공식 Claude Agent SDK와 설치된 Claude Code CLI를 사용합니다. OAuth 탈취, 브라우저 토큰 추출·재사용, 지원되지 않는 클라이언트로의 위장, Anthropic 인증 우회를 하지 않습니다. Anthropic이 지원하는 정상 경로를 사용하므로 토큰 탈취나 비인가 인증 우회에 따른 계정 정지 위험이 없습니다.
+
+## 업데이트 및 제거
+
+- **Update**는 플러그인의 최신 공개 버전을 설치합니다.
+- **Remove**는 OpenCode 설정에서 플러그인을 삭제합니다. OpenCode가 다시 로드되면 공급자는 더 이상 로드되지 않습니다.
+
+카드에 항목을 수동으로 관리해야 한다고 표시되면 **Manage plugins**를 선택해 중복 항목을 정리하세요.
+
+## Excalidraw
+
+Excalidraw를 사용하면 `.excalidraw` 파일과 Obsidian `.excalidraw.md` 그림을 Files에서 바로 그릴 수 있습니다. OpenChamber 확장 기능이며 같은 페이지의 **OpenChamber extensions** 아래에 표시됩니다.
+
+1. **Settings → Integrations**를 열고 Excalidraw 카드에서 **Install**을 선택합니다. Files에서 그림을 열고 그 위에 표시되는 알림에서 **Install**을 선택해도 됩니다.
+2. 그림을 다시 엽니다. 파일의 텍스트 대신 캔버스가 표시되며, Cmd/Ctrl+S, 자동 저장, 소스 보기 전환, 전체 화면은 다른 파일과 똑같이 작동합니다.
+
+카드에서 새 버전이 나오면 확장 기능을 업데이트하고, 일시 중지했다면 다시 켜고, 제거할 수 있습니다. 제거해도 그림은 그대로 남으며 텍스트로 열릴 뿐입니다. 웹과 데스크톱에서만 사용할 수 있습니다.
 
 ## 관련 문서
 

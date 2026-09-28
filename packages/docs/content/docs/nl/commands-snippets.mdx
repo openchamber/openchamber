@@ -1,0 +1,39 @@
+---
+title: Opdrachten en snippets
+description: Maak herbruikbare slash-opdrachten en tekstfragmenten voor de chat.
+---
+
+# Opdrachten en snippets
+
+Met opdrachten en snippets hoeft u dezelfde tekst niet steeds opnieuw te typen. Opdrachten zijn volledige prompts die u met `/` aanroept. Snippets zijn tekstfragmenten die u met `#` in een bericht invoegt.
+
+## Opdrachten
+
+Een opdracht is een opgeslagen prompt die u met een slash uitvoert, zoals `/review`. U beheert ze bij **Instellingen → Opdrachten**.
+
+1. Open **Instellingen → Opdrachten** en maak een opdracht aan.
+2. Geef deze een naam, een beschrijving en de prompttekst die moet worden verstuurd.
+3. Koppel de opdracht eventueel aan een specifieke agent of een specifiek model.
+4. Kies of de opdracht persoonlijk is of bij het project hoort.
+
+Typ `/` als **eerste** teken van een chatbericht om de opdrachten te openen en kies er een. De tekst kan placeholders bevatten:
+
+- `$ARGUMENTS` voegt toe wat u na de opdracht typt
+- `@filename` voegt de inhoud van een bestand in
+- `` !`command` `` voegt de uitvoer van een shell-opdracht in
+
+De ingebouwde opdrachten `init` en `review` kunnen worden teruggezet naar hun standaard, maar niet worden verwijderd.
+
+## Snippets
+
+Een snippet is herbruikbare tekst waarnaar u in een bericht verwijst met een hashtag, bijvoorbeeld `#signoff`. U beheert ze bij **Instellingen → Snippets**.
+
+1. Open **Instellingen → Snippets** en maak een snippet aan.
+2. Geef deze een naam en de tekst waarvoor hij staat. Voeg aliassen toe als u meerdere namen wilt gebruiken om hem in te voegen.
+3. Kies of de snippet persoonlijk is of bij het project hoort.
+
+Typ `#` in de chat en kies een snippet. OpenChamber vervangt de verwijzing vóór het versturen door de volledige tekst.
+
+## Zie ook
+
+- [Skills](/nl/skills/) om grotere instructiesets op verzoek te laden

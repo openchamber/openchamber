@@ -1075,10 +1075,15 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
 };
 
 export const registerCommonRequestMiddleware = (app, dependencies) => {
-  const { express, verboseRequestLogs = false } = dependencies;
+  // `skipBodyParsing(req)` names a request whose body must reach its route untouched: a
+  // request the isolated-spaces dispatcher streams into a space, where a parsed body would
+  // otherwise be consumed here and lost.
+  const { express, verboseRequestLogs = false, skipBodyParsing = () => false } = dependencies;
 
   app.use((req, res, next) => {
-    if (req.path === '/api/config/themes' || req.path.startsWith('/api/config/themes/')) {
+    if (skipBodyParsing(req)) {
+      next();
+    } else if (req.path === '/api/config/themes' || req.path.startsWith('/api/config/themes/')) {
       express.json({ limit: '1mb' })(req, res, next);
     } else if (req.path.startsWith('/api/behavior')) {
       const contentLength = parseInt(req.headers['content-length'] || '0', 10);
@@ -1115,7 +1120,8 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
-      req.path.startsWith('/api/openchamber/tunnel')
+      req.path.startsWith('/api/openchamber/tunnel') ||
+      req.path.startsWith('/api/openchamber/spaces')
     ) {
       express.json({ limit: '50mb' })(req, res, next);
     } else if (req.path.startsWith('/api')) {
@@ -1125,7 +1131,14 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
     }
   });
 
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  const urlencoded = express.urlencoded({ extended: true, limit: '50mb' });
+  app.use((req, res, next) => {
+    if (skipBodyParsing(req)) {
+      next();
+      return;
+    }
+    urlencoded(req, res, next);
+  });
 
   app.use((req, _res, next) => {
     if (verboseRequestLogs) {

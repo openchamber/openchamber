@@ -966,6 +966,7 @@ TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
 const useRunningTaskChildSessionId = (part: ToolPartType | undefined, directory: string): string | undefined => {
     const startedAt = part?.state.status === 'running' ? part.state.time.start : undefined;
     const agent = part?.state.input.agent;
+    const description = part?.state.input.description;
     const parentSessionID = part?.sessionID;
     const messageID = part?.messageID;
     const partID = part?.id;
@@ -986,12 +987,13 @@ const useRunningTaskChildSessionId = (part: ToolPartType | undefined, directory:
                 parentSessionID,
                 startedAt,
                 agent,
+                description,
                 siblingParts: siblings,
                 partID,
             });
             return lastResult;
         };
-    }, [agent, messageID, parentSessionID, partID, startedAt]);
+    }, [agent, description, messageID, parentSessionID, partID, startedAt]);
     return useDirectorySync(selector, directory || undefined);
 };
 

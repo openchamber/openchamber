@@ -12,7 +12,7 @@ const REMOVED = [
   'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_KEY_12', 'GIT_CONFIG_VALUE_12',
   'GIT_TRACE', 'GIT_TRACE_PACKET', 'GIT_TRACE_PACK_ACCESS', 'GIT_TRACE_PERFORMANCE', 'GIT_TRACE_SETUP', 'GIT_TRACE_CURL',
   'GIT_TRACE_SHALLOW', 'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_TRACE2_PERF', 'GIT_TRACE2_CONFIG_PARAMS',
-  'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS',
+  'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS', 'GIT_ATTR_SOURCE',
 ];
 const ADDED = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
 const mixedCase = (name) => name.toLowerCase().replace(/^git/, 'Git');
@@ -86,7 +86,8 @@ describe('createHostGit', () => {
   it('runs git -C with an argv, the cleaned environment and the call options', async () => {
     const { calls, runCommand } = recordingRunner({ code: 0, stdout: 'out\n', stderr: '' });
     const git = createHostGit({ runCommand, gitPath: '/opt/git/bin/git', environment: { PATH: '/usr/bin', GIT_DIR: '/elsewhere' } });
-    expect(await git.output('/repo with space', ['write-tree'], { env: { GIT_INDEX_FILE: '/tmp/index' }, killTree: true })).toBe('out\n');
+    const { signal } = new AbortController();
+    expect(await git.output('/repo with space', ['write-tree'], { env: { GIT_INDEX_FILE: '/tmp/index' }, keepTail: true, killTree: true, keepAtExit: true, signal })).toBe('out\n');
     expect(calls).toEqual([{
       file: '/opt/git/bin/git',
       args: ['-C', '/repo with space', 'write-tree'],
@@ -95,7 +96,10 @@ describe('createHostGit', () => {
         stdin: undefined,
         timeoutMs: 120_000,
         maxOutputBytes: 4 * 1024 * 1024,
+        keepTail: true,
         killTree: true,
+        keepAtExit: true,
+        signal,
       },
     }]);
   });

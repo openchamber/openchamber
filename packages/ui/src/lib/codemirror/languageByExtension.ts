@@ -132,6 +132,8 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'drawio':
     case 'dio':
       return html();
+    case 'excalidraw':
+      return json();
     case 'md':
     case 'mdx':
     case 'markdown':

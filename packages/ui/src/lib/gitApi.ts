@@ -815,12 +815,24 @@ export async function deleteGitWorktree(
   return gitHttp.deleteGitWorktree(directory, payload);
 }
 
+export async function snapshotGitWorktree(
+  directory: string,
+  payload: import('./api/types').GitWorktreeSnapshotPayload
+): Promise<import('./api/types').GitWorktreeSnapshotResult> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.snapshot) {
+    return runtime.worktree.snapshot(directory, payload);
+  }
+  return gitHttp.snapshotGitWorktree(directory, payload);
+}
+
 export const git = {
   worktree: {
     list: listGitWorktrees,
     validate: validateGitWorktree,
     create: createGitWorktree,
     remove: deleteGitWorktree,
+    snapshot: snapshotGitWorktree,
   },
 };
 

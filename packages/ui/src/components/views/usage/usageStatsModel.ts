@@ -1,4 +1,4 @@
-import type { UsageStats } from '@/lib/opencode/session-stats';
+import type { UsageStats, UsageTokens } from '@/lib/opencode/session-stats';
 
 export type UsageRange = '7d' | '30d' | '90d' | 'all';
 
@@ -77,6 +77,53 @@ export function buildActivitySeries(stats: Pick<UsageStats, 'range' | 'activity'
 /** Nothing happened in the range: no prompt and no model step. */
 export const isEmptyReport = (stats: Pick<UsageStats, 'prompts' | 'steps'>): boolean =>
   stats.prompts === 0 && stats.steps === 0;
+
+/** Share of prompt tokens served from the cache: reads over everything that
+ * could have been a miss (cache reads plus cache writes plus fresh input).
+ * Null when nothing entered the context, so callers can show a dash. */
+export const cacheHitRate = (tokens: Pick<UsageTokens, 'input' | 'cacheRead' | 'cacheWrite'>): number | null => {
+  const misses = tokens.input + tokens.cacheWrite + tokens.cacheRead;
+  return misses > 0 ? tokens.cacheRead / misses : null;
+};
+
+/** total / count, or null when there is nothing to divide by. */
+export const averagePer = (total: number, count: number): number | null => (count > 0 ? total / count : null);
+
+/** Succeeded calls over all completed calls; null when nothing completed. */
+export const toolSuccessRate = (totals: { succeeded: number; failed: number }): number | null => {
+  const completed = totals.succeeded + totals.failed;
+  return completed > 0 ? totals.succeeded / completed : null;
+};
+
+/** Cost in USD per one million tokens, or null with no tokens at all. */
+export const costPerMillionTokens = (cost: number, tokens: number): number | null =>
+  (tokens > 0 ? (cost / tokens) * 1_000_000 : null);
+
+/** Share of reasoning inside everything the model produced; null when it
+ * produced nothing. */
+export const reasoningShare = (tokens: Pick<UsageTokens, 'output' | 'reasoning'>): number | null => {
+  const produced = tokens.output + tokens.reasoning;
+  return produced > 0 ? tokens.reasoning / produced : null;
+};
+
+export type TokenSegmentKey = 'input' | 'output' | 'cacheRead' | 'cacheWrite';
+
+/** One stacked-bar slice; zero values stay so legend order is stable. */
+interface TokenSegment {
+  key: TokenSegmentKey
+  /** Output merges reasoning: the model's own production. */
+  value: number
+}
+
+/** Token totals as stacked-bar segments in fixed order: fresh input, model
+ * output plus reasoning, cache reads, cache writes. Zero segments stay in the
+ * list so legend order is stable; renderers skip them. */
+export const tokenSegments = (tokens: UsageTokens): TokenSegment[] => [
+  { key: 'input', value: tokens.input },
+  { key: 'output', value: tokens.output + tokens.reasoning },
+  { key: 'cacheRead', value: tokens.cacheRead },
+  { key: 'cacheWrite', value: tokens.cacheWrite },
+];
 
 /** Project name as the sidebar shows it: its label, else the folder name. */
 export const projectDisplayName = (project: { label?: string | null; path: string }): string => {

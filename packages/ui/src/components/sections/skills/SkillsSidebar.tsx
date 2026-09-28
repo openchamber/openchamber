@@ -24,6 +24,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { SettingsSidebarNoMatches, SettingsSidebarSearch } from '@/components/sections/shared/SettingsSidebarSearch';
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -42,6 +44,7 @@ const isRenamableSkill = (skill: DiscoveredSkill | null | undefined): boolean =>
 
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
   const [renameDialogSkill, setRenameDialogSkill] = React.useState<DiscoveredSkill | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [deleteDialogSkill, setDeleteDialogSkill] = React.useState<DiscoveredSkill | null>(null);
@@ -192,8 +195,9 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   // Separate project and user skills
-  const projectSkills = skills.filter((s) => s.scope === 'project');
-  const userSkills = skills.filter((s) => s.scope === 'user');
+  const shownSkills = skills.filter((skill) => matchesRankQuery([skill.name, skill.description], query));
+  const projectSkills = shownSkills.filter((s) => s.scope === 'project');
+  const userSkills = shownSkills.filter((s) => s.scope === 'user');
 
   // Helper: group a list of skills by their domain folder
   function groupSkillsByFolder(list: DiscoveredSkill[]) {
@@ -236,6 +240,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
+        {skills.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
@@ -245,6 +250,8 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             <p className="typography-ui-label font-medium">{t('settings.skills.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.skills.sidebar.empty.description')}</p>
           </div>
+        ) : shownSkills.length === 0 ? (
+          <SettingsSidebarNoMatches query={query} />
         ) : (
           <>
             {projectSkills.length > 0 && (

@@ -49,10 +49,18 @@ const ContextCard: React.FC<{
         // that settles it"). Attachments without a comment (terminal output
         // and the like) collapse to the caption alone.
         const comment = text.trim();
+        const handleKeyDown = (event: React.KeyboardEvent): void => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onExpand?.();
+        };
         return (
             <div
                 className="my-1 flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 border-l-2 border-[var(--interactive-border)] pl-3 text-xs text-muted-foreground"
+                role="button"
+                tabIndex={0}
                 onClick={onExpand}
+                onKeyDown={handleKeyDown}
                 title={title}
             >
                 <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
@@ -62,6 +70,7 @@ const ContextCard: React.FC<{
                         <span className="text-sm text-[var(--surface-foreground)]">{comment}</span>
                     ) : null}
                 </span>
+                <Icon name="arrow-down-s" className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
             </div>
         );
     }

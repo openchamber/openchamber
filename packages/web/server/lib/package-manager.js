@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchUpdateNotes } from './changelog/update-notes.js';
+import { isEnterpriseMode } from './enterprise-mode.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,7 +129,9 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const shouldTrustClientPlatform = appType === 'desktop-electron' || appType === 'vscode' || appType === 'mobile-capacitor';
     const platform = shouldTrustClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
     const arch = shouldTrustClientPlatform ? normalizeArch(options.arch) : hostArch;
-    const reportUsage = options.reportUsage !== false;
+    // Enterprise mode keeps the update check (security fixes must reach the
+    // company) but never reports usage, whatever the client asked for.
+    const reportUsage = options.reportUsage !== false && !isEnterpriseMode();
     const payload = {
       appType,
       deviceClass: normalizeDeviceClass(options.deviceClass),

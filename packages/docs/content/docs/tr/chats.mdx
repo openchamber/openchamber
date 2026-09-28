@@ -1,0 +1,49 @@
+---
+title: Sohbetler
+description: Ajanla herhangi bir projenin dışında yapılan sade konuşmalar.
+---
+
+# Sohbetler
+
+Sohbet, ajanla herhangi bir projenin dışında yapılan sade bir konuşmadır. Kod tabanlarınızla ilgisi olmayan şeyler için kullanın: KDE'yi FreeBSD için nasıl yamalayacağınız, bir düzenli ifadenin ne yaptığı, bir e-posta taslağı. Ajan geçici bir klasörde çalışır; depo yoktur, dal yoktur ve projelerinizin bağlamı konuşmaya yük olmaz.
+
+## Sohbet başlatma
+
+En doğrudan yol, kenar çubuğundaki **Sohbetler** bölümünün **+** düğmesidir. Telefonda oturum listesinin üstündeki **Yeni sohbet**'e ya da sohbetlerdeki **+** düğmesine dokunun.
+
+**Mod+N** (macOS'ta Cmd+N, diğer sistemlerde Ctrl+N) ve komut paletindeki **Yeni Session**, yeni oturumu en son kullandığınız tarafta açar: Son yeni oturumunuz bir sohbetse sohbet, değilse projeniz. İlk mesajı göndermeden önce onu Sohbetler'e çevirebilirsiniz.
+
+## Sohbetler nerede durur
+
+Sohbetlerin kenar çubuğunun en üstünde, [Devam eden](/tr/sessions-in-work/) bölümünün ve projelerinizin üstünde kendi bölümü vardır. Diğer oturumlar gibi sıralanırlar, en yeni etkinlik önce gelir; sabitlenmiş sohbetler üstte kalır. Timeline modunda bölüm en yeni üç sohbeti gösterir, **Daha fazla session göster** gerisini yükler. Bölüm diğerleri gibi daraltılabilir.
+
+Telefonda sohbetler, oturum panelinde proje listesinin üstündedir.
+
+## Bir sohbet neler yapabilir, neler yapamaz
+
+Her sohbetin kendine ait boş bir klasörü vardır; yani ajan yine de orada dosya oluşturup düzenleyebilir: bir betik, hızlı bir prototip, dönüştürülmüş bir belge. Bir sohbette olmayanlar:
+
+- git durumu, dallar veya worktree'ler
+- devam edenlere taşıma: sohbetler asla [Devam eden](/tr/sessions-in-work/) bölümünde görünmez
+- bir planı yeni bir oturumda uygulama
+- bir Linear issue'sundan başlama
+
+Notlar, yapılacaklar ve planlar çalışır. Tüm sohbetler, projelerinizden ayrı tek bir ortak set kullanır.
+
+Sohbet, sohbet olarak kalır. Biten bir sohbeti projeye taşımanın yolu yoktur; bir konuşma gerçek işe dönüşürse projede bir oturum başlatın ve işe yarar kısmı oraya taşıyın.
+
+## Arşivleme ve silme
+
+Bir sohbeti listeden gizlemek için arşivleyin. Kalıcı olarak kaldırmak için silin; başka hiçbir oturum (bir fork ya da bir alt ajan) o klasörü kullanmıyorsa klasörüyle birlikte silinir.
+
+## Klasörler nerede
+
+Sohbet klasörleri `~/.config/openchamber/chats` içinde, her gün için tarihli bir klasör olarak durur. OpenChamber verilerini `OPENCHAMBER_DATA_DIR` ile taşıdıysanız o klasörün altındadır. Sohbetleri başka bir yerde tutmak için `OPENCHAMBER_CHATS_DIR` değişkenini ayarlayın; [Ortam değişkenleri](/tr/environment/) sayfasına bakın. Bu, OpenCode başka bir kullanıcı olarak çalışıp ev klasörünüzü okuyamadığında önemlidir.
+
+> VS Code'da sohbet yoktur. Eklenti her zaman açtığınız klasörde çalışır.
+
+## İlgili
+
+- [Projeler](/tr/projects/): bir kod tabanına bağlı oturumlar
+- [Devam eden oturumlar](/tr/sessions-in-work/): gerçek işi göz önünde tutun
+- [Notlar, yapılacaklar ve planlar](/tr/notes-todos-plans/): sohbetlerde de çalışan notlar

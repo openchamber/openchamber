@@ -1,6 +1,6 @@
 ---
 title: Integraciones
-description: Conecta GitHub y Linear con OpenChamber.
+description: Conecta los servicios y suscripciones con los que trabaja OpenChamber.
 ---
 
 # Integraciones
@@ -45,6 +45,40 @@ En el compositor del chat, elige **Link Linear Issue**. La issue acompaña tu si
 ### Comentarios de sesión
 
 Activa **Session comments** en la tarjeta de Linear y una sesión iniciada desde una issue publica un comentario en esa issue al empezar, terminar o fallar, cada uno con un enlace que abre la sesión. Los comentarios solo se publican cuando este servidor de OpenChamber tiene una dirección pública, para que el enlace funcione para todos en la issue; en una dirección local o privada no se publica nada.
+
+## Instalar una integración
+
+1. Abre **Settings → Integrations**.
+2. Busca la integración y elige **Install**.
+3. Reinicia OpenCode cuando se te pida — el proveedor aparece tras el reinicio.
+4. Elige **Set up** e inicia sesión. Los modelos aparecerán luego en el selector de modelos del chat.
+
+Las integraciones se instalan para tu usuario, así que funcionan en todos los proyectos. Puedes actualizarlas o eliminarlas desde la misma tarjeta en cualquier momento.
+
+## Claude Code
+
+Claude Code usa tu plan Claude Pro o Max a través de la CLI de Claude Code en tu equipo — sin claves de API.
+
+1. Instala la integración (arriba).
+2. Elige **Set up** e inicia sesión. Si aún no tienes la CLI de Claude Code, la configuración ofrece instalarla primero y luego iniciar sesión.
+
+**Cómo se protege tu cuenta de Claude:** esta integración usa el Claude Agent SDK oficial de Anthropic y tu CLI de Claude Code instalada. No secuestra OAuth, no extrae ni reutiliza tokens del navegador, no se hace pasar por un cliente no admitido ni omite la autenticación de Anthropic. Se mantiene en la vía de acceso admitida por Anthropic, por lo que no conlleva el riesgo de baneo asociado al secuestro de tokens o a rodeos de autenticación no autorizados.
+
+## Actualizar o eliminar
+
+- **Update** instala la última versión publicada del plugin.
+- **Remove** elimina el plugin de tu configuración de OpenCode. El proveedor deja de cargarse cuando OpenCode se recarga.
+
+Si una tarjeta indica que las entradas requieren gestión manual, elige **Manage plugins** y limpia ahí los duplicados.
+
+## Excalidraw
+
+Excalidraw te permite dibujar en archivos `.excalidraw` y en dibujos `.excalidraw.md` de Obsidian directamente en Files. Es una extensión de OpenChamber y aparece en **OpenChamber extensions** en la misma página.
+
+1. Abre **Settings → Integrations** y elige **Install** en la tarjeta de Excalidraw. También puedes abrir un dibujo en Files y elegir **Install** en el aviso que aparece encima.
+2. Vuelve a abrir el dibujo. El lienzo sustituye al texto del archivo, y Cmd/Ctrl+S, el guardado automático, el cambio a la vista de código fuente y la pantalla completa funcionan como en cualquier otro archivo.
+
+Desde la tarjeta actualizas la extensión cuando sale una versión nueva, la vuelves a activar si la pausaste y la eliminas. Tus dibujos no cambian al eliminarla; simplemente se abren como texto. Solo en web y escritorio.
 
 ## Relacionado
 

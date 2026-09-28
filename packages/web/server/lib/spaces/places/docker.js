@@ -1,3 +1,5 @@
+import net from 'node:net';
+
 import { SpaceError } from '../errors.js';
 import { createGatekeeperChannel } from '../gatekeeper-channel.js';
 import {
@@ -25,7 +27,8 @@ import {
   requireSpaceId,
   spaceResourceName,
 } from '../labels.js';
-import { SPACE_USER, TOOLS_MOUNT_PATH } from '../layout.js';
+import { SPACE_CONNECT_COMMAND, SPACE_IDLE_EXIT_CODE, SPACE_USER, TOOLS_MOUNT_PATH } from '../layout.js';
+import { openCommandStream as openCommandStreamProcess } from '../run-command.js';
 import { createSpaceServerChannel, createSpaceToken } from '../space-server.js';
 import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, createDockerEngine, entryLabels, entryName, isInterrupted, pause } from './docker-engine.js';
 import { createDockerTools } from './docker-tools.js';
@@ -57,7 +60,7 @@ function execRole(target) {
   throw new SpaceError('invalid_exec_target', `A command runs in the space or in its gatekeeper, not in '${target}'`);
 }
 
-export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, wait = pause, now = () => new Date() }) {
+export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, owner, toolsSource, wait = pause, now = () => new Date() }) {
   requireOwner(owner);
 
   const engine = createDockerEngine({ runCommand, dockerPath });
@@ -307,7 +310,7 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
       await docker(['network', 'connect', outerNetwork, gatekeeperName], CHANGE_TIMEOUT_MS);
       await requireGatekeeperVerified(id, await inspectOwnContainer(id, gatekeeperName) ?? {});
       await docker(['start', gatekeeperName], CHANGE_TIMEOUT_MS);
-      await gatekeeper.writeProgram(id);
+      await gatekeeper.writeProgram(id, { bindAddress: await innerAddressOf(id) });
       await gatekeeper.waitUntilReady(id);
       // Create, verify, then start: a container that fails the check never runs.
       await docker(buildSpaceCreateArgs({
@@ -381,12 +384,30 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
       if (space && (!guard || (state === 'running' && guard.entry.State?.Running !== true))) {
         missing.push(spaceResourceName(id, ROLE_GATEKEEPER));
       }
-      return { id, name, project, created, state, orphans, damaged: missing.length > 0, missing };
+      // Since 5d-3: a space that stopped itself for the idle stop, told by its exit code, and whether
+      // its gatekeeper still runs, which the host stops when it finds one beside a stopped space.
+      const stoppedIdle = state === 'exited' && space.entry.State?.ExitCode === SPACE_IDLE_EXIT_CODE;
+      const gatekeeperRunning = guard?.entry.State?.Running === true;
+      return { id, name, project, created, state, stoppedIdle, gatekeeperRunning, orphans, damaged: missing.length > 0, missing };
     });
   };
 
   // Starts that are under way in this process, by space id.
   const starting = new Map();
+
+  /**
+   * The gatekeeper's own address on the space's inner network, read from the runtime once the
+   * container runs: that is where its corridor and window listen, and nowhere else. An engine
+   * that reports none leaves the gatekeeper unstarted, which is the safe answer.
+   */
+  const innerAddressOf = async (spaceId) => {
+    const entry = await inspectOwnContainer(spaceId, spaceResourceName(spaceId, ROLE_GATEKEEPER));
+    const address = String(entry?.NetworkSettings?.Networks?.[spaceResourceName(spaceId, ROLE_NETWORK)]?.IPAddress ?? '');
+    if (net.isIP(address) === 0) {
+      throw new SpaceError('gatekeeper_address_unknown', `The runtime reports no address for the network filter of space ${spaceId} on the space's network, so its listeners cannot be bound.`);
+    }
+    return address;
+  };
 
   /** The gatekeeper container of a space. It is never renamed, so there is no move to repair here. */
   const requireGatekeeperContainer = async (spaceId) => {
@@ -426,6 +447,17 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
   };
 
   /**
+   * A channel to the server inside the space: the bridge of `layout.js` over the argv of
+   * `execArgv`, so the same ownership and running checks come first, and the same process
+   * shape as a push carries the bytes. The space's network never sees it. The stream is a
+   * `CommandStream` of `run-command.js`, and the dispatcher's agent uses it as a socket.
+   */
+  const connect = async (spaceId) => {
+    const [file, ...args] = await execArgv(spaceId);
+    return openCommandStream(file, [...args, ...SPACE_CONNECT_COMMAND]);
+  };
+
+  /**
    * The space stops first and its gatekeeper after it, so a space is never running while its
    * way out is not under the host's control. A stop of the gatekeeper that fails leaves the
    * space stopped, which is the safe side of this order.
@@ -456,7 +488,7 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
       await requireGatekeeperVerified(spaceId, container);
       await docker(['start', name], CHANGE_TIMEOUT_MS);
     }
-    await gatekeeper.writeProgram(spaceId);
+    await gatekeeper.writeProgram(spaceId, { bindAddress: await innerAddressOf(spaceId) });
     await gatekeeper.waitUntilReady(spaceId);
   };
 
@@ -583,5 +615,5 @@ export function createDockerPlace({ runCommand, dockerPath, owner, toolsSource, 
     return starting.get(spaceId);
   };
 
-  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, stop, start, remove, verify };
+  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, connect, stop, start, remove, verify };
 }

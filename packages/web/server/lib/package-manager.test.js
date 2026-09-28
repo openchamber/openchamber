@@ -149,6 +149,30 @@ describe('checkForUpdates', () => {
     });
   });
 
+  it('still checks for updates in enterprise mode but reports no usage', async () => {
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({ latestVersion: '1.10.0', updateAvailable: true, releaseNotes: '' }),
+      });
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const result = await checkForUpdates({
+        appType: 'desktop-electron',
+        currentVersion: '1.9.10',
+        installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
+        platform: 'windows',
+        arch: 'arm64',
+      });
+      expect(result.available).toBe(true);
+      const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(sent.reportUsage).toBe(false);
+      expect(sent.installId).toBeUndefined();
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+  });
+
   it('resolves an Android APK asset when the update API returns an AAB', async () => {
     fetchMock
       .when('api.openchamber.dev', {

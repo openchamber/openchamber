@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSpaceId, hashProjectDirectory, toolsKeyFromVolumeName } from '../labels.js';
 import { SPACE_SERVER_PORT, SPACE_TOKEN_PATH, TOOLS_MOUNT_PATH } from '../layout.js';
+import { createGatekeeperChannel } from '../gatekeeper-channel.js';
 import { createSpaceServerChannel } from '../space-server.js';
 import { createRegistryToolsSource, readHostToolVersions } from '../tools.js';
 import { LIVE_DOCKER_ENABLED, createLiveDockerPlace } from './docker-live-support.js';
@@ -51,11 +52,12 @@ setTimeout(() => finish({ error: 'timeout' }), 30000);
 })().catch((error) => finish({ error: String(error) }));
 `;
 
-const HELLO_TOOL = `import { tool } from "@opencode/plugin"
-export default tool({
-  description: "Says hello",
-  args: { name: tool.schema.string() },
-  async execute(args) { return "hello " + args.name },
+// A project plugin in the form OpenCode 2 loads from `.opencode/plugins/`. It imports the
+// plugin package, which is the import that needs the link above the projects.
+const HELLO_PLUGIN = `import { Plugin } from "@opencode/plugin"
+export default Plugin.define({
+  id: "hello",
+  setup: async () => {},
 })
 `;
 
@@ -69,6 +71,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('server inside a space: docker (live)', ()
   };
   const repo = `/spaces/${spec.id}/repo`;
   const link = `/spaces/${spec.id}/link-to-repo`;
+  const plugin = `${repo}/.opencode/plugins/hello.ts`;
   let place;
   let placeWith;
   let host;
@@ -88,6 +91,14 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('server inside a space: docker (live)', ()
     return login.headers['set-cookie'][0].split(';')[0];
   };
   const health = async () => JSON.parse((await server.request(spec.id, { path: '/health' })).body);
+  // OpenCode 2 answers with the record under `data`.
+  const api = async (path, { method = 'GET', body } = {}) => {
+    const answer = await server.request(spec.id, { method, path, headers: body === undefined ? { Cookie: cookie } : { ...JSON_HEADERS, Cookie: cookie }, body });
+    expect(answer.status, `${method} ${path}: ${answer.body}`).toBe(200);
+    return JSON.parse(answer.body).data;
+  };
+  const createSession = (directory) => api('/api/session', { method: 'POST', body: JSON.stringify({ location: { directory } }) });
+  const listSessions = async (directory) => (await api(`/api/session?directory=${encodeURIComponent(directory)}`)).map((entry) => entry.id);
 
   beforeAll(async () => {
     ({ place, placeWith, host, owner, dispose } = createLiveDockerPlace());
@@ -115,45 +126,70 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('server inside a space: docker (live)', ()
     expect(await shell('tr "\\0" "\\n" < /proc/1/environ')).not.toContain('OPENCHAMBER_UI_PASSWORD');
   });
 
-  // The open question of stage 0: does OpenCode report the space path unchanged?
+  // The open question of stage 0: does OpenCode report the space path unchanged? OpenCode 2
+  // takes the directory from `location` in the body. It ignores `?directory=` on this route, and
+  // such a session lands in HOME, so the dispatcher must never rely on the query here.
   it('reports the directory of a session byte for byte as the space path', async () => {
     await shell(`mkdir -p ${repo} && cd ${repo} && git init -q . && git -c user.email=space@example.invalid -c user.name=Space commit -q --allow-empty -m init`);
 
-    const created = await server.request(spec.id, { method: 'POST', path: `/api/session?directory=${encodeURIComponent(repo)}`, headers: { ...JSON_HEADERS, Cookie: cookie }, body: '{}' });
-    expect(created.status).toBe(200);
-    const session = JSON.parse(created.body);
-    expect(session.directory).toBe(repo);
+    const session = await createSession(repo);
+    expect(session.location.directory).toBe(repo);
+    expect((await api(`/api/session/${session.id}`)).location.directory).toBe(repo);
+    expect(await listSessions(repo)).toEqual([session.id]);
 
-    const readBack = await server.request(spec.id, { path: `/api/session/${session.id}?directory=${encodeURIComponent(repo)}`, headers: { Cookie: cookie } });
-    expect(JSON.parse(readBack.body).directory).toBe(repo);
-
-    const listed = await server.request(spec.id, { path: `/api/session?directory=${encodeURIComponent(repo)}`, headers: { Cookie: cookie } });
-    expect(JSON.parse(listed.body).map((entry) => entry.directory)).toEqual([repo]);
+    const byQuery = await api(`/api/session?directory=${encodeURIComponent(repo)}`, { method: 'POST', body: '{}' });
+    expect(byQuery.location.directory).toBe('/home/space');
+    expect(await listSessions(repo)).toEqual([session.id]);
   });
 
-  // Recorded, not wished for: OpenCode 1.18.31 resolves a symlink and reports the real path.
-  // The dispatcher stage must therefore hand OpenCode real paths only.
-  it('reports the real path for a directory that was reached through a symlink', async () => {
+  // Recorded, not wished for. OpenCode 1.18.31 resolved a symlink and reported the real path.
+  // OpenCode 2 keeps the link path, says how it relates to the project in `subpath`, and leaves
+  // the session out of the list for the real path. OpenCode no longer normalises anything, so
+  // handing it real paths only is the whole defence, and the dispatcher stage must do it.
+  it('reports the link path for a directory that was reached through a symlink', async () => {
     await shell(`ln -sfn ${repo} ${link}`);
+    const before = await listSessions(repo);
 
-    const created = await server.request(spec.id, { method: 'POST', path: `/api/session?directory=${encodeURIComponent(link)}`, headers: { ...JSON_HEADERS, Cookie: cookie }, body: '{}' });
-    expect(created.status).toBe(200);
-    expect(JSON.parse(created.body).directory).toBe(repo);
+    const session = await createSession(link);
+    expect(session.location.directory).toBe(link);
+    expect(session.subpath).toBe('../link-to-repo');
+    expect(await listSessions(repo)).toEqual(before);
   });
 
-  it('lists a project tool that imports @opencode/plugin, without waiting for a download that cannot happen', async () => {
-    await shell(`mkdir -p ${repo}/.opencode/tool && cat > ${repo}/.opencode/tool/hello.ts`, HELLO_TOOL);
-    // Only the plugin is linked above the projects, not the whole tools node_modules.
-    expect(await shell(`ls /spaces/${spec.id}/node_modules /spaces/${spec.id}/node_modules/@opencode`)).toBe(`/spaces/${spec.id}/node_modules:\n@opencode\n\n/spaces/${spec.id}/node_modules/@opencode:\nplugin\n`);
-    // The instance of the earlier tests loaded before the tool existed.
-    await server.request(spec.id, { method: 'POST', path: `/api/instance/dispose?directory=${encodeURIComponent(repo)}`, headers: { Cookie: cookie } });
+  // With no network, a project plugin that imports @opencode/plugin must load from the link above
+  // the projects. OpenCode 2 does not download the package for a local plugin: without the link
+  // the plugin fails at once with "Cannot find package". OpenCode 1 waited 131 seconds for a
+  // background install instead. The state check is what turns red when the link goes.
+  it('loads a project plugin that imports @opencode/plugin, without a download', async () => {
+    await shell(`mkdir -p "$(dirname ${plugin})" && cat > ${plugin}`, HELLO_PLUGIN);
+    const location = `location%5Bdirectory%5D=${encodeURIComponent(repo)}`;
 
     const started = Date.now();
-    const answer = await server.request(spec.id, { path: `/api/experimental/tool/ids?directory=${encodeURIComponent(repo)}`, headers: { Cookie: cookie } });
-    expect(answer.status).toBe(200);
-    expect(JSON.parse(answer.body)).toContain('hello');
-    // Without npm_config_fetch_retries=0 this took 131 seconds.
+    // The location of the earlier tests loaded before the plugin existed.
+    const reload = await server.request(spec.id, { method: 'POST', path: '/api/location/reload', headers: { Cookie: cookie } });
+    expect(reload.status).toBe(204);
+    // OpenCode loads plugins in the background, so the list can show this one before it has
+    // loaded, or not yet at all. Only `active` or `failed` is an answer.
+    let entry;
+    for (;;) {
+      entry = (await api(`/api/plugin?${location}`)).find((candidate) => candidate.source?.path === plugin);
+      if (['active', 'failed'].includes(entry?.state?.status) || Date.now() - started >= 15_000) break;
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+    }
+    expect(entry, 'OpenCode never listed the project plugin').toBeDefined();
+    // OpenCode answers a failure with a generic text and a ref. Its log has the cause under that ref.
+    const cause = entry.state?.ref
+      ? (await place.exec(spec.id, ['sh', '-c', 'grep -h -F -- "$1" "$HOME"/.local/share/opencode/log/*.log | tail -1', 'sh', entry.state.ref])).stdout.trim()
+      : '';
+    expect(entry.state, cause).toEqual({ status: 'active' });
     expect(Date.now() - started).toBeLessThan(15_000);
+
+    // Nothing tried to fetch a package for it.
+    const journal = await createGatekeeperChannel({ exec: place.exec }).readJournal(spec.id);
+    expect(journal.records.filter((record) => /npm/i.test(record.host))).toEqual([]);
+
+    // Only the plugin is linked above the projects, not the whole tools node_modules.
+    expect(await shell(`ls /spaces/${spec.id}/node_modules /spaces/${spec.id}/node_modules/@opencode`)).toBe(`/spaces/${spec.id}/node_modules:\n@opencode\n\n/spaces/${spec.id}/node_modules/@opencode:\nplugin\n`);
   }, 60_000);
 
   it('runs commands in a terminal as uid 1000, through the terminal WebSocket', async () => {
@@ -173,7 +209,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('server inside a space: docker (live)', ()
 
     expect(await health()).toMatchObject({ isOpenCodeReady: true });
     expect(await server.readToken(spec.id)).toBe(tokenBefore);
-    expect(await shell(`cat ${repo}/.opencode/tool/hello.ts`)).toBe(HELLO_TOOL);
+    expect(await shell(`cat ${plugin}`)).toBe(HELLO_PLUGIN);
     expect(await place.verify(spec.id)).toEqual([]);
   }, 5 * 60_000);
 
@@ -197,7 +233,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('server inside a space: docker (live)', ()
     expect(await updatedPlace.verify(spec.id)).toEqual([]);
     expect(await health()).toMatchObject({ isOpenCodeReady: true });
     expect(await server.readToken(spec.id)).toBe(tokenBefore);
-    expect(await shell(`cat ${repo}/.opencode/tool/hello.ts`)).toBe(HELLO_TOOL);
+    expect(await shell(`cat ${plugin}`)).toBe(HELLO_PLUGIN);
     expect(await updatedPlace.list()).toMatchObject([{ id: spec.id, state: 'running', damaged: false }]);
     // No container mounts the old tools volume any more, so it is gone.
     expect((await host.volumes()).filter((name) => name.startsWith('openchamber-tools-'))).toEqual([after]);

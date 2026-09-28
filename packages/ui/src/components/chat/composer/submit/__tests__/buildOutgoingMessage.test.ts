@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
@@ -434,3 +437,85 @@ describe('capturing composer context for the queue', () => {
         expect(direct.skillNames).toEqual(['deploy']);
     });
 });
+
+const chatInputSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ChatInput.tsx'), 'utf-8');
+
+const LINKED_REFERENCE_KINDS = ['linkedIssue', 'linkedPr', 'linkedLinearIssue', 'linkedGuestIssue'];
+
+/** Lift one predicate out of the composer source: the code under test is the parameter source. */
+const gateExpression = (pattern: RegExp, what: string): string => {
+    const match = pattern.exec(chatInputSource);
+    if (!match) throw new Error('ChatInput.tsx no longer holds ' + what);
+    return match[1];
+};
+
+/** Every value in the file that is derived from all four kinds of linked reference. */
+const linkedReferenceValues = (): string[] => {
+    const names: string[] = [];
+    for (const match of chatInputSource.matchAll(/const (\w+) = ([^;\n]*);/g)) {
+        const [, name, expression] = match;
+        if (LINKED_REFERENCE_KINDS.every((kind) => expression.includes(kind))) names.push(name);
+    }
+    return names;
+};
+
+/**
+ * True when a predicate counts a linked reference: it names one of the four kinds
+ * directly, or it reads a value derived from all four. The assertion follows that
+ * intent rather than one variable name, so inlining the value back into the
+ * predicates stays green while a predicate that stops counting stays red.
+ */
+const countsLinkedReference = (predicate: string): boolean =>
+    LINKED_REFERENCE_KINDS.some((kind) => predicate.includes(kind))
+    || linkedReferenceValues().some((name) => predicate.includes(name));
+
+/** The condition the builder strips linked references with, read from the builder call itself. */
+const builderStripGuard = gateExpression(/linkedIssue: !(\w+) && linkedIssue/, 'the builder strip on linked references');
+
+describe('the composer send gate counts what the submission builder counts', () => {
+    // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
+    // Vite worker URLs and every runtime store. The gate is guarded at the source, the way
+    // the neighbouring composer regression tests guard theirs.
+    test('every predicate the composer sends with counts a linked reference', () => {
+        const gates = [
+            gateExpression(/const hasContent = ([^;\n]*);/, 'the send-button gate'),
+            gateExpression(/hasContent: (currentMessage\.trim\(\)[^,\n]*),/, 'the submit guard predicate'),
+            gateExpression(/hasContent: (options\.presetText\.trim\(\)[^,\n]*),/, 'the preset snapshot predicate'),
+        ];
+
+        for (const gate of gates) {
+            expect(countsLinkedReference(gate)).toBe(true);
+            // The builder drops the linked context in that mode, so the gate must too.
+            expect(gate).toContain(builderStripGuard);
+        }
+    });
+
+    test('the submit guard recomputes when a linked reference changes', () => {
+        expect(countsLinkedReference(gateExpression(
+            /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{([\s\S]*?)\n {4}\}, \[/,
+            'the submit guard body',
+        ))).toBe(true);
+        expect(countsLinkedReference(gateExpression(
+            /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{[\s\S]*?\n {4}\}, ([^)]*)\);/,
+            'the submit guard dependencies',
+        ))).toBe(true);
+    });
+
+    test('a linked reference on its own is a message, and nothing at all is still empty', () => {
+        expect(buildOutgoingMessage(input(), deps()).isEmpty).toBe(true);
+
+        const onlyLinked: Partial<OutgoingMessageInput>[] = [
+            { linkedIssue: { number: 12, title: 'Attached', url: 'https://github.com/acme/app/issues/12', contextText: 'body' } },
+            { linkedPr: { number: 34, title: 'Attached', url: 'https://github.com/acme/app/pull/34', instructions: 'review', context: 'body' } },
+            { linkedLinearIssue: { identifier: 'ENG-1', title: 'Attached', url: 'https://linear.app/acme/issue/ENG-1', contextText: 'body' } },
+            { linkedGuestIssue: { providerId: 'guest.example', id: 'guest-1', title: 'Attached', url: 'https://example.com/issues/1', contextText: 'body' } },
+        ];
+
+        for (const linked of onlyLinked) {
+            const built = buildOutgoingMessage(input(linked), deps());
+            expect(built.isEmpty).toBe(false);
+            expect(built.additionalParts.map((part) => part.text)).toContain('body');
+        }
+    });
+});
+

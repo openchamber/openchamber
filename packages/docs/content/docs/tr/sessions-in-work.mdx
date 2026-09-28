@@ -1,0 +1,76 @@
+---
+title: Devam eden oturumlar
+description: Gerçek iş süren oturumları, tamamlandı olarak işaretleyene kadar kenar çubuğunda göz önünde tutun.
+---
+
+# Devam eden oturumlar
+
+Sorular, araştırmalar ve hızlı denemeler çabucak birikir; gerçekten bir şeyi düzelttiğiniz oturum da bunların arasında kaybolur. **Devam eden** bölümü bu oturumları kenar çubuğunda tek bir yerde toplar. Bir oturum, siz tamamlandı diyene kadar orada kalır.
+
+"Son kullanılanlar" bölümünden farkı da budur. "Son kullanılanlar" son iki günde değişen her şeyi gösterir ve kendiliğinden yenilenir: Bu sabah merak edip açtığınız oturum oradadır, pazartesi yarıda bıraktığınız düzeltme ise çoktan gitmiştir. "Devam eden", ne kadar zaman önce açmış olursanız olun, henüz bitirmediğiniz işlerin listesidir.
+
+## Nerede bulunur
+
+**Devam eden** bölümü kenar çubuğunda, sohbetlerin altında ve "Son kullanılanlar"ın (Timeline modunda ise zaman çizelgesinin) üstündedir. Telefonda oturum listesinde aynı yerdedir.
+
+Devam eden bir oturum, alt oturumlarıyla birlikte oraya taşınır. "Son kullanılanlar"da, zaman çizelgesinde, projesinde ya da klasöründe ikinci kez görünmez. Tamamlandı olarak işaretlediğinizde eski yerine döner.
+
+## Oturumları elle izleyin ve bitirin
+
+- **İzlemek için:** Fareyle bir oturumun üzerine gelip göze tıklayın ya da oturum menüsünden **Devam eden iş olarak izle**'yi seçin.
+- **Bitirmek için:** Bölümdeki bir oturumun üzerine gelip onay işaretine tıklayın ya da menüden **Tamamlandı olarak işaretle**'yi seçin.
+
+Telefonda aynı işleme ulaşmak için oturum satırını kaydırın ya da oturum menüsünü kullanın.
+
+Worktree'lerdeki oturumlar dahil, her proje oturumu devam edenlerde olabilir. Alt oturumlar üst oturumlarıyla birlikte gelir. Sohbetler asla: Onlar sade konuşmalardır, bu yüzden göz simgesi almazlar.
+
+## Oturumları Jev taşısın
+
+Bir [sınıflandırma sağlayıcısı](/tr/classification-providers/) kuruluysa oturumları kendiniz izlemek zorunda değilsiniz. Jev gönderdiğiniz her mesajı okur ve şu durumlarda oturumu devam edenlere taşır:
+
+- bir değişiklik istediğinizde
+- bir hata bildirdiğinizde
+- yapmak üzere olduğunuz somut bir değişikliği konuştuğunuzda
+
+Sorular, açıklamalar ve araştırmalar sayılmaz. Ajan bir turu bitirdiğinde Jev bir kez daha bakar; böylece ancak yanıttan anlaşılan işi de yakalar.
+
+Jev oturumları yalnızca devam edenlere **taşır**. Bir oturumu tamamlandı olarak işaretledikten sonra onu yalnızca sonradan gönderilen yeni bir istek geri getirir.
+
+### "Bu iş tamamlanmış görünüyor."
+
+Bir tur işin sonu gibi göründüğünde (teşekkür ettiniz, commit istediniz, çalıştığını onayladınız) Jev hiçbir şeyi kapatmaz, bir ipucu bırakır:
+
+- kenar çubuğunda oturum satırında gri bir onay işareti
+- mesaj alanının üstünde bir şerit: **Bu iş tamamlanmış görünüyor.** ve **Tamamlandı olarak işaretle** düğmesi
+
+Jev haklıysa **Tamamlandı olarak işaretle**'ye basın. Değilse devam edin: İpucu bir sonraki mesajınızla kaybolur.
+
+## Özet ve sonraki mesaj önerisi
+
+Ajan işini bitirip oturum bir dakika sessiz kaldığında OpenChamber küçük modelinizle iki şey yazabilir ([Sağlayıcılar, modeller ve agentlar](/tr/providers/) sayfasına bakın):
+
+- **Özet:** Neyin yapıldığını ve işlerin nerede durduğunu hatırlatan kısa bir not; son yanıtın altında ve kenar çubuğunda oturumun ipucu balonunda görünür
+- **Öneri:** Büyük olasılıkla göndereceğiniz sonraki mesaj; mesaj alanının üstünde bir satır olarak görünür, tıklayınca metin alana yerleşir, kendiliğinden asla gönderilmez
+
+Jev kullanılabiliyorsa OpenChamber önce ona turun bunlara ihtiyacı olup olmadığını sorar. Gerçek bir işten sonra basit bir "teşekkürler, bu kadar" yine de özet alır; ama yapılacak bir şey kalmadığında öneri atlanır, ikisi de işe yaramayacaksa küçük model hiç çağrılmaz. Jev yoksa ikisi de eskisi gibi her turdan sonra üretilir.
+
+Bunları **Ayarlar → Sohbet → Session Yardımı** bölümünden açıp kapatabilirsiniz.
+
+## Ayarlar
+
+**Ayarlar → Session'lar → Devam eden oturumlar** bölümünü açın:
+
+- **Devam eden oturumları göster:** Bölümün kendisi; kapatırsanız oturumlar her zamanki yerlerinde kalır
+- **Oturumları otomatik olarak devam edenlere taşı:** Jev kısmı; yalnızca elle izlemek için kapatın
+
+İkisi de varsayılan olarak açıktır.
+
+## Nerede çalışır
+
+Bölüm ve elle izleme ile bitirme, VS Code dahil her yerde çalışır. Otomatik taşıma, "tamamlanmış görünüyor" ipucu ve özetler için Jev filtresi OpenChamber sunucusuna ihtiyaç duyar; bu yüzden masaüstü uygulamasında, web uygulamasında ve telefonda çalışır, VS Code'da çalışmaz.
+
+## İlgili
+
+- [Sınıflandırma sağlayıcıları (Jev)](/tr/classification-providers/): otomatik izlemeyi kurun
+- [Sohbetler](/tr/chats/): devam eden işlere girmeyen konuşmalar
+- [Oturum hedefleri](/tr/session-goals/): ajanı bitiş çizgisine kadar çalıştırın

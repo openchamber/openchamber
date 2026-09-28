@@ -1,5 +1,6 @@
 import type {
   AttachContribution,
+  FileEditorContribution,
   GuestActionContribution,
   GuestCommandContribution,
   GuestSurfaceDock,
@@ -38,6 +39,8 @@ export type InstalledGuest = {
   integration?: PublicIntegration;
   /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
   filesystem?: string[];
+  /** Declared `contributes.origins`: the frame may exchange data with them once approved. */
+  origins?: string[];
   service?: PublicService;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
@@ -45,6 +48,8 @@ export type InstalledGuest = {
   commands?: GuestCommandContribution[];
   /** Declared `contributes.tools`; the chat applies them only for an active guest. */
   tools?: GuestToolContribution[];
+  /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
+  fileEditors?: FileEditorContribution[];
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
   source?: GuestSource;

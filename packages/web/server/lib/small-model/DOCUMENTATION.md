@@ -41,10 +41,11 @@ login `generateSmallModelText` throws `404`. What happens next is per feature:
   model with the session as context and does not touch its history. Verified
   on OpenCode 2.0.2: the reply comes back and the message count stays at zero.
 - Session renaming, the session goal and the walkthrough do NOT fall back —
-  feeding a whole session into a model to write a title or audit a goal is the
+  feeding a whole session into a model to write a title or check a goal is the
   wrong cost. Their entry points read `available` from `GET /api/small-model`
   (`packages/ui/src/stores/useSmallModelStore.ts`) and show a disabled control
-  with the reason; the walkthrough uses its own readiness (`no-model`).
+  with the reason; the walkthrough uses its own readiness (`no-model`). A goal
+  is also allowed when Jev checks it instead (`../session-goal`).
 - Session assist is server-side and simply does nothing when
   `describeSmallModel` answers null.
 - Notes summarization and spoken summaries keep the original text and silence
@@ -58,7 +59,9 @@ Four things are decided here, in order:
 2. OpenChamber's settings override (Settings → Sessions → Small Model): when
    `smallModelUseDefault` is `false`, `smallModelOverride` wins —
    `source: 'settings'`.
-3. The small model of the session's provider (`preferredProviderID`) —
+3. The small model of the caller's provider (`preferredProviderID`: the
+   session's, or the composer's for commit messages, PR descriptions, spoken
+   summaries, the diff walkthrough and extensions) —
    `source: 'session-provider-small'` — found by `pickSmallModelInProvider`:
    the newest enabled, active, text-in text-out model of the first family in
    `SMALL_MODEL_FAMILY_PRIORITY` (`gpt-luna`, `gemini-flash-lite`,
@@ -75,18 +78,20 @@ Four things are decided here, in order:
    and finds none then takes the session's own model — `source:
    'session-model'`: costlier than a small model elsewhere, but never another
    provider's subscription.
-4. The small model of any provider OpenCode can call, same family order,
-   newest first — `source: 'small'`. Where callers without a session (commit
-   messages, spoken summaries) usually land.
-5. Otherwise `GET /api/model/default` — `source: 'default'`. This is
+4. Otherwise `GET /api/model/default` — `source: 'default'`. This is
    OpenCode's default chat model, not a small one; it is the last resort.
 
-Claude Code is refused unconditionally (`422`,
-`code: 'small-model-provider-unsupported'`). A plugin can publish an
-OpenAI-compatible endpoint for it, but that endpoint is a façade over the
-Claude Agent SDK, which spawns the Claude Code CLI per request and spends the
-user's Claude subscription rate limit. An available endpoint does not lift the
-refusal — the cost is the reason, not the transport.
+There is deliberately no step that takes a small model from whichever other
+provider is connected. Until 2026-09 one existed (`source: 'small'`, after
+step 3); it sent diffs and replies to a provider the user never chose for
+them, and the walkthrough and extensions reached it without even passing
+their provider. Content goes only to the provider the user works with, the
+model they picked, or the default they configured.
+
+Claude Code (`claude-code`, from the opencode-claude plugin) is a provider
+like any other: its generate path runs a clean one-shot turn with no tools and
+no session, so `claude-code/haiku` (family `claude-haiku`) is picked in the
+normal family order.
 
 ## Prompt shape
 
@@ -120,10 +125,13 @@ model they got. The resolved value comes back as `outputTokens`.
 longer wanted. The timeout covers generation, retry waits and structured-output
 retries together.
 
-OpenCode 2 can reject an explicit model before its cold catalog finishes loading.
-An `InvalidRequestError` whose message exactly names the selected model as
-`Model unavailable: provider/model` gets one retry after 500 ms, with the same
-model and prompt. Cancellation also stops the wait. Other errors are not retried.
+OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
+plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode
+starts because plugins for the global location load lazily. An
+`InvalidRequestError` whose message exactly names the selected model as
+`Model unavailable: provider/model` is retried with exponential backoff (0.5, 1,
+2, 4, 8, 16 s, ~31 s in total), with the same model and prompt. The rejection
+precedes provider dispatch, so retries cost no tokens. Cancellation also stops the wait. Other errors are not retried.
 If the model remains unavailable, the route returns 503 with
 `code: 'small-model-unavailable'` and the model-specific reason. Commit and PR
 generation own their error toast and suppress the shared request toast.

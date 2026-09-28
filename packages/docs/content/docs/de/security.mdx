@@ -36,6 +36,92 @@ Geräte, die über [Ein Gerät verbinden](/connect-devices/) gekoppelt werden, a
 - Wenn Sie eine öffentliche URL brauchen, verwenden Sie lieber einen [Tunnel](/tunnels/) oder ein privates Netzwerk (z. B. VPN), statt einen Port ins Internet zu öffnen.
 - Wenn Sie OpenChamber hinter Ihrem eigenen HTTPS-Server betreiben, sehen Sie sich [Reverse Proxy](/reverse-proxy/) an.
 
+## Enterprise-Modus
+
+Wenn Ihr Team Gesprächsinhalte nur an die Modellanbieter senden darf, die Sie in OpenCode konfiguriert haben, schalten Sie den Enterprise-Modus ein. Dafür gibt es zwei Wege, und einer davon reicht.
+
+### Eine Richtliniendatei auf dem Rechner
+
+Das ist der Weg für Laptops, die Sie verwalten. Legen Sie eine Datei namens `policy.json` in einen Ordner, in den nur ein Administrator schreiben darf:
+
+| System | Pfad |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+Der Pfad hängt nicht davon ab, wie OpenChamber installiert ist. Die Desktop-App, der über npm gestartete Webserver, die CLI und die VS Code-Erweiterung lesen alle dieselbe Datei. Verteilen können Sie sie über Ihre Geräteverwaltung (Jamf, Intune und Ähnliche). Für einen Server in Docker binden Sie die Datei unter dem Linux-Pfad ein.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+Nötig ist nur `enterpriseMode`. `organization` erscheint in den Einstellungen als „Verwaltet von Acme“, damit alle wissen, wer das entschieden hat. Mit `relayUrl` und `jev` legen Sie Ihr eigenes Relay und Ihren eigenen Jev-Endpunkt fest, und `allowNetworkAccess` lässt andere Geräte OpenChamber über das Netzwerk erreichen. Alle drei sind unten beschrieben.
+
+- Nichts, was ein Nutzer einstellt, weder in den Einstellungen noch in der Umgebung, schaltet aus, was die Datei einschaltet.
+- Wenn die Datei den Enterprise-Modus einschaltet, entscheidet nur die Datei. Die Umgebungsvariablen unten für Relay, Jev und Netzwerkzugriff werden ignoriert, weil ein Nutzer sie selbst setzen kann.
+- Wenn die Datei existiert, sich aber nicht lesen lässt oder kein gültiges JSON ist, bleibt der Enterprise-Modus an und nichts wird festgelegt. Die Einstellungen zeigen dann, dass die Richtlinie nicht gelesen werden konnte. Eine kaputte Datei hebt den Schutz nie stillschweigend auf.
+- Änderungen greifen ohne Neustart.
+- OpenChamber läuft unter dem Konto des Nutzers, also kann der Nutzer die Datei lesen. Denken Sie daran, bevor Sie einen API-Schlüssel hineinschreiben.
+
+### Eine Umgebungsvariable
+
+Auf einem Server oder in einem Container, wo Sie die Umgebung selbst in der Hand haben, genügt das:
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+Auf einem Laptop ist das die schwächere Sperre: Die Desktop-App liest die Variable aus dem Profil der Login-Shell (zum Beispiel `~/.zshrc`), und das kann der Nutzer bearbeiten. Nehmen Sie dort die Richtliniendatei.
+
+Mit der Variable kommen auch Relay, Jev und Netzwerkzugriff aus eigenen Variablen: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL` und `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`. In Docker brauchen Sie die letzte, weil der Server über den Container hinaus lauschen muss.
+
+### Was sich ändert
+
+- Modellanbieter kommen nur aus Ihrer OpenCode-Konfiguration. Einen Anbieter verbinden, sich bei einem anmelden, einen Schlüssel hinzufügen oder einen eigenen Anbieter anlegen ist in OpenChamber ausgeschaltet; bestehende Konten entfernen oder wechseln funktioniert weiter. Das schließt nur den Weg über die App; die eigentliche Sperre ist die unten beschriebene OpenCode-Richtlinie.
+- [Klassifizierungsanbieter (Jev)](/classification-providers/) bleiben aus, auch ein eigener Endpunkt, den jemand in den Einstellungen einträgt. Sicherheitsnetz und Auto werden nicht angeboten, und Sitzungen kommen nur von Hand in Arbeit. Um Jev über Ihre eigene Infrastruktur zu nutzen, legen Sie einen Endpunkt mit `jev` in der Richtliniendatei oder mit `OPENCHAMBER_JEV_URL` fest (dazu `OPENCHAMBER_JEV_MODEL` und, falls er einen braucht, `OPENCHAMBER_JEV_API_KEY`). Er wird zur Voreinstellung, lässt sich weiterhin ausschalten, und etwas anderes kann nicht gewählt werden.
+- Vorlesen über OpenAI ist aus. Ein eigener Server für Sprachausgabe oder Transkription muss auf demselben Rechner laufen. Lokale Stimmen und lokale Diktiermodelle funktionieren weiter.
+- Push-Benachrichtigungen an Telefone und Browser enthalten nur einen allgemeinen Titel wie „Agent response is ready“, ohne Nachrichtentext oder Sitzungsnamen. Desktop-Benachrichtigungen bleiben auf Ihrem Rechner und behalten den vollständigen Text.
+- Update-Prüfungen laufen weiter, damit Sicherheitsfixes Sie weiterhin erreichen, aber sie melden nie Nutzungsdaten, nicht einmal die anonyme Installations-ID.
+- [Externe Tunnel](/tunnels/) (Cloudflare, ngrok) sind aus. Ein Tunnelanbieter entschlüsselt den Traffic an seinem Edge und sieht jede Anfrage im Klartext.
+- Das [Private Relay](/private-relay/) funktioniert nur über Ihr eigenes Relay. Betreiben Sie ein [selbst gehostetes Relay](https://github.com/openchamber/openchamber-relay) und richten Sie OpenChamber mit `relayUrl` in der Richtliniendatei oder mit `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws` darauf aus. Auch das gemeinsame Relay kann Ihren Traffic nicht lesen, da es Ende-zu-Ende verschlüsselt ist, aber Ihr eigenes hält die Verbindungsmetadaten und den Weg zu diesem Rechner in Ihrem Netzwerk. Ohne eigenes Relay lassen sich überhaupt keine Geräte koppeln.
+- OpenChamber lauscht nur auf dem Rechner, auf dem es läuft. Die Desktop-Einstellung, mit der andere Geräte im lokalen Netzwerk die App öffnen können, ist aus, und der Server startet nicht auf einer Netzwerkadresse, weder über die CLI (`--host`, `--lan`) noch über die Umgebung. Taucht die Richtliniendatei auf, während die App läuft, werden Verbindungen von anderen Rechnern bis zum nächsten Start getrennt. Netzwerkzugriff erlauben Sie mit `"allowNetworkAccess": true` in der Richtliniendatei oder mit `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, wo die Umgebung den Enterprise-Modus einschaltet. Denken Sie daran, dass die Verbindung unverschlüsseltes HTTP ist, in einem gemeinsamen Netzwerk kann sie also jeder mitlesen; stellen Sie einen Server, den andere erreichen, hinter [Ihr eigenes HTTPS](/reverse-proxy/).
+- In der VS Code-Erweiterung ist das Verbinden von Anbietern aus, und Update-Prüfungen melden keine Nutzungsdaten. Jev, Relay, Tunnel, Push-Benachrichtigungen und Sprachdienste aus der Cloud gibt es dort ohnehin nicht.
+
+Aufgaben des kleinen Modells (Sitzungstitel, Zusammenfassungen, Commit-Nachrichten, die Durchsicht der Änderungen) brauchen keinen besonderen Modus. Sie laufen immer auf dem kleinen Modell, das Sie in den Einstellungen gewählt haben, auf einem kleinen Modell des Anbieters, mit dem Sie gerade arbeiten, oder auf dem Standardmodell aus Ihrer OpenCode-Konfiguration. Sie weichen nie auf einen anderen Anbieter aus, der zufällig ebenfalls verbunden ist.
+
+Welche Modellanbieter überhaupt genutzt werden dürfen, entscheidet OpenCode, nicht OpenChamber. Sperren Sie das mit [OpenCode-Richtlinien](https://opencode.ai/v2/docs/policies/): alle Anbieter verbieten, dann die freigegebenen erlauben.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+Ein verbotener Anbieter verschwindet, selbst wenn jemand einen Schlüssel dafür hinzufügt. Legen Sie die Richtlinien in die globale `~/.config/opencode/opencode.jsonc`, wo ein Projekt sie nicht aufheben kann, oder liefern Sie sie aus einem OpenCode-Console-Workspace aus, der das letzte Wort hat. Der Enterprise-Modus deckt ab, was OpenChamber selbst darüber hinaus sendet.
+
+Die Websuchen und Seitenabrufe des Agenten laufen ebenfalls über OpenCode, zum Suchdienst und zu den Seiten selbst. Wenn sie Ihr Netzwerk nicht verlassen sollen, verbieten Sie sie mit derselben Art von Richtlinie:
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## Verwandt
 
 - [Ein Gerät verbinden](/connect-devices/) — einmaliges Pairing und gerätespezifische Tokens

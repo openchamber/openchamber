@@ -174,11 +174,14 @@ export const parseGitInstallUrl = (value) => {
   return ref ? { url, ref } : { url };
 };
 
+const STDERR_TAIL_BYTES = 4096;
+
 /**
  * Run one git command without a terminal. Resolves `{ ok: true, stdout }` on
- * exit 0 and `{ ok: false }` on a non-zero exit, a spawn error, or the
+ * exit 0 and `{ ok: false, stderr }` on a non-zero exit, a spawn error, or the
  * timeout (the child is killed). Never rejects. `stdout` is captured only
- * when `capture` is set so a clone's progress is not buffered.
+ * when `capture` is set so a clone's progress is not buffered; `stderr` keeps
+ * only its tail, for diagnosis.
  */
 export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} } = {}) => (
   new Promise((resolve) => {
@@ -208,6 +211,11 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
     if (capture && child.stdout) {
       child.stdout.on('data', (chunk) => chunks.push(chunk));
     }
+    let stderrTail = Buffer.alloc(0);
+    child.stderr?.on('data', (chunk) => {
+      const joined = Buffer.concat([stderrTail, chunk]);
+      stderrTail = joined.subarray(Math.max(0, joined.length - STDERR_TAIL_BYTES));
+    });
     let settled = false;
     const finish = (result) => {
       if (settled) {
@@ -226,7 +234,7 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
     });
     child.on('close', (exit) => {
       clearTimeout(timer);
-      finish(exit === 0 ? { ok: true, stdout: Buffer.concat(chunks).toString('utf8') } : { ok: false });
+      finish(exit === 0 ? { ok: true, stdout: Buffer.concat(chunks).toString('utf8') } : { ok: false, stderr: stderrTail.toString('utf8') });
     });
   })
 );
@@ -279,6 +287,24 @@ export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } =
   return sshCommand ? { args, env: { GIT_SSH_COMMAND: sshCommand } } : { args };
 };
 
+/**
+ * Run a network git command (clone, fetch). The pinned connection options make
+ * git honour `http.sslBackend` from the user's config; a Git build that lacks
+ * that backend refuses with "Unsupported SSL backend" and names the ones it
+ * has, so the command is retried once on the first of those. A failure's
+ * stderr is logged: the UI only shows a generic "could not clone".
+ */
+export const runGitNetwork = async (args, options) => {
+  const result = await runGit(args, options);
+  if (result.ok) return result;
+  const supported = /Unsupported SSL backend[\s\S]*?Supported SSL backends:\s*([\w-]+)/i.exec(result.stderr ?? '')?.[1];
+  const retried = supported ? await runGit(['-c', `http.sslBackend=${supported}`, ...args], options) : result;
+  if (!retried.ok) {
+    console.warn('[guests] git network command failed:', (retried.stderr ?? '').trim() || 'no output');
+  }
+  return retried;
+};
+
 export const cloneGitRepository = async (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId } = {}) => {
   if (ref !== undefined && !isGitRef(ref)) {
     return { ok: false, code: 'clone-failed' };
@@ -292,6 +318,6 @@ export const cloneGitRepository = async (source, dest, { gitBinary = 'git', time
     args.push('--branch', ref);
   }
   args.push('--', source, dest);
-  const result = await runGit(args, { gitBinary, timeoutMs, env: network.env });
+  const result = await runGitNetwork(args, { gitBinary, timeoutMs, env: network.env });
   return result.ok ? { ok: true } : { ok: false, code: 'clone-failed' };
 };

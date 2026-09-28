@@ -1,4 +1,4 @@
-export const REQUIRED_PLACE_METHODS = ['check', 'create', 'list', 'exec', 'execArgv', 'stop', 'start', 'remove', 'verify'];
+export const REQUIRED_PLACE_METHODS = ['check', 'create', 'list', 'exec', 'execArgv', 'connect', 'stop', 'start', 'remove', 'verify'];
 
 export function createPlaceRegistry(initialPlaces = []) {
   const places = new Map();

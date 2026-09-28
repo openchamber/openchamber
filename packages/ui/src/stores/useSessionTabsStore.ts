@@ -16,7 +16,12 @@ import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
 interface SessionTabsStore {
   tabIds: string[];
 
-  ensureTab: (sessionId: string) => void;
+  /**
+   * Adds the session's tab. `slotIds` are sessions that share one tab with it
+   * (the members of a multi-run): an existing tab of any of them is reused in
+   * place instead of adding a new one.
+   */
+  ensureTab: (sessionId: string, slotIds?: readonly string[]) => void;
   closeTab: (sessionId: string) => void;
   closeOtherTabs: (sessionId: string) => void;
   reorderTabs: (activeId: string, overId: string) => void;
@@ -34,10 +39,17 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
       (set, get) => ({
         tabIds: [],
 
-        ensureTab: (sessionId) => {
+        ensureTab: (sessionId, slotIds) => {
           if (!sessionId) return;
           const { tabIds } = get();
           if (tabIds.includes(sessionId)) return;
+          const slot = slotIds && slotIds.length > 0 ? new Set(slotIds) : null;
+          const slotIndex = slot ? tabIds.findIndex((id) => slot.has(id)) : -1;
+          if (slot && slotIndex >= 0) {
+            const next = tabIds.flatMap((id, index) => (index === slotIndex ? [sessionId] : slot.has(id) ? [] : [id]));
+            set({ tabIds: next });
+            return;
+          }
           // Soft cap: with auto-add the strip only ever grows, so past the cap
           // the oldest tab (never the one being opened, which lands last)
           // leaves the working set.

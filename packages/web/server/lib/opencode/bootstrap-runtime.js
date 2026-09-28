@@ -67,6 +67,7 @@ export const createBootstrapRuntime = (dependencies) => {
       agentToolRuntime,
       pluginNotificationEmitter,
       desktopUpdater,
+      skipBodyParsing,
     } = options;
 
     const uiAuthController = createUiAuth({
@@ -93,7 +94,7 @@ export const createBootstrapRuntime = (dependencies) => {
       uiAuthController,
     });
 
-    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
     registerAgentToolRoutes(app, { express, agentToolRuntime });
 

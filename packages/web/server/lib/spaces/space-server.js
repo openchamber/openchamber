@@ -20,6 +20,7 @@ import {
   IMAGE_CAT,
   IMAGE_ONLY_PATH,
   IMAGE_SH,
+  SPACE_IDLE_STOP_PATH,
   SPACE_SERVER_HOST,
   SPACE_SERVER_PORT,
   SPACE_TOKEN_DIRECTORY,
@@ -47,6 +48,14 @@ const WRITE_TOKEN_SCRIPT = [
   'umask 077;',
   `mkdir -p ${SPACE_TOKEN_DIRECTORY} && chmod 700 ${SPACE_TOKEN_DIRECTORY}`,
   `&& cat > ${SPACE_TOKEN_PATH}.new && mv ${SPACE_TOKEN_PATH}.new ${SPACE_TOKEN_PATH}`,
+].join(' ');
+
+// The idle stop's setting, the same way: the server inside reads it once a minute, never half of it.
+const WRITE_IDLE_STOP_SCRIPT = [
+  IMAGE_ONLY_PATH,
+  'umask 077;',
+  `mkdir -p ${SPACE_TOKEN_DIRECTORY} && chmod 700 ${SPACE_TOKEN_DIRECTORY}`,
+  `&& cat > ${SPACE_IDLE_STOP_PATH}.new && mv ${SPACE_IDLE_STOP_PATH}.new ${SPACE_IDLE_STOP_PATH}`,
 ].join(' ');
 
 // Module resolution walks up from the project files, so one link above every project is enough.
@@ -93,6 +102,9 @@ export function createSpaceServerChannel({ exec, wait = pause, now = Date.now })
 
   /** The token travels on stdin. It never appears in an argument, on the host or inside. */
   const writeToken = (spaceId, token) => runFixedScript(spaceId, [IMAGE_SH, '-c', WRITE_TOKEN_SCRIPT], token, 'store the server token');
+
+  /** The idle stop's setting, `{ enabled, hours }`, for the server inside to read at its next check. */
+  const writeIdleStop = (spaceId, setting) => runFixedScript(spaceId, [IMAGE_SH, '-c', WRITE_IDLE_STOP_SCRIPT], JSON.stringify(setting), 'store the idle stop setting');
 
   /**
    * The host keeps no copy of the token. It reads it back when it needs it.
@@ -186,5 +198,5 @@ export function createSpaceServerChannel({ exec, wait = pause, now = Date.now })
     );
   };
 
-  return { writeToken, readToken, linkPlugin, request, waitUntilReady };
+  return { writeToken, writeIdleStop, readToken, linkPlugin, request, waitUntilReady };
 }

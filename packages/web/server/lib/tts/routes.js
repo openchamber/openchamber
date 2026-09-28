@@ -3,6 +3,7 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
 export function registerTtsRoutes(app, { sayTTSCapability }) {
   let ttsModulePromise = null;
@@ -18,6 +19,9 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       contentType: req.headers['content-type'] || null,
     });
     try {
+      if (isEnterpriseMode()) {
+        return res.status(403).json({ allowed: false, error: ENTERPRISE_MODE_ERROR });
+      }
       const openaiApiKey = process.env.OPENAI_API_KEY;
       console.log('[Voice] OpenAI API Key present:', !!openaiApiKey);
 
@@ -58,6 +62,12 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
+      }
+
+      // Without a custom server this is OpenAI's cloud; a custom one has
+      // already been held to this machine by the URL check above.
+      if (isEnterpriseMode() && !normalizedBaseURL) {
+        return res.status(403).json({ error: ENTERPRISE_MODE_ERROR });
       }
 
       // Dynamically import the TTS service (ESM)
@@ -135,8 +145,10 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   app.get('/api/tts/status', async (_req, res) => {
     try {
       const { ttsService } = await getTtsModule();
+      const enterpriseMode = isEnterpriseMode();
       res.json({
-        available: ttsService.isAvailable(),
+        available: !enterpriseMode && ttsService.isAvailable(),
+        enterpriseMode,
         voices: [
           'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
           'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'

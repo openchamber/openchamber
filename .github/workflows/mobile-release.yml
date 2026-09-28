@@ -72,7 +72,7 @@ env:
 jobs:
   resolve-version:
     name: Resolve mobile version
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       version_name: ${{ steps.version.outputs.version_name }}
       build_number: ${{ steps.version.outputs.build_number }}
@@ -111,7 +111,7 @@ jobs:
   android-release:
     name: Android signed release
     if: inputs.build_android
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: resolve-version
     permissions:
       contents: write
@@ -185,7 +185,7 @@ jobs:
   ios-testflight:
     name: iOS TestFlight upload
     if: inputs.build_ios
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     needs: resolve-version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -6,6 +6,7 @@
 // curl config. It is in no argument list, on the host or inside, in no label and in no file.
 
 import { readFileSync } from 'node:fs';
+import net from 'node:net';
 
 import { SpaceError } from './errors.js';
 import {
@@ -19,6 +20,7 @@ import {
 } from './exec-http.js';
 import { ROLE_GATEKEEPER } from './labels.js';
 import {
+  GATEKEEPER_BIND_PATH,
   GATEKEEPER_CONTROL_HOST,
   GATEKEEPER_CONTROL_PORT,
   GATEKEEPER_PROGRAM_DIRECTORY,
@@ -46,16 +48,22 @@ const MAX_JOURNAL_RECORDS = 1_000;
 const MAX_JOURNAL_BODY_CHARACTERS = 1024 * 1024;
 const MAX_JOURNAL_FIELD_CHARACTERS = 256;
 
-// The program goes through a temporary name, so the waiting container never runs half a file.
+// The bind address first, then the program, each through a temporary name, so the waiting
+// container never runs half a file and never runs the program before its address is there.
 const WRITE_PROGRAM_SCRIPT = [
   IMAGE_ONLY_PATH,
   `mkdir -p ${GATEKEEPER_PROGRAM_DIRECTORY}`,
+  `&& printf '%s' "$1" > ${GATEKEEPER_BIND_PATH}.new && mv ${GATEKEEPER_BIND_PATH}.new ${GATEKEEPER_BIND_PATH}`,
   `&& cat > ${GATEKEEPER_PROGRAM_PATH}.new && mv ${GATEKEEPER_PROGRAM_PATH}.new ${GATEKEEPER_PROGRAM_PATH}`,
 ].join(' ');
 
+// A policy is three small lists. These caps are what the host is willing to read back.
+const MAX_POLICY_BODY_CHARACTERS = 256 * 1024;
+const MAX_POLICY_ENTRIES = 1_000;
+
 const pause = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
 
-const unreadableAnswer = (why) => new SpaceError('gatekeeper_answer_unreadable', `The gatekeeper of the space ${why}`);
+const unreadableAnswer = (why) => new SpaceError('gatekeeper_answer_unreadable', `The network filter of the space ${why}`);
 
 /**
  * One field of a journal record, as text and no longer than the host reads. A list or an object
@@ -73,11 +81,20 @@ const text = (value) => (value === null || value === undefined || value instance
 export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) {
   const execInGatekeeper = (spaceId, argv, options) => exec(spaceId, argv, { ...options, target: ROLE_GATEKEEPER });
 
-  /** The program travels on stdin. It is in no argument, on the host or inside. */
-  const writeProgram = async (spaceId) => {
-    const result = await execInGatekeeper(spaceId, [IMAGE_SH, '-c', WRITE_PROGRAM_SCRIPT], { stdin: GATEKEEPER_PROGRAM });
+  /**
+   * The program travels on stdin. It is in no argument, on the host or inside. `bindAddress` is
+   * the gatekeeper's own address on the space's network, which the place read from the runtime
+   * after the container started; it goes into the file the container command names, and the
+   * program listens there and nowhere else. It is an address and not a secret, so it may be an
+   * argument of the script.
+   */
+  const writeProgram = async (spaceId, { bindAddress }) => {
+    if (net.isIP(bindAddress) === 0 || bindAddress === '0.0.0.0' || bindAddress === '::') {
+      throw new SpaceError('gatekeeper_address_unknown', 'The address of the network filter on the space\'s network is not known, so its listeners cannot be bound to it.');
+    }
+    const result = await execInGatekeeper(spaceId, [IMAGE_SH, '-c', WRITE_PROGRAM_SCRIPT, 'sh', bindAddress], { stdin: GATEKEEPER_PROGRAM });
     if (result.code !== 0) {
-      throw new SpaceError('gatekeeper_setup_failed', `Could not store the gatekeeper's program: ${tail(result.stderr) || `exit code ${result.code}`}`);
+      throw new SpaceError('gatekeeper_setup_failed', `Could not store the network filter's program: ${tail(result.stderr) || `exit code ${result.code}`}`);
     }
   };
 
@@ -99,7 +116,7 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
       }
       // No Docker step was interrupted here, so this must not look like one to a rollback.
       if (EXEC_INTERRUPTED_CODES.includes(error.code)) {
-        throw new SpaceError('gatekeeper_unreachable', `The request to the gatekeeper did not finish in time: ${error.message}`, { curlExitCode: null, execFailed: false });
+        throw new SpaceError('gatekeeper_unreachable', `The request to the network filter did not finish in time: ${error.message}`, { curlExitCode: null, execFailed: false });
       }
       throw error;
     }
@@ -117,7 +134,7 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
   const command = async (spaceId, path, body, what) => {
     const answer = await request(spaceId, { method: 'POST', path, body: JSON.stringify(body) });
     if (answer.status !== 200) {
-      throw new SpaceError('gatekeeper_refused', `The gatekeeper refused to ${what}: ${tail(answer.body) || `status ${answer.status}`}`, { status: answer.status });
+      throw new SpaceError('gatekeeper_refused', `The network filter refused to ${what}: ${tail(answer.body) || `status ${answer.status}`}`, { status: answer.status });
     }
   };
 
@@ -157,8 +174,43 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
    */
   const setNetwork = (spaceId, { mode, domains = [] }) => command(spaceId, '/network', { mode, domains }, 'change the network of this space');
 
-  /** One "uses without seeing" grant. The secret is in the body, so it stays out of every argument list. */
-  const addGrant = (spaceId, { id, upstream, header, secret }) => command(spaceId, '/grants', { id, upstream, header, secret }, `add the grant '${id}'`);
+  /**
+   * One grant: a "uses without seeing" credential, whose secret is in the body and so out of every
+   * argument list, or an opened domain with no secret and no header, which the window forwards to
+   * as the space sent it.
+   */
+  const addGrant = (spaceId, { id, upstream, header = null, secret = null }) => command(
+    spaceId,
+    '/grants',
+    secret === null ? { id, upstream } : { id, upstream, header, secret },
+    `add the grant '${id}'`,
+  );
+
+  /**
+   * What the gatekeeper holds now: its mode, its allowlist and the ids of its grants, never a
+   * secret. Read as data, capped, so the host can tell a gatekeeper that forgot its grants after
+   * a start from one that has them.
+   */
+  const readPolicy = async (spaceId) => {
+    const answer = await request(spaceId, { path: '/policy' });
+    if (answer.status !== 200) throw unreadableAnswer(`answered ${answer.status} for its policy`);
+    if (answer.body.length > MAX_POLICY_BODY_CHARACTERS) throw unreadableAnswer('answered with a policy larger than the host reads');
+    let parsed;
+    try {
+      parsed = JSON.parse(answer.body);
+    } catch {
+      throw unreadableAnswer('answered with a policy that is not JSON');
+    }
+    if (!(parsed instanceof Object) || Array.isArray(parsed) || !Array.isArray(parsed.grants) || !Array.isArray(parsed.domains)) {
+      throw unreadableAnswer('answered with a policy that holds no lists');
+    }
+    const names = (list) => list.slice(0, MAX_POLICY_ENTRIES).map(text).filter((entry) => entry !== '');
+    return {
+      mode: parsed.mode === 'open' ? 'open' : 'allowlist',
+      domains: names(parsed.domains),
+      grants: names(parsed.grants),
+    };
+  };
 
   /**
    * What the gatekeeper allowed and refused. The answer comes out of a container, so it is read
@@ -195,8 +247,10 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
         };
       }),
       dropped: Number.isSafeInteger(parsed.dropped) && parsed.dropped >= 0 ? parsed.dropped : 0,
+      // When the gatekeeper started: the journal holds nothing older, and the UI has to say so.
+      since: text(parsed.since),
     };
   };
 
-  return { writeProgram, waitUntilReady, setNetwork, addGrant, readJournal };
+  return { writeProgram, waitUntilReady, setNetwork, addGrant, readPolicy, readJournal };
 }

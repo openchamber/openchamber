@@ -9,11 +9,11 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { SECRET, SETUP_GIT, blob, createTestHost, forConfig, hostState, makeBait, readTree, removeTestHosts, shortStatus, unexpectedChanges } from './code-in-bait.js';
-import { buildExtUrl, createCodeIn } from './code-in.js';
+import { SECRET, SETUP_GIT, blob, createLocalPlace, createTestHost, forConfig, hostState, makeBait, readTree, removeTestHosts, shortStatus, unexpectedChanges } from './code-in-bait.js';
+import { createCodeIn } from './code-in.js';
+import { buildExtUrl } from './code-transfer.js';
 import { SpaceError } from './errors.js';
 import { createHostGit } from './host-git.js';
-import { IMAGE_ONLY_PATH, IMAGE_SH } from './layout.js';
 import { runCommand } from './run-command.js';
 
 const WIN = process.platform === 'win32';
@@ -441,6 +441,7 @@ describe('the git version floor', () => {
   });
 
   it.each([
+    ['git version 2.28.1\n', 'git_too_old'],
     ['git version 2.26.2\n', 'git_too_old'],
     ['git version 1.9.5\n', 'git_too_old'],
     ['something else\n', 'git_version_unreadable'],
@@ -451,14 +452,14 @@ describe('the git version floor', () => {
     const codeIn = createCodeIn({ git: gitAnswering(host, text), place: null, temporaryDirectory: host.root });
     const failure = await codeIn.takeSnapshot({ repository: repo, spaceId: SPACE_ID, mode: 'uncommitted' }).catch((error) => error);
     expect(failure).toMatchObject({ code });
-    if (code === 'git_too_old') expect(failure.message).toMatch(/needs git 2\.27 or newer/);
+    if (code === 'git_too_old') expect(failure.message).toMatch(/needs git 2\.29 or newer/);
     expect(changedSince(before, repo, [])).toEqual([]);
   });
 
-  it('lets 2.27.0 and every build suffix through, and refuses an old git for the history too', async () => {
+  it('lets 2.29.0 and every build suffix through, and refuses an old git for the history too', async () => {
     const host = createTestHost();
     const { repo } = makeBait(host);
-    for (const text of ['git version 2.27.0\n', 'git version 2.50.1 (Apple Git-155)\n', 'git version 2.54.0.windows.1\n']) {
+    for (const text of ['git version 2.29.0\n', 'git version 2.50.1 (Apple Git-155)\n', 'git version 2.54.0.windows.1\n']) {
       const codeIn = createCodeIn({ git: gitAnswering(host, text), place: null, temporaryDirectory: host.root });
       await codeIn.takeSnapshot({ repository: repo, spaceId: SPACE_ID, mode: 'clean' });
       await codeIn.removeSpaceRefs({ repository: repo, spaceId: SPACE_ID });
@@ -604,83 +605,6 @@ describe('failures keep their codes', () => {
     expect(await host.codeIn(null, stuck).listTravellingFiles(repo)).toMatchObject({ files: expect.any(Array) });
   });
 });
-
-// The receiving side of a push, standing in for `docker exec ... git receive-pack` in a real space.
-// It checks that the host wrote out the fixed command, and maps /spaces/ into a local folder.
-const RECEIVER = `
-const { spawn } = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
-const [root, behaviour, ...command] = process.argv.slice(2);
-const [timeoutPath, dashS, signal, seconds, gitPath, service, target] = command;
-if (command.length !== 7 || timeoutPath !== '/usr/bin/timeout' || dashS !== '-s' || signal !== 'KILL' || !/^[0-9]+$/.test(seconds)
-  || gitPath !== '/usr/bin/git' || service !== 'receive-pack' || !target.startsWith('/spaces/')) {
-  process.stderr.write('unexpected command ' + JSON.stringify(command) + '\\n');
-  process.exit(2);
-}
-fs.writeFileSync(path.join(root, 'last-command.json'), JSON.stringify(command));
-fs.appendFileSync(path.join(root, 'commands.log'), target + '\\n');
-if (behaviour === 'refuse') { process.stderr.write('refused by the space\\n'); process.exit(1); }
-if (behaviour === 'flood') {
-  const chunk = 'x'.repeat(65536);
-  const pump = () => { while (process.stderr.write(chunk)) {} process.stderr.once('drain', pump); };
-  pump();
-} else if (behaviour === 'hang') {
-  const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-  fs.writeFileSync(path.join(root, 'hang.pid'), String(grandchild.pid));
-  setInterval(() => {}, 1000);
-} else {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')));
-  const child = spawn('git', ['receive-pack', path.join(root, target)], { stdio: 'inherit', env: { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: ${JSON.stringify(os.devNull)} } });
-  child.on('exit', (code) => process.exit(code ?? 1));
-}
-`;
-
-/**
- * A stand-in place for one space in a local folder. `exec` runs the module's fixed scripts with the
- * host's `sh` and `git`, with /spaces/ mapped into the folder and a `timeout` that only drops its
- * limit, since the host may have none. `execArgv` points at RECEIVER, kept in a folder whose name has
- * a space and a percent sign, so the ext escaping is exercised through git itself.
- */
-function createLocalPlace(host, behaviour = 'receive') {
-  const root = path.join(host.root, 'stand in 50% place');
-  const bin = path.join(root, 'bin');
-  fs.mkdirSync(path.join(root, 'spaces', SPACE_ID), { recursive: true });
-  fs.mkdirSync(bin);
-  const receiver = path.join(root, 'receiver.cjs');
-  fs.writeFileSync(receiver, RECEIVER);
-  fs.writeFileSync(path.join(bin, 'timeout'), '#!/bin/sh\nshift 3\nexec "$@"\n', { mode: 0o755 });
-  const emptyConfig = path.join(root, 'inside-gitconfig');
-  fs.writeFileSync(emptyConfig, '');
-  const insideEnvironment = { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: emptyConfig };
-  const local = (inside) => path.join(root, inside);
-  return {
-    root,
-    local,
-    inside: (args) => {
-      const result = spawnSync('git', args, { env: insideEnvironment, encoding: 'utf8' });
-      return { code: result.status, stdout: result.stdout };
-    },
-    lastCommand: () => JSON.parse(fs.readFileSync(path.join(root, 'last-command.json'), 'utf8')),
-    /** How many pushes reached the history side repository. */
-    historyPushes: () => (fs.existsSync(path.join(root, 'commands.log')) ? fs.readFileSync(path.join(root, 'commands.log'), 'utf8').split('\n').filter((line) => line.endsWith('.openchamber-history.git')).length : 0),
-    hangPid: () => Number(fs.readFileSync(path.join(root, 'hang.pid'), 'utf8')),
-    place: {
-      execArgv: async (spaceId) => {
-        if (spaceId !== SPACE_ID) throw new SpaceError('space_not_found', 'no such space');
-        return [process.execPath, receiver, path.join(root), behaviour];
-      },
-      exec: async (spaceId, argv, { timeoutMs }) => {
-        const [shell, flag, script, zero, ...args] = argv;
-        expect([shell, flag, zero]).toEqual([IMAGE_SH, '-c', 'sh']);
-        expect(script.startsWith(IMAGE_ONLY_PATH)).toBe(true);
-        // Quoted: the stand-in's folder name has a space in it, which the image's own PATH never has.
-        const localScript = `PATH='${insideEnvironment.PATH}';${script.slice(IMAGE_ONLY_PATH.length)}`;
-        return runCommand('/bin/sh', ['-c', localScript, zero, ...args.map((arg) => (arg.startsWith('/spaces/') ? local(arg) : arg))], { env: insideEnvironment, timeoutMs });
-      },
-    },
-  };
-}
 
 // Every hook that git on the host could run during code in, each writing a marker of its own name.
 const HOOK_NAMES = ['pre-push', 'post-index-change', 'reference-transaction', 'post-checkout', 'pre-commit', 'post-commit', 'pre-auto-gc', 'post-rewrite', 'push-to-checkout', 'pre-receive', 'post-receive', 'update', 'post-update'];

@@ -16,7 +16,7 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 type TunnelState =
@@ -103,6 +103,8 @@ interface TunnelSessionRecord {
 
 interface TunnelStatusResponse {
   active: boolean;
+  /** The server refuses every tunnel; sent only while none is active. */
+  enterpriseMode?: boolean;
   url: string | null;
   mode?: ApiTunnelMode;
   hasManagedRemoteTunnelToken?: boolean;
@@ -352,6 +354,7 @@ export const TunnelSettings: React.FC = () => {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
+  const [enterpriseLocked, setEnterpriseLocked] = React.useState(false);
   const [tunnelInfo, setTunnelInfo] = React.useState<TunnelInfo | null>(null);
   const [activeTunnelMode, setActiveTunnelMode] = React.useState<TunnelMode | null>(null);
   const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null);
@@ -563,6 +566,7 @@ export const TunnelSettings: React.FC = () => {
 
       const selectedId = presets[0]?.id || '';
 
+      setEnterpriseLocked(statusData.enterpriseMode === true);
       setBootstrapTtlMs(loadedBootstrapTtl);
       setSessionTtlMs(loadedSessionTtl);
       setTunnelProvider(loadedProvider);
@@ -1224,6 +1228,14 @@ export const TunnelSettings: React.FC = () => {
       <div className="flex items-center justify-center py-12">
         <span className="h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.openchamber.tunnel.state.loading')} />
       </div>
+    );
+  }
+
+  if (enterpriseLocked) {
+    return (
+      <SettingsSection title={t('settings.openchamber.tunnel.title')} divider={false}>
+        <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.openchamber.tunnel.enterpriseMode')}</p>
+      </SettingsSection>
     );
   }
 

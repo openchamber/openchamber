@@ -104,7 +104,8 @@ export const createContextObligatoryRuntime = ({
     const recentMessages = Array.isArray(recent?.data) ? recent.data : [];
     if (recentMessages.length === 0) return;
     const summary = recentMessages.find((message) => message?.type === 'compaction' && message?.status === 'completed');
-    if (!summary?.id || !summary?.time?.completed) return;
+    // A v2 compaction message has only `time.created`; `status` says it finished.
+    if (!summary?.id) return;
     if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
 
     const fetched = await Promise.allSettled(state.messages.map(async (pinned) => {

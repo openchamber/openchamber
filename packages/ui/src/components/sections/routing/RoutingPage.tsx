@@ -32,6 +32,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
@@ -182,21 +183,14 @@ export const RoutingPage: React.FC = () => {
   const { t } = useI18n();
   const available = useRoutingStore((state) => state.available);
   const autoReady = useRoutingStore((state) => state.autoReady);
-  const tokenPresent = useRoutingStore((state) => state.tokenPresent);
-  const jevSource = useRoutingStore((state) => state.jevSource);
   const serverConfig = useRoutingStore((state) => state.config);
   const builtins = useRoutingStore((state) => state.builtins);
   const loaded = useRoutingStore((state) => state.loaded);
   const loadError = useRoutingStore((state) => state.loadError);
   const load = useRoutingStore((state) => state.load);
   const saveConfig = useRoutingStore((state) => state.saveConfig);
-  const setToken = useRoutingStore((state) => state.setToken);
-  const clearToken = useRoutingStore((state) => state.clearToken);
 
   const [draft, setDraft] = React.useState<RoutingConfig | null>(serverConfig);
-  const [tokenInput, setTokenInput] = React.useState('');
-  const [tokenBusy, setTokenBusy] = React.useState(false);
-  const [tokenError, setTokenError] = React.useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   // A pending edit remembers the server it was made against; a save that would
@@ -282,33 +276,6 @@ export const RoutingPage: React.FC = () => {
     update((config) => ({ ...config, categories: config.categories.map((category) => (category.id === id ? { ...category, ...patch } : category)) }));
   }, [update]);
 
-  const handleSaveToken = async () => {
-    const token = tokenInput.trim();
-    if (!token) return;
-    setTokenBusy(true);
-    setTokenError(null);
-    try {
-      await setToken(token);
-      setTokenInput('');
-    } catch (error) {
-      setTokenError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTokenBusy(false);
-    }
-  };
-
-  const handleClearToken = async () => {
-    setTokenBusy(true);
-    setTokenError(null);
-    try {
-      await clearToken();
-    } catch (error) {
-      setTokenError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTokenBusy(false);
-    }
-  };
-
   const addCategory = () => {
     const name = newCategoryName.trim();
     if (!name || !draft) return;
@@ -367,50 +334,9 @@ export const RoutingPage: React.FC = () => {
         <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.unavailable')}</p>
       ) : (
         <>
-          <SettingsSection title={t('settings.routing.access.title')} divider={false}>
+          <SettingsSection title={t('settings.routing.auto.title')} divider={false}>
             <div className={SETTINGS_FIELDS_STACK_CLASS}>
-              <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.access.intro')}</p>
-              <p className={SETTINGS_HELPER_CLASS}>
-                {jevSource === 'typesafe' ? t('settings.routing.access.usingKey') : (
-                  <>
-                    <strong className="font-semibold">{t('settings.routing.access.usingFree')}</strong>{' '}
-                    {t('settings.routing.access.usingFreeDetails')}
-                  </>
-                )}
-              </p>
-              <SettingsFieldRow
-                settingsItem="routing.token"
-                label={t('settings.routing.token.label')}
-                info={t('settings.routing.token.info')}
-              >
-                <div className="flex w-full min-w-0 items-center gap-2">
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={tokenInput}
-                    onChange={(event) => setTokenInput(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') void handleSaveToken(); }}
-                    placeholder={tokenPresent ? t('settings.routing.token.replacePlaceholder') : t('settings.routing.token.placeholder')}
-                    aria-label={t('settings.routing.token.label')}
-                    className="h-8 rounded-md px-3 min-w-0 flex-1"
-                    disabled={tokenBusy}
-                  />
-                  <Button size="sm" variant="outline" onClick={() => void handleSaveToken()} disabled={tokenBusy || tokenInput.trim().length === 0}>
-                    {t('settings.routing.token.save')}
-                  </Button>
-                  {tokenPresent ? (
-                    <Button size="sm" variant="ghost" onClick={() => void handleClearToken()} disabled={tokenBusy}>
-                      {t('settings.routing.token.remove')}
-                    </Button>
-                  ) : null}
-                </div>
-              </SettingsFieldRow>
-              {tokenError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{tokenError}</p> : null}
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title={t('settings.routing.auto.title')}>
-            <div className={SETTINGS_FIELDS_STACK_CLASS}>
+              <JevAccessNote />
               <div className={SETTINGS_OPTION_STACK_CLASS}>
                 <SettingsCheckboxRow
                   settingsItem="routing.enabled"
@@ -494,22 +420,6 @@ export const RoutingPage: React.FC = () => {
               </SettingsFieldRow>
             </div>
           </SettingsSection>
-          <SettingsSection title={t('settings.routing.safety.title')}>
-            <div className={SETTINGS_FIELDS_STACK_CLASS}>
-              <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.safety.description')}</p>
-              <div className={SETTINGS_OPTION_STACK_CLASS}>
-                <SettingsCheckboxRow
-                  settingsItem="routing.safety-enabled"
-                  checked={draft.safetyNet.enabled}
-                  onChange={(checked) => update((config) => ({ ...config, safetyNet: { ...config.safetyNet, enabled: checked } }))}
-                  label={t('settings.routing.safety.enable')}
-                  ariaLabel={t('settings.routing.safety.enable')}
-                  info={t('settings.routing.safety.enableInfo')}
-                />
-              </div>
-            </div>
-          </SettingsSection>
-
         </>
       )}
     </SettingsPageLayout>

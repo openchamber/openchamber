@@ -127,6 +127,32 @@ describe('core-routes', () => {
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
   });
 
+  it('leaves the body of a request alone when told to, for both parsers', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express, skipBodyParsing: (req) => req.path.startsWith('/api/spaces/') });
+    const raw = (req, res) => {
+      // A body a parser read is complete already, and its stream ends no second time.
+      if (req.complete) {
+        res.json({ body: req.body ?? null, raw: '' });
+        return;
+      }
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => res.json({ body: req.body ?? null, raw: Buffer.concat(chunks).toString('utf8') }));
+    };
+    app.post('/api/spaces/abc/form', raw);
+    app.post('/api/spaces/abc/config/snippets/x', raw);
+    app.post('/api/other/form', raw);
+
+    const kept = await request(app).post('/api/spaces/abc/form').type('form').send('a=1&b=2').expect(200);
+    expect(kept.body).toEqual({ body: null, raw: 'a=1&b=2' });
+    const keptJson = await request(app).post('/api/spaces/abc/config/snippets/x').send({ content: 'x' }).expect(200);
+    expect(keptJson.body).toEqual({ body: null, raw: '{"content":"x"}' });
+    // Elsewhere the parsers still run, and a parsed body leaves nothing to read.
+    const parsed = await request(app).post('/api/other/form').type('form').send('a=1&b=2').expect(200);
+    expect(parsed.body).toEqual({ body: { a: '1', b: '2' }, raw: '' });
+  });
+
   it('should parse JSON bodies for the web search config route', async () => {
     const app = express();
     registerCommonRequestMiddleware(app, { express });

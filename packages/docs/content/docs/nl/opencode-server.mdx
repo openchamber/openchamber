@@ -1,0 +1,97 @@
+---
+title: OpenCode-server
+description: Verbind OpenChamber met een lokale OpenCode-server of een server op afstand.
+---
+
+# OpenCode-server
+
+OpenChamber gebruikt een OpenCode-server. Standaard start het die voor u; u hoeft daar niets voor te doen. Deze pagina is bedoeld voor wie een bestaande server wil gebruiken of de automatisch gestarte server wil beheren.
+
+## Hoe OpenChamber een server vindt
+
+Bij het starten zoekt OpenChamber in deze volgorde:
+
+1. Een server hergebruiken die het zelf al heeft gestart.
+2. Verbinding maken met een externe server, als u die hebt ingesteld zoals hieronder beschreven.
+3. Een server op de standaardpoort `4096` automatisch herkennen.
+4. Anders zelf een server starten en beheren.
+
+Als er niets is ingesteld, gebeurt stap 4 automatisch en kunt u aan het werk.
+
+## Een bestaande server gebruiken
+
+Stel het volgende in voordat u OpenChamber start:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` is het volledige adres van uw OpenCode-server, inclusief de poort, bijvoorbeeld `http://localhost:4096`. Er mag geen pad achter staan.
+- `OPENCODE_SKIP_START=true` voorkomt dat OpenChamber zelf een server start.
+
+Wilt u alleen de poort wijzigen? Gebruik dan `OPENCODE_PORT` in plaats van `OPENCODE_HOST`.
+
+Als de poort in `OPENCODE_HOST` ontbreekt of het adres een pad bevat, negeert OpenChamber die waarde en start het zelf een server. Controleer bij een onverwachte verbinding de opstartlogs op een waarschuwing met `[config]`.
+
+## De server beheren via de CLI
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+Met alleen `openchamber` start de server op de achtergrond. Voeg `--foreground` toe om hem aan uw terminal gekoppeld te houden.
+
+## OpenChamber starten bij het aanmelden
+
+Met `startup enable` installeert u een gebruikersservice van het besturingssysteem. OpenChamber gebruikt `launchd` op macOS, `systemd --user` op Linux en Taakplanner op Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Stel bij het inschakelen van de service een wachtwoord in om de interface te beschermen:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+Voor een server zonder webinterface die bij het aanmelden start en desktop- of mobiele clients bedient, voegt u `--api-only` en een bereikbaar hostadres toe:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable` neemt een momentopname van uw huidige omgevingsvariabelen over in de service. Daardoor gedraagt die zich meer alsof u `openchamber` vanuit dezelfde shell start. Providertokens, `PATH`, SSH-agentinstellingen en andere CLI-variabelen voor authenticatie en configuratie blijven beschikbaar. Gebruik `--no-env-snapshot` voor een minimale serviceomgeving.
+
+De opstartservice onthoudt `--port`, `--host`, `--ui-password` en `--api-only`. Herstarts via de CLI en na updates gebruiken deze opgeslagen instellingen opnieuw.
+
+Maak zo een verbindingslink voor een andere OpenChamber-app:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+Met `openchamber connect-url --help` ziet u alle linkopties, waaronder `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` en `--qr`.
+
+U kunt tunnels voor de draaiende service afzonderlijk blijven beheren:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Een tunnel stoppen herstart de service of de app niet.
+
+## 'OpenCode wordt opnieuw gestart'
+
+Tijdens het starten of herstarten toont OpenChamber dat OpenCode opnieuw wordt gestart. Verzoeken wachten totdat de server klaar is. Direct na het openen of herstarten is dat normaal. Blijft deze melding staan? Zie [Verbinding met OpenCode](/nl/troubleshooting/opencode-connection/).
+
+## Zie ook
+
+- [Providers, modellen en agents](/nl/providers/) voor het instellen van de diensten waarmee de server communiceert
+- [Verbinding met OpenCode](/nl/troubleshooting/opencode-connection/) als verbinden niet lukt

@@ -46,6 +46,32 @@ describe('public tunnel password requirement', () => {
     expect(getStarts()).toBe(0);
   });
 
+  it('refuses every tunnel in enterprise mode, password or not', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const { runtime, getStarts } = createRuntime(true);
+      await expect(runtime.startTunnelWithNormalizedRequest({ provider: 'cloudflare', mode: 'quick' }))
+        .rejects.toThrow('enterprise mode');
+      const routes = new Map();
+      runtime.registerRoutes({
+        get: (path, handler) => routes.set(`GET ${path}`, handler),
+        post: (path, handler) => routes.set(`POST ${path}`, handler),
+        put: (path, handler) => routes.set(`PUT ${path}`, handler),
+      });
+      let status = 200;
+      let body;
+      await routes.get('POST /api/openchamber/tunnel/start')({ body: {} }, {
+        status(code) { status = code; return this; },
+        json(payload) { body = payload; return this; },
+      });
+      expect(status).toBe(403);
+      expect(body.code).toBe('enterprise_mode');
+      expect(getStarts()).toBe(0);
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+  });
+
   it('allows a password-protected runtime to start a tunnel', async () => {
     const { runtime, getStarts } = createRuntime(true);
     const result = await runtime.startTunnelWithNormalizedRequest({ provider: 'cloudflare', mode: 'quick' });

@@ -3,7 +3,7 @@ import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/auto
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
-import type { Provider, Model, Agent, Config } from "@/lib/opencode/model";
+import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
 import type { DesktopSettings } from "@/lib/desktop";
 import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
@@ -198,13 +198,12 @@ const normalizeOptionalString = (value: unknown): string | undefined => {
     return trimmed.length > 0 ? trimmed : undefined;
 };
 
-/** Looks a model up by its bare id (`modelID`); `Model.id` is provider-qualified. */
 const findProviderModel = (
     providers: ProviderWithModelList[],
     providerId: string,
     modelId: string,
 ): Model | undefined => (
-    providers.find((provider) => provider.id === providerId)?.models.find((model) => model.modelID === modelId)
+    findCatalogModel(providers.find((provider) => provider.id === providerId)?.models, modelId)
 );
 
 /** v2 lists model variants as records with an `id`, not as a keyed map. */
@@ -226,7 +225,7 @@ const hasProviderModel = (
     if (!provider) {
         return false;
     }
-    return provider.models.some((model) => model.modelID === modelId);
+    return findCatalogModel(provider.models, modelId) !== undefined;
 };
 
 /**
@@ -761,13 +760,8 @@ const resolveInitialDirectoryKey = (): string => {
     return toConfigDirectoryKey(directory);
 };
 
-// Persisted worktree→project mapping. The runtime worktree map
-// (availableWorktreesByProject) is populated by async git discovery and isn't
-// ready when initializeApp runs on startup — so without this, a worktree's first
-// config load can't resolve to its project and duplicates the project's load.
-// We cache resolved mappings to localStorage so subsequent launches resolve the
-// project synchronously at init time. worktree→project is effectively immutable,
-// so a cached entry is safe to trust.
+// Persisted worktree→project mapping for project-level defaults. Config catalogs
+// themselves are scoped to the worktree's own directory.
 const WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap.v2';
 const LEGACY_WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap';
 const MAX_WORKTREE_PROJECT_RUNTIME_MAPS = 8;
@@ -873,7 +867,8 @@ const getProjectDefaultsForConfigDirectory = (directory: string | null | undefin
     const session = useSessionUIStore.getState();
     if (!session.currentSessionId && session.newSessionDraft?.open && session.newSessionDraft.target === 'chat'
         && toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey) return {};
-    const project = useProjectsStore.getState().projects.find((entry) => normalizeConfigPath(entry.path) === configDirectory);
+    const projectDirectory = resolveProjectDirectory(configDirectory);
+    const project = useProjectsStore.getState().projects.find((entry) => normalizeConfigPath(entry.path) === projectDirectory);
     return {
         projectDefaultAgent: normalizeOptionalString(project?.defaultAgent),
         projectDefaultModel: normalizeOptionalString(project?.defaultModel),
@@ -881,14 +876,7 @@ const getProjectDefaultsForConfigDirectory = (directory: string | null | undefin
     };
 };
 
-/**
- * Map a directory to its CONFIG scope. Providers/agents/defaults are defined at
- * the PROJECT level (opencode.json), so a worktree must inherit its parent
- * project's config instead of maintaining — and re-fetching — its own
- * per-worktree snapshot. Returns the owning project's path when the directory is
- * a known worktree, else the directory unchanged.
- */
-const resolveConfigDirectory = (directory: string | null | undefined): string | null => {
+const resolveProjectDirectory = (directory: string | null | undefined): string | null => {
     const dir = normalizeConfigPath(directory);
     const projects = getKnownProjectDirectories();
     if (!dir) return null;
@@ -910,23 +898,21 @@ const resolveConfigDirectory = (directory: string | null | undefined): string | 
             rememberWorktreeProject(dir, projectPath);
             return projectPath;
         }
-    } catch {
-        return null;
-    }
+    } catch { /* The cached mapping, if any, was checked above. */ }
     return null;
 };
+
+const resolveConfigDirectory = normalizeConfigPath;
 
 const toConfigDirectoryKey = (directory: string | null | undefined): string =>
     toDirectoryKey(resolveConfigDirectory(directory));
 
 // Runtime freshness tracking (NOT persisted) for the stale-while-revalidate
 // background refresh, keyed by config-directory key. Prevents re-fetching
-// project-scoped providers/agents we just loaded — e.g. initializeApp loading a
-// project, then activateDirectory firing for the same project moments later.
+// catalogs we just loaded for the same project or worktree.
 const _providersLoadedAt = new Map<string, number>();
 const _agentsLoadedAt = new Map<string, number>();
 const CONFIG_REFRESH_TTL_MS = 30_000;
-const PROJECT_CONFIG_PREWARM_DELAY_MS = 1_000;
 const getConfigLoadKey = (context: ConfigRuntimeContext, directoryKey: string): string => (
     JSON.stringify([context.generation, context.runtimeKey, directoryKey])
 );
@@ -1241,11 +1227,12 @@ interface ConfigStore {
     setSummarizeCharacterThreshold: (threshold: number) => void;
     setSummarizeMaxLength: (maxLength: number) => void;
 
-    activateDirectory: (directory: string | null | undefined) => Promise<void>;
+    activateDirectory: (directory: string | null | undefined, options?: { preserveManualModel?: boolean }) => Promise<void>;
 
     loadProviders: (options?: { directory?: string | null; source?: string }) => Promise<void>;
     loadSessionDefaults: () => Promise<boolean>;
-    loadAgents: (options?: { directory?: string | null; source?: string }) => Promise<boolean>;
+    /** `fresh`: a request already in flight started before the caller's reason to reload, so it cannot answer it. */
+    loadAgents: (options?: { directory?: string | null; source?: string; fresh?: boolean }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
     invalidateProviderCache: (directory?: string | null) => void;
     setProvider: (providerId: string) => void;
@@ -1274,7 +1261,6 @@ interface ConfigStore {
     probeConnection: (options?: { timeoutMs?: number }) => Promise<boolean>;
     checkConnection: () => Promise<boolean>;
     initializeApp: () => Promise<void>;
-    prewarmProjectConfigs: (initialDirectory?: string | null) => Promise<void>;
     getCurrentProvider: () => ProviderWithModelList | undefined;
     getCurrentModel: () => ProviderModel | undefined;
     getCurrentAgent: () => Agent | undefined;
@@ -1636,12 +1622,10 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 500;
                 })(),
-                activateDirectory: async (directory) => {
+                activateDirectory: async (directory, options) => {
                     const runtimeContext = captureConfigRuntimeContext();
-                    // Resolve the worktree to its owning project up-front so the
-                    // active key + snapshot key always match and stay project-scoped.
-                    // Everything below operates on this key unchanged; the OpenCode
-                    // working directory (opencodeClient.getDirectory()) is separate.
+                    // Keep the active catalog and snapshot scoped to the actual
+                    // directory, including worktrees with their own opencode.json.
                     const configDirectory = resolveConfigDirectory(directory);
                     if (!configDirectory) {
                         markStartupTrace('activateDirectory:skippedUnknownDirectory', { directory });
@@ -1653,46 +1637,67 @@ export const useConfigStore = create<ConfigStore>()(
 
                     set((state) => {
                         const snapshot = state.directoryScoped[directoryKey];
+                        const carryManualModel = options?.preserveManualModel && state.activeDirectoryKey !== directoryKey
+                            && state.selectionSource === 'manual' && Boolean(state.currentProviderId && state.currentModelId);
+                        const manualModel = carryManualModel ? {
+                            currentProviderId: state.currentProviderId,
+                            currentModelId: state.currentModelId,
+                            currentVariant: state.currentVariant,
+                            currentVariantSelection: state.currentVariantSelection,
+                            selectionSource: 'manual' as const,
+                        } : null;
                         if (snapshot) {
                             snapshotHadProviders = snapshot.providers.length > 0;
                             snapshotHadAgents = snapshot.agents.length > 0;
                             return {
                                 activeDirectoryKey: directoryKey,
+                                directoryScoped: manualModel ? {
+                                    ...state.directoryScoped,
+                                    [directoryKey]: { ...snapshot, ...manualModel },
+                                } : state.directoryScoped,
                                 providers: snapshot.providers,
                                 agents: snapshot.agents,
                                 providersLoaded: snapshot.providersLoaded ?? snapshot.providers.length > 0,
                                 agentsLoaded: snapshot.agentsLoaded ?? snapshot.agents.length > 0,
-                                currentProviderId: snapshot.currentProviderId,
-                                currentModelId: snapshot.currentModelId,
-                                currentVariant: snapshot.currentVariant,
-                                currentVariantSelection: snapshot.currentVariantSelection ?? { override: undefined, inherited: snapshot.currentVariant },
+                                currentProviderId: manualModel?.currentProviderId ?? snapshot.currentProviderId,
+                                currentModelId: manualModel?.currentModelId ?? snapshot.currentModelId,
+                                currentVariant: manualModel ? manualModel.currentVariant : snapshot.currentVariant,
+                                currentVariantSelection: manualModel?.currentVariantSelection ?? snapshot.currentVariantSelection ?? { override: undefined, inherited: snapshot.currentVariant },
                                 currentAgentName: snapshot.currentAgentName,
                                 selectedProviderId: snapshot.selectedProviderId,
                                 agentModelSelections: snapshot.agentModelSelections,
                                 defaultProviders: snapshot.defaultProviders,
                                 opencodeDefaultAgent: snapshot.opencodeDefaultAgent,
                                 opencodeDefaultModel: snapshot.opencodeDefaultModel,
-                                selectionSource: snapshot.selectionSource ?? "auto",
+                                selectionSource: manualModel?.selectionSource ?? snapshot.selectionSource ?? "auto",
                                 agentSelectionSource: snapshot.agentSelectionSource ?? "auto",
                             };
                         }
 
                         return {
                             activeDirectoryKey: directoryKey,
+                            directoryScoped: manualModel ? {
+                                ...state.directoryScoped,
+                                [directoryKey]: {
+                                    providers: [], agents: [], agentModelSelections: {}, defaultProviders: {},
+                                    selectedProviderId: '', currentAgentName: undefined, ...manualModel,
+                                },
+                            } : state.directoryScoped,
                             providers: [],
                             agents: [],
                             providersLoaded: false,
                             agentsLoaded: false,
-                            currentProviderId: "",
-                            currentModelId: "",
-                            currentVariantSelection: { override: undefined, inherited: undefined },
+                            currentProviderId: manualModel?.currentProviderId ?? "",
+                            currentModelId: manualModel?.currentModelId ?? "",
+                            currentVariant: manualModel?.currentVariant,
+                            currentVariantSelection: manualModel?.currentVariantSelection ?? { override: undefined, inherited: undefined },
                             currentAgentName: undefined,
                             selectedProviderId: "",
                             agentModelSelections: {},
                             defaultProviders: {},
                             opencodeDefaultAgent: undefined,
                             opencodeDefaultModel: undefined,
-                            selectionSource: "auto",
+                            selectionSource: manualModel?.selectionSource ?? "auto",
                             agentSelectionSource: "auto",
                         };
                     });
@@ -1787,8 +1792,6 @@ export const useConfigStore = create<ConfigStore>()(
                 loadProviders: async (options) => {
                     const runtimeContext = captureConfigRuntimeContext();
                     const requestedDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
-                    // Providers are project-scoped: resolve a worktree to its project
-                    // so it reuses one shared snapshot instead of its own.
                     const configDirectory = resolveConfigDirectory(requestedDirectory);
                     if (!configDirectory) {
                         markStartupTrace('loadProviders:skippedUnknownDirectory', { requestedDirectory, source: options?.source ?? 'unknown' });
@@ -2042,8 +2045,8 @@ export const useConfigStore = create<ConfigStore>()(
                                 const parsed = parseModelString(state.settingsDefaultModel);
                                 if (parsed) {
                                     const settingsProvider = previousProviders.find((p) => p.id === parsed.providerId);
-                                    if (settingsProvider?.models.some((m) => m.modelID === parsed.modelId)) {
-                                        const model = settingsProvider.models.find((m) => m.modelID === parsed.modelId);
+                                    const model = findCatalogModel(settingsProvider?.models, parsed.modelId);
+                                    if (model) {
                                         const currentVariant = modelHasVariant(model, state.settingsDefaultVariant)
                                             ? state.settingsDefaultVariant
                                             : undefined;
@@ -2342,8 +2345,6 @@ export const useConfigStore = create<ConfigStore>()(
                 loadAgents: async (options) => {
                     const runtimeContext = captureConfigRuntimeContext();
                     const requestedDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
-                    // Agents are project-scoped: resolve a worktree to its project
-                    // so it reuses one shared snapshot instead of its own.
                     const configDirectory = resolveConfigDirectory(requestedDirectory);
                     if (!configDirectory) {
                         markStartupTrace('loadAgents:skippedUnknownDirectory', { requestedDirectory, source: options?.source ?? 'unknown' });
@@ -2355,8 +2356,14 @@ export const useConfigStore = create<ConfigStore>()(
                     const source = options?.source ?? 'unknown';
                     markStartupTrace('loadAgents:called', { directoryKey, source, requestedDirectory, effectiveDirectory });
 
-                    // Dedup: if a load is already in-flight for this directory, reuse it
-                    const existing = _inFlightAgents.get(inFlightKey);
+                    // Dedup: if a load is already in-flight for this directory, reuse it.
+                    // A fresh load waits it out instead: that request may have been
+                    // answered before the change that prompted this one.
+                    let existing = _inFlightAgents.get(inFlightKey);
+                    if (existing && options?.fresh) {
+                        await existing.catch(() => false);
+                        existing = _inFlightAgents.get(inFlightKey);
+                    }
                     if (existing) {
                         markStartupTrace('loadAgents:deduped', { directoryKey, source, requestedDirectory, effectiveDirectory });
                         return existing;
@@ -2926,7 +2933,7 @@ export const useConfigStore = create<ConfigStore>()(
                         if (agentModelSelection?.providerID && agentModelSelection?.id) {
                             const { providerID, id: modelID } = agentModelSelection;
                             const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.modelID === modelID);
+                            const agentModel = findCatalogModel(agentProvider?.models, modelID);
 
                             if (agentModel) {
                                 applyResolvedModelSelection(
@@ -2975,7 +2982,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const parsed = parseModelString(settingsDefaultModel);
                             if (parsed) {
                                 const settingsProvider = providers.find((p) => p.id === parsed.providerId);
-                                if (settingsProvider?.models.some((m) => m.modelID === parsed.modelId)) {
+                                if (findCatalogModel(settingsProvider?.models, parsed.modelId)) {
                                     applyResolvedModelSelection(
                                         parsed.providerId,
                                         parsed.modelId,
@@ -3654,8 +3661,8 @@ export const useConfigStore = create<ConfigStore>()(
 
                             // Config (providers/agents/defaults) lives at the PROJECT level. If the
                             // app starts on a worktree directory, load config under the owning
-                            // project's key so the initial draft — which activates the project — finds
-                            // a ready snapshot instead of triggering a second provider/agent load.
+                            // initial directory's key so its draft finds a ready snapshot
+                            // instead of triggering a second provider/agent load.
                             const initialDirectory = opencodeClient.getDirectory()
                                 ?? useDirectoryStore.getState().currentDirectory
                                 ?? fromDirectoryKey(get().activeDirectoryKey);
@@ -3664,7 +3671,9 @@ export const useConfigStore = create<ConfigStore>()(
                                 useSessionUIStore.getState().availableWorktreesByProject,
                                 initialDirectory ?? null,
                             );
-                            const resolvedInitialDirectory = resolveConfigDirectory(resolvedProject?.path ?? initialDirectory ?? null);
+                            const resolvedInitialDirectory = (resolvedProject || resolveProjectDirectory(initialDirectory))
+                                ? resolveConfigDirectory(initialDirectory)
+                                : null;
                             const configDirectory = resolvedInitialDirectory ?? getFallbackProjectDirectory();
                             if (!configDirectory) {
                                 markStartupTrace('initializeApp:noProjectConfigDirectory');
@@ -3695,15 +3704,23 @@ export const useConfigStore = create<ConfigStore>()(
                                 // A broken config belongs to this one project. Finish startup
                                 // so the user can read the error and move to another project;
                                 // any other failure keeps the startup retry loop going.
+                                // A project whose folder is gone (an unplugged drive) is the
+                                // same: the app opens and the other projects stay reachable.
                                 const configError = get().projectConfigErrors[configDirectoryKey];
-                                if (!configError) {
+                                if (configError) {
+                                    markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
+                                } else if (await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
+                                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                                    markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });
+                                } else {
                                     set({ lastInitFailure: { step: 'loadAgents', message: _agentsLoadErrors.get(configDirectoryKey) || null } });
                                     return;
                                 }
-                                markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
                             }
                             set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected", lastInitFailure: null });
-                            void get().prewarmProjectConfigs(configDirectory);
+                            // A plugin registers its agents while the server is already serving, so
+                            // the load above can race it. Re-check once, after startup has settled.
+                            setTimeout(() => void get().loadAgents({ directory: configDirectory, source: 'startupAgentRecheck' }), 8_000);
                             const initEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
                             markStartupTrace('initializeApp:end', {
                                 durationMs: Math.round(initEnded - initStarted),
@@ -3731,56 +3748,6 @@ export const useConfigStore = create<ConfigStore>()(
                     return run;
                 },
 
-                prewarmProjectConfigs: async (initialDirectory?: string | null) => {
-                    const runtimeContext = captureConfigRuntimeContext();
-                    if (!get().isConnected) {
-                        return;
-                    }
-
-                    const initialKey = toConfigDirectoryKey(initialDirectory ?? fromDirectoryKey(get().activeDirectoryKey));
-                    const projectDirectories = useProjectsStore.getState().projects
-                        .map((project) => project.path)
-                        .filter((path): path is string => typeof path === 'string' && path.trim().length > 0);
-                    const seen = new Set<string>([initialKey]);
-                    const queuedDirectories: string[] = [];
-
-                    for (const directory of projectDirectories) {
-                        const directoryKey = toConfigDirectoryKey(directory);
-                        if (seen.has(directoryKey)) {
-                            continue;
-                        }
-                        seen.add(directoryKey);
-
-                        const snapshot = get().directoryScoped[directoryKey];
-                        if (snapshot?.providers.length && snapshot.agents.length) {
-                            continue;
-                        }
-                        const scopedDirectory = fromDirectoryKey(directoryKey);
-                        if (scopedDirectory) {
-                            queuedDirectories.push(scopedDirectory);
-                        }
-                    }
-
-                    for (const directory of queuedDirectories) {
-                        await sleep(PROJECT_CONFIG_PREWARM_DELAY_MS);
-                        if (!isConfigRuntimeContextCurrent(runtimeContext) || !get().isConnected) {
-                            return;
-                        }
-                        const directoryKey = toConfigDirectoryKey(directory);
-                        const snapshot = get().directoryScoped[directoryKey];
-                        const tasks: Promise<unknown>[] = [];
-                        if (!snapshot?.providers.length) {
-                            tasks.push(get().loadProviders({ directory, source: 'projectConfigPrewarm' }));
-                        }
-                        if (!snapshot?.agents.length) {
-                            tasks.push(get().loadAgents({ directory, source: 'projectConfigPrewarm' }));
-                        }
-                        if (tasks.length > 0) {
-                            await Promise.allSettled(tasks);
-                        }
-                    }
-                },
-
                 getCurrentProvider: () => {
                     const { providers, currentProviderId } = get();
                     return providers.find((p) => p.id === currentProviderId);
@@ -3792,7 +3759,7 @@ export const useConfigStore = create<ConfigStore>()(
                     if (!provider) {
                         return undefined;
                     }
-                    return provider.models.find((model) => model.modelID === currentModelId);
+                    return findCatalogModel(provider.models, currentModelId);
                 },
 
                 getCurrentAgent: () => {
@@ -3807,21 +3774,18 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     const { modelsMetadata, providers } = get();
                     const cached = modelsMetadata.get(key);
+                    const model = findCatalogModel(providers.find((p) => p.id === providerId)?.models, modelId);
+
+                    // The running OpenCode's limits win over the models.dev
+                    // catalog: providers adjust them per auth (ChatGPT sign-in
+                    // serves GPT models with a 400K window, the catalog says 1M+).
                     if (cached) {
-                        return cached;
+                        if (!model || model.limit.context <= 0) return cached;
+                        return { ...cached, limit: { ...cached.limit, context: model.limit.context, output: model.limit.output } };
                     }
 
                     // Fallback: derive metadata from provider model data (covers custom providers not in models.dev)
-                    const provider = providers.find((p) => p.id === providerId);
-                    if (!provider) {
-                        return undefined;
-                    }
-                    const model = provider.models.find((m) => m.modelID === modelId);
-                    if (!model) {
-                        return undefined;
-                    }
-
-                    return deriveModelMetadata(providerId, model);
+                    return model ? deriveModelMetadata(providerId, model) : undefined;
                 },
                 getVisibleAgents: () => {
                     const { agents } = get();

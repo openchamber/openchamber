@@ -50,7 +50,10 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
     status route reports per-model install/download state.
   - `openai-compatible`: buffered per-segment transcription against any
     OpenAI-compatible `/v1/audio/transcriptions` endpoint
-    (`openai-compatible-session.js`, reuses `../tts/stt.js`).
+    (`openai-compatible-session.js`, reuses `../tts/stt.js`). `connect()`
+    runs the same URL check as every transcription
+    (`normalizeCustomOpenAIBaseURL`), so a refused host — any remote one in
+    enterprise mode — fails before the user dictates.
 - `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
   recognizer engine and segment session (one decode per committed segment),
   model catalog and downloader. The native `sherpa-onnx-node` addon is only

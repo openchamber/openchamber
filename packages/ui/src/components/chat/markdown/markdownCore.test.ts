@@ -492,6 +492,7 @@ describe('Dollar math rendering', () => {
       'raised $50M to $72M, then $100M',
       '总价 $5 and $10，合计 $50',
       '价格是 $100$ 整',
+      'the mysterious $1 on the 11580 — dedicated key. Gathering facts in parallel (wrapper key mechanics, the Go card "$" display logic)',
     ];
     for (const text of cases) {
       const html = renderMarkdownSync(text);
@@ -500,6 +501,8 @@ describe('Dollar math rendering', () => {
     // The dollar signs survive verbatim instead of being eaten as delimiters.
     expect(renderMarkdownSync('US$ 680')).toContain('US$ 680');
     expect(renderMarkdownSync('价格是 $100$ 整')).toContain('$100$');
+    // A digit-leading span such as $2\pi r$ is math, not currency.
+    expect(renderMarkdownSync('$2\\pi r$')).toContain('katex');
   });
 
   test('keeps dollar pairs out of code and out of link attributes', () => {

@@ -2,6 +2,95 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.0.3] - 2026-09-28
+
+### New
+
+- **Sessions: an In work section keeps the sessions where you're changing something.** Jev puts a session there when you start real work, a grey check shows when the work looks finished, and the session stays until you mark it done. [Read how it works](https://docs.openchamber.dev/sessions-in-work/).
+- **Permissions: every session has a mode: ask, safety net or accept all.** The shield in the composer switches it, and Settings → Sessions sets the default for new sessions. With the safety net, Jev decides what may run without asking you. [Read how it works](https://docs.openchamber.dev/permissions/).
+- Settings/Providers: providers are a card grid, and one provider can hold several accounts that you switch, rename or remove.
+- Settings: MCP servers and plugins are cards that show their status at a glance, and the agents, commands and skills lists have search.
+- Files: `.excalidraw` files and Obsidian drawings open as a canvas you can draw on, in your theme's colors (thanks to @mmospanenko).
+- Stats: the Stats page shows how your tokens split between input, output and cache, efficiency numbers, a model comparison, and tool calls on request (thanks to @NemeZZiZZ).
+- Mobile: the sessions drawer has an optional Recent section, sessions can be pinned, and the swipe menu can copy a session's ID (thanks to @claymor333).
+- Jev: it can run through your OpenRouter or Vercel AI Gateway account.
+- Settings/Integrations: the Claude Code card is back.
+- Sidebar: Timeline rows show the logo of the session's model provider.
+
+### Improvements
+
+- **Multi-run: run one prompt on several models right from the composer.** Pick "Run on several models" in the model picker, choose the models and send; the run is one row in the sidebar and opens an overview where you compare answers, keep one or combine them.
+- Startup: only the project you open starts its MCP servers, so launching with many projects no longer spawns dozens of processes.
+
+### Fixes
+
+- Windows: the app no longer hangs at startup when the PowerShell profile sits in a OneDrive folder (thanks to @thewerthon).
+- Desktop: an open session no longer reconnects every 15–20 seconds with OpenCode 2 (thanks to @JarvisMaxDev).
+- Settings/Providers: custom providers with an API key save again.
+- OpenCode: the app connects when you set your own `OPENCODE_PASSWORD`.
+- Models: the model picker scrolls through providers with 40 or more models to the last one.
+- Models: favorite Fast models show up in Favorites, also in an agent's settings.
+- Opening a tooltip or menu no longer makes the whole app stutter.
+- Chat: commands that run as a subagent show a running card and then their result.
+- Chat: subagent answers show formatted text, and parallel calls of the same subagent show their progress.
+- Chat: a shell command killed by a signal shows as failed.
+- Chat: a message with only a linked GitHub or Linear issue can be sent (thanks to @hiro-nikaitou).
+- Sessions: a session deleted outside the app closes, and messages no longer fail with "Session not found" (thanks to @hiro-nikaitou).
+- Sessions: an archived chat can be restored from the header menu (thanks to @kjhq).
+- Worktrees: removing a worktree on Windows finishes, even when a session was still using its folder (thanks to @bashrusakh).
+- Worktrees: a new worktree stays selected while it's being created (thanks to @hiro-nikaitou).
+- Worktrees: a deleted worktree disappears from Manage worktrees right away (thanks to @aiiibolo).
+- Sidebar: worktrees show up after switching to a remote instance.
+- Sidebar: project icons are found on Windows (thanks to @hiro-nikaitou).
+- Mobile: the download button and file links in chat work in the Android app.
+- Mobile: after choosing how to paste a long text, the cursor stays in the message box (thanks to @aiiibolo).
+- Extensions: panels no longer flash white in a dark theme.
+- Extensions: installing an extension from git works on Git for Windows set up for OpenSSL.
+- Settings/Plugins: plugins from a private npm registry no longer show as not found (thanks to @Ex0ry).
+- GitHub: pull request search shows an error when GitHub fails to answer (thanks to @aiiibolo).
+- Browser: a local page that isn't running stops reloading after a short while (thanks to @aiiibolo).
+- Usage: the Zhipu Coding Plan card shows its limits again (thanks to @CMBill).
+- CLI: `openchamber tunnel start` gives the instance it starts a UI password, so the tunnel comes up.
+- SSH: managed remote hosts find `opencode` installed through nvm (thanks to @CMBill).
+
+### Misc
+
+- Bundled OpenCode updated to 2.0.18.
+
+## [2.0.2] - 2026-09-26
+
+### Improvements
+
+- **Chat: compaction and shell commands read like the rest of the turn.** Compaction is one collapsible row with the summary inside, and shell runs look like any other tool row.
+- Sidebar: a project whose folder is missing is marked, so you can see why it won't open.
+- Settings: Claude Code can be the small model for titles and commit messages.
+- Models: the model picker stays fast with long provider lists.
+- Models: context limits in model details match what OpenCode really uses.
+- Chat: the retry countdown shows again while OpenCode waits to retry a request.
+- Chat: the session goal strip sits on glass over the conversation.
+
+### Fixes
+
+- Startup: the app opens even when the last project's folder was deleted or moved.
+- Chat: answers typed into a question form survive switching to another session and back.
+- Agents: agents added by plugins show up in the composer without a reload (thanks to @hiro-nikaitou).
+- Chat: reverting to a message or forking brings its attached context along (thanks to @hiro-nikaitou).
+- Settings: edits to AGENTS.md made in another editor show up, and saving no longer overwrites them.
+- Config: a global `opencode.jsonc` is picked up.
+- Worktrees: the provider and agent lists in a worktree session match that worktree's config.
+- Sessions: an archived session no longer shows up as still replying (thanks to @aiiibolo).
+- Models: a Fast model variant is picked correctly (thanks to @hiro-nikaitou).
+- Small model: background titles and commit messages keep working while plugins are still loading after startup.
+- Chat: long identifiers in Markdown tables stay on one line when there is room and wrap when there isn't (thanks to @aiiibolo).
+- Chat: a dollar sign in regular text no longer turns the rest of the line into math (thanks to @hiro-nikaitou).
+- Chat: context chip preview actions stay inside the chat area (thanks to @aiiibolo).
+- Chat: the actions for a reverted message stay visible on narrow screens.
+- Chat: the stray scrollbar next to the send button is gone.
+- Mobile: the trust dialog shows above the worktree sheet (thanks to @ChangeHow).
+- Mobile: browser control works over the private relay (thanks to @aiiibolo).
+- Mobile: sending over the private relay no longer fails on a slow connection.
+- SSH: managed remote hosts find npm installed through nvm.
+
 ## [2.0.1] - 2026-09-24
 
 ### New

@@ -37,7 +37,10 @@ const ALLOWED_WS_PATHS = new Set([
 // Extension surfaces carry the extension id in the path, so they are matched
 // by shape rather than listed.
 const GUEST_SURFACE_WS_PATH = /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/;
-export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname);
+// The sockets of an isolated space carry the space id in the path: the same four sockets,
+// under `/api/spaces/<id>/`, matched by shape.
+const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
+export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname) || SPACE_WS_PATH.test(pathname);
 
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is

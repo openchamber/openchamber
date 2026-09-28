@@ -27,7 +27,7 @@ const refreshAgents = async (): Promise<void> => {
   invalidateAgentsLoadCache();
   await Promise.allSettled([
     useAgentsStore.getState().loadAgents(),
-    useConfigStore.getState().loadAgents({ source: SOURCE }),
+    useConfigStore.getState().loadAgents({ source: SOURCE, fresh: true }),
   ]);
 };
 

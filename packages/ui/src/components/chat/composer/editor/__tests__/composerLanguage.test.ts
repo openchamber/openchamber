@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { Direction, EditorView } from '@codemirror/view';
 
 import type { ComposerLanguageContext } from '../../language/tokenize';
 import { composerLanguage, setLanguageContext } from '../composerLanguage';
@@ -22,13 +22,12 @@ const stateWith = (doc: string, ctx = context()) =>
 const decorations = (state: EditorState) => {
     const found: Array<[string, string]> = [];
     const set = state.facet(EditorView.decorations)
-        .map((source) => (typeof source === 'function' ? null : source))
+        .map((source) => (source instanceof Function ? null : source))
         .find(Boolean);
     if (!set) return found;
     const iterator = set.iter();
     while (iterator.value) {
-        const spec = iterator.value.spec as { class?: string };
-        found.push([state.doc.sliceString(iterator.from, iterator.to), spec.class ?? '']);
+        found.push([state.doc.sliceString(iterator.from, iterator.to), iterator.value.spec.class ?? '']);
         iterator.next();
     }
     return found;
@@ -103,5 +102,52 @@ describe('composerLanguage — updates', () => {
     test('the document stays the plain string that gets sent', () => {
         const state = stateWith('# Title\n@build /review #sig');
         expect(state.doc.toString()).toBe('# Title\n@build /review #sig');
+    });
+});
+
+describe('composerLanguage — bidirectional technical fragments', () => {
+    const isolatedText = (state: EditorState) => {
+        const found: string[] = [];
+        for (const source of state.facet(EditorView.bidiIsolatedRanges)) {
+            if (source instanceof Function) throw new Error('Expected state-owned isolates');
+            for (const cursor = source.iter(); cursor.value; cursor.next()) {
+                expect(cursor.value.spec.bidiIsolate).toBe(Direction.LTR);
+                found.push(state.doc.sliceString(cursor.from, cursor.to));
+            }
+        }
+        return found;
+    };
+
+    test('keeps inline code and references intact inside Arabic prose', () => {
+        const text = 'مرحبا `fn(1);` @build /review';
+        const state = stateWith(text);
+        expect(isolatedText(state)).toEqual(['`fn(1);`', '@build', '/review']);
+        expect(state.doc.toString()).toBe(text);
+    });
+
+    test('syntax colors and nested references do not split a fenced code line', () => {
+        const state = stateWith('```js\n// مرحبا @build\nconst value = 1;\n```');
+        expect(isolatedText(state)).toEqual(['```js', '// مرحبا @build\nconst value = 1;', '```']);
+    });
+
+    test('removing code delimiters removes the isolation', () => {
+        const state = stateWith('`مرحبا`');
+        const next = state.update({ changes: [{ from: 0, to: 1 }, { from: 6, to: 7 }] }).state;
+        expect(isolatedText(next)).toEqual([]);
+        expect(next.doc.toString()).toBe('مرحبا');
+    });
+
+    test('shell input remains one LTR context and switching back releases it', () => {
+        const text = 'echo مرحبا;';
+        const state = stateWith(text, context({ inputMode: 'shell' }));
+        expect(isolatedText(state)).toEqual([text]);
+        const next = state.update({ effects: setLanguageContext.of(context()) }).state;
+        expect(isolatedText(next)).toEqual([]);
+    });
+
+    test('selection-only transactions reuse the direction ranges', () => {
+        const state = stateWith('مرحبا `fn();`');
+        const next = state.update({ selection: { anchor: 3 } }).state;
+        expect(next.facet(EditorView.bidiIsolatedRanges)[0]).toBe(state.facet(EditorView.bidiIsolatedRanges)[0]);
     });
 });

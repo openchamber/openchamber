@@ -28,6 +28,9 @@ const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
     updateConfig: vi.fn(async () => ({ available: true })),
     setToken: vi.fn(async () => ({ available: true, tokenPresent: true })),
     clearToken: vi.fn(async () => ({ available: true, tokenPresent: false })),
+    setClassifierSource: vi.fn(async () => ({ available: true })),
+    setCustomEndpoint: vi.fn(async () => ({ available: true })),
+    clearCustomEndpoint: vi.fn(async () => ({ available: true })),
   };
   const app = express();
   registerRoutingRoutes(app, runtime);
@@ -130,6 +133,12 @@ describe('routing routes', () => {
     expect(runtime.setToken).toHaveBeenCalledWith('ts-key');
     await request(app).delete('/api/routing/token').expect(200);
     expect(runtime.clearToken).toHaveBeenCalled();
+    await request(app).put('/api/routing/classifier').send({ source: 'zen-key' }).expect(200);
+    expect(runtime.setClassifierSource).toHaveBeenCalledWith('zen-key');
+    await request(app).put('/api/routing/classifier/custom').send({ url: 'https://jev.example.com/v1', model: 'jev-latest', key: 'k', extra: true }).expect(200);
+    expect(runtime.setCustomEndpoint).toHaveBeenCalledWith({ url: 'https://jev.example.com/v1', model: 'jev-latest', key: 'k' });
+    await request(app).delete('/api/routing/classifier/custom').expect(200);
+    expect(runtime.clearCustomEndpoint).toHaveBeenCalled();
   });
 
 });

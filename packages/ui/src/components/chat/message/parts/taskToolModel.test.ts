@@ -86,6 +86,21 @@ describe('taskToolModel', () => {
         expect(prepareTaskToolOutput(output)).toBe('result');
     });
 
+    test('unwraps the OpenCode 2 subagent envelope and preserves the result Markdown exactly', () => {
+        const result = '**MERGE**\n\n- first item\n\n```ts\nconst answer = 42;\n```';
+        const output = `<subagent sessionID="ses_abc123" state="completed">\n${result}\n</subagent>`;
+
+        expect(prepareTaskToolOutput(output)).toBe(result);
+    });
+
+    test('leaves a subagent tag that does not wrap the whole output untouched', () => {
+        const unterminated = '<subagent sessionID="ses_abc123" state="completed">\nstill writing';
+        expect(prepareTaskToolOutput(unterminated)).toBe(unterminated);
+
+        const trailingProse = '<subagent sessionID="ses_abc123" state="completed">\nresult\n</subagent>\nmore text';
+        expect(prepareTaskToolOutput(trailingProse)).toBe(trailingProse);
+    });
+
     test('leaves output without a complete task envelope untouched', () => {
         const plainMarkdown = '## Verdict\n- first item';
         expect(prepareTaskToolOutput(plainMarkdown)).toBe(plainMarkdown);
@@ -117,8 +132,8 @@ describe('taskToolModel', () => {
 });
 
 describe('resolveRunningTaskChildSessionId', () => {
-    const session = (id: string, created: number, agent?: string, parentID = 'parent'): Session => ({
-        id, parentID, projectID: 'p', directory: '/w', title: id, agent, cost: 0,
+    const session = (id: string, created: number, agent?: string, parentID = 'parent', title = id): Session => ({
+        id, parentID, projectID: 'p', directory: '/w', title, agent, cost: 0,
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         time: { created, updated: created },
     });
@@ -126,8 +141,8 @@ describe('resolveRunningTaskChildSessionId', () => {
         id, sessionID: 'parent', messageID: 'm', type: 'tool', tool: 'subagent', callID: id,
         state: { status: 'running', input: { agent }, time: { start: 100 }, metadata },
     });
-    const resolve = (sessions: Session[], siblings: Part[] = [task('t1', 'explore')], agent = 'explore') =>
-        resolveRunningTaskChildSessionId({ sessions, parentSessionID: 'parent', startedAt: 100, agent, siblingParts: siblings, partID: 't1' });
+    const resolve = (sessions: Session[], siblings: Part[] = [task('t1', 'explore')], agent = 'explore', description?: string) =>
+        resolveRunningTaskChildSessionId({ sessions, parentSessionID: 'parent', startedAt: 100, agent, description, siblingParts: siblings, partID: 't1' });
 
     test('finds the single child created after the call started', () => {
         expect(resolve([session('old', 50, 'explore'), session('other', 150, 'explore', 'elsewhere'), session('child', 120, 'explore')])).toBe('child');
@@ -145,5 +160,17 @@ describe('resolveRunningTaskChildSessionId', () => {
     test('gives up when more than one candidate remains', () => {
         expect(resolve([session('a', 110, 'explore'), session('b', 120, 'explore')])).toBeUndefined();
         expect(resolve([])).toBeUndefined();
+    });
+
+    test('tells parallel calls of one agent apart by the child title', () => {
+        const siblings = [task('t1', 'explore'), task('t2', 'explore'), task('t3', 'explore')];
+        const sessions = [
+            session('c0', 110, 'explore', 'parent', 'Part 0'),
+            session('c1', 111, 'explore', 'parent', 'Part 1'),
+            session('c2', 112, 'explore', 'parent', 'Part 2'),
+        ];
+        expect(resolve(sessions, siblings, 'explore', 'Part 1')).toBe('c1');
+        expect(resolve(sessions, siblings, 'explore', 'Part 9')).toBeUndefined();
+        expect(resolve([...sessions, session('dup', 113, 'explore', 'parent', 'Part 1')], siblings, 'explore', 'Part 1')).toBeUndefined();
     });
 });

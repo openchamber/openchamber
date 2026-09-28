@@ -118,13 +118,21 @@ export function createLiveDockerPlace({ toolsSource = createRegistryToolsSource(
 const crypto = require('node:crypto');
 const hash = (value) => (value === undefined ? 'none' : 'sha256:' + crypto.createHash('sha256').update(String(value)).digest('hex'));
 require('node:http').createServer((request, response) => {
-  response.writeHead(200, { 'content-type': 'application/json' });
-  response.end(JSON.stringify({
+  const seen = {
+    method: request.method,
     path: request.url,
     authorization: hash(request.headers.authorization),
     apiKey: hash(request.headers['x-api-key']),
     headerNames: Object.keys(request.headers).sort(),
-  }));
+  };
+  // One line per request in the container's log, so the host can read what a client it does
+  // not control, OpenCode inside a space, sent here. Hashes only, as in the answer.
+  console.log('seen ' + JSON.stringify(seen));
+  request.resume();
+  request.on('end', () => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(seen));
+  });
 }).listen(9000, '0.0.0.0', () => console.log('upstream listening'));
 `;
       await docker([
@@ -136,8 +144,23 @@ require('node:http').createServer((request, response) => {
         await new Promise((resolve) => { setTimeout(resolve, 250); });
         if ((await docker(['logs', name])).stdout.includes('upstream listening')) break;
       }
-      return { url: 'http://upstream:9000/v1', stop: () => docker(['rm', '--force', name]) };
+      return {
+        url: 'http://upstream:9000/v1',
+        /** Every request this upstream has seen so far, oldest first, from its log. */
+        seen: async () => (await docker(['logs', name])).stdout.split('\n').filter((line) => line.startsWith('seen ')).map((line) => JSON.parse(line.slice(5))),
+        stop: () => docker(['rm', '--force', name]),
+      };
     },
+
+    /**
+     * Runs a Node script in a helper container on the space's outer network, where the stand-in
+     * upstream sits and where, on a Linux host, the host's own processes can reach. What such a
+     * neighbour can reach on the gatekeeper is what the gatekeeper's bind address decides.
+     */
+    probeFromOuterNetwork: (spaceId, script) => docker(
+      ['run', '--rm', ...helperLabels, '--network', spaceResourceName(spaceId, ROLE_OUTER_NETWORK), SPACE_BASE_IMAGE, 'node', '-e', script],
+      { timeoutMs: 120_000 },
+    ),
 
     /**
      * A name of our own in the space's outer network, answered by Docker's embedded resolver with
