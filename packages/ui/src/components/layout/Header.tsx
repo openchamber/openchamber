@@ -27,7 +27,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { collectSessionSubtreeIds } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
+import { archiveUndoToastOptions, collectSessionSubtreeIds } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
@@ -899,26 +899,29 @@ export const Header: React.FC = () => {
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
 
-  const confirmHeaderRetentionAction = React.useCallback(async () => {
-    if (!pendingHeaderRetentionAction) return;
-    const action = pendingHeaderRetentionAction.action;
-    const ids = [
-      pendingHeaderRetentionAction.sessionId,
-      ...collectSessionSubtreeIds(pendingHeaderRetentionAction.sessionId, [], action === 'delete'),
-    ];
-    setPendingHeaderRetentionAction(null);
-    const result = action === 'archive' ? await archiveSessions(ids) : await deleteSessions(ids);
-    const failedIds = result.failedIds;
-    if (failedIds.length > 0) {
-      toast.error(t(action === 'archive'
-        ? 'sessions.sidebar.session.archive.error'
-        : 'sessions.sidebar.session.delete.error'));
+  const runHeaderRetentionAction = React.useCallback(async (action: 'archive' | 'delete', sessionId: string) => {
+    const ids = [sessionId, ...collectSessionSubtreeIds(sessionId, [], action === 'delete')];
+    const reopenId = useSessionUIStore.getState().currentSessionId === sessionId ? sessionId : null;
+    if (action === 'delete') {
+      const { failedIds } = await deleteSessions(ids);
+      if (failedIds.length > 0) toast.error(t('sessions.sidebar.session.delete.error'));
+      else toast.success(t('sessions.sidebar.session.delete.success'));
       return;
     }
-    toast.success(t(action === 'archive'
-      ? 'sessions.sidebar.session.archive.success'
-      : 'sessions.sidebar.session.delete.success'));
-  }, [archiveSessions, deleteSessions, pendingHeaderRetentionAction, t]);
+    const { archivedIds, failedIds } = await archiveSessions(ids);
+    if (failedIds.length > 0) {
+      toast.error(t('sessions.sidebar.session.archive.error'));
+      return;
+    }
+    toast.success(t('sessions.sidebar.session.archive.success'), archiveUndoToastOptions(archivedIds, reopenId, t));
+  }, [archiveSessions, deleteSessions, t]);
+
+  const confirmHeaderRetentionAction = React.useCallback(async () => {
+    if (!pendingHeaderRetentionAction) return;
+    const { action, sessionId } = pendingHeaderRetentionAction;
+    setPendingHeaderRetentionAction(null);
+    await runHeaderRetentionAction(action, sessionId);
+  }, [pendingHeaderRetentionAction, runHeaderRetentionAction]);
 
   // Full-page surfaces (Scheduled, Archive, Worktrees, Spaces, run overview) replace the
   // chat area; while one is open the header shows the surface identity
@@ -1237,6 +1240,15 @@ export const Header: React.FC = () => {
     rename_current_session: () => {
       if (!currentSessionId || isMobile) return false;
       beginHeaderSessionRename();
+    },
+    archive_current_session: () => {
+      if (!currentSessionId || isMobile) return false;
+      if (useGlobalSessionsStore.getState().entityById.get(currentSessionId)?.time.archived) return false;
+      if (useUIStore.getState().showDeletionDialog) {
+        setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId });
+        return;
+      }
+      void runHeaderRetentionAction('archive', currentSessionId);
     },
     toggle_services_menu: () => {
       if (isDesktopServicesOpen) {

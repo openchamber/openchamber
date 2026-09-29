@@ -634,6 +634,14 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   const expandedPathSet = React.useMemo(() => new Set(expandedPaths), [expandedPaths]);
   const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
+  const treeSectionRef = React.useRef<HTMLElement>(null);
+  // A newly selected file is revealed once, as soon as its row exists: its
+  // ancestors may still be loading when the selection lands. After that the
+  // tree scrolls only when the user scrolls it.
+  const pendingRevealPathRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    pendingRevealPathRef.current = selectedPath;
+  }, [selectedPath]);
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
@@ -1179,7 +1187,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
       const isLast = index === nodes.length - 1;
 
       return (
-        <li key={node.path} className="relative">
+        <li key={node.path} className="relative" data-file-tree-path={isDir ? undefined : node.path}>
           {depth > 0 && (
             <>
               <span className="absolute top-3.5 left-[-12px] w-3 h-px bg-border/40" />
@@ -1227,12 +1235,23 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
     });
   }
 
+  React.useEffect(() => {
+    const path = pendingRevealPathRef.current;
+    const section = treeSectionRef.current;
+    if (!path || !section) return;
+    const row = section.querySelector<HTMLElement>(`[data-file-tree-path="${CSS.escape(path)}"]`);
+    // A hidden tree has no layout to scroll; reveal once it is shown.
+    if (!row || row.offsetParent === null) return;
+    pendingRevealPathRef.current = null;
+    row.scrollIntoView({ block: 'nearest' });
+  });
+
   const hasTree = Boolean(root && childrenByDir[root]);
   const rootLoadError = root ? loadErrorsByDir[root] : null;
   const dropTargetLabel = dropIndicatorTarget ? getDropTargetLabel(root, dropIndicatorTarget) : '';
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden">
+    <section ref={treeSectionRef} className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex flex-col gap-2 border-b border-border/40 px-3 py-2">
         <div className="flex items-center justify-end gap-2">
         {canCreateFile && (
@@ -1367,7 +1386,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
             searchResults.map((node) => {
               const isActive = selectedPath === node.path;
               return (
-                <li key={node.path}>
+                <li key={node.path} data-file-tree-path={node.path}>
                   <button
                     type="button"
                     onClick={() => handleOpenFile(node)}

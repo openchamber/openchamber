@@ -2,7 +2,8 @@ import React from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -86,7 +87,9 @@ const SortableTabWrapper: React.FC<{ id: string; children: React.ReactNode; clas
       ref={setNodeRef}
       data-sortable-tab-id={id}
       style={{
-        transform: DndCSS.Transform.toString(transform),
+        // Translate only: Transform adds the scale that stretches a dragged
+        // tab to the width of the slot it passes over.
+        transform: DndCSS.Translate.toString(transform),
         transition,
       }}
       className={cn('h-full rounded-md', className, isDragging && 'opacity-50')}
@@ -164,7 +167,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   }, [activeId, items, pressedId, usesIndicator]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    // Mouse drags after a small move so a click still selects the tab; touch
+    // needs a long-press so a swipe keeps scrolling the strip.
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
   );
 
   const isSamePillRect = React.useCallback((
@@ -303,7 +309,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     updateActivePillRect();
   });
 
-  const itemOrderKey = itemIDs.join(' ');
+  const itemOrderKey = itemIDs.join('\u0000');
 
   React.useLayoutEffect(() => {
     if (!usesIndicator) {

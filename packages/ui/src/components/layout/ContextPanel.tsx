@@ -1480,7 +1480,11 @@ export const ContextPanel: React.FC = () => {
         ))}
         {terminalTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
-            <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} directory={terminalTab.targetDirectory} />
+            <TerminalView
+              visible={isOpen && activeTab?.mode === 'terminal'}
+              directory={terminalTab.targetDirectory}
+              onLastTabClosed={() => { if (directoryKey) closeContextPanelTab(directoryKey, terminalTab.id); }}
+            />
           </div>
         ) : null}
         {hasWalkthroughTab ? (

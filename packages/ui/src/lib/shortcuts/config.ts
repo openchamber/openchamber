@@ -66,11 +66,33 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.switch_session_next.label',
     },
     {
+      // Browser-style back/forward over the sessions opened in this window.
+      id: 'session_history_back',
+      defaultBinding: 'mod+[',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.session_history_back.label',
+    },
+    {
+      id: 'session_history_forward',
+      defaultBinding: 'mod+]',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.session_history_forward.label',
+    },
+    {
       id: 'rename_current_session',
       defaultBinding: 'mod+k r',
       customizable: true,
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.rename_current_session.label',
+    },
+    {
+      id: 'archive_current_session',
+      defaultBinding: 'mod+k backspace',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.archive_current_session.label',
     },
     {
       id: 'toggle_permission_auto_accept',
@@ -160,14 +182,14 @@ const SHORTCUT_GROUPS = {
     },
     {
       id: 'cycle_favorite_model_forward',
-      defaultBinding: 'ctrl+]',
+      defaultBinding: 'ctrl+alt+]',
       customizable: true,
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label',
     },
     {
       id: 'cycle_favorite_model_backward',
-      defaultBinding: 'ctrl+[',
+      defaultBinding: 'ctrl+alt+[',
       customizable: true,
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label',

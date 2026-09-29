@@ -183,6 +183,8 @@ export const useKeyboardShortcuts = () => {
       if (!isVSCodeRuntime() && useUIStore.getState().sessionTabsEnabled && activateAdjacentSessionTab(1)) return;
       return navigateSessionHistory(1) ? undefined : false;
     },
+    session_history_back: (event) => navigateSessionHistoryByShortcut(event, -1),
+    session_history_forward: (event) => navigateSessionHistoryByShortcut(event, 1),
     close_session_tab: () => {
       if (isVSCodeRuntime() || !useUIStore.getState().sessionTabsEnabled) return false;
       if (currentSessionId) {
@@ -319,6 +321,13 @@ export const useKeyboardShortcuts = () => {
       void sessionActions.abortCurrentOperation(currentSessionId);
     },
   });
+
+  function navigateSessionHistoryByShortcut(event: KeyboardEvent, delta: -1 | 1): boolean | void {
+    // An editor that already handled the chord (CodeMirror outdent/indent)
+    // keeps it.
+    if (event.defaultPrevented) return false;
+    return navigateSessionHistory(delta) ? undefined : false;
+  }
 
   function cycleFavoriteModel(delta: number): boolean | void {
     if (hasActiveBtwComposer()) return false;
