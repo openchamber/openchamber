@@ -88,6 +88,7 @@ import {
   useGlobalSessionStatusStore,
 } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
+import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
 import type { State } from "./types"
 import {
   getSessionMaterializationRequestKey,
@@ -253,6 +254,9 @@ const getDirectoryEventState = (
 const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
   applySessionEventsToGlobalSessions(batch.globalSessionEvents)
   for (const [directory, events] of batch.globalStatusEventsByDirectory) {
+    // Before statuses: an idle that follows a command's start in the same
+    // flush must see the command.
+    applyBackgroundShellEvents(directory, events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
   }
@@ -1743,6 +1747,7 @@ export function handleEvent(
       applySessionEventToGlobalSessions(payload)
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
+      applyBackgroundShellEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
       applyGlobalBlockingRequestEvents(directory, [payload])
     }
@@ -1782,6 +1787,13 @@ export function handleEvent(
               force: true,
             })
           }
+        }
+        // Bootstrap re-reads the commands of open directories; a command in
+        // any other directory may have exited during the gap.
+        for (const dir of directoriesWithRunningShells()) {
+          if (childStores.getChild(dir)) continue
+          void runBackgroundNetworkTask(() => refreshBackgroundShells(dir, (target) => opencodeClient.listRunningShells(target)))
+            .catch(() => undefined)
         }
       }
     }

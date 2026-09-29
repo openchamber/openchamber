@@ -1,7 +1,7 @@
 import React from 'react';
 import { useChatColumnSession } from '@/components/chat/chatColumnSession';
 import type { Message, ModelRef, Part, ReasoningPart, TextPart, ToolPart } from '@/lib/opencode/model';
-import { executeToolCalls, isExecuteTool } from '@/lib/opencode/tools';
+import { executeToolCalls, isExecuteTool, isShellTool, isSubagentTool } from '@/lib/opencode/tools';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -30,6 +30,11 @@ interface WorkingSummary {
     lastCompletionId: string | null;
     isComplete: boolean;
     retryInfo: { attempt?: number; next?: number } | null;
+    /**
+     * The turn waits on work OpenCode can move to the background: a running
+     * shell command or a subagent it delegated to (`session.background`).
+     */
+    canBackground: boolean;
 }
 
 interface FormingSummary {
@@ -73,6 +78,7 @@ const DEFAULT_WORKING: WorkingSummary = {
     lastCompletionId: null,
     isComplete: false,
     retryInfo: null,
+    canBackground: false,
 };
 
 const EMPTY_PARTS: Part[] = [];
@@ -119,6 +125,7 @@ type ParsedStatusResult = {
     activeToolName: string | undefined;
     statusText: string;
     isGenericStatus: boolean;
+    canBackground: boolean;
 };
 
 const getToolStatusPhrase = (toolName: string): string => {
@@ -151,6 +158,18 @@ const hashString = (value: string): number => {
 const getStableWorkingPhrase = (key: string): string => {
     return WORKING_PHRASES[hashString(key) % WORKING_PHRASES.length] ?? 'working';
 };
+
+/**
+ * The turn waits on a job OpenCode can move to the background: a shell command
+ * or a subagent call that already runs. A pending call has not started yet (or
+ * waits for a permission), and a background call settles at once, so neither
+ * counts.
+ */
+export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.some((part) => (
+    part.type === 'tool'
+    && part.state?.status === 'running'
+    && (isShellTool(part.tool) || isSubagentTool(part.tool))
+));
 
 const createParsedStatus = (parts: Part[], genericKey: string): ParsedStatusResult => {
     let activePartType: ParsedStatusResult['activePartType'] = undefined;
@@ -210,7 +229,7 @@ const createParsedStatus = (parts: Part[], genericKey: string): ParsedStatusResu
         return getStableWorkingPhrase(genericKey);
     })();
 
-    return { activePartType, activeToolName, statusText, isGenericStatus };
+    return { activePartType, activeToolName, statusText, isGenericStatus, canBackground: hasBackgroundableWork(parts) };
 };
 
 const encodeParsedStatus = (status: ParsedStatusResult): string => {
@@ -219,11 +238,12 @@ const encodeParsedStatus = (status: ParsedStatusResult): string => {
         status.activeToolName ?? '',
         status.statusText,
         status.isGenericStatus ? '1' : '0',
+        status.canBackground ? '1' : '0',
     ].join(STATUS_SIGNATURE_SEPARATOR);
 };
 
 const decodeParsedStatus = (signature: string): ParsedStatusResult => {
-    const [activePartType, activeToolName, statusText = 'working', isGenericStatus] = signature.split(STATUS_SIGNATURE_SEPARATOR);
+    const [activePartType, activeToolName, statusText = 'working', isGenericStatus, canBackground] = signature.split(STATUS_SIGNATURE_SEPARATOR);
     return {
         activePartType: activePartType === 'text' || activePartType === 'tool' || activePartType === 'reasoning' || activePartType === 'editing'
             ? activePartType
@@ -231,6 +251,7 @@ const decodeParsedStatus = (signature: string): ParsedStatusResult => {
         activeToolName: activeToolName || undefined,
         statusText,
         isGenericStatus: isGenericStatus === '1',
+        canBackground: canBackground === '1',
     };
 };
 
@@ -448,6 +469,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             lastCompletionId: null,
             isComplete: false,
             retryInfo,
+            canBackground: isWorking && parsedStatus.canBackground,
         };
     }, [activityPhase, isPhaseWorking, parsedStatus, abortState, sessionRetryAttempt, sessionRetryNext, assistantRetry]);
 
@@ -479,6 +501,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                 activePartType: undefined,
                 activeToolName: undefined,
                 retryInfo: null,
+                canBackground: false,
             };
         }
 
@@ -488,6 +511,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             isWaitingForPermission: true,
             canAbort: false,
             retryInfo: null,
+            canBackground: false,
         };
     }, [baseWorking, sessionPermissionRequests, sessionFormRequests]);
 

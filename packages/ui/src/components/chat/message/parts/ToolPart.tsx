@@ -12,11 +12,15 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages, useSessionMessages } from '@/sync/sync-context';
+import { useRunningShell } from '@/sync/background-shells';
+import { findShellCancellation, findShellCompletion, readBackgroundShellID } from '@/lib/opencode/background-shell';
+import { opencodeClient } from '@/lib/opencode/client';
 import type { State } from '@/sync/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -101,6 +105,11 @@ import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websea
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
+import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
+import { toBackgroundSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
+import { findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useBackgroundShellOutput } from './useBackgroundShellOutput';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1733,13 +1742,20 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
 ToolExpandedContent.displayName = 'ToolExpandedContent';
 
-const ToolPartContent: React.FC<ToolPartProps> = ({
+/** Header extras of a background shell command: its label, and a stop action while it runs. */
+type BackgroundShellHeader = {
+    phase: BackgroundShellPhase['kind'];
+    onStop?: () => void;
+};
+
+const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHeader }> = ({
     part,
     isExpanded,
     onToggle,
     isMobile,
     onShowPopup,
     animateTailText = true,
+    background,
 }) => {
     const { t } = useI18n();
     const state = part.state;
@@ -2239,13 +2255,21 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     </button>
                                 ) : null}
                             </div>
-                            {isShellTool(normalizedPartTool) && typeof effectiveTimeStart === 'number' ? (
+                            {/* A background command whose end is not known yet has no duration to show. */}
+                            {isShellTool(normalizedPartTool) && typeof effectiveTimeStart === 'number' && background?.phase !== 'unknown' ? (
                                 <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     <LiveDuration
                                         start={effectiveTimeStart}
                                         end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
                                         active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
                                     />
+                                </span>
+                            ) : null}
+                            {background ? (
+                                <span className={cn('flex-shrink-0 text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
+                                    {background.phase === 'stopped'
+                                        ? t('chat.toolPart.background.stoppedLabel')
+                                        : t('chat.toolPart.background.label')}
                                 </span>
                             ) : null}
                         </>
@@ -2291,6 +2315,25 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 </span>
                             )}
                         </div>
+                        {background?.onStop ? (
+                            <Tooltip delayDuration={750}>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        type="button"
+                                        onClick={(event) => { event.stopPropagation(); background.onStop?.(); }}
+                                        className={cn(
+                                            'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                            'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                        )}
+                                        style={{ color: 'var(--status-error)' }}
+                                        aria-label={t('chat.toolPart.background.stop')}
+                                    >
+                                        <Icon name="stop" className="h-3 w-3" />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" sideOffset={6}>{t('chat.toolPart.background.stop')}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
                     </div>
                 )}
             </div>
@@ -2394,10 +2437,76 @@ class ToolPartErrorBoundary extends React.Component<{
     }
 }
 
+/** A shell call OpenCode moved to the background, rendered from the command's own state (see `backgroundShellPart.ts`). */
+const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string }> = ({ shellID, ...props }) => {
+    const { t } = useI18n();
+    const directory = useEffectiveDirectory();
+    const running = useRunningShell(shellID);
+    const messages = useSessionMessages(props.part.sessionID, directory);
+    const completion = React.useMemo(() => findShellCompletion(messages, shellID), [messages, shellID]);
+    const cancellation = React.useMemo(() => findShellCancellation(messages, shellID), [messages, shellID]);
+    const isRunning = !completion && running !== undefined;
+    const liveOutput = useBackgroundShellOutput(shellID, running?.directory, isRunning && props.isExpanded);
+    const [stopping, setStopping] = React.useState(false);
+
+    // A stop the user asked for wins over the error OpenCode reports for it,
+    // but not over a command that is somehow still running.
+    const phase = React.useMemo((): BackgroundShellPhase => {
+        if (isRunning) return { kind: 'running', output: liveOutput };
+        if (cancellation) {
+            return { kind: 'stopped', endedAt: completion?.endedAt ?? cancellation.stoppedAt, notice: t('chat.toolPart.background.stoppedNotice') };
+        }
+        return completion ? { kind: 'finished', completion } : { kind: 'unknown' };
+    }, [cancellation, completion, isRunning, liveOutput, t]);
+    const part = React.useMemo(() => toBackgroundShellPart(props.part, phase), [phase, props.part]);
+
+    const stop = React.useCallback(() => {
+        if (!running) return;
+        setStopping(true);
+        opencodeClient.stopBackgroundShell({
+            sessionID: props.part.sessionID,
+            sessionDirectory: directory,
+            shellID,
+            shellDirectory: running.directory,
+            command: running.command,
+        }).catch(() => {
+            setStopping(false);
+            toast.error(t('chat.toolPart.background.stopFailed'));
+        });
+    }, [directory, props.part.sessionID, running, shellID, t]);
+
+    return (
+        <ToolPartContent
+            {...props}
+            part={part}
+            background={{ phase: phase.kind, onStop: isRunning && !stopping ? stop : undefined }}
+        />
+    );
+};
+
+/** A subagent call that went to the background, rendered from its child and report (see `backgroundSubagentPart.ts`). */
+const BackgroundSubagentToolPartContent: React.FC<ToolPartProps & { childSessionID: string }> = ({ childSessionID, ...props }) => {
+    const directory = useEffectiveDirectory();
+    const messages = useSessionMessages(props.part.sessionID, directory);
+    const run = React.useMemo(() => findSubagentRun(messages, childSessionID), [childSessionID, messages]);
+    const childRunning = useGlobalSessionStatusStore((state) => state.activeSessionIds.has(childSessionID));
+
+    const phase = React.useMemo((): BackgroundSubagentPhase => {
+        if (run) return { kind: 'finished', run };
+        return childRunning ? { kind: 'running' } : { kind: 'unknown' };
+    }, [childRunning, run]);
+    const part = React.useMemo(() => toBackgroundSubagentPart(props.part, phase), [phase, props.part]);
+    const headerPhase: BackgroundShellPhase['kind'] = phase.kind === 'finished' && phase.run.state === 'cancelled' ? 'stopped' : phase.kind;
+
+    return <ToolPartContent {...props} part={part} background={{ phase: headerPhase }} />;
+};
+
 const ToolPart: React.FC<ToolPartProps> = (props) => {
     const { t } = useI18n();
     const toolName = normalizeToolName(props.part.tool) || 'tool';
     const displayName = getToolMetadata(toolName).displayName;
+    const backgroundShellID = isShellTool(toolName) ? readBackgroundShellID(props.part) : undefined;
+    const backgroundChildID = backgroundShellID ? undefined : readBackgroundSubagentChildID(props.part);
 
     return (
         <ToolPartErrorBoundary
@@ -2406,7 +2515,11 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
             resetKey={props.part}
             toolName={toolName}
         >
-            <ToolPartContent {...props} />
+            {backgroundShellID
+                ? <BackgroundShellToolPartContent {...props} shellID={backgroundShellID} />
+                : backgroundChildID
+                    ? <BackgroundSubagentToolPartContent {...props} childSessionID={backgroundChildID} />
+                    : <ToolPartContent {...props} />}
         </ToolPartErrorBoundary>
     );
 };

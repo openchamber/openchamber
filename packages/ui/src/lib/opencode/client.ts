@@ -62,6 +62,7 @@ import {
   type Vcs,
 } from "./model"
 import { ascendingId } from "./ids"
+import { runningShellFromWire, shellCancellationNote, type RunningShell } from "./background-shell"
 import { toJsonRecord } from "./json"
 import { deniesAnyProvider, mergeConfigDocuments, projectAgent, projectMessages, projectProject, projectSession, projectVcs } from "./projection"
 
@@ -73,6 +74,8 @@ const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api"
 const CONFIG_CACHE_TTL_MS = 10_000
 const OPENCODE_HEALTH_TIMEOUT_MS = 4_000
 const DEFAULT_SESSION_PAGE_LIMIT = 100
+/** How much of a running command's output the live view starts with. */
+const SHELL_OUTPUT_TAIL_BYTES = 64 * 1024
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -1226,6 +1229,16 @@ class OpencodeService {
     return result.interrupted
   }
 
+  /**
+   * Moves the work the turn is blocked on (a running shell command, a
+   * subagent it waits for) to the background. The work keeps running, the
+   * agent is told to move on, and the result is handed back when it settles.
+   * A no-op when nothing blocks.
+   */
+  async backgroundSessionWork(id: string, directory?: string | null): Promise<void> {
+    await call("session.background", () => this.clientFor(directory).session.background({ sessionID: id }))
+  }
+
   /** Runs a shell command inside the session transcript. Returns the shell message id. */
   async shellSession(params: {
     runtimeKey?: string
@@ -1505,6 +1518,70 @@ class OpencodeService {
       ),
     )
     return dedupeById(lists)
+  }
+
+  // -------------------------------------------------------------------------
+  // Shell commands the agent started (background commands)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Commands still running in the directory on behalf of a session, keyed by
+   * the directory OpenCode resolved it to (symlinks resolved), which is the
+   * directory its shell events carry. Throws on fetch failure.
+   */
+  async listRunningShells(directory: string): Promise<{ directory: string; shells: RunningShell[] }> {
+    const response = await call("shell.list", () => this.clientFor(directory).shell.list())
+    return {
+      directory: response.location.directory ?? directory,
+      shells: response.data.flatMap((info) => runningShellFromWire(info) ?? []),
+    }
+  }
+
+  /**
+   * The newest part of a command's captured output, and the cursor to read
+   * on from. Without a cursor the read starts `tailBytes` before the end.
+   */
+  async readShellOutput(
+    shellID: string,
+    directory: string,
+    cursor?: number,
+    tailBytes = SHELL_OUTPUT_TAIL_BYTES,
+  ): Promise<{ output: string; cursor: number; skipped: boolean }> {
+    const client = this.clientFor(directory)
+    let start = cursor
+    if (start === undefined) {
+      const end = await call("shell.output", () => client.shell.output({ id: shellID, cursor: Number.MAX_SAFE_INTEGER }).then((r) => r.data))
+      start = Math.max(0, end.size - tailBytes)
+    }
+    const page = await call("shell.output", () => client.shell.output({ id: shellID, cursor: start, limit: tailBytes }).then((r) => r.data))
+    return { output: page.output, cursor: page.cursor, skipped: cursor === undefined && start > 0 }
+  }
+
+  /**
+   * Stops a background command the agent started. The agent is told first,
+   * in a note that does not wake it, that the error OpenCode is about to
+   * report is the user's stop (see `shellCancellationNote`); the command is
+   * killed only once the note is in. Throws when either step fails, and
+   * nothing is killed when the note could not be delivered.
+   */
+  async stopBackgroundShell(params: {
+    sessionID: string
+    sessionDirectory?: string | null
+    shellID: string
+    shellDirectory: string
+    command: string
+  }): Promise<void> {
+    const note = shellCancellationNote({ shellID: params.shellID, command: params.command })
+    await call("session.synthetic", () =>
+      this.clientFor(params.sessionDirectory).session.synthetic({
+        sessionID: params.sessionID,
+        text: note.text,
+        description: note.description,
+        metadata: note.metadata,
+        resume: false,
+      }),
+    )
+    await call("shell.remove", () => this.clientFor(params.shellDirectory).shell.remove({ id: params.shellID }))
   }
 
   /** Global pending items when requested, then each distinct directory. */

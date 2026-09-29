@@ -33,16 +33,7 @@ export function CollapsedActivityIndicator({
       </span>
     );
   }
-  const label = state === 'active'
-    ? t('sessions.sidebar.session.status.active')
-    : t('sessions.sidebar.session.status.unread');
-  return (
-    <SessionActivityIndicator
-      state={state === 'active' ? 'running' : 'unread'}
-      label={label}
-      className={className}
-    />
-  );
+  return <SessionActivityIndicator state={state === 'active' ? 'running' : 'unread'} className={className} />;
 }
 
 export const CollapsedSessionActivityIndicator: React.FC<{ nodes: SessionNode[]; includeUnreadSubtasks: boolean }> = ({ nodes, includeUnreadSubtasks }) => {

@@ -132,6 +132,16 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_dictation.label',
     },
     { id: 'abort_run', defaultBinding: 'escape', customizable: false },
+    {
+      // Not ctrl+b (the OpenCode TUI's key): the composer editor's macOS
+      // emacs keymap moves the caret on it, and elsewhere it is mod+b
+      // (toggle_sidebar).
+      id: 'background_session_work',
+      defaultBinding: 'mod+shift+b',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.background_session_work.label',
+    },
   ],
   models: [
     {

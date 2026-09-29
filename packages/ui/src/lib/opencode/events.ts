@@ -32,6 +32,7 @@ import {
   type TokenUsageInfo,
 } from "./model"
 import { projectUserParts, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
+import { runningShellFromWire, type RunningShell } from "./background-shell"
 
 // ---------------------------------------------------------------------------
 // Event vocabulary
@@ -130,6 +131,10 @@ export type SyncEvent =
   | { type: "permission.replied"; properties: { sessionID: string; requestID: string } }
   | { type: "form.created"; properties: { form: FormRequest } }
   | { type: "form.settled"; properties: { sessionID: string; formID: string } }
+  /** A session's shell command started; commands that belong to no session are not reported. */
+  | { type: "shell.started"; properties: { shell: RunningShell } }
+  /** A shell command exited or was removed. */
+  | { type: "shell.ended"; properties: { shellID: string } }
   | { type: "vcs.branch.updated"; properties: { branch?: string } }
   | { type: "mcp.status.changed"; properties: { server: string } }
   | { type: "catalog.updated"; properties: { kind: CatalogKind } }
@@ -415,6 +420,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
               time: { created: event.created },
               text: event.data.text,
               description: event.data.description,
+              metadata: event.data.metadata,
             }),
           },
         },
@@ -840,11 +846,20 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "worktree.updated":
     case "worktree.resolved":
       return []
-    // Free-standing shells and PTYs are the TUI's and the terminal panel's
-    // own transports; neither reads them from this stream.
-    case "shell.created":
-    case "shell.deleted":
+    // --- shell commands -------------------------------------------------------
+
+    // A session's running commands keep its turn open (background commands),
+    // so only commands tagged with a session are reported.
+    case "shell.created": {
+      const shell = runningShellFromWire(event.data.info)
+      return shell ? [{ type: "shell.started", properties: { shell } }] : []
+    }
     case "shell.exited":
+    case "shell.deleted":
+      return [{ type: "shell.ended", properties: { shellID: event.data.id } }]
+
+    // PTYs are the terminal panel's own transport; it does not read them from
+    // this stream.
     case "pty.created":
     case "pty.updated":
     case "pty.deleted":

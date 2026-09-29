@@ -30,9 +30,12 @@ export const isTimelineNoticeRole = (role: Message['role']): boolean => NOTICE_R
 export const isSkippedTimelineRole = (role: Message['role']): boolean => SKIPPED_ROLES.has(role);
 
 /**
- * A background subagent run: a `subagent: true` command, or a subagent call the
- * model sent to the background. It opens a turn of its own, like the prompt a
- * command used to be, so the parent's reaction to the result renders below it.
+ * A background subagent run: a `subagent: true` command, or a subagent call
+ * that went to the background outside the loaded history. It opens a turn of
+ * its own, like the prompt a command used to be, so the parent's reaction to
+ * the result renders below it. The report of a call the transcript shows is
+ * dropped before this point (`keepCommandSubagentReports` in
+ * `ChatContainer`) and finishes that call's row instead.
  */
 export const isSubagentRunEntry = (message: Message): boolean => readSubagentRun(message) !== undefined;
 

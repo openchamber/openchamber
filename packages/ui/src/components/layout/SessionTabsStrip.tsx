@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSessionTurnActive } from '@/sync/global-session-status';
+import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import {
   DndContext,
@@ -110,13 +110,11 @@ const SessionTabItem: React.FC<{
 
   // Session state for the dot and the hover tooltip.
   const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
-  const isStreaming = useSessionTurnActive(tab.id);
+  const turnActivity = useSessionTurnActivity(tab.id);
+  const isStreaming = turnActivity !== null;
   const unseenCount = useSessionUnseenCount(tab.id);
   const showUnread = unseenCount > 0 && !isActive && !isStreaming;
   const showDot = isStreaming || showUnread;
-  const dotLabel = isStreaming
-    ? t('sessions.sidebar.session.status.active')
-    : t('sessions.sidebar.session.status.unread');
 
   const menuArgsFor = (components: SessionTabMenuComponents): SessionTabMenuArgs => ({
     session: tab.session,
@@ -203,8 +201,7 @@ const SessionTabItem: React.FC<{
                       <Icon name="loader-4" className="ml-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
                     ) : showDot ? (
                       <SessionActivityIndicator
-                        state={isStreaming ? 'running' : 'unread'}
-                        label={dotLabel}
+                        state={turnActivity ?? 'unread'}
                         className={cn('ml-1.5 shrink-0', !suppressControls && 'group-hover/session-tab:opacity-0', overlayVisible && 'opacity-0')}
                       />
                     ) : null}

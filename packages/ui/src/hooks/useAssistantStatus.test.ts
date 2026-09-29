@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, Part, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
 
-import { getActiveAssistantContext } from './useAssistantStatus';
+import { getActiveAssistantContext, hasBackgroundableWork } from './useAssistantStatus';
 
 const userMessage = (id: string): UserMessage => ({
     id,
@@ -108,5 +108,34 @@ describe('getActiveAssistantContext', () => {
             assistantId: running.id,
             model: { providerId: 'anthropic', modelId: 'claude-opus-4-1' },
         });
+    });
+});
+
+describe('hasBackgroundableWork', () => {
+    const tool = (name: string, state: Extract<Part, { type: 'tool' }>['state']): Part => ({
+        id: `prt_${name}`,
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'tool',
+        callID: `call_${name}`,
+        tool: name,
+        state,
+    });
+
+    test('a running command or subagent can go to the background', () => {
+        expect(hasBackgroundableWork([tool('shell', { status: 'running', input: { command: 'bun test' }, time: { start: 1 } })])).toBe(true);
+        expect(hasBackgroundableWork([tool('subagent', { status: 'running', input: { agent: 'explore' }, time: { start: 1 } })])).toBe(true);
+    });
+
+    test('other tools, pending calls and settled calls cannot', () => {
+        expect(hasBackgroundableWork([tool('read', { status: 'running', input: {}, time: { start: 1 } })])).toBe(false);
+        expect(hasBackgroundableWork([tool('shell', { status: 'pending', input: {}, raw: '' })])).toBe(false);
+        expect(hasBackgroundableWork([tool('shell', {
+            status: 'completed',
+            input: { command: 'sleep 300', background: true },
+            output: 'Command moved to the background',
+            metadata: { status: 'running', shellID: 'sh_1' },
+            time: { start: 1, end: 2 },
+        })])).toBe(false);
     });
 });

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
+import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
 
 import { ChatInput } from './ChatInput';
 import { ChatColumnSessionContext, type ChatColumnSession } from './chatColumnSession';
@@ -73,6 +74,7 @@ import {
     useScopedBlockingForms,
     useParentSession,
     useSession,
+    useSessions,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
@@ -1145,7 +1147,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         onActiveTurnChange: handleActiveTurnChange,
     });
 
-    const viewportMessages = sessionMessages;
+    // A subagent report opens a turn of its own at the end of the chat only for
+    // a `subagent: true` command; a call's report finishes that call's row
+    // (see `ToolPart`), and a run started before the loaded history stays in
+    // the session's subagent list, so the chat never shifts for either.
+    const directorySessions = useSessions(effectiveSessionDirectory);
+    const viewportMessages = React.useMemo(() => {
+        const childStartedAt = (childSessionID: string): number | undefined => (
+            directorySessions.find((session) => session.id === childSessionID)?.time.created
+        );
+        return keepCommandSubagentReports(sessionMessages, childStartedAt);
+    }, [directorySessions, sessionMessages]);
 
     const timelineController = useChatTimelineController({
         sessionId: currentSessionId,

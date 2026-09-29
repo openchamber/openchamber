@@ -150,6 +150,13 @@ describe('layout-independent key matching', () => {
     expect(eventMatchesShortcut(event({ ctrlKey: true, key: 'y', code: 'KeyT' }), 'mod+t')).toBe(false);
   });
 
+  test('the background shortcut matches the shifted letter on any layout and is not a browser shortcut', () => {
+    expect(eventMatchesShortcut(event({ ctrlKey: true, shiftKey: true, key: 'B', code: 'KeyB' }), 'mod+shift+b')).toBe(true);
+    expect(eventMatchesShortcut(event({ ctrlKey: true, shiftKey: true, key: 'И', code: 'KeyB' }), 'mod+shift+b')).toBe(true);
+    expect(eventMatchesShortcut(event({ ctrlKey: true, key: 'b', code: 'KeyB' }), 'mod+shift+b')).toBe(false);
+    expect(isRiskyBrowserShortcut('mod+shift+b')).toBe(false);
+  });
+
   test('resolveShortcutEventDigit reads the digit from the code under Option', () => {
     expect(resolveShortcutEventDigit({ key: '¡', code: 'Digit1' })).toBe('1');
     expect(resolveShortcutEventDigit({ key: '5', code: 'Digit5' })).toBe('5');

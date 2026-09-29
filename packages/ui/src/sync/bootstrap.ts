@@ -6,6 +6,7 @@ import { runtimeFetch } from "../lib/runtime-fetch"
 import { emitSyncConfigChanged } from "./sync-refs"
 import { warmChatsRootDirectory } from "../lib/chatDirectories"
 import { runBackgroundNetworkTask } from "../lib/background-network"
+import { refreshBackgroundShells } from "./background-shells"
 import {
   readDirectoryStatusSnapshot,
   readDirectoryFormSnapshot,
@@ -176,6 +177,9 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
   // stores (useMcpStore, useCommandsStore) instead.
   const enrichment = Promise.allSettled([
     read(() => opencodeClient.getVcs(directory).then((vcs) => commit({ vcs }))),
+    // Commands the agent left running in the background, including ones whose
+    // start or exit this client missed.
+    read(() => refreshBackgroundShells(directory, (target) => opencodeClient.listRunningShells(target))),
   ])
   const [results, enrichmentResults] = await Promise.all([critical, enrichment])
   if (input.isStale?.()) return "stale"
