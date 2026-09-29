@@ -2024,6 +2024,71 @@ async function attachGitWorktreeToCandidate(
   };
 }
 
+const isAncestorRef = async (cwd: string, ancestor: string, descendant: string): Promise<boolean> => {
+  const result = await runGitCommand(cwd, ['merge-base', '--is-ancestor', ancestor, descendant]);
+  return result.success;
+};
+
+type PublishedLocalBranchUpstream = { remote: string; branch: string; localRef: string; trackingRef: string };
+
+/**
+ * The upstream of a local branch whose commits are all published, or null.
+ *
+ * Only the standard remote-tracking layout qualifies
+ * (`refs/remotes/<remote>/<branch>`), because that is the ref
+ * `fetchRemoteBranchRef` refreshes.
+ */
+const resolvePublishedLocalBranchUpstream = async (
+  primaryWorktree: string,
+  startRef: string,
+): Promise<PublishedLocalBranchUpstream | null> => {
+  const branch = startRef.trim().replace(/^refs\/heads\//, '');
+  if (!branch || branch === 'HEAD') return null;
+  const localRef = `refs/heads/${branch}`;
+  const refs = await runGitCommand(primaryWorktree, [
+    'for-each-ref',
+    '--format=%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)',
+    localRef,
+  ]);
+  if (!refs.success) return null;
+  const line = refs.stdout.split('\n').find((entry) => entry.startsWith(`${localRef}\0`));
+  if (!line) return null;
+  const [, trackingRef = '', remote = '', remoteRef = ''] = line.split('\0');
+  const remoteBranch = remoteRef.replace(/^refs\/heads\//, '');
+  if (!remote || !remoteBranch || trackingRef !== `refs/remotes/${remote}/${remoteBranch}`) return null;
+  if (!(await isAncestorRef(primaryWorktree, localRef, trackingRef))) return null;
+  return { remote, branch: remoteBranch, localRef, trackingRef };
+};
+
+/**
+ * A local base branch with nothing unpublished starts the worktree from its
+ * freshly fetched upstream, so the worktree includes what was pushed since
+ * the last pull. The local branch itself is never moved. A branch with
+ * unpublished commits, or an upstream that no longer contains the local
+ * commits after the fetch (a force-push), keeps the local ref; a failed fetch
+ * keeps it too and says so.
+ */
+const preparePublishedLocalBranchSource = async (
+  primaryWorktree: string,
+  input: CreateGitWorktreePayload,
+  startRef: string,
+): Promise<{ input: CreateGitWorktreePayload; sourceFetchFailed: boolean }> => {
+  const upstream = await resolvePublishedLocalBranchUpstream(primaryWorktree, startRef);
+  if (!upstream) return { input, sourceFetchFailed: false };
+  try {
+    await fetchRemoteBranchRef(primaryWorktree, upstream.remote, upstream.branch);
+  } catch {
+    return { input, sourceFetchFailed: true };
+  }
+  if (!(await isAncestorRef(primaryWorktree, upstream.localRef, upstream.trackingRef))) {
+    return { input, sourceFetchFailed: false };
+  }
+  return {
+    input: { ...input, startRef: `remotes/${upstream.remote}/${upstream.branch}` },
+    sourceFetchFailed: false,
+  };
+};
+
 const prepareWorktreeCreateSource = async (
   context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
   input: CreateGitWorktreePayload,
@@ -2041,7 +2106,7 @@ const prepareWorktreeCreateSource = async (
   const startRef = normalizeStartRef(input.startRef);
   const remoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
   if (!remoteStartRef) {
-    return { input, sourceFetchFailed: false };
+    return preparePublishedLocalBranchSource(context.primaryWorktree, input, startRef);
   }
 
   const status = await getGitStatus(context.primaryWorktree, { mode: 'light' }).catch(() => null);
