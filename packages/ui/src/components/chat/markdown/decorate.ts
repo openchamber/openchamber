@@ -4,6 +4,8 @@ import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/d
 import type { IconName } from '@/components/icon/icons';
 import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
 import { getMermaidViewerController } from './mermaidViewer';
+import { getMarkdownCodeText } from './codeText';
+import { getMarkdownSelectionText } from './selectionMarkdown';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -197,12 +199,7 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
   code.toggleAttribute('data-md-code-trailing-newline', hasTrailingNewline);
 };
 
-export const getMarkdownCodeText = (code: HTMLElement): string => {
-  const lineContents = Array.from(code.querySelectorAll<HTMLElement>('[data-md-code-line-content]'));
-  if (lineContents.length === 0) return code.textContent ?? '';
-  const text = lineContents.map((line) => line.textContent ?? '').join('\n');
-  return code.hasAttribute('data-md-code-trailing-newline') ? `${text}\n` : text;
-};
+export { getMarkdownCodeText };
 
 export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
@@ -708,27 +705,38 @@ type MarkdownCopyState = {
 
 const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
 
+// Copying a selection inside rendered markdown writes its source form: code
+// as the exact code text, anything else as Markdown. The markdown path keeps
+// the selected HTML too, so rich editors still paste formatted text.
 const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
   let state = markdownCopyStates.get(doc);
   if (!state) {
-    const getSelectedText = (): string | null => {
+    const getSelectedCopy = (): { text: string; html: string | null } | null => {
       const selection = doc.getSelection();
       if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
-      return getMarkdownCodeSelectionText(selection.getRangeAt(0));
+      const range = selection.getRangeAt(0);
+      const code = getMarkdownCodeSelectionText(range);
+      if (code !== null) return { text: code, html: null };
+      const markdown = getMarkdownSelectionText(range);
+      if (markdown === null) return null;
+      const holder = doc.createElement('div');
+      holder.appendChild(range.cloneContents());
+      return { text: markdown, html: holder.innerHTML };
     };
     const handler = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
-      const text = getSelectedText();
-      if (text === null) return;
+      const copy = getSelectedCopy();
+      if (copy === null) return;
       event.preventDefault();
       event.stopPropagation();
-      event.clipboardData.setData('text/plain', text);
+      event.clipboardData.setData('text/plain', copy.text);
+      if (copy.html) event.clipboardData.setData('text/html', copy.html);
     };
     const menuHandler = (event: Event) => {
-      const text = getSelectedText();
-      if (text === null) return;
+      const copy = getSelectedCopy();
+      if (copy === null) return;
       event.preventDefault();
-      void copyTextToClipboard(text);
+      void copyTextToClipboard(copy.text);
     };
     state = { registrations: 0, handler, menuHandler };
     markdownCopyStates.set(doc, state);
