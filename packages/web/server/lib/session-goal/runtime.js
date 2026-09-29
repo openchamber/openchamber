@@ -62,7 +62,7 @@ const MESSAGE_FETCH_LIMIT = 40;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
 // the intended stop conditions; this only prevents a runaway loop.
-const MAX_AUTO_TURNS = 20;
+const MAX_AUTO_TURNS = Number(process.env.OPENCHAMBER_MAX_AUTO_TURNS) || 20;
 // Consecutive check failures tolerated before the goal stops: one transient
 // hiccup allows a single unchecked continuation; a dead checker must not drive
 // the loop blind all the way to the turn cap.
