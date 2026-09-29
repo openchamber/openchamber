@@ -35,7 +35,7 @@ import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-conte
 import { ContextPanelContent } from './ContextSidebarTab';
 import { BrowserPane } from '@/components/browser/BrowserPane';
 import { browserUrlLabel } from '@/lib/browser/url';
-import { registerBrowserOpener, setShownBrowserTab } from '@/lib/browser/controlClient';
+import { registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
@@ -529,16 +529,29 @@ export const ContextPanel: React.FC = () => {
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const openAgentBrowserTab = useUIStore((state) => state.openAgentBrowserTab);
 
+  // A browser tab loads its page only once it is needed: shown in the open
+  // panel, opened by the agent, or woken by an agent action. Tabs restored
+  // from a previous run otherwise stay asleep, since every loaded tab costs a
+  // Chromium process. Once loaded, a tab stays loaded until it is closed.
+  const [wokenBrowserTabIds, setWokenBrowserTabIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const wakeBrowserTab = React.useCallback((tabId: string) => {
+    setWokenBrowserTabIds((current) => (current.has(tabId) ? current : new Set(current).add(tabId)));
+  }, []);
+
   // Lets an agent's browser.open create its own tab; the id goes back to the
   // agent so it keeps working there. Registered from the panel because opening a tab is panel state, not
   // something the browser view itself can do before it exists. Background on
   // purpose: an agent working a page must not pop the panel open or steal the
-  // active tab while the user reads something else. The tab appears in the
-  // strip; browser.capture shows it only for the moment of the screenshot.
+  // active tab while the user reads something else, and that includes taking
+  // a screenshot of it. The tab appears in the strip.
   React.useEffect(() => {
     if (!effectiveDirectory) return;
-    return registerBrowserOpener((url) => openAgentBrowserTab(effectiveDirectory, url));
-  }, [effectiveDirectory, openAgentBrowserTab]);
+    return registerBrowserOpener((url) => {
+      const tabId = openAgentBrowserTab(effectiveDirectory, url);
+      if (tabId) wakeBrowserTab(tabId);
+      return tabId;
+    });
+  }, [effectiveDirectory, openAgentBrowserTab, wakeBrowserTab]);
   // The agent asked for a file to be shown. It opens in front of whatever tab
   // the user had, on purpose: the agent is pointing at a result, and the prior
   // tab is one click away.
@@ -1089,6 +1102,27 @@ export const ContextPanel: React.FC = () => {
     () => tabs.filter((tab) => tab.mode === 'browser'),
     [tabs],
   );
+  const visibleBrowserTabId = isOpen && activeTab?.mode === 'browser' ? activeTab.id : null;
+  React.useEffect(() => {
+    if (visibleBrowserTabId) wakeBrowserTab(visibleBrowserTabId);
+  }, [visibleBrowserTabId, wakeBrowserTab]);
+  const loadedBrowserTabs = React.useMemo(
+    () => browserTabs.filter((tab) => tab.id === visibleBrowserTabId || wokenBrowserTabIds.has(tab.id)),
+    [browserTabs, visibleBrowserTabId, wokenBrowserTabIds],
+  );
+  React.useEffect(() => {
+    // Only a Chromium host mounts views that agents can drive, so only it may
+    // offer to wake a tab; anywhere else a claimed action could never run.
+    if (!window.__OPENCHAMBER_ELECTRON__) return;
+    const unregister = browserTabs
+      .filter((tab) => !loadedBrowserTabs.includes(tab))
+      .map((tab) => registerSleepingBrowserTab({
+        tabId: tab.id,
+        describe: () => ({ title: '', url: tab.targetPath ?? '' }),
+        wake: () => wakeBrowserTab(tab.id),
+      }));
+    return () => unregister.forEach((release) => release());
+  }, [browserTabs, loadedBrowserTabs, wakeBrowserTab]);
   const diffTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
@@ -1407,7 +1441,7 @@ export const ContextPanel: React.FC = () => {
             }}
           />
         ) : null}
-        {browserTabs.map((tab) => (
+        {loadedBrowserTabs.map((tab) => (
           <div
             key={tab.id}
             // Invisible rather than display:none, so a background tab the agent

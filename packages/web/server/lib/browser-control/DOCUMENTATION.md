@@ -57,7 +57,14 @@ itself; it can only ask and wait.
   carries its `tabId`. `browser.snapshot` answers carry `tabs`
   (`id`, `title`, `url`, `active`). A client without the named tab waits
   briefly, so the client that has it claims first, then claims and answers
-  "no such tab". `tabId` is validated and passed through by
+  "no such tab". A tab restored from a previous run has no pane until it is
+  shown or used, so `ContextPanel` registers it as sleeping
+  (`registerSleepingBrowserTab`): it is listed in `tabs` without being loaded,
+  and an action that lands on it wakes it after the claim and waits for its
+  pane. `browser.capture` never opens the panel or switches its tab: a hidden
+  pane is drawn at zero opacity inside the window for the screenshot, because
+  Chromium composites a transparent webview but not a hidden or clipped one.
+  `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
 
