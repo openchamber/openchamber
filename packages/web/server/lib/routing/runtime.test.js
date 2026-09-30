@@ -19,7 +19,7 @@ const readyConfig = () => {
   return config;
 };
 
-const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true, enterprise = false, pinned = null, answers, askError } = {}) => {
+const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true, enterprise = false, pinned = null, catalog = [], answers, askError } = {}) => {
   const events = [];
   const store = {
     readConfig: vi.fn(async () => config),
@@ -45,6 +45,10 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource =
     zenPromotionActive,
     enterpriseMode: () => enterprise,
     readPinnedEndpoint: () => pinned,
+    listCatalogModels: async () => {
+      if (catalog instanceof Error) throw catalog;
+      return catalog;
+    },
   });
   return { runtime, store, jev, events };
 };
@@ -141,6 +145,31 @@ describe('resolveAutoSelection', () => {
 
     const noFallback = makeRuntime({ config: { ...readyConfig(), fallback: null }, answers: {} });
     await expect(noFallback.runtime.resolveAutoSelection(send())).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('drops a saved variant the model does not list, such as a list position saved before #4133', async () => {
+    const config = readyConfig();
+    config.fallback = { model: FALLBACK.model, variant: '2' };
+    const catalog = [{ providerID: 'anthropic', modelID: 'claude-sonnet-5', variants: [{ id: 'low' }, { id: 'high' }] }];
+    const { runtime, events } = makeRuntime({ config, catalog, answers: { category: { choice: 'trivial', confidence: 0.99 } } });
+    const resolved = await runtime.resolveAutoSelection(send());
+    expect(resolved.model).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-5' });
+    expect(resolved.decision.variant).toBeNull();
+    expect(events.at(-1).properties.variant).toBeNull();
+  });
+
+  it('keeps a known variant, and any variant when the catalog cannot vouch for the model', async () => {
+    const known = makeRuntime({
+      catalog: [{ providerID: 'anthropic', modelID: 'claude-sonnet-5', variants: [{ id: 'medium' }] }],
+      answers: { category: { choice: 'trivial', confidence: 0.99 } },
+    });
+    expect((await known.runtime.resolveAutoSelection(send())).model.variant).toBe('medium');
+
+    const unknownModel = makeRuntime({ catalog: [], answers: { category: { choice: 'trivial', confidence: 0.99 } } });
+    expect((await unknownModel.runtime.resolveAutoSelection(send())).model.variant).toBe('medium');
+
+    const unreachable = makeRuntime({ catalog: new Error('OpenCode down'), answers: { category: { choice: 'trivial', confidence: 0.99 } } });
+    expect((await unreachable.runtime.resolveAutoSelection(send())).model.variant).toBe('medium');
   });
 });
 

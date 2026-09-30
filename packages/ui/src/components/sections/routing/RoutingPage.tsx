@@ -52,6 +52,15 @@ const useModelVariants = (providerID: string | null | undefined, modelID: string
   }, [modelID, providerID, providers]);
 };
 
+/**
+ * The saved level, or null when the model does not list it: list positions
+ * saved before #4133 run as the model's default on the server, so they read
+ * as Default here too. A model with no known levels keeps what was saved.
+ */
+const knownVariant = (value: string | null | undefined, variants: string[]): string | null => (
+  value && (variants.length === 0 || variants.includes(value)) ? value : null
+);
+
 const VariantSelect: React.FC<{
   providerID: string | null | undefined;
   modelID: string | null | undefined;
@@ -62,13 +71,14 @@ const VariantSelect: React.FC<{
 }> = ({ providerID, modelID, value, onChange, ariaLabel, className }) => {
   const { t } = useI18n();
   const variants = useModelVariants(providerID, modelID);
+  const selected = knownVariant(value, variants) ?? DEFAULT_VARIANT_VALUE;
   const label = (variant: string) => (variant === DEFAULT_VARIANT_VALUE
     ? t('settings.routing.thinking.default')
     : variant.charAt(0).toUpperCase() + variant.slice(1));
   return (
-    <Select value={value ?? DEFAULT_VARIANT_VALUE} onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? null : next)} disabled={variants.length === 0}>
+    <Select value={selected} onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? null : next)} disabled={variants.length === 0}>
       <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, className)} aria-label={ariaLabel}>
-        <SelectValue>{label(value ?? DEFAULT_VARIANT_VALUE)}</SelectValue>
+        <SelectValue>{label(selected)}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={DEFAULT_VARIANT_VALUE}>{label(DEFAULT_VARIANT_VALUE)}</SelectItem>
@@ -91,8 +101,10 @@ const CategoryRow: React.FC<{
   onRemove: () => void;
 }> = ({ category, expanded, onToggle, onChange, onReset, onRemove }) => {
   const { t } = useI18n();
+  const variants = useModelVariants(category.model?.providerID, category.model?.modelID);
+  const shownVariant = knownVariant(category.variant, variants);
   const modelLabel = category.model
-    ? `${category.model.modelID}${category.variant ? ` / ${category.variant}` : ''}`
+    ? `${category.model.modelID}${shownVariant ? ` / ${shownVariant}` : ''}`
     : t('settings.routing.model.useFallback');
   const summary = [modelLabel, category.agent].filter(Boolean).join(' · ');
   return (

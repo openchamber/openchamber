@@ -83,6 +83,10 @@ Auto. There is no env gate — the feature shipped dark behind
 - A category without a model uses the fallback model *and* variant; a variant
   only travels with the model it was chosen for. A category agent replaces the
   composer's agent; an empty one keeps it.
+- A variant the model's catalog entry does not list is dropped before the
+  switch, so the reply runs on the model's default thinking instead of OpenCode
+  refusing it (Settings from before #4133 saved list positions like `"2"`).
+  An unreadable catalog, or one that does not know the model yet, keeps it.
 - Auto is offered (`autoReady`) with a usable classification provider
   (`jevAvailable`), `enabled`, a fallback model and at least two enabled
   categories.
