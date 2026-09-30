@@ -34,7 +34,7 @@ import { cn } from '@/lib/utils';
 import { agentLabel } from '@/lib/agentLabel';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { useContextStore } from '@/stores/contextStore';
-import { useConfigStore, isStaleAutoSelection } from '@/stores/useConfigStore';
+import { useConfigStore, isStaleAutoSelection, selectKnownAgent, selectKnownCatalogModel } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSession, useSessionMessages, useSessionRenderable } from '@/sync/sync-context';
@@ -416,6 +416,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const uiAgentName = currentSessionId
         ? (sessionSavedAgentName || stickySessionAgentName || currentAgentName)
         : currentAgentName;
+    // Display only, like `knownCurrentModel`: while this directory's agents
+    // are still arriving, show the chosen (or default) agent as another
+    // catalog knows it instead of "Select agent".
+    const knownAgent = useConfigStore((state) => (
+        state.agents.length > 0 ? undefined : selectKnownAgent(state, uiAgentName || settingsDefaultAgent || 'build')
+    ));
 
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
@@ -619,6 +625,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentModelForMetadata = currentModelId
         ? models.find((model: ProviderModel) => model.id === currentModelId)
         : undefined;
+    // Display only: a directory OpenCode is still starting lists part of its
+    // catalog for a second or two, so the name and efforts another catalog
+    // knows for this model stay on screen. Everything that decides or
+    // validates the selection keeps reading the active catalog.
+    const knownCurrentModel = useConfigStore((state) => (
+        currentModelForMetadata ? undefined : selectKnownCatalogModel(state, currentProviderId, currentModelId)
+    ));
+    const displayCurrentModel = currentModelForMetadata ?? knownCurrentModel;
     const currentMetadata = currentProviderId && currentModelId && currentModelForMetadata
         ? mergeModelMetadataWithLiveModel(currentProviderId, currentModelForMetadata, getModelMetadata(currentProviderId, currentModelId))
         : currentProviderId && currentModelId
@@ -663,7 +677,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         () => (availableVariantsKey ? availableVariantsKey.split('\u0000') : []),
         [availableVariantsKey],
     );
-    const hasVariants = availableVariants.length > 0;
+    const displayVariants = React.useMemo(
+        () => (availableVariants.length > 0 || !knownCurrentModel
+            ? availableVariants
+            : listModelVariantIds(knownCurrentModel.variants)),
+        [availableVariants, knownCurrentModel],
+    );
+    const hasVariants = displayVariants.length > 0;
 
     const costRows = [
         { label: 'Input', value: formatCost(currentMetadata?.cost?.input) },
@@ -1253,6 +1273,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!contextHydrated || !currentAgentName || (currentModelId && !currentModelForMetadata)) return;
 
         if (!currentProviderId || !currentModelId) {
+            // Switching the draft to another directory empties the automatic
+            // model until that directory's catalog resolves it; that gap is not
+            // a model without efforts and must not erase the one picked.
+            if (!providersResolved) return;
             manualVariantSelectionRef.current = false;
             setCurrentVariant(undefined);
             return;
@@ -1310,6 +1334,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentVariantSelection.override,
         effectiveCurrentVariant,
         getAgentModelVariantForSession,
+        providersResolved,
         resolveInheritedVariantForModel,
         setCurrentVariant,
         setCurrentVariantOverride,
@@ -1430,8 +1455,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getCurrentModelDisplayName = () => {
         if (!currentModelId) return t('chat.modelControls.selectModel');
         if (isAutoSelected) return t('chat.modelControls.autoModel');
-        const currentModel = models.find((m: ProviderModel) => m.id === currentModelId);
-        return getModelDisplayName(currentModel, currentModelId) || t('chat.modelControls.selectModel');
+        return getModelDisplayName(displayCurrentModel, currentModelId) || t('chat.modelControls.selectModel');
     };
 
     const currentModelDisplayName = getCurrentModelDisplayName();
@@ -1442,9 +1466,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!uiAgentName) {
             const buildAgent = primaryAgents.find(agent => agent.name === 'build');
             const defaultAgent = buildAgent || primaryAgents[0];
-            return defaultAgent ? agentLabel(defaultAgent) : t('chat.modelControls.selectAgent');
+            const shownAgent = defaultAgent ?? knownAgent;
+            return shownAgent ? agentLabel(shownAgent) : t('chat.modelControls.selectAgent');
         }
-        const agent = agents.find(a => a.name === uiAgentName);
+        const agent = agents.find(a => a.name === uiAgentName) ?? knownAgent;
         return agent ? agentLabel(agent) : agentLabel({ name: uiAgentName, displayName: '' });
     };
 
@@ -2830,8 +2855,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 {isDefault && <Icon name="check" className="size-4 text-primary flex-shrink-0" />}
                             </div>
                         </DropdownMenuItem>
-                        {availableVariants.length > 0 && <DropdownMenuSeparator />}
-                        {availableVariants.map((variant) => {
+                        {displayVariants.length > 0 && <DropdownMenuSeparator />}
+                        {displayVariants.map((variant) => {
                             const selected = currentVariant === variant;
                             const label = variant.charAt(0).toUpperCase() + variant.slice(1);
                             return (

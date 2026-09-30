@@ -54,13 +54,14 @@ const refreshPlugins = async (): Promise<void> => {
 
 // The current list stays on screen until the fresh one lands: emptying it
 // first would blank the composer's model and effort pickers and every message
-// footer's effort label for the length of the request. `loadProviders` always
-// re-reads (its only short-circuit is an in-flight request for the same
-// directory) and keeps the existing objects when nothing changed.
+// footer's effort label for the length of the request. `loadProviders` keeps
+// the existing objects when nothing changed. The read is fresh: one already in
+// flight, say from opening a worktree, began before this change and can answer
+// with the catalog OpenCode just replaced.
 const refreshProviders = async (): Promise<void> => {
   const config = useConfigStore.getState();
   config.invalidateModelMetadataCache();
-  await config.loadProviders({ source: SOURCE });
+  await config.loadProviders({ source: SOURCE, fresh: true });
 };
 
 /**

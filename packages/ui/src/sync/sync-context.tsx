@@ -70,7 +70,7 @@ import {
   processVSCodePermissionAutoAccept,
   processVSCodeReconciledPermissionAutoAccept,
 } from "./vscode-permission-auto-accept"
-import { useConfigStore } from "@/stores/useConfigStore"
+import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
@@ -1525,7 +1525,8 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
         // The provider slice follows everything that can change it:
         // `provider.updated` / `model.updated` (2.0.8's own announcements), a
         // credential change, and the config (which can declare providers).
-        const provider = await opencodeClient.getProvidersForConfig(directory)
+        // Fresh: a read already in flight may predate the change.
+        const provider = await opencodeClient.getProvidersForConfig(directory, { fresh: true })
         // Same catalog, same object: a re-read that changes nothing must not
         // re-render every provider consumer.
         if (JSON.stringify(store.getState().provider) !== JSON.stringify(provider)) {
@@ -1548,7 +1549,10 @@ const CATALOG_RELOAD_DEBOUNCE_MS = 250
 const pendingCatalogKinds = new Set<CatalogKind>()
 let catalogReloadTimer: ReturnType<typeof setTimeout> | null = null
 
-function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager): void {
+function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager, directory: string | null): void {
+  // The reload re-reads the active directory's lists only; the directory the
+  // event names loses its fresh mark now, so switching to it re-reads.
+  markConfigCatalogStale(kind, directory)
   pendingCatalogKinds.add(kind)
   if (catalogReloadTimer) clearTimeout(catalogReloadTimer)
   catalogReloadTimer = setTimeout(() => {
@@ -1772,7 +1776,7 @@ export function handleEvent(
         useGlobalSyncStore.setState({ reload: "pending" })
       }
     } else if (result.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
+      scheduleCatalogReload(result.kind, childStores, null)
     }
     // On server.connected, re-bootstrap all directories
     // but only if not during recent boot
@@ -1829,7 +1833,7 @@ export function handleEvent(
     if (result?.type === "refresh") {
       useGlobalSyncStore.setState({ reload: "pending" })
     } else if (result?.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
+      scheduleCatalogReload(result.kind, childStores, directory)
     }
     return
   }
@@ -1993,7 +1997,7 @@ export function handleEvent(
   // A catalog event names the location it was rebuilt in; for an open
   // directory it lands here rather than in the global branch above.
   const reducerResult = applyDirectoryEvent(draft, payload, {
-    onCatalogUpdated: (kind) => scheduleCatalogReload(kind, childStores),
+    onCatalogUpdated: (kind) => scheduleCatalogReload(kind, childStores, resolvedDirectory),
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization

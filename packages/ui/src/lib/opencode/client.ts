@@ -1663,12 +1663,19 @@ class OpencodeService {
    * The providers of a directory inside an isolated space are the host's: a space offers the
    * host's catalog, and the host refuses its provider routes across the boundary, so they are
    * asked of the host with no directory. Models and the default come from the space as usual.
+   *
+   * `fresh`: a request already in flight started before the caller's reason to re-read (a
+   * catalog event), so it may carry the old catalog. Wait it out and read again.
    */
-  async getProvidersForConfig(directory?: string | null): Promise<ProviderCatalog> {
+  async getProvidersForConfig(directory?: string | null, options?: { fresh?: boolean }): Promise<ProviderCatalog> {
     const effectiveDirectory = this.resolveDirectory(directory)
     const key = effectiveDirectory ?? ""
 
-    const existing = this.providerCatalogInFlight.get(key)
+    let existing = this.providerCatalogInFlight.get(key)
+    if (existing && options?.fresh) {
+      await existing.catch(() => undefined)
+      existing = this.providerCatalogInFlight.get(key)
+    }
     if (existing) {
       return existing
     }

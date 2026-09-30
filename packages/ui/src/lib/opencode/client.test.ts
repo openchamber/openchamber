@@ -606,6 +606,27 @@ describe("messages and config", () => {
     expect(catalog.models).toHaveLength(1)
     expect(catalog.default).toEqual({ id: "x", providerID: "openai" })
   })
+
+  test("a fresh provider read waits out the one in flight and reads again", async () => {
+    const answer = (request: CapturedRequest) =>
+      request.url.pathname === "/api/provider"
+        ? json({ location: {}, data: [{ id: "openai", name: "OpenAI" }] })
+        : request.url.pathname === "/api/model"
+          ? json({ location: {}, data: [{ id: "openai/x", modelID: "x", providerID: "openai" }] })
+          : json({ location: {}, data: { id: "openai/x", modelID: "x", providerID: "openai" } })
+    responses.push(answer, answer, answer, answer, answer, answer)
+    const before = requests.length
+
+    const first = opencodeClient.getProvidersForConfig("/repo/app")
+    const joined = opencodeClient.getProvidersForConfig("/repo/app")
+    const fresh = opencodeClient.getProvidersForConfig("/repo/app", { fresh: true })
+    const [firstCatalog, joinedCatalog, freshCatalog] = await Promise.all([first, joined, fresh])
+
+    // One catalog read is three requests: the joined call adds none, the fresh one three more.
+    expect(requests.length - before).toBe(6)
+    expect(joinedCatalog).toBe(firstCatalog)
+    expect(freshCatalog).not.toBe(firstCatalog)
+  })
 })
 
 describe("providers of an isolated space", () => {
