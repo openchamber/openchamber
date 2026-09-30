@@ -357,10 +357,12 @@ const useDiffSwapAfterHighlight = (
     ].join(':');
 
     // subscribeToStatChanges invokes the listener synchronously, so swap can
-    // run before the subscription and timer handles exist.
+    // run before the subscription and timer handles exist. The initializers
+    // keep prefer-const from demanding const: settle reads both handles while
+    // subscribeToStatChanges is still running, and const would throw there.
     let settled = false;
-    let unsubscribe: (() => void) | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe: (() => void) | undefined = undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined = undefined;
     const settle = () => {
       if (settled) return;
       settled = true;

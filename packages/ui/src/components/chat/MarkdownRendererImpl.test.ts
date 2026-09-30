@@ -137,6 +137,7 @@ const installRendererDom = () => {
     Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value: {
+            location: { origin: 'http://localhost', href: 'http://localhost/' },
             matchMedia: () => ({ matches: false }),
             setTimeout,
             clearTimeout,
@@ -281,7 +282,8 @@ mock.module('./markdown/detachedMarkdownDomCache', () => ({
         store: () => undefined,
     },
 }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime' }));
+mock.module('@/lib/runtime-switch', () => ({ getRuntimeApiBaseUrl: () => '', getRuntimeKey: () => 'runtime' }));
+mock.module('@/lib/router/openSessionFromRoute', () => ({ openSessionLink: async () => undefined }));
 type TestDecorateContext = {
     labels: { copy: string };
     codeBlockLineWrap: boolean;
