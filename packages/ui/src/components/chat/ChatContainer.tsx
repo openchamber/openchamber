@@ -81,6 +81,8 @@ import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
@@ -1176,6 +1178,49 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         onActiveTurnChange: handleActiveTurnChange,
     });
 
+    // ── in-conversation search ──────────────────────────────────────────────
+    // Cmd+F belongs to whatever has focus: the editor keeps its own search,
+    // the chat (its composer, or nothing focused after clicking its text)
+    // opens this bar. With several chat columns on screen, an unfocused
+    // Cmd+F goes to the column the pointer last pressed in. Search is opt-in;
+    // while it is off the shortcut is left alone. VS Code has no OpenChamber
+    // server and so no index to search.
+    const chatRootRef = React.useRef<HTMLDivElement>(null);
+    const lastPressedInsideRef = React.useRef(false);
+    const [chatSearch, setChatSearch] = React.useState({ open: false, focusRequest: 0 });
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+    const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
+    React.useEffect(() => {
+        if (!active || !currentSessionId || !messageSearchEnabled || isVSCodeRuntime()) return;
+        const combo = getEffectiveShortcutCombo('find_in_file', shortcutOverrides);
+        const onPointerDown = (event: PointerEvent) => {
+            // SAFETY: a pointer event target inside the document is a Node.
+            lastPressedInsideRef.current = Boolean(chatRootRef.current?.contains(event.target as Node));
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || !eventMatchesShortcut(event, combo)) return;
+            const root = chatRootRef.current;
+            const focused = document.activeElement;
+            const unfocused = !focused || focused === document.body;
+            if (!root || (unfocused ? !lastPressedInsideRef.current : !root.contains(focused))) return;
+            event.preventDefault();
+            setChatSearch((current) => ({ open: true, focusRequest: current.focusRequest + 1 }));
+        };
+        document.addEventListener('pointerdown', onPointerDown, { capture: true });
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown, { capture: true });
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [active, currentSessionId, messageSearchEnabled, shortcutOverrides]);
+    // The search belongs to the conversation it was opened in.
+    React.useEffect(() => {
+        setChatSearch((current) => (current.open ? { ...current, open: false } : current));
+    }, [currentSessionId]);
+    const closeChatSearch = React.useCallback(() => {
+        setChatSearch((current) => ({ ...current, open: false }));
+    }, []);
+
     // A subagent report opens a turn of its own at the end of the chat only for
     // a `subagent: true` command; a call's report finishes that call's row
     // (see `ToolPart`), and a run started before the loaded history stays in
@@ -1666,9 +1711,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			scrollNode={scrollNode}
 			scrollToMessage={timelineController.scrollToMessage}
 		/>
-		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
+		<div ref={chatRootRef} data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			{sessionSurface}
+			{chatSearch.open && currentSessionId && messageSearchEnabled ? (
+				<div className="pointer-events-none absolute right-3 top-2 z-20">
+					<ChatSearchBar
+						sessionId={currentSessionId}
+						scrollNode={scrollNode}
+						focusRequest={chatSearch.focusRequest}
+						onClose={closeChatSearch}
+					/>
+				</div>
+			) : null}
 
             <div
                 ref={attachComposerSlot}

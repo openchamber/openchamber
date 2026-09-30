@@ -251,7 +251,7 @@
   background: var(--interactive-selection);
   pointer-events: none;
   opacity: 0;
-  animation: oc-message-link-target 2s ease-out;
+  animation: oc-message-link-target 1.2s ease-out;
 }
 
 [data-message-link-target]:not(:has([data-user-message-bubble])) > .chat-message-column::before {
@@ -272,7 +272,7 @@
 
 @keyframes oc-message-link-target {
   0%,
-  35% {
+  25% {
     opacity: 0.6;
   }
   100% {

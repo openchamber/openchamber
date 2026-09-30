@@ -179,6 +179,25 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).not.toContain('data-message-text-export-source');
   });
 
+  test('opens a collapsed block with its body in the first render when search asks for it', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={LONG_REASONING}
+          variant="thinking"
+          blockId="reasoning-reveal"
+          showDuration={false}
+          revealRequest={1}
+          reasoningMessageId="msg_reveal"
+        />
+      </TestProviders>,
+    );
+
+    expect(markup).toContain('aria-expanded="true"');
+    expect(markup).toContain('data-message-text-export-source');
+    expect(markup).toContain('data-reasoning-message-id="msg_reveal"');
+  });
+
   test('renders "Justification" label for justification variant when pre-expanded and not streaming', () => {
     const markup = renderToStaticMarkup(
       <TestProviders>

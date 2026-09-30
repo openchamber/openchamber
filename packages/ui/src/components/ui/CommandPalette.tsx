@@ -56,6 +56,11 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
+import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { useMessageSearch } from '@/hooks/useMessageSearch';
+import type { MessageSearchHit } from '@/lib/messageSearch';
+import { MessageHitItem, MessageSearchFilters, type MessageAuthor, type MessageScope } from './commandPaletteMessages';
+import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 
 type CommandEntry = {
   id: string;
@@ -71,6 +76,9 @@ type CommandEntry = {
 
 type FileHit = { path: string; name: string; relativePath: string };
 const EMPTY_SESSIONS: Session[] = [];
+// Message hits shown among everything else; "Show all" opens the full list.
+const MESSAGE_PREVIEW_LIMIT = 3;
+const MESSAGE_PAGE_SIZE = 30;
 
 /**
  * Commands, Settings pages and projects match a query only at word starts, so a short
@@ -167,11 +175,18 @@ export const CommandPalette: React.FC = () => {
   const debouncedQuery = useDebouncedValue(query, 200);
   const trimmedQuery = debouncedQuery.trim();
   const liveTrimmed = query.trim();
+  // Messages mode: the palette lists only message hits, with filters.
+  const [messagesMode, setMessagesMode] = React.useState(false);
+  const [messageScope, setMessageScope] = React.useState<MessageScope>('all');
+  const [messageAuthor, setMessageAuthor] = React.useState<MessageAuthor>('any');
 
   // Clear query on open (not close) so content stays visible through the
   // close animation instead of emptying mid-flight.
   React.useEffect(() => {
-    if (isCommandPaletteOpen) setQuery('');
+    if (isCommandPaletteOpen) {
+      setQuery('');
+      setMessagesMode(false);
+    }
   }, [isCommandPaletteOpen]);
 
   // Lazy-load git status for every session directory we plan to display so that
@@ -535,6 +550,33 @@ export const CommandPalette: React.FC = () => {
   const nestedWorktreePrefixesRef = React.useRef(nestedWorktreePrefixes);
   nestedWorktreePrefixesRef.current = nestedWorktreePrefixes;
 
+  // ---------------------------------------------------------------------------
+  // Message search (server index, opt-in; VS Code has no OpenChamber server)
+  // ---------------------------------------------------------------------------
+  const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
+  const messageSearchSupported = messageSearchEnabled && !isVSCodeRuntime();
+  // Reasoning hits only while it is indexed and shown in the chat: a hit in
+  // hidden reasoning would lead nowhere visible.
+  const reasoningIndexed = useUIStore((state) => state.messageSearchReasoningEnabled);
+  const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+  const reasoningSearchable = reasoningIndexed && showReasoningTraces;
+  const effectiveAuthor: MessageAuthor = messageAuthor === 'reasoning' && !reasoningSearchable ? 'any' : messageAuthor;
+  // "This project" covers the project folder and its worktrees, wherever they live.
+  const projectDirectories = React.useMemo(() => {
+    if (!activeProject?.path) return [];
+    return [...new Set([normalizePath(activeProject.path), ...availableWorktrees.map((worktree) => normalizePath(worktree.path))])];
+  }, [activeProject?.path, availableWorktrees]);
+  const projectScoped = messagesMode && messageScope === 'project' && projectDirectories.length > 0;
+  const { state: messageSearch, loadMore: loadMoreMessages } = useMessageSearch({
+    query: trimmedQuery,
+    enabled: isCommandPaletteOpen && messageSearchSupported,
+    limit: messagesMode ? MESSAGE_PAGE_SIZE : MESSAGE_PREVIEW_LIMIT,
+    directories: projectScoped ? projectDirectories : undefined,
+    role: messagesMode && effectiveAuthor !== 'any' ? effectiveAuthor : null,
+    includeReasoning: showReasoningTraces,
+  });
+  const messageHits = 'hits' in messageSearch ? messageSearch.hits : [];
+
   React.useEffect(() => {
     if (!isCommandPaletteOpen) {
       setFileResults([]);
@@ -676,7 +718,7 @@ export const CommandPalette: React.FC = () => {
 
   const visibleOpenFiles = hasQuery ? [] : openFiles;
 
-  const groupOrder = React.useMemo<('openFiles' | 'commands' | 'settings' | 'sessions' | 'files' | 'projects')[]>(() => {
+  const groupOrder = React.useMemo<('openFiles' | 'commands' | 'settings' | 'sessions' | 'files' | 'projects' | 'messages')[]>(() => {
     if (!hasQuery) return ['openFiles', 'sessions', 'commands'];
     const best = (arr: { score: number }[]): number => (arr.length ? arr[0].score : Infinity);
     const groups: { key: 'commands' | 'settings' | 'sessions' | 'files' | 'projects'; score: number }[] = [
@@ -687,8 +729,19 @@ export const CommandPalette: React.FC = () => {
       { key: 'projects', score: best(scoredProjects) },
     ];
     groups.sort((a, b) => a.score - b.score);
-    return groups.map((g) => g.key);
+    // Text inside conversations answers after names do: a session or file
+    // called what you typed is the likelier target.
+    return [...groups.map((g) => g.key), 'messages'];
   }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles, scoredProjects]);
+
+  const handleOpenMessage = React.useCallback(
+    (hit: MessageSearchHit) => {
+      close();
+      requestReasoningReveal(hit.role === 'reasoning' ? hit.id : null);
+      void openSessionLink(hit.sessionId, hit.id);
+    },
+    [close],
+  );
 
   const handleOpenSession = React.useCallback(
     (session: Session) => {
@@ -744,7 +797,18 @@ export const CommandPalette: React.FC = () => {
   };
 
   return (
-    <Dialog open={isCommandPaletteOpen} onOpenChange={setCommandPaletteOpen}>
+    <Dialog
+      open={isCommandPaletteOpen}
+      onOpenChange={(nextOpen, details) => {
+        // Esc leaves messages mode first; a second Esc closes the palette.
+        if (!nextOpen && messagesMode && details.reason === 'escape-key') {
+          details.cancel();
+          setMessagesMode(false);
+          return;
+        }
+        setCommandPaletteOpen(nextOpen);
+      }}
+    >
       <DialogHeader className="sr-only">
         <DialogTitle>{t('commandPalette.title')}</DialogTitle>
         <DialogDescription>{t('commandPalette.description')}</DialogDescription>
@@ -763,13 +827,74 @@ export const CommandPalette: React.FC = () => {
           <CommandInput
             value={query}
             onValueChange={setQuery}
-            placeholder={t('commandPalette.input.placeholder')}
+            placeholder={messagesMode ? t('commandPalette.messages.placeholder') : t('commandPalette.input.placeholder')}
+            onKeyDown={(event) => {
+              if (messagesMode && event.key === 'Backspace' && query.length === 0) {
+                event.preventDefault();
+                setMessagesMode(false);
+              }
+            }}
           />
-          <div className="h-[min(440px,60vh)] min-h-0">
+          {messagesMode ? (
+            <MessageSearchFilters
+              scope={messageScope}
+              onScopeChange={setMessageScope}
+              projectScopeAvailable={projectDirectories.length > 0}
+              author={effectiveAuthor}
+              onAuthorChange={setMessageAuthor}
+              reasoningAvailable={reasoningSearchable}
+              onBack={() => setMessagesMode(false)}
+            />
+          ) : null}
+          <div className={cn('min-h-0', messagesMode ? 'h-[min(403px,calc(60vh-37px))]' : 'h-[min(440px,60vh)]')}>
           <CommandList>
+            {messagesMode ? (
+              <>
+                {messageHits.map((hit) => (
+                  <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
+                ))}
+                {messageSearch.status === 'ready' && messageSearch.next ? (
+                  <CommandItem value="message:load-more" onSelect={loadMoreMessages} disabled={messageSearch.loadingMore}>
+                    <Icon name="more" className="mr-2 h-4 w-4" />
+                    <span className="truncate text-muted-foreground">{t('commandPalette.messages.loadMore')}</span>
+                  </CommandItem>
+                ) : null}
+                <div className="px-4 py-2 typography-meta text-muted-foreground" role="status">
+                  {messageSearch.status === 'idle' || messageSearch.status === 'too-short'
+                    ? t('commandPalette.messages.tooShort')
+                    : messageSearch.status === 'loading' && messageHits.length === 0
+                      ? t('commandPalette.messages.searching')
+                      : messageSearch.status === 'error'
+                        ? t('commandPalette.messages.error')
+                        : messageSearch.status === 'unavailable'
+                          ? t('commandPalette.messages.unavailable')
+                          : messageSearch.status === 'ready' && messageHits.length === 0
+                            ? t('commandPalette.messages.empty')
+                            : null}
+                  {messageSearch.status === 'ready' && messageSearch.index?.backfill.state === 'running'
+                    ? ` ${t('commandPalette.messages.indexing', { done: messageSearch.index.backfill.done, total: messageSearch.index.backfill.total })}`
+                    : null}
+                </div>
+              </>
+            ) : (
+            <>
             <CommandEmpty>{t('commandPalette.empty.noResults')}</CommandEmpty>
 
             {groupOrder.map((groupKey) => {
+              if (groupKey === 'messages') {
+                if (!hasQuery || messageHits.length === 0) return null;
+                return (
+                  <CommandGroup key="messages" heading={t('commandPalette.group.messages')}>
+                    {messageHits.map((hit) => (
+                      <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
+                    ))}
+                    <CommandItem value="message:show-all" onSelect={() => setMessagesMode(true)}>
+                      <Icon name="search" className="mr-2 h-4 w-4" />
+                      <span className="truncate text-muted-foreground">{t('commandPalette.messages.showAll')}</span>
+                    </CommandItem>
+                  </CommandGroup>
+                );
+              }
               if (groupKey === 'openFiles' && visibleOpenFiles.length > 0) {
                 return (
                   <CommandGroup key="openFiles" heading={t('commandPalette.group.openFiles')}>
@@ -867,6 +992,8 @@ export const CommandPalette: React.FC = () => {
                 {t('commandPalette.empty.searchingFiles')}
               </div>
             ) : null}
+            </>
+            )}
           </CommandList>
           </div>
           {isMobile ? null : (

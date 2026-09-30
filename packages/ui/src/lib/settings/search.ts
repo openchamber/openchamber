@@ -389,6 +389,27 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
   },
   {
+    id: 'chat.message-search',
+    page: 'chat',
+    titleKey: 'settings.openchamber.messageSearch.title',
+    keywords: ['search', 'find', 'index', 'messages', 'history', 'full text'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.message-search-enabled',
+    page: 'chat',
+    titleKey: 'settings.openchamber.messageSearch.field.enabled',
+    keywords: ['search', 'find', 'index', 'messages'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.message-search-reasoning',
+    page: 'chat',
+    titleKey: 'settings.openchamber.messageSearch.field.reasoning',
+    keywords: ['search', 'reasoning', 'thinking', 'index'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.persist-drafts',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.persistDraftMessages',

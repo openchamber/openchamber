@@ -133,6 +133,17 @@ button,
   background-color: var(--oc-text-selection);
 }
 
+/* In-conversation search (chat/search): every occurrence tinted, the current
+   message's painted solid so the eye lands on it. */
+::highlight(oc-chat-search) {
+  background-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+::highlight(oc-chat-search-current) {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
 .pierre-diff-wrapper {
   --diffs-bg-selection-override: var(--interactive-selection);
   --diffs-bg-selection-background-override: var(--interactive-selection);

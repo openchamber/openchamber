@@ -26,6 +26,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
+import { isReasoningRevealTarget } from './search/reasoningReveal';
 import {
     ANCHOR_HOLD_MAX_FRAMES,
     ANCHOR_HOLD_STABLE_FRAMES,
@@ -1338,6 +1339,45 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return indexMap;
     }, [allEntries]);
 
+    // Assistant messages before a turn's last one: in a collapsed turn their
+    // text sits inside the folded activity and has no row of its own.
+    // Reasoning of any of a turn's messages, the last one included, sits in
+    // that fold too.
+    const { collapsibleTurnByMessageId, turnByAssistantMessageId } = React.useMemo(() => {
+        const collapsible = new Map<string, string>();
+        const all = new Map<string, string>();
+        for (const entry of allEntries) {
+            if (entry.kind !== 'turn') continue;
+            const { assistantMessages } = entry.turn;
+            assistantMessages.forEach((message, index) => {
+                all.set(message.info.id, entry.turn.turnId);
+                if (index < assistantMessages.length - 1) collapsible.set(message.info.id, entry.turn.turnId);
+            });
+        }
+        return { collapsibleTurnByMessageId: collapsible, turnByAssistantMessageId: all };
+    }, [allEntries]);
+    const turnUiStatesRef = React.useRef(turnUiStates);
+    turnUiStatesRef.current = turnUiStates;
+
+    /**
+     * Opens the turn a linked or searched message is folded into, the way a
+     * browser's find opens a closed <details>. True when it had to open it:
+     * the row renders the message on a later frame. Both folds are opened,
+     * since which one hides the text depends on the chat render mode.
+     */
+    const revealFoldedMessage = React.useCallback((messageId: string): boolean => {
+        const turnId = isReasoningRevealTarget(messageId)
+            ? turnByAssistantMessageId.get(messageId)
+            : collapsibleTurnByMessageId.get(messageId);
+        if (!turnId) return false;
+        const current = turnUiStatesRef.current.get(turnId) ?? { isExpanded: defaultActivityExpanded };
+        if (current.isExpanded && current.isLiveExpanded) return false;
+        const opened = { ...current, isExpanded: true, isLiveExpanded: true };
+        writeTurnUiStateCache(turnId, opened);
+        setTurnUiStates((previous) => new Map(previous).set(turnId, opened));
+        return true;
+    }, [collapsibleTurnByMessageId, defaultActivityExpanded, turnByAssistantMessageId]);
+
     const turnIndexMap = React.useMemo(() => {
         const indexMap = new Map<string, number>();
         allEntries.forEach((entry, index) => {
@@ -1352,6 +1392,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         const container = resolveScrollContainer();
         if (!container) {
             return null;
+        }
+        // A search hit in reasoning lands on the reasoning itself, which in
+        // sorted mode is drawn inside another message's activity.
+        if (isReasoningRevealTarget(messageId)) {
+            const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
+            if (reasoning) return reasoning;
         }
         return container.querySelector(`[data-message-id="${messageId}"]`);
     }, [resolveScrollContainer]);
@@ -1449,6 +1495,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (index === undefined || !container) {
             return 'missing';
         }
+        if (revealFoldedMessage(anchor.messageId)) {
+            scrollHistoryIndexIntoView(index);
+            return 'moved';
+        }
 
         const element = findMessageElement(anchor.messageId);
         if (!element) {
@@ -1467,7 +1517,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // A message near either end of the timeline cannot reach the offset:
         // the scroll is clamped, and where it stopped is as close as it gets.
         return Math.abs(container.scrollTop - before) < 0.5 ? 'aligned' : 'moved';
-    }, [findMessageElement, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView]);
+    }, [findMessageElement, messageIndexMap, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
 
     // Installed during layout so a parent's layout effect (session entry
     // restore) already reaches this list, not the one it replaced.

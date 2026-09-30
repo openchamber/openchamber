@@ -88,6 +88,7 @@ import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
+import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -427,6 +428,9 @@ const settingsRuntime = createSettingsRuntime({
   syncManagedRemoteTunnelConfigWithPresets,
   upsertManagedRemoteTunnelToken,
   onManagedPluginSettingsChanged: () => managedConfigRuntime?.refreshManagedConfigFile(),
+  // Declared further down; settings are only saved once the server serves requests.
+  onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
+  onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
 });
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
@@ -1054,6 +1058,20 @@ const messageQueueRuntime = createMessageQueueRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
 });
 messageQueueRuntime.start();
+
+// Full-text search over this server's conversations (user messages and agent
+// replies). Opt-in: off by default, and off means idle. The index is derived
+// data in the data dir, fed from the same event stream; see lib/message-search.
+const messageSearchRuntime = createMessageSearchRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  globalEventHub: globalMessageStreamHub,
+  readSettings: async () => {
+    const settings = await readSettingsFromDisk();
+    return { enabled: settings.messageSearchEnabled === true, reasoning: settings.messageSearchReasoningEnabled === true };
+  },
+});
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
@@ -1723,6 +1741,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   messageQueueRuntime,
+  messageSearchRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
@@ -2273,6 +2292,7 @@ async function main(options = {}) {
   });
 
   await featureRoutesRuntime.registerRoutes(app, {
+    messageSearchRuntime,
     crypto,
     fs,
     os,

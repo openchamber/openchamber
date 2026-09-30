@@ -899,7 +899,16 @@ viewport (any real gesture), when another session is entered, or after a
 minute. A repeated click on the same link is a new request and is shown
 again. The message lands just below the scroller's top fade
 (`--scroll-shadow-size` plus a small gap), not inside it where it reads as
-cut off, and is tinted briefly (`[data-message-link-target]`). A linked message outside the
+cut off, and is tinted briefly (`[data-message-link-target]`). A target
+folded into a collapsed turn (an assistant step before the turn's last one,
+whose text lives in the folded activity) opens that turn first
+(`MessageList` `revealFoldedMessage`), the way a browser's find opens a closed
+`<details>`; the final answer is visible folded and opens nothing. Message
+search uses this path: a hit in Cmd+P (`components/ui/commandPaletteMessages`)
+opens its message through `openSessionLink`, and the in-conversation bar
+(`components/chat/search`) moves between hits with `requestMessageFocus`,
+painting matches with the CSS Custom Highlight API. The index itself is the
+server's (`packages/web/server/lib/message-search`). A linked message outside the
 loaded window is first checked with one `session.message.get` request: a 404
 shows a "not in this session" toast, anything else loads older history until
 the message or the start of the history, on every runtime including mobile.

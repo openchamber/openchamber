@@ -68,6 +68,8 @@ export const createSettingsRuntime = (deps) => {
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
     onManagedPluginSettingsChanged = async () => {},
+    onMessageSearchEnabledChanged = () => {},
+    onMessageSearchReasoningChanged = () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1129,6 +1131,13 @@ export const createSettingsRuntime = (deps) => {
         await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
           console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
         });
+      }
+      // The search index starts or stops in the background; the save does not wait for it.
+      if (changedKeys.includes('messageSearchEnabled')) {
+        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+      }
+      if (changedKeys.includes('messageSearchReasoningEnabled')) {
+        onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
       }
       return formatSettingsResponse(next);
     });

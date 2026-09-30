@@ -158,7 +158,8 @@ const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
 // scroller fades its top edge out (index.css, --scroll-shadow-size), so the
 // message starts below the fade, not inside it where it reads as cut off.
 const MESSAGE_LINK_GAP_PX = 12;
-const MESSAGE_LINK_HIGHLIGHT_MS = 2000;
+// Matches the animation length in typography.css.
+const MESSAGE_LINK_HIGHLIGHT_MS = 1200;
 
 const messageLinkOffsetTop = (node: HTMLElement): number => {
     const fade = Number.parseFloat(getComputedStyle(node).getPropertyValue('--scroll-shadow-size'));

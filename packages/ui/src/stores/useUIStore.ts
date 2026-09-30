@@ -1039,6 +1039,10 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentWebToolEnabled: boolean;
+  /** Full-text message search (server index). Opt-in: off keeps every part of it idle. */
+  messageSearchEnabled: boolean;
+  /** Also index the agent's reasoning. Opt-in: it can make the index much bigger. */
+  messageSearchReasoningEnabled: boolean;
   /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
@@ -1272,6 +1276,8 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
+  setMessageSearchEnabled: (value: boolean) => void;
+  setMessageSearchReasoningEnabled: (value: boolean) => void;
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentNotifyToolEnabled: (value: boolean) => void;
@@ -1466,6 +1472,8 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
         agentWebToolEnabled: true,
+        messageSearchEnabled: false,
+        messageSearchReasoningEnabled: false,
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
         agentNotifyToolEnabled: false,
@@ -2874,6 +2882,12 @@ export const useUIStore = create<UIStore>()(
         setAgentWebToolEnabled: (value) => {
           set({ agentWebToolEnabled: value });
         },
+        setMessageSearchEnabled: (value) => {
+          set({ messageSearchEnabled: value });
+        },
+        setMessageSearchReasoningEnabled: (value) => {
+          set({ messageSearchReasoningEnabled: value });
+        },
         setBrowserProvider: (value) => {
           set({ browserProvider: value });
         },
@@ -3365,6 +3379,8 @@ export const useUIStore = create<UIStore>()(
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
           agentWebToolEnabled: state.agentWebToolEnabled,
+          messageSearchEnabled: state.messageSearchEnabled,
+          messageSearchReasoningEnabled: state.messageSearchReasoningEnabled,
           browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentNotifyToolEnabled: state.agentNotifyToolEnabled,

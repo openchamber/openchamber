@@ -214,6 +214,7 @@ const ChatSectionContent: React.FC = () => {
                 'diffLayout',
                 'inputHistoryScope',
                 'inputHistoryLimit',
+                'messageSearch',
                 'dotfiles',
                 'fileViewerPreview',
                 'followUpBehavior',
