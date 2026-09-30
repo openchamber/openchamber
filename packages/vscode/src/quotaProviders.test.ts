@@ -3,35 +3,38 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { CredentialEntry } from '@opencode/client';
+
+import { configureOpenCodeCredentials } from './opencodeAuth';
 
 const previousQuotaDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
 const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-quota-'));
 process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
-// OpenCode 2.x answers credentials from its database first. Point the reader
-// at a database that does not exist so the stubbed auth.json below is the only
-// source and the machine's real keys never reach these assertions.
-const previousOpenCodeDb = process.env.OPENCODE_DB;
-process.env.OPENCODE_DB = path.join(temporaryQuotaDataDirectory, 'no-such-opencode.db');
-
-// readAuthFile reads ~/.local/share/opencode/auth.json via fs.readFileSync.
-// Stub fs to serve a known auth entry so the providers treat themselves as
-// configured and proceed straight to fetch.
-const ORIGINAL_FS = { ...fs };
-const AUTH = JSON.stringify({
-  openai: { access: 'test-token' },
-  'cline-pass': { key: 'test-token' },
-  neuralwatt: { key: 'test-token' },
-  'opencode-go': { key: 'test-token' },
-  openrouter: { key: 'test-token' },
-  'zai-coding-plan': { key: 'test-token' },
-  'zhipuai-coding-plan': { key: 'test-token' },
-  deepseek: { key: 'test-token' },
-  hyper: { key: 'test-token' },
-  'github-copilot': { access: 'test-token' },
-  anthropic: { access: 'test-token', refresh: 'test-refresh' },
+// Credentials come from the running OpenCode; serve a fixed list so the
+// providers treat themselves as configured and go straight to fetch.
+const key = (integrationID: string): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label: 'default', active: true, value: { type: 'key', key: 'test-token' } });
+const oauth = (integrationID: string): CredentialEntry => ({
+  id: `cred_${integrationID}`,
+  integrationID,
+  label: 'default',
+  active: true,
+  value: { type: 'oauth', methodID: 'test', access: 'test-token', refresh: 'test-refresh', expires: 0 },
 });
-((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
-((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+configureOpenCodeCredentials({
+  list: async () => [
+    oauth('openai'),
+    key('cline-pass'),
+    key('neuralwatt'),
+    key('opencode-go'),
+    key('openrouter'),
+    key('zai-coding-plan'),
+    key('zhipuai-coding-plan'),
+    key('deepseek'),
+    key('hyper'),
+    oauth('github-copilot'),
+    oauth('anthropic'),
+  ],
+});
 
 import { fetchClinePassQuota, fetchHyperQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
@@ -41,8 +44,6 @@ type MockResponseInit = { ok?: boolean; status?: number };
 after(() => {
   if (previousQuotaDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
   else process.env.OPENCHAMBER_DATA_DIR = previousQuotaDataDirectory;
-  if (previousOpenCodeDb === undefined) delete process.env.OPENCODE_DB;
-  else process.env.OPENCODE_DB = previousOpenCodeDb;
   fs.rmSync(temporaryQuotaDataDirectory, { recursive: true, force: true });
 });
 
@@ -103,7 +104,7 @@ test('dispatches Charm Hyper through the generic quota API', async () => {
 });
 
 describe('OpenCode Go quota provider (VS Code parity)', () => {
-  test('uses the opencode-go key from auth.json', async () => {
+  test('uses the opencode-go key stored in OpenCode', async () => {
     let request: RequestInit | undefined;
     const legacyPath = path.join(temporaryQuotaDataDirectory, 'quota', 'opencode-go.json');
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
@@ -165,16 +166,16 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
 
   const withStubbedConfigFile = async (configJson: string, run: () => Promise<void>): Promise<void> => {
     // SAFETY: the reassignment widens the bound readFileSync to the text-only
-    // signature the config/auth readers actually call.
+    // signature the config reader actually calls.
     const configurableFs = fs as { readFileSync: (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding) => string };
-    const authOnlyRead = configurableFs.readFileSync;
-    configurableFs.readFileSync = (filePath: fs.PathOrFileDescriptor): string => (
-      String(filePath).includes('opencode.json') ? configJson : AUTH
+    const realRead = configurableFs.readFileSync;
+    configurableFs.readFileSync = (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding): string => (
+      String(filePath).includes('opencode.json') ? configJson : realRead(filePath, options)
     );
     try {
       await run();
     } finally {
-      configurableFs.readFileSync = authOnlyRead;
+      configurableFs.readFileSync = realRead;
     }
   };
 
@@ -527,7 +528,9 @@ describe('Codex quota provider (VS Code parity)', () => {
 
     const first = fetchQuotaForProvider('codex');
     const second = fetchQuotaForProvider('codex');
-    resolveResponse?.(mockResponse({ rate_limit: null }));
+    // The request goes out once the credential read settles.
+    while (!resolveResponse) await new Promise((resolve) => setImmediate(resolve));
+    resolveResponse(mockResponse({ rate_limit: null }));
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
 
@@ -1103,22 +1106,9 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.equal(result.error, 'No quota data in response');
     assert.equal(result.usage, null);
   });
-
-  // Restore fs so other test files (which use the real auth file) are unaffected.
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
-  });
 });
 
 describe('DeepSeek quota provider (VS Code parity)', () => {
-  beforeEach(() => {
-    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
-    fsMock.existsSync = () => true;
-    fsMock.readFileSync = () => AUTH;
-  });
-
   test('builds credits_balance window from documented USD payload (string balance)', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       is_available: true,
@@ -1193,12 +1183,6 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
-  });
-
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
   });
 });
 

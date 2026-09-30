@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ openai: { access: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
 }));
 
 import { fetchQuota } from './codex.js';

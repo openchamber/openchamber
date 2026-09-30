@@ -18,7 +18,7 @@ import { execFileSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 
-import { readAuthFile } from '../../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../../opencode/auth.js';
 import { asObject, asNonEmptyString, normalizeTimestamp, getAuthEntry, normalizeAuthEntry, readJsonFile } from '../../utils/index.js';
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
@@ -79,8 +79,8 @@ const readKeychainCredential = () => {
 const readCredentialsFile = () =>
   parseClaudeCodeBlob(readJsonFile(path.join(claudeConfigDirectory(), '.credentials.json')), 'credentials-file');
 
-const readOpenCodeCredential = () => {
-  const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), OPENCODE_AUTH_ALIASES));
+const readOpenCodeCredential = (auth) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, OPENCODE_AUTH_ALIASES));
   const accessToken = asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
   if (!accessToken) return null;
   return {
@@ -99,15 +99,28 @@ const readEnvCredential = () => {
 };
 
 /**
- * First credential a source can produce, in priority order.
+ * First credential a source can produce, in priority order, given the
+ * credentials OpenCode stores (`auth`).
  *
  * The Keychain wins over the credentials file because on macOS the file is a
  * leftover that Claude Code no longer updates.
  *
  * @returns {ClaudeCredential|null}
  */
-export const loadClaudeCredential = () =>
+export const findClaudeCredential = (auth) =>
   readKeychainCredential()
   ?? readCredentialsFile()
-  ?? readOpenCodeCredential()
+  ?? readOpenCodeCredential(auth)
+  ?? readEnvCredential();
+
+/**
+ * Same order as `findClaudeCredential`; OpenCode is asked only when the
+ * local Claude Code sources have nothing.
+ *
+ * @returns {Promise<ClaudeCredential|null>}
+ */
+export const loadClaudeCredential = async () =>
+  readKeychainCredential()
+  ?? readCredentialsFile()
+  ?? readOpenCodeCredential(await readOpenCodeCredentials())
   ?? readEnvCredential();

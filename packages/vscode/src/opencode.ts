@@ -78,6 +78,8 @@ export interface OpenCodeManager {
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
+  /** The managed server's launch environment; null while none runs (external URL, stopped). */
+  getManagedLaunchEnvironment(): NodeJS.ProcessEnv | null;
   getWorkingDirectory(): string;
   isCliAvailable(): boolean;
   getDebugInfo(): OpenCodeDebugInfo;
@@ -737,13 +739,14 @@ function spawnManagedOpenCodeServer(
   port: number,
   timeoutMs: number,
   signal: AbortSignal,
+  env: NodeJS.ProcessEnv,
 ) {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   assertSupportedOpenCodeBinary(binary);
   const launch = resolveWindowsLaunchSpec(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)]);
   return spawnManagedOpenCodeProcess(launch.binary, launch.args, {
     cwd: workingDirectory,
-    env: applyProviderEnvAliases({ ...process.env }),
+    env,
     port, timeoutMs, signal, sourceBinary: binary,
     appBundleHint: isMacOpenCodeAppBundlePath(binary)
       ? ' The configured binary points at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
@@ -777,6 +780,9 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
   let server: ReturnType<typeof spawnManagedOpenCodeServer> | null = null;
+  // The environment the managed server was launched with: the only place the
+  // values of the variables OpenCode takes provider keys from can be read back.
+  let serverEnv: NodeJS.ProcessEnv | null = null;
   let startupAbort: AbortController | null = null;
   let lifecycleRevision = 0;
   let reapedOrphansOnce = false;
@@ -981,7 +987,8 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       fs.mkdirSync(serverCwd, { recursive: true });
       const port = await allocateManagedOpenCodePort();
       startup.signal.throwIfAborted();
-      server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal);
+      serverEnv = applyProviderEnvAliases({ ...process.env });
+      server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal, serverEnv);
       await server.ready;
 
       if (server && server.url) {
@@ -1171,6 +1178,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     getStatus: () => status,
     getApiUrl,
     getOpenCodeAuthHeaders,
+    getManagedLaunchEnvironment: () => (server ? serverEnv : null),
     getWorkingDirectory: () => workingDirectory,
     isCliAvailable: () => !cliMissing || Boolean(cliPath || resolveOpencodeCliPath()),
     getDebugInfo: () => {

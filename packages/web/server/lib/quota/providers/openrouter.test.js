@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ openrouter: { key: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ openrouter: { key: 'test-token' } }),
 }));
 
 // The quota base URL is resolved through the real config-layer reader. Point

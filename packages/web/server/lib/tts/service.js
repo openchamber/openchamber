@@ -5,7 +5,7 @@
  * This bypasses mobile Safari's audio context restrictions.
  */
 
-import { readAuthFile } from '../opencode/auth.js';
+import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
@@ -15,16 +15,16 @@ export const TTS_VOICES = [
   'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
 ];
 
-function getOpenAIApiKey() {
+async function getOpenAIApiKey() {
   // First check environment variable
   const envKey = process.env.OPENAI_API_KEY;
   if (envKey) {
     return envKey;
   }
 
-  // Then check opencode auth file (same as usage tracker)
+  // Then the OpenAI credential stored in OpenCode (same as usage tracker)
   try {
-    const auth = readAuthFile();
+    const auth = await readOpenCodeCredentials();
     // Check for openai, codex, or chatgpt aliases
     const openaiAuth = auth.openai || auth.codex || auth.chatgpt;
     if (openaiAuth) {
@@ -41,7 +41,7 @@ function getOpenAIApiKey() {
       }
     }
   } catch (error) {
-    console.warn('[TTSService] Failed to read auth file:', error.message);
+    console.warn('[TTSService] Failed to read OpenCode credentials:', error.message);
   }
 
   return null;
@@ -54,7 +54,7 @@ class TTSService {
   }
 
   async _getClient() {
-    const apiKey = getOpenAIApiKey();
+    const apiKey = await getOpenAIApiKey();
 
     // If API key changed or client doesn't exist, create new client
     if (apiKey && (!this._client || this._lastApiKey !== apiKey)) {
@@ -66,8 +66,8 @@ class TTSService {
     return this._client;
   }
 
-  isAvailable() {
-    return Boolean(getOpenAIApiKey());
+  async isAvailable() {
+    return Boolean(await getOpenAIApiKey());
   }
 
   /**

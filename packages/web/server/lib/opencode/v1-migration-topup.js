@@ -42,12 +42,22 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { z } from 'zod';
 
-import { resolveCredentialDbPath } from './credential-db.js';
-import { OPENCODE_DATA_DIR } from './auth.js';
+const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
+
+/**
+ * Where OpenCode keeps its database: `OPENCODE_DB` when set (absolute or
+ * relative to the data dir), else `opencode.db` in the data dir.
+ */
+const resolveOpenCodeDbPath = (env = process.env) => {
+  const configured = (env.OPENCODE_DB ?? '').trim();
+  if (configured && configured !== ':memory:') return path.resolve(OPENCODE_DATA_DIR, configured);
+  return path.join(OPENCODE_DATA_DIR, 'opencode.db');
+};
 
 /** OpenCode's key for the migration state row in `kv`. */
 const MIGRATION_STATE_KEY = 'migration.v1-v2';
@@ -231,7 +241,7 @@ const countRevisitedSessions = (db, cursor) =>
  */
 export const topUpV1Migration = (options = {}) => {
   const {
-    dbPath = resolveCredentialDbPath({ dataDir: OPENCODE_DATA_DIR, path }),
+    dbPath = resolveOpenCodeDbPath(),
     fileSystem = fs,
     logger = console,
     now = Date.now,

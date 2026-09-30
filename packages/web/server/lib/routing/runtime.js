@@ -26,7 +26,7 @@ import {
   resolveClassifier,
 } from './classifier.js';
 import { loadRoutingHistory } from './history.js';
-import { readAuthFile } from '../opencode/auth.js';
+import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
@@ -84,10 +84,10 @@ const envKeySchema = z.string().trim().min(1);
  */
 const PROVIDER_ENV_KEYS = { openrouter: 'OPENROUTER_API_KEY', vercel: 'AI_GATEWAY_API_KEY' };
 
-export const readOpenCodeKeys = ({ readAuth = readAuthFile, env = process.env } = {}) => {
+export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials, env = process.env } = {}) => {
   let auth = {};
   try {
-    auth = readAuth();
+    auth = await readAuth();
   } catch {
     // An unreadable credential store still leaves the environment.
   }
@@ -144,7 +144,7 @@ export function createRoutingRuntime({
     // An endpoint the administrator pinned replaces the one saved in Settings.
     const pinned = readPinnedEndpoint();
     const customEndpoint = pinned ?? savedEndpoint;
-    const keys = { typesafeKey, customEndpoint, ...readProviderKeys() };
+    const keys = { typesafeKey, customEndpoint, ...(await readProviderKeys()) };
     // Enterprise mode overrides whatever was picked; the pick itself is kept.
     // The pinned endpoint is the administrator's own, so there it is the
     // default and Off the only other choice.

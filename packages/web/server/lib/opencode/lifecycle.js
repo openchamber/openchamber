@@ -147,6 +147,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   } = deps;
 
   let managedPreflight = null;
+  // The environment the managed OpenCode was launched with. Keys OpenCode
+  // takes from environment variables are never stored in it, so this is the
+  // only place their values can be read back (see auth.js).
+  let managedProcessEnv = null;
 
   const killProcessOnPortWin32 = (port) => {
     try {
@@ -761,6 +765,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
+    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
+      ...shellEnv,
+      ...process.env,
+      ...managedOpenCodeEnv,
+      PATH: envPath,
+      // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+      // user's own OPENCODE_PASSWORD would otherwise win and every request
+      // we send with openCodePassword would get 401.
+      OPENCODE_PASSWORD: openCodePassword,
+      OPENCODE_SERVER_PASSWORD: openCodePassword,
+    })));
+    managedProcessEnv = processEnv;
+
     let serverInstance;
     try {
       if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
@@ -771,17 +788,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: managedStartupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
-          ...shellEnv,
-          ...process.env,
-          ...managedOpenCodeEnv,
-          PATH: envPath,
-          // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
-          // user's own OPENCODE_PASSWORD would otherwise win and every request
-          // we send with openCodePassword would get 401.
-          OPENCODE_PASSWORD: openCodePassword,
-          OPENCODE_SERVER_PASSWORD: openCodePassword,
-        }))),
+        env: processEnv,
       });
 
       if (!serverInstance || !serverInstance.url) {
@@ -1403,6 +1410,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   return {
+    /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
+    getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

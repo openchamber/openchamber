@@ -11,7 +11,7 @@ let homeDirectory;
 let binary;
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 const cli = (version) => '#!/bin/sh\nprintf "%s\\n" "opencode v' + version + '"\n';
-const run = (script, version = '2.0.15') => installOpenCodeV2({
+const run = (script, version = '2.0.20') => installOpenCodeV2({
   homeDirectory,
   fetchImpl: async (url) => url.includes('registry.npmjs.org')
     ? Response.json({ version })
@@ -31,13 +31,13 @@ describe('OpenCode v2 installation', () => {
     const script = `#!/bin/bash
 set -eu
 test "$1" = "--version"
-test "$2" = "2.0.15"
+test "$2" = "2.0.20"
 test "$3" = "--no-modify-path"
-printf %s ${quote(cli('2.0.15'))} > ${quote(binary)}
+printf %s ${quote(cli('2.0.20'))} > ${quote(binary)}
 chmod 755 ${quote(binary)}
 `;
     expect(await run(script)).toBe(binary);
-    expect(await readOpenCodeCliVersion({ binary, args: [] })).toBe('2.0.15');
+    expect(await readOpenCodeCliVersion({ binary, args: [] })).toBe('2.0.20');
     await expect(fs.stat(path.join(path.dirname(binary), '.openchamber-install'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -63,7 +63,7 @@ chmod 755 ${quote(binary)}
   });
 
   describe('on Windows', () => {
-    const tarballOf = (name) => `https://registry.npmjs.org/@opencode/${name}/-/${name}-2.0.15.tgz`;
+    const tarballOf = (name) => `https://registry.npmjs.org/@opencode/${name}/-/${name}-2.0.20.tgz`;
     let exe;
     const integrityOf = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
     // The platform package keeps its binary at package/bin/opencode.exe. Here it is a
@@ -85,8 +85,8 @@ chmod 755 ${quote(binary)}
       tarCommand: 'tar',
       fetchImpl: async (url) => {
         const name = PACKAGE_BY_ARCH[arch];
-        if (url.endsWith('/@opencode%2Fcli/latest')) return Response.json({ version: '2.0.15' });
-        if (url.endsWith(`/@opencode%2F${name}/2.0.15`)) return Response.json({ dist: { tarball: tarballOf(name), integrity } });
+        if (url.endsWith('/@opencode%2Fcli/latest')) return Response.json({ version: '2.0.20' });
+        if (url.endsWith(`/@opencode%2F${name}/2.0.20`)) return Response.json({ dist: { tarball: tarballOf(name), integrity } });
         if (url === tarballOf(name)) return new Response(archive);
         return new Response(null, { status: 404 });
       },
@@ -98,27 +98,27 @@ chmod 755 ${quote(binary)}
     });
 
     it('installs the verified platform package without the bash installer', async () => {
-      expect(await runWindows(await pack('2.0.15'))).toBe(exe);
-      expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('2.0.15');
+      expect(await runWindows(await pack('2.0.20'))).toBe(exe);
+      expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('2.0.20');
       expect(await readOpenCodeCliVersion({ binary, args: [] })).toBe('1.18.30');
       await expect(fs.stat(path.join(path.dirname(exe), '.openchamber-install'))).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it('installs the native arm64 package on Windows ARM64', async () => {
-      const archive = await pack('2.0.15');
+      const archive = await pack('2.0.20');
       expect(await runWindows(archive, integrityOf(archive), 'arm64')).toBe(exe);
-      expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('2.0.15');
+      expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('2.0.20');
     });
 
     it('rejects a package that does not match its published integrity before touching the binary', async () => {
-      const archive = await pack('2.0.15');
+      const archive = await pack('2.0.20');
       await expect(runWindows(archive, integrityOf(Buffer.from('other')))).rejects.toThrow('integrity');
       expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('1.18.30');
       await expect(fs.stat(path.join(path.dirname(exe), '.openchamber-install'))).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it('restores the previous binary when the package holds another release', async () => {
-      await expect(runWindows(await pack('2.0.14'))).rejects.toThrow();
+      await expect(runWindows(await pack('2.0.19'))).rejects.toThrow();
       expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('1.18.30');
     });
   });

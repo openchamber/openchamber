@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -29,10 +29,10 @@ const getApiKey = (auth) => {
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const isConfigured = (auth = readAuthFile()) => Boolean(getApiKey(auth));
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch } = {}) => {
-  const apiKey = getApiKey(readAuth());
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({

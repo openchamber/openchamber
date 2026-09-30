@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ deepseek: { key: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ deepseek: { key: 'test-token' } }),
 }));
 
 import { fetchQuota } from './deepseek.js';

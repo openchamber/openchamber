@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { registerOpenCodeRoutes } from './routes.js';
+import { configureOpenCodeCredentials } from './auth.js';
 
 const createApp = (getProviderSources) => {
   const app = express();
@@ -60,6 +61,10 @@ describe('provider writes in enterprise mode', () => {
 });
 
 describe('GET /api/provider/:providerId/source', () => {
+  // The auth source reads OpenCode's stored credentials; this one has none.
+  beforeEach(() => configureOpenCodeCredentials({ list: async () => [] }));
+  afterEach(() => configureOpenCodeCredentials(null));
+
   it('returns the stored config entry next to the layer sources', async () => {
     const stored = {
       name: 'Stored',

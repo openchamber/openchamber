@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { buildResult, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'xai';
@@ -19,16 +19,16 @@ const nonEmptyString = (value) => {
   return trimmed ? trimmed : null;
 };
 
-const readXaiAuth = () => {
+const xaiEntryOf = (auth) => {
+  const entry = auth?.xai;
+  if (entry?.type !== 'oauth') return null;
+  if (!nonEmptyString(entry.access) && !nonEmptyString(entry.refresh)) return null;
+  return entry;
+};
+
+const readXaiAuth = async () => {
   try {
-    const entry = readAuthFile()?.xai;
-    if (!entry || typeof entry !== 'object' || entry.type !== 'oauth') {
-      return { entry: null, error: null };
-    }
-    if (!nonEmptyString(entry.access) && !nonEmptyString(entry.refresh)) {
-      return { entry: null, error: null };
-    }
-    return { entry, error: null };
+    return { entry: xaiEntryOf(await readOpenCodeCredentials()), error: null };
   } catch {
     return { entry: null, error: 'Failed to read xAI OAuth credentials' };
   }
@@ -340,10 +340,10 @@ const fetchUsage = async (accessToken) => {
   return parseUsage(new Uint8Array(await response.arrayBuffer()));
 };
 
-export const isConfigured = () => Boolean(readXaiAuth().entry);
+export const isConfigured = (auth) => Boolean(xaiEntryOf(auth));
 
 export const fetchQuota = async () => {
-  const { entry, error: authError } = readXaiAuth();
+  const { entry, error: authError } = await readXaiAuth();
   if (authError) {
     return buildResult({
       providerId,

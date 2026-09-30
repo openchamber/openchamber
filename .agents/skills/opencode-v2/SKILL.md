@@ -42,10 +42,8 @@ the workaround goes and the record comes from OpenCode.
   keeps it per data dir and the proxy folds it into session reads.
   Session metadata is not a workaround since 2.0.15: it lives on the OpenCode
   record, written by merge-then-PATCH in `session-metadata-store.js`, which
-  also migrates the old `sessions-metadata.json`.
-- **Provider credentials**: not readable over HTTP. `credential-db.js` reads
-  OpenCode's own SQLite `credential` table read-only, `auth.json` as legacy
-  fallback. Private schema: re-verify on every bump.
+  also migrates the old `sessions-metadata.json`. Provider credentials are
+  not one either since 2.0.20: `opencode/auth.js` reads `GET /api/credential`.
 - **1.x sessions created after the one-shot migration**:
   `v1-migration-topup.js` rewinds the migration cursor before a managed start,
   only when no revisited session has 2.x activity.
@@ -53,8 +51,8 @@ the workaround goes and the record comes from OpenCode.
   route does not declare, so session update/delete/archive report the status
   without OpenCode's message or log `ref`.
 
-Open asks upstream (OpenCode Slack): credential read over HTTP, declaring 500
-bodies on session mutations. Dropped: an import route for missing 1.x
+Open asks upstream (OpenCode Slack): declaring 500 bodies on session
+mutations. Dropped: an import route for missing 1.x
 sessions (the top-up workaround is enough). Check the newest tag before re-asking.
 
 ## Sources of truth

@@ -255,19 +255,19 @@ describe('resolveClassifier', () => {
 describe('readOpenCodeKeys', () => {
   const env = { OPENROUTER_API_KEY: 'or-env', AI_GATEWAY_API_KEY: ' gw-env ' };
 
-  it('prefers a key saved in OpenCode and falls back to the variable OpenCode reads', () => {
+  it('prefers a key saved in OpenCode and falls back to the variable OpenCode reads', async () => {
     const readAuth = () => ({
       opencode: { type: 'api', key: 'zen' },
       openrouter: { type: 'api', key: 'or-saved' },
       vercel: { type: 'oauth', access: 'a', refresh: 'r', expires: 0 },
     });
-    expect(readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: 'zen', openrouterKey: 'or-saved', vercelKey: 'gw-env' });
+    expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: 'zen', openrouterKey: 'or-saved', vercelKey: 'gw-env' });
   });
 
-  it('keeps the variables when the credential store cannot be read, and ignores blank ones', () => {
+  it('keeps the variables when the credential store cannot be read, and ignores blank ones', async () => {
     const readAuth = () => { throw new Error('locked'); };
-    expect(readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: null, openrouterKey: 'or-env', vercelKey: 'gw-env' });
-    expect(readOpenCodeKeys({ readAuth: () => ({}), env: { OPENROUTER_API_KEY: '  ' } })).toEqual({ zenKey: null, openrouterKey: null, vercelKey: null });
+    expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: null, openrouterKey: 'or-env', vercelKey: 'gw-env' });
+    expect(await readOpenCodeKeys({ readAuth: () => ({}), env: { OPENROUTER_API_KEY: '  ' } })).toEqual({ zenKey: null, openrouterKey: null, vercelKey: null });
   });
 });
 

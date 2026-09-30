@@ -20,9 +20,13 @@ extension applies the same policy in its own process at activation.
 
 These provider IDs are currently dispatchable via `fetchQuotaForProvider(providerId)` in `packages/web/server/lib/quota/providers/index.js`.
 
-Where this table says "OpenCode `auth.json`", the credential is read through
-`../opencode/auth.js`, which answers from OpenCode 2.x's own credential
-database first and the legacy file second (see the opencode module docs).
+Where this table says "OpenCode `auth.json`", the credential is the one the
+running OpenCode uses (stored, or from an environment variable when
+OpenChamber launched OpenCode), read through `../opencode/auth.js` (`GET
+/api/credential`, see the opencode module docs); the name is the legacy shape
+the entries keep. The provider list reads it once and hands it to every
+`isConfigured(auth)`; each `fetchQuota` reads it again. When OpenCode cannot be
+asked, `/api/quota/providers` answers 500 instead of an empty list.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |

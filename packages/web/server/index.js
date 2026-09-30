@@ -81,6 +81,7 @@ import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capabil
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/client.js';
+import { configureOpenCodeCredentials, openCodeCredentialSource } from './lib/opencode/auth.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
@@ -1403,6 +1404,15 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
 });
+
+// Quota lookups, voice keys and routing read provider credentials from the
+// running OpenCode (`GET /api/credential`), plus the values of the variables a
+// managed OpenCode takes keys from, read from the environment it was given.
+configureOpenCodeCredentials(openCodeCredentialSource({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getLaunchEnvironment: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv(),
+}));
 
 const getOpenCodeCompatibility = async () => {
   if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) {

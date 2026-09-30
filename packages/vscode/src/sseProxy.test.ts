@@ -14,6 +14,7 @@ const createManager = (): OpenCodeManager => ({
   getStatus: () => 'connected',
   getApiUrl: () => 'http://127.0.0.1:3902',
   getOpenCodeAuthHeaders: () => ({}),
+  getManagedLaunchEnvironment: () => null,
   getWorkingDirectory: () => '/workspace',
   isCliAvailable: () => true,
   getDebugInfo: () => ({

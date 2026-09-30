@@ -438,8 +438,7 @@ export async function handleSystemBridgeMessage(
           ? directory.trim()
           : ctx?.manager?.getWorkingDirectory();
         const sources = getProviderSources(providerId, workingDirectory);
-        const auth = getProviderAuth(providerId);
-        sources.auth.exists = Boolean(auth);
+        sources.auth.exists = Boolean(await getProviderAuth(providerId));
         const config = getStoredProviderConfig(providerId, workingDirectory);
         return { id, type, success: true, data: { providerId, sources, config } };
       } catch (error) {
@@ -490,7 +489,7 @@ export async function handleSystemBridgeMessage(
           config,
           workingDirectory,
           normalizedScope,
-          { hasStoredAuth: hasCredential === true || Boolean(getProviderAuth(providerId)) },
+          { hasStoredAuth: hasCredential === true || Boolean(await getProviderAuth(providerId)) },
         );
         await ctx?.manager?.restart();
         return {
@@ -514,7 +513,7 @@ export async function handleSystemBridgeMessage(
 
     case 'api:quota:providers': {
       try {
-        const providers = listConfiguredQuotaProviders();
+        const providers = await listConfiguredQuotaProviders();
         return { id, type, success: true, data: { providers } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
