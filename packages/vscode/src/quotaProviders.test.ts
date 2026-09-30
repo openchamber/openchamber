@@ -33,7 +33,7 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchHyperQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -1323,4 +1323,51 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
       assert.equal(result.usage, null);
     });
   }
+});
+
+describe('Kimi for Coding credential lookup (VS Code parity)', () => {
+  const sentKey = async (auth: Record<string, { type?: string; key: string; token?: string }>) => {
+    let authorization: string | undefined;
+    const result = await fetchKimiQuota({
+      readAuth: () => auth,
+      fetchImpl: async (_url, init) => {
+        authorization = new Headers(init.headers).get('Authorization') ?? undefined;
+        return Response.json({ usage: null, limits: [] });
+      },
+    });
+    return { result, authorization };
+  };
+
+  test('finds a China plan credential stored under kimi-code-plan-cn', async () => {
+    const { result, authorization } = await sentKey({ 'kimi-code-plan-cn': { type: 'api', key: 'cn-key' } });
+    assert.equal(result.ok, true);
+    assert.equal(authorization, 'Bearer cn-key');
+  });
+
+  test('prefers the China plan credential over a leftover pre-split kimi-for-coding key', async () => {
+    const { authorization } = await sentKey({
+      'kimi-for-coding': { type: 'api', key: 'stale-key' },
+      kimi: { type: 'api', key: 'older-key' },
+      'kimi-code-plan-cn': { type: 'api', key: 'cn-key' },
+    });
+    assert.equal(authorization, 'Bearer cn-key');
+  });
+
+  test('still reads the global plan and the pre-split ids when they are the only credential', async () => {
+    assert.equal((await sentKey({ 'kimi-code-plan-global': { key: 'global-key' } })).authorization, 'Bearer global-key');
+    assert.equal((await sentKey({ 'kimi-for-coding': { key: 'legacy-key' } })).authorization, 'Bearer legacy-key');
+  });
+
+  test('skips a blank key and uses the token next to it', async () => {
+    const { authorization } = await sentKey({ 'kimi-code-plan-cn': { key: '  ', token: 'cn-token' } });
+    assert.equal(authorization, 'Bearer cn-token');
+  });
+
+  test('keeps a pre-split key ahead of the global plan, as before', async () => {
+    const { authorization } = await sentKey({
+      'kimi-code-plan-global': { key: 'global-key' },
+      'kimi-for-coding': { key: 'legacy-key' },
+    });
+    assert.equal(authorization, 'Bearer legacy-key');
+  });
 });

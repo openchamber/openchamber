@@ -775,6 +775,18 @@ const durationToSeconds = (duration?: number, unit?: string) => {
   return null;
 };
 
+// OpenCode stores the Kimi For Coding plans as `kimi-code-plan-cn` (kimi.com)
+// and `kimi-code-plan-global` (kimi.ai). The China plan comes first: its key
+// works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
+// key left behind with a dead credential must not shadow it. The global plan
+// stays last, as before, since its key is not known to work at that address.
+const KIMI_AUTH_ALIASES = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
+
+const getKimiApiKey = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, KIMI_AUTH_ALIASES));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
 export const listConfiguredQuotaProviders = () => {
   let auth: AuthFile = {};
   try {
@@ -813,8 +825,7 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('zhipuai-coding-plan');
   }
 
-  const kimiAuth = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi', 'kimi-code-plan-global']));
-  if (kimiAuth && ((kimiAuth as Record<string, unknown>).key || (kimiAuth as Record<string, unknown>).token)) {
+  if (getKimiApiKey(auth)) {
     configured.add('kimi-for-coding');
   }
 
@@ -1655,10 +1666,13 @@ const computeKimiUsedPercent = (
   return null;
 };
 
-const fetchKimiQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi', 'kimi-code-plan-global'])) as Record<string, unknown> | null;
-  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+type KimiQuotaDependencies = {
+  readAuth?: () => AuthFile;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchKimiQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch }: KimiQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = getKimiApiKey(readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -1671,7 +1685,7 @@ const fetchKimiQuota = async (): Promise<ProviderResult> => {
   }
 
   try {
-    const response = await fetch('https://api.kimi.com/coding/v1/usages', {
+    const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,

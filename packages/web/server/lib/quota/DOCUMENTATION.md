@@ -37,7 +37,7 @@ database first and the legacy file second (see the opencode module docs).
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
-| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-for-coding`, `kimi` |
+| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (first match wins) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
@@ -121,6 +121,8 @@ Web and VS Code accept finite numeric balances and non-empty numeric strings. Mi
 `GET https://api.kimi.com/coding/v1/usages` is inconsistent about which field carries consumption:
 - The weekly `usage` block returns `used` (consumed) with no `remaining` field.
 - Each `limits[].detail` rate-limit block returns `remaining` (available) with no `used` field.
+
+Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai, API base `api.kimi.ai`) stays last: it is not verified that a global key works at the `api.kimi.com` usage address, so it must not outrank a working pre-split key.
 
 The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
