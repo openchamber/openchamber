@@ -130,6 +130,7 @@ type MobileSessionsSheetProps = {
     instanceLabel: string | null;
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
+    onOpenScheduled: () => void;
     onOpenUsage: () => void;
     /** Present only while a server update is available (hosted web). */
     onOpenUpdate?: () => void;
@@ -2361,6 +2362,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   <span className="absolute right-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
                 </Button>
               ) : null}
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                className="w-10 px-0"
+                onClick={footer.onOpenScheduled}
+                aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
+                title={t('sessions.sidebar.header.actions.scheduledTasks')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="calendar-schedule" className="size-5" />
+              </Button>
               <Button
                 type="button"
                 variant="default"

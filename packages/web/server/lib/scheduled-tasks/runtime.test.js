@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import os from 'os';
 import path from 'path';
-import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, stat, readdir } from 'fs/promises';
 import {
   computeNextRunAt,
   expandCommandGoalObjective,
@@ -10,6 +10,7 @@ import {
   createScheduledTasksRuntime,
 } from './runtime.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
+import { createChatsScope } from './chats-scope.js';
 
 describe('scheduled-tasks runtime helpers', () => {
   it.each([
@@ -323,5 +324,106 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[1].body.resume).toBe(false);
     expect(dispatch[2].body).toMatchObject({ text: 'Review open issues' });
     expect(dispatch[2].body.resume).toBeUndefined();
+  });
+});
+
+describe('scheduled-tasks runtime chats scope', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const task = {
+    id: 'task-1',
+    name: 'Morning digest',
+    enabled: true,
+    schedule: { kind: 'daily', times: ['08:00'], timezone: 'UTC' },
+    execution: { prompt: 'Summarize the news', providerID: 'openai', modelID: 'gpt-5' },
+    state: { createdAt: 1, updatedAt: 1 },
+  };
+
+  const createChatsRuntime = async ({ sessionStatus = 200 } = {}) => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-runtime-chats-'));
+    const chatsScope = createChatsScope(path.join(tempRoot, 'chats'));
+    const sessionBodies = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname === '/api/session') {
+        sessionBodies.push(JSON.parse(init.body));
+        if (sessionStatus !== 200) return new Response(JSON.stringify({ error: 'boom' }), { status: sessionStatus });
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_chat' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const projectConfigRuntime = {
+      listScheduledTasks: vi.fn(async () => [task]),
+      reconcileLoopTasks: vi.fn(async () => [task]),
+      updateScheduledTaskState: async () => ({ task, updated: true }),
+      updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+    };
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime,
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      chatsScope,
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    return {
+      runtime,
+      chatsScope,
+      projectConfigRuntime,
+      sessionBodies,
+      cleanup: () => rm(tempRoot, { recursive: true, force: true }),
+    };
+  };
+
+  it('schedules chats without discovering loop files', async () => {
+    const { runtime, chatsScope, projectConfigRuntime, cleanup } = await createChatsRuntime();
+    try {
+      await runtime.start();
+      runtime.stop();
+      expect(projectConfigRuntime.reconcileLoopTasks).toHaveBeenCalledWith('proj', expect.anything());
+      expect(projectConfigRuntime.reconcileLoopTasks).not.toHaveBeenCalledWith(chatsScope.id, expect.anything());
+      expect(projectConfigRuntime.listScheduledTasks).toHaveBeenCalledWith(chatsScope.id);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('starts every run in a new chat directory under the chats root', async () => {
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime();
+    try {
+      await runtime.start();
+      const first = await runtime.runNow(chatsScope.id, 'task-1');
+      const second = await runtime.runNow(chatsScope.id, 'task-1');
+      runtime.stop();
+
+      expect(first.ok).toBe(true);
+      expect(first.directory).not.toBe(second.directory);
+      for (const result of [first, second]) {
+        expect(path.relative(chatsScope.root, result.directory)).toMatch(/^\d{4}-\d{2}-\d{2}[\\/]session-/);
+        await expect(stat(result.directory)).resolves.toBeTruthy();
+      }
+      expect(sessionBodies.map((body) => body.location.directory)).toEqual([first.directory, second.directory]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('removes the new chat directory when the session cannot be created', async () => {
+    const { runtime, chatsScope, cleanup } = await createChatsRuntime({ sessionStatus: 500 });
+    try {
+      await runtime.start();
+      const result = await runtime.runNow(chatsScope.id, 'task-1');
+      runtime.stop();
+
+      expect(result.ok).toBe(false);
+      const dayDirectories = await readdir(chatsScope.root);
+      expect(dayDirectories).toHaveLength(1);
+      expect(await readdir(path.join(chatsScope.root, dayDirectories[0]))).toEqual([]);
+    } finally {
+      await cleanup();
+    }
   });
 });

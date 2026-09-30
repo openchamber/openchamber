@@ -89,6 +89,7 @@ import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime
 import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
+import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
@@ -1444,8 +1445,10 @@ const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentP
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
+const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
+  chatsScope: scheduledChatsScope,
   listProjects: async () => {
     const settings = await readSettingsFromDiskMigrated();
     return sanitizeProjects(settings?.projects || []);
@@ -1463,7 +1466,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
         writeSseEvent(client, {
           type: 'openchamber:scheduled-task-ran',
           properties: {
-            projectId: event.projectID,
+            projectId: scheduledChatsScope.toPublicID(event.projectID),
             taskId: event.taskID,
             ranAt: event.ranAt,
             status: event.status,
@@ -1534,6 +1537,7 @@ const scheduledTaskService = createScheduledTaskService({
   sanitizeProjects,
   projectConfigRuntime,
   scheduledTasksRuntime,
+  chatsScope: scheduledChatsScope,
 });
 const openChamberSessionService = createOpenChamberSessionService({
   readSettingsFromDiskMigrated,
