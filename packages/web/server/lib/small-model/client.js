@@ -104,10 +104,13 @@ export async function getDefaultModelInfo(client) {
 }
 
 /**
- * The model entry for a `provider/model` reference. `modelID` and `id` are
- * both accepted because OpenCode reports the same model under both.
+ * The model entry for a `provider/model` reference. `id` is the catalog key a
+ * reference holds; `modelID` is the provider API name, shared by derived
+ * entries (`gpt-6-luna` and `gpt-6-luna-fast`), so an exact `id` match wins.
  */
 export function findModelInfo(models, providerID, modelID) {
-  return models.find((model) => model?.providerID === providerID
-    && (model.id === modelID || model.modelID === modelID)) ?? null;
+  const ofProvider = models.filter((model) => model?.providerID === providerID);
+  return ofProvider.find((model) => model.id === modelID)
+    ?? ofProvider.find((model) => model.modelID === modelID)
+    ?? null;
 }

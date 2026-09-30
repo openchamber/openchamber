@@ -8,6 +8,8 @@ type GuestFrameOptions = {
   entry: string | null;
   instanceKey: string;
   enabled: boolean;
+  /** Approved `contributes.origins`; relay documents carry them in their policy. Part of `instanceKey`. */
+  origins: readonly string[];
 };
 
 type FrameState =
@@ -15,7 +17,10 @@ type FrameState =
   | { key: string; status: 'ready'; source: GuestFrameUrl };
 
 /** Keep a loaded document alive; renew scoped auth only when it navigates again. */
-export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled }: GuestFrameOptions) => {
+export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins }: GuestFrameOptions) => {
+  // `instanceKey` changes with the list, so the effect re-runs; the ref only avoids an array dependency.
+  const originsRef = React.useRef(origins);
+  originsRef.current = origins;
   const [state, setState] = React.useState<FrameState | null>(null);
   const [reloadGeneration, setReloadGeneration] = React.useState(0);
   const recoveryAttempted = React.useRef(false);
@@ -35,7 +40,7 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled }: Guest
     if (!entry || !enabled) return;
     let cancelled = false;
     const abort = new AbortController();
-    void resolveGuestFrameUrl(guestId, entry, abort.signal)
+    void resolveGuestFrameUrl(guestId, entry, abort.signal, originsRef.current)
       .then((next) => {
         if (!cancelled) setState({ key, status: 'ready', source: next });
       })

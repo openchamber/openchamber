@@ -27,6 +27,8 @@ import { normalizePath } from '../attachments/filePaths';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { getGitStatus } from '@/lib/gitApi';
+import { isSpaceCreationRequest, spaceOfCreationRequest } from '@/lib/spaces/space-creation';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
 
 /** How long a cached branch list is served before it is refreshed. */
 const BRANCHES_SWR_TTL_MS = 30_000;
@@ -50,6 +52,7 @@ export function getProjectDisplayLabel(project: { label?: string; path: string }
 export function useDraftTarget(enabled: boolean) {
     const configuredProjects: readonly DraftTargetProject[] = useProjectsStore((state) => state.projects);
     const { t } = useI18n();
+    const spacesJourney = useSpacesStore((state) => state.journey);
     const chatProject = React.useMemo<DraftTargetProject>(() => ({
         id: CHAT_DRAFT_PROJECT_ID,
         path: '',
@@ -246,9 +249,12 @@ export function useDraftTarget(enabled: boolean) {
             newSessionDraft?.preserveDirectoryOverride
             ||
             newSessionDraft?.pendingWorktreeRequestId
+            // Git lists a created worktree only once its background attach
+            // finishes, so a refresh inside that window omits it.
+            || selectedDraftDirectoryBootstrapPending
             || (pendingDirectory && pendingDirectory === selectedDraftDirectory)
         );
-    }, [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory]);
+    }, [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftDirectoryBootstrapPending]);
 
     const draftBranchItems = React.useMemo(() => {
         const baseItems: Array<{ value: string; label: string }> = [];
@@ -274,14 +280,17 @@ export function useDraftTarget(enabled: boolean) {
 
     const selectedDraftBranchLabel = React.useMemo(() => {
         if (newSessionDraft?.pendingWorktreeRequestId) {
-            return t('session.newWorktree.actions.creating');
+            if (!isSpaceCreationRequest(newSessionDraft.pendingWorktreeRequestId)) return t('session.newWorktree.actions.creating');
+            const space = spaceOfCreationRequest(newSessionDraft.pendingWorktreeRequestId);
+            const entry = space ? spacesJourney?.get(space) : undefined;
+            return entry && entry.state === 'running' ? entry.name : t('spaces.draft.preparing');
         }
         const selectedValue = selectedDraftDirectory ?? draftBranchItems[0]?.value ?? null;
         if (!selectedValue) {
             return null;
         }
         return draftBranchItems.find((item) => item.value === selectedValue)?.label ?? formatDirectoryName(selectedValue);
-    }, [draftBranchItems, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, t]);
+    }, [draftBranchItems, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, spacesJourney, t]);
 
 
     const selectedDraftBranchIsKnown = React.useMemo(() => {

@@ -39,7 +39,7 @@ describe("attachment file preparation", () => {
 
   test("exposes the expanded code and structured-text formats to pickers", () => {
     for (const extension of [
-      "diff", "patch", "ipynb", "jsonl", "ndjson", "har", "svg", "drawio",
+      "diff", "patch", "ipynb", "jsonl", "ndjson", "har", "svg", "drawio", "excalidraw",
       "vue", "svelte", "php", "cs", "kt", "swift", "lua", "dart", "tf", "hcl", "proto",
       "docx", "pptx", "xlsx", "odt", "odp", "ods",
     ]) {

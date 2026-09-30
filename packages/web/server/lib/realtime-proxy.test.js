@@ -228,6 +228,35 @@ describe('realtime proxy', () => {
     }
   });
 
+  it('proxies the sockets of an isolated space by path shape, and refuses another path under the prefix', async () => {
+    const seen = [];
+    const upstreamServer = http.createServer();
+    const upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', (socket, request) => {
+      seen.push(request.url);
+      socket.send('ready');
+    });
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    const attempt = (path) => new Promise((resolve, reject) => {
+      const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstreamOrigin.replace(/^http:/, 'ws:')}${path}`), { headers: { Origin: 'openchamber-ui://app' } });
+      client.once('message', (data) => { client.close(); resolve({ message: data.toString() }); });
+      client.once('close', (code) => resolve({ code }));
+      client.once('error', reject);
+    });
+
+    try {
+      expect(await attempt('/api/spaces/a1b2c3d4e5f6/terminal/ws')).toEqual({ message: 'ready' });
+      expect(await attempt('/api/spaces/a1b2c3d4e5f6/event/ws?directory=%2Fspaces%2Fa1b2c3d4e5f6%2Frepo')).toEqual({ message: 'ready' });
+      expect(await attempt('/api/spaces/a1b2c3d4e5f6/dictation/ws')).toEqual({ code: 1008 });
+      expect(await attempt('/api/spaces/A1B2C3D4E5F6/terminal/ws')).toEqual({ code: 1008 });
+      expect(seen).toEqual(['/api/spaces/a1b2c3d4e5f6/terminal/ws', '/api/spaces/a1b2c3d4e5f6/event/ws?directory=%2Fspaces%2Fa1b2c3d4e5f6%2Frepo']);
+      upstreamWs.close();
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('allows first passwordless WebSocket proxy upgrade without an existing cookie', async () => {
     const upstreamServer = http.createServer();
     const upstreamWs = new WebSocketServer({ server: upstreamServer });

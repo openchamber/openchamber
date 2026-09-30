@@ -6,7 +6,8 @@ import { parseManifestJson } from '@openchamber/sdk/schemas';
 import { requestedGuestCapabilities } from '@openchamber/sdk';
 
 import { inspectGuestPackage, invalidateGuestCatalog, listInstalledGuests } from './catalog.js';
-import { cloneGitRepository, prepareGuestGitNetwork, runGit } from './clone.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
+import { cloneGitRepository, prepareGuestGitNetwork, runGit, runGitNetwork } from './clone.js';
 import { unwrapGuestRoot } from './extract-zip.js';
 import { guestCopiesDir, isCopiedGuestRoot } from './persist.js';
 import { stopGuestService } from './service.js';
@@ -95,7 +96,7 @@ export const checkGuestUpdate = async ({ guest, origin, gitBinary, timeoutMs = C
   if (!network) {
     return { available: false, error: 'fetch-failed' };
   }
-  const fetched = await runGit(
+  const fetched = await runGitNetwork(
     [...network.args, 'fetch', '--depth', '1', '--', 'origin', origin.ref ?? 'HEAD'],
     { gitBinary, cwd, timeoutMs, env: network.env },
   );
@@ -249,6 +250,12 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
     if (inspected.guest.id !== guest.id) {
       await removeDir(staging);
       return { ok: false, code: 'invalid-manifest' };
+    }
+    // A version that starts asking for what enterprise mode refuses from this
+    // repository stays uninstalled; the current one keeps working.
+    if (enterpriseBlockedCapabilities(inspected.guest, { source: 'git', gitUrl: origin.url }).length > 0) {
+      await removeDir(staging);
+      return { ok: false, code: 'enterprise-mode' };
     }
   } catch {
     await removeDir(staging);

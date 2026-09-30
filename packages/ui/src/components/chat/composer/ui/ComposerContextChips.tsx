@@ -27,6 +27,7 @@ import {
 import type { Theme } from '@/types/theme';
 import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useChatQuoteHighlightApi, type ChatQuoteMark } from '../../hooks/chatQuoteHighlightStore';
+import { getContextPreviewMaxHeight } from './contextPreviewHeight';
 
 export interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
@@ -231,6 +232,32 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
     editingRef.current = editingDraftId;
     const containerRef = React.useRef<HTMLDivElement>(null);
     const closeTimerRef = React.useRef<number | null>(null);
+    const [previewMaxHeight, setPreviewMaxHeight] = React.useState<number | null>(null);
+
+    React.useLayoutEffect(() => {
+        const anchor = containerRef.current;
+        if (!openGroupKey || !anchor) return;
+
+        const boundary = anchor.closest('[data-composer-bound]') ?? anchor.closest('[data-chat-area]');
+        const updateHeight = () => {
+            setPreviewMaxHeight(getContextPreviewMaxHeight(
+                anchor.getBoundingClientRect().top,
+                boundary?.getBoundingClientRect().top ?? 0,
+                window.innerHeight,
+            ));
+        };
+        updateHeight();
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(anchor);
+        if (boundary) observer.observe(boundary);
+        const form = anchor.closest('form');
+        if (form) observer.observe(form);
+        window.addEventListener('resize', updateHeight);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener('resize', updateHeight);
+        };
+    }, [openGroupKey]);
 
     const cancelClose = React.useCallback(() => {
         if (closeTimerRef.current !== null) {
@@ -371,11 +398,20 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         <div className="relative" ref={containerRef}>
             {openGroup ? (
                 <div
-                    className="oc-glass-popover absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+                    // Shadow on the wrapper, never on the glass: see "Floating
+                    // composer" in composer/DOCUMENTATION.md.
+                    className="absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                     onMouseEnter={cancelClose}
                     onMouseLeave={scheduleClose}
                 >
-                    <div className="max-h-[min(50vh,420px)] divide-y divide-[var(--interactive-border)] overflow-y-auto">
+                <div
+                    className="oc-glass-popover overflow-hidden rounded-xl border border-[var(--interactive-border)]"
+                    style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
+                >
+                    <div
+                        className="divide-y divide-[var(--interactive-border)] overflow-y-auto"
+                        style={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                    >
                         {openGroup.drafts.map((draft, index) => (
                             <DraftPreviewEntry
                                 key={draft.id}
@@ -398,6 +434,7 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                             />
                         ))}
                     </div>
+                </div>
                 </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 pb-2">

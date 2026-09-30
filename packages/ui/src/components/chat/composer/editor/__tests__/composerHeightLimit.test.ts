@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getComposerHeightLimit, getComposerHostHeightLimit } from '../heightLimit';
+import { getComposerHeightLimit, getComposerHostHeightLimit, isComposerContentCapped } from '../heightLimit';
 
 describe('getComposerHeightLimit', () => {
     test('keeps short composer content below both limits', () => {
@@ -88,5 +88,17 @@ describe('getComposerHeightLimit', () => {
 
     test('falls back to the line cap when no screen bound is available', () => {
         expect(getComposerHeightLimit({ maxLinesHeight: 180 })).toBe(180);
+    });
+});
+
+describe('isComposerContentCapped', () => {
+    test('[issue-4004] treats a sub-line overflow of fitting text as fitting', () => {
+        expect(isComposerContentCapped(21, 21, 21)).toBe(false);
+        expect(isComposerContentCapped(22.4, 21, 21)).toBe(false);
+        expect(isComposerContentCapped(84, 168, 21)).toBe(false);
+    });
+
+    test('scrolls once the text is a line or more past the cap', () => {
+        expect(isComposerContentCapped(189, 168, 21)).toBe(true);
     });
 });

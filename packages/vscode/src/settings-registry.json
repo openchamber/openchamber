@@ -114,6 +114,14 @@
     "permissionAutoAccept": {
       "scope": "instance"
     },
+    "permissionDefaultMode": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },
@@ -126,10 +134,16 @@
     "agentNotifyToolEnabled": {
       "scope": "instance"
     },
+    "agentToolsCodeMode": {
+      "scope": "instance"
+    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
     "isolatedSpacesEnabled": {
+      "scope": "instance"
+    },
+    "isolatedSpacesIdleStop": {
       "scope": "instance"
     },
     "agentMemoryFeatureAvailable": {
@@ -232,7 +246,8 @@
       "scope": "profile"
     },
     "sidebarShowRecentSection": {
-      "scope": "profile"
+      "scope": "profile",
+      "perSurface": true
     },
     "workStatusSectionOrder": {
       "scope": "profile"
@@ -473,8 +488,27 @@
     "sessionSuggestionEnabled": {
       "scope": "profile"
     },
+    "sessionWorkEnabled": {
+      "scope": "profile"
+    },
+    "sessionWorkAutoOpen": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionGoalEnabled": {
       "scope": "profile"
+    },
+    "sessionGoalChecker": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
     },
     "sessionGoalDefaultBudgetEnabled": {
       "scope": "profile"

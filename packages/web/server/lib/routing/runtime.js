@@ -1,9 +1,10 @@
 /**
- * Owns Jev routing at runtime: whether Auto is ready, which model and agent a
- * send that selected `openchamber/auto` runs on, and the safety net consulted
- * before a permission is auto-accepted. Every failure path keeps the user's own
- * behaviour: a prompt goes to the fallback model, a permission is accepted as
- * auto-accept would have, and the UI is told why.
+ * Owns Jev routing at runtime: which classification provider answers, whether
+ * Auto is ready, which model and agent a send that selected `openchamber/auto`
+ * runs on, and the safety net consulted in a `safety` permission session.
+ * Failure paths fall back to the user's own behaviour for routing (the
+ * fallback model) and to the user's own decision for the safety net: a request
+ * Jev could not check waits for the user, and the UI is told why.
  *
  * OpenCode 2.x holds the model and the agent on the session, switched by their
  * own calls, and a prompt body carries only the user's text. So Auto is a
@@ -13,10 +14,20 @@
  */
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
-import { AUTO_MODEL_REF, BUILTIN_CATEGORIES, isAutoModel } from './defaults.js';
+import { AUTO_MODEL_REF, BUILTIN_CATEGORIES, ZEN_JEV_PROMOTION_ACTIVE, isAutoModel } from './defaults.js';
 import { createRoutingStore, parseEffectiveConfig } from './store.js';
-import { buildPermissionRequest, buildRoutingRequest, createJevClient, decidePermission, decideRouting, jevEndpoint } from './jev.js';
+import { buildPermissionRequest, buildRoutingRequest, createJevClient, decidePermission, decideRouting } from './jev.js';
+import {
+  CLASSIFIER_SOURCES,
+  classifierEndpoint,
+  legacyClassifier,
+  normalizeCustomEndpointUrl,
+  readPinnedCustomEndpoint,
+  resolveClassifier,
+} from './classifier.js';
 import { loadRoutingHistory } from './history.js';
+import { readAuthFile } from '../opencode/auth.js';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
 /** A held permission is remembered so reconnect reconciliation does not re-ask Jev. */
@@ -44,11 +55,49 @@ export const requestTextOf = (body) => {
 
 const agentBodySchema = z.object({ agent: z.string().trim().min(1) });
 
+const customEndpointInputSchema = z.object({
+  url: z.string().trim().min(1).max(2000),
+  model: z.string().trim().min(1).max(200),
+  key: z.string().trim().max(4000).nullable().optional(),
+});
+
 /** OpenChamber stores a model as `{ providerID, modelID }`; v2 wants a `Model.Ref`. */
 const toModelRef = (model, variant) => {
   const ref = { providerID: model.providerID, id: model.modelID };
   if (variant) ref.variant = variant;
   return ref;
+};
+
+/**
+ * The API keys the user saved in OpenCode for the providers that serve Jev. An
+ * OpenCode account sign-in is an OAuth credential, which Zen rejects as a key,
+ * so only `api` entries count.
+ */
+const apiKeySchema = z.object({ type: z.literal('api'), key: z.string().min(1) });
+const envKeySchema = z.string().trim().min(1);
+
+/**
+ * OpenCode also connects OpenRouter and AI Gateway from these variables, read
+ * live and never stored in its database. A managed OpenCode inherits this
+ * server's environment, so the same variable is the same key. A saved key
+ * wins over the variable; Zen has no variable.
+ */
+const PROVIDER_ENV_KEYS = { openrouter: 'OPENROUTER_API_KEY', vercel: 'AI_GATEWAY_API_KEY' };
+
+export const readOpenCodeKeys = ({ readAuth = readAuthFile, env = process.env } = {}) => {
+  let auth = {};
+  try {
+    auth = readAuth();
+  } catch {
+    // An unreadable credential store still leaves the environment.
+  }
+  const saved = (providerId) => apiKeySchema.safeParse(auth[providerId]).data?.key ?? null;
+  const fromEnv = (providerId) => envKeySchema.safeParse(env[PROVIDER_ENV_KEYS[providerId]]).data ?? null;
+  return {
+    zenKey: saved('opencode'),
+    openrouterKey: saved('openrouter') ?? fromEnv('openrouter'),
+    vercelKey: saved('vercel') ?? fromEnv('vercel'),
+  };
 };
 
 export function createRoutingRuntime({
@@ -59,6 +108,10 @@ export function createRoutingRuntime({
   fetchImpl = fetch,
   store = createRoutingStore({ dataDir }),
   jev = createJevClient({ fetchImpl }),
+  readProviderKeys = () => readOpenCodeKeys(),
+  zenPromotionActive = ZEN_JEV_PROMOTION_ACTIVE,
+  enterpriseMode = isEnterpriseMode,
+  readPinnedEndpoint = readPinnedCustomEndpoint,
   now = Date.now,
 }) {
   const permissionDecisions = new Map();
@@ -81,23 +134,70 @@ export function createRoutingRuntime({
 
   const enabledCategories = (config) => config.categories.filter((category) => category.enabled);
 
-  /** What the client needs to decide whether to offer Auto and what the settings page shows. */
+  /** Which classification provider answers now, and where its requests go (null endpoint: no Jev). */
+  const resolveAccess = async () => {
+    const [typesafeKey, stored, savedEndpoint] = await Promise.all([
+      store.readToken(),
+      store.readClassifierSource(),
+      store.readCustomEndpoint(),
+    ]);
+    // An endpoint the administrator pinned replaces the one saved in Settings.
+    const pinned = readPinnedEndpoint();
+    const customEndpoint = pinned ?? savedEndpoint;
+    const keys = { typesafeKey, customEndpoint, ...readProviderKeys() };
+    // Enterprise mode overrides whatever was picked; the pick itself is kept.
+    // The pinned endpoint is the administrator's own, so there it is the
+    // default and Off the only other choice.
+    const selected = !enterpriseMode() ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
+    const classifier = resolveClassifier({ selected, ...keys, zenPromotionActive });
+    const endpoint = classifier.effective ? classifierEndpoint(classifier.effective, keys) : null;
+    return { classifier, endpoint, tokenPresent: Boolean(typesafeKey), customEndpoint, pinned: pinned !== null };
+  };
+
+  // What Settings shows of the custom endpoint: never the key itself.
+  const describeCustomEndpoint = (endpoint, pinned) => (endpoint
+    ? { url: endpoint.url, model: endpoint.model, keyPresent: Boolean(endpoint.key), pinned }
+    : null);
+
+  const pinnedEndpointError = () => Object.assign(
+    new Error('The custom endpoint is set by your administrator and cannot be changed here'),
+    { status: 409 },
+  );
+
+  /** What the client needs to decide whether to offer Auto and the safety net, and what Settings shows. */
   const describe = async () => {
-    const [config, token] = await Promise.all([store.readConfig(), store.readToken()]);
-    const tokenPresent = Boolean(token);
-    // A key is not a precondition: without one Jev answers through the free
-    // model zen serves, so Auto only needs a fallback and two categories.
-    const autoReady = config.enabled && Boolean(config.fallback) && enabledCategories(config).length >= 2;
+    const [config, access] = await Promise.all([store.readConfig(), resolveAccess()]);
+    const jevAvailable = access.endpoint !== null;
+    const autoReady = jevAvailable && config.enabled && Boolean(config.fallback) && enabledCategories(config).length >= 2;
     // Built-in text travels with the config so "Reset" in Settings restores the shipped wording.
     // `available` stays in the payload for the client: a runtime without an
     // OpenChamber server (VS Code) answers 404 and reads it as false.
-    return { available: true, autoReady, tokenPresent, jevSource: jevEndpoint(token).source, config, builtins: BUILTIN_CATEGORIES };
+    // `jevSource` is the two-value field clients from before the classifier
+    // pick parse, `classifier` what v2.0.2 clients parse, and `classification`
+    // the full picture.
+    return {
+      available: true,
+      autoReady,
+      jevAvailable,
+      tokenPresent: access.tokenPresent,
+      customEndpoint: describeCustomEndpoint(access.customEndpoint, access.pinned),
+      enterpriseMode: enterpriseMode(),
+      jevSource: access.classifier.effective === 'typesafe' ? 'typesafe' : 'zen-free',
+      classifier: legacyClassifier(access.classifier),
+      classification: access.classifier,
+      config,
+      builtins: BUILTIN_CATEGORIES,
+    };
   };
 
   const publishUpdated = async () => {
     const state = await describe();
     broadcast('openchamber:routing.updated', {
-      available: state.available, autoReady: state.autoReady, tokenPresent: state.tokenPresent, jevSource: state.jevSource,
+      available: state.available,
+      autoReady: state.autoReady,
+      jevAvailable: state.jevAvailable,
+      tokenPresent: state.tokenPresent,
+      jevSource: state.jevSource,
     });
     return state;
   };
@@ -166,9 +266,10 @@ export function createRoutingRuntime({
         console.warn('[routing] history unavailable, routing on the request alone:', errorMessage(error));
       }
       try {
-        const token = await store.readToken();
+        const { endpoint } = await resolveAccess();
+        if (!endpoint) throw new Error('No classification provider is available');
         const request = (requestText ?? '').trim();
-        const { answers, ms } = await jev.ask(buildRoutingRequest({ categories: enabledCategories(config), history, request }), token);
+        const { answers, ms } = await jev.ask(buildRoutingRequest({ categories: enabledCategories(config), history, request }), endpoint);
         const result = decideRouting(answers.category, { categories: enabledCategories(config), minConfidence: config.minConfidence });
         decision.category = result.category?.id ?? null;
         decision.confidence = result.confidence;
@@ -233,37 +334,53 @@ export function createRoutingRuntime({
   };
 
   /**
-   * Consulted by permission auto-accept before it replies. `accept` keeps the
-   * reply; `hold` leaves the request for the user; `skipped` is `accept` with
-   * a reason the UI surfaces (Jev unreachable, bad key).
+   * Consulted by permission auto-accept in a `safety` session before it
+   * replies. `accept` replies; `hold` leaves the request for the user. Only a
+   * verdict from Jev accepts: with no classification provider the request
+   * waits quietly, the way an `ask` session's would; when Jev fails it waits
+   * too, and the UI is told why (`skipped`).
    */
   const evaluatePermission = async (permission, directory) => {
-    if (!permission?.id) return { action: 'accept' };
+    if (!permission?.id) return { action: 'hold' };
     const cached = permissionDecisions.get(permission.id);
     if (cached && now() - cached.at < PERMISSION_DECISION_TTL_MS) return cached.result;
-    const state = await describe();
-    if (!state.config?.enabled || !state.config.safetyNet.enabled) return { action: 'accept' };
+    const [config, access] = await Promise.all([store.readConfig(), resolveAccess()]);
+    if (!access.endpoint) return { action: 'hold', unavailable: true };
     let result;
     try {
-      const token = await store.readToken();
-      const { answers } = await jev.ask(buildPermissionRequest(permission), token);
-      const verdict = decidePermission(answers, { threshold: state.config.safetyNet.threshold });
+      const { answers } = await jev.ask(buildPermissionRequest(permission), access.endpoint);
+      const verdict = decidePermission(answers, { threshold: config.safetyNet.threshold });
       result = verdict.hold
         ? { action: 'hold', score: verdict.score, kind: verdict.kind }
         : { action: 'accept', score: verdict.score, kind: verdict.kind };
-      if (verdict.hold) {
-        broadcast('openchamber:routing.permission-held', {
-          permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, score: verdict.score, kind: verdict.kind,
-        });
-      }
     } catch (error) {
-      result = { action: 'accept', skipped: errorMessage(error) };
+      // Not remembered: reconnect reconciliation asks Jev again, and may accept.
+      const skipped = errorMessage(error);
       broadcast('openchamber:routing.safety-skipped', {
-        permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, error: result.skipped,
+        permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, error: skipped,
+      });
+      return { action: 'hold', skipped };
+    }
+    if (result.action === 'hold') {
+      broadcast('openchamber:routing.permission-held', {
+        permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, score: result.score, kind: result.kind,
       });
     }
     permissionDecisions.set(permission.id, { at: now(), result });
     return result;
+  };
+
+  /**
+   * Whether the old global safety-net switch was on. Asked once, when the
+   * permission policy converts its pre-modes `true` entries: those sessions
+   * were auto-accepting behind the safety net, so they become `safety`.
+   */
+  const legacySafetyNetEnabled = async () => {
+    try {
+      return (await store.readConfig()).safetyNet.enabled === true;
+    } catch {
+      return false;
+    }
   };
 
   const forgetPermission = (permissionId) => {
@@ -279,7 +396,10 @@ export function createRoutingRuntime({
   const setToken = async (token) => {
     const parsed = z.string().trim().min(1).max(4000).safeParse(token);
     if (!parsed.success) throw Object.assign(new Error('A Jev API key is required'), { status: 400 });
+    if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
     await store.writeToken(parsed.data);
+    // Pasting a key is choosing it.
+    await store.writeClassifierSource('typesafe');
     return publishUpdated();
   };
 
@@ -287,6 +407,47 @@ export function createRoutingRuntime({
     await store.clearToken();
     return publishUpdated();
   };
+
+  const setClassifierSource = async (source) => {
+    const parsed = z.enum(CLASSIFIER_SOURCES).safeParse(source);
+    if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
+    const allowedInEnterprise = parsed.data === 'off' || (parsed.data === 'custom' && readPinnedEndpoint() !== null);
+    if (enterpriseMode() && !allowedInEnterprise) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    await store.writeClassifierSource(parsed.data);
+    return publishUpdated();
+  };
+
+  /**
+   * Saves the custom System One endpoint and picks it, the way saving a
+   * TypeSafe key does. `key`: a string replaces the saved one, null removes
+   * it, absent keeps it, so the URL or model can change without retyping it.
+   */
+  const setCustomEndpoint = async (input) => {
+    if (readPinnedEndpoint()) throw pinnedEndpointError();
+    if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    const parsed = customEndpointInputSchema.safeParse(input);
+    if (!parsed.success) throw Object.assign(new Error('A URL and a model are required'), { status: 400 });
+    const { model, key } = parsed.data;
+    const url = normalizeCustomEndpointUrl(parsed.data.url);
+    // An empty key field is the same as leaving it out.
+    const keepKey = key === undefined || key === '';
+    const savedKey = keepKey ? (await store.readCustomEndpoint())?.key : key;
+    const endpoint = { url, model };
+    if (savedKey) endpoint.key = savedKey;
+    await store.writeCustomEndpoint(endpoint);
+    // Saving is choosing it; removing only the key is not a choice of anything.
+    if (key !== null) await store.writeClassifierSource('custom');
+    return publishUpdated();
+  };
+
+  const clearCustomEndpoint = async () => {
+    if (readPinnedEndpoint()) throw pinnedEndpointError();
+    await store.clearCustomEndpoint();
+    return publishUpdated();
+  };
+
+  /** Where a Jev request goes right now, or null when no classification provider is usable. */
+  const currentClassifierEndpoint = async () => (await resolveAccess()).endpoint;
 
   /** Held permissions the UI can read back after a reload. */
   const heldPermissions = () => {
@@ -299,6 +460,7 @@ export function createRoutingRuntime({
 
   return {
     describe,
+    classifierEndpoint: currentClassifierEndpoint,
     noteModelSelection,
     isAutoSession,
     resolveAutoSelection,
@@ -307,8 +469,12 @@ export function createRoutingRuntime({
     evaluatePermission,
     forgetPermission,
     heldPermissions,
+    legacySafetyNetEnabled,
     updateConfig,
     setToken,
     clearToken,
+    setClassifierSource,
+    setCustomEndpoint,
+    clearCustomEndpoint,
   };
 }

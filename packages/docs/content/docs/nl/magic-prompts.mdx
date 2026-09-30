@@ -1,0 +1,84 @@
+---
+title: Magische prompts
+description: Pas de ingebouwde prompts voor automatische functies van OpenChamber aan.
+---
+
+# Magische prompts
+
+OpenChamber gebruikt ingebouwde prompts wanneer het automatisch iets doet: een commitbericht schrijven, een PR opstellen, een issue beoordelen, een conflict oplossen of een sessie samenvatten. Bij **Magic Prompts** kunt u die instructies lezen en herschrijven. Open **Instellingen → Magic Prompts**.
+
+Voor normaal gebruik hoeft u hier niets te wijzigen. Gebruik deze instellingen als u een functie anders wilt laten werken, bijvoorbeeld om commitberichten in een bepaalde stijl te laten schrijven.
+
+## Een prompt bewerken
+
+1. Open **Instellingen → Magic Prompts**.
+2. Kies een prompt uit de groepen in de zijbalk: Git, GitHub, Planning en Sessie.
+3. Bewerk de tekst en sla deze op.
+
+Sommige prompts hebben een zichtbaar deel, het bericht dat u zou zien, en een instructiedeel met verborgen aanwijzingen voor de agent. Prompts kunnen `{{placeholders}}` bevatten die OpenChamber invult, bijvoorbeeld met de diff of de issuetitel. Laat die staan.
+
+## Terugzetten
+
+Wilt u uw wijziging ongedaan maken? Elke prompt heeft **Terugzetten naar standaard**. Met **Alles terugzetten** begint u overal opnieuw.
+
+## Waar elke prompt wordt gebruikt
+
+Hieronder staat voor elke prompt waar en wanneer die wordt gebruikt. Controleer dat voordat u gaat bewerken, zodat u weet welk gedrag u verandert.
+
+### Git
+
+| Prompt | Waar | Wanneer |
+| --- | --- | --- |
+| Commit genereren | De generatieknop bij het commitveld in de Git-weergave en het mobiele scherm Wijzigingen | U genereert een commitbericht. De geselecteerde bestanden en recente commitonderwerpen van de branch worden ingevuld, zodat het onderwerp bij de stijl van de repository aansluit. |
+| PR genereren | Het formulier voor een nieuwe pull request in het PR-tabblad van de Git-weergave | U genereert een titel en beschrijving. De basis- en head-branch, tussenliggende commits en gewijzigde bestanden, extra context en een eventueel PR-sjabloon worden ingevuld. |
+| Merge- of rebaseconflicten oplossen | Het conflictenvenster van de Git-weergave als een merge of rebase op conflicten stopt | U kiest oplossen in de huidige of een nieuwe sessie. De agent leest de bestanden, stelt per bestand een aanpak voor en wacht op uw bevestiging voordat hij bewerkt, staget of de bewerking voortzet. |
+| Cherry-pickconflicten oplossen | Het gedeelte voor het opnieuw integreren van commits bij een worktree-sessie | Het overnemen van sessiecommits naar de doelbranch loopt vast op een conflict en u draagt het over aan de agent. Die lost het op in de tijdelijke worktree, staget de herstelde bestanden en zet de cherry-pick voort. |
+
+### GitHub
+
+| Prompt | Waar | Wanneer |
+| --- | --- | --- |
+| PR-review | De kiezer om een GitHub-PR te koppelen in het bijlagenmenu van het invoerveld, en het venster voor een nieuwe worktree | Bij het koppelen als context worden de instructies samengesteld en met uw volgende bericht verstuurd. Bij het starten van een worktree-sessie vanuit een PR vormt de prompt het eerste bericht, met de volledige PR-context erbij. |
+| Issue-review | Het venster voor een nieuwe worktree wanneer u vanuit een issue begint | Het eerste bericht van de nieuwe sessie laat het issue beoordelen, met de beschrijving en reacties als context. |
+| Mislukte PR-controles / PR-reacties / één PR-reactie | Niet in gebruik | Momenteel verstuurt geen enkele functie deze prompts. Vroeger gebeurde dat via reviewknoppen in de PR-weergave. Mislukte controles en reacties worden nu als concept voor de chatcontext vastgezet. De prompts blijven bewerkbaar om bestaande aangepaste versies te behouden. |
+
+### Planning
+
+| Prompt | Waar | Wanneer |
+| --- | --- | --- |
+| Taak plannen | Het takenpaneel in de projectzijbalk | U verstuurt een taak naar een sessie of een nieuwe worktree-sessie. De taaktekst wordt het zichtbare bericht. De instructies beginnen met een planningsgesprek met vragen, in plaats van meteen te implementeren. |
+| Plan verbeteren | De actie **Verbeteren** bij een opgeslagen plan | U laat een opgeslagen plan verbeteren. De agent leest eerst het planbestand, stelt wijzigingen voor op basis van de huidige repository en biedt aan hetzelfde bestand te bewerken. |
+| Plan uitvoeren | De actie **Uitvoeren** bij een opgeslagen plan | U laat een opgeslagen plan uitvoeren. De agent leest het bestand en voert het volledig uit zonder de opdracht uit te breiden. Als het plan zelf onjuist blijkt, schrijft hij de aanpassingen terug naar het bestand. |
+
+### Sessie
+
+De meeste van deze prompts horen bij slash-opdrachten in het invoerveld. De meeste verschijnen ook als startknoppen bij een nieuwe sessie.
+
+| Prompt | Waar | Wanneer |
+| --- | --- | --- |
+| Rondleiding door de codebase | `/explore` | U vraagt om een algemeen overzicht van de codebase. |
+| Sessie samenvatten | `/summary`, eventueel `/summary <topic>` | U vat het gesprek tot nu toe samen, bijvoorbeeld om het aan een nieuwe sessie over te dragen. Vereist een bestaande sessie. |
+| Werkruimte beoordelen | `/workspace-review` | U laat de huidige wijzigingen beoordelen op bedoeling, correctheid en beveiliging. |
+| Functie plannen | `/plan-feature` | U werkt via een begeleid vraaggesprek een globaal idee uit tot een implementatieplan. |
+| Doel formuleren | `/craft-goal`, eventueel `/craft-goal <idea>` | U maakt van een idee een controleerbare opdracht voor het doelvenster. |
+| Bijpraten | `/catch-up` | U keert terug naar een project en vraagt naar de stand van zaken en de volgende stap. |
+| Fouten onderzoeken | `/debug` | U onderzoekt een bug. De agent vormt hypotheses, bevestigt de oorzaak in de code en stelt pas daarna een oplossing voor. |
+| Opties afwegen | `/weigh` | U weet wat u wilt bouwen, maar nog niet hoe. De agent vergelijkt twee of drie aanpakken en beveelt er een aan. |
+| Fusie | De actie om een fusie uit te voeren op een groep parallelle runs | U combineert de resultaten van meerdere runs tot één antwoord. De uitvoer van de runs wordt na de instructies toegevoegd. |
+
+### Prompts zonder instellingenpagina
+
+Een paar prompts worden automatisch gebruikt en hebben geen bewerkbare pagina in de instellingen:
+
+| Prompt | Wanneer |
+| --- | --- |
+| Geplande taak | `/schedule-task`, eventueel met een eerste idee. Begeleidt het gesprek waarin een geplande taak wordt vastgelegd. |
+| Reviewoverdracht | `/handoff-review`, of de reviewknop in de diffweergave met overdracht ingeschakeld. Maakt de overdracht in de werksessie. |
+| Reviewsessie starten | Het eerste bericht van de aangemaakte reviewsessie, met de overdracht als die is gemaakt en anders zonder. |
+| Reviewfeedback / implementatieantwoord | Wisselt berichten tussen de twee sessies uit: reviewfeedback gaat naar de implementatiesessie en het antwoord van de uitvoerder terug naar de reviewsessie. |
+
+## Zie ook
+
+- [Git en GitHub](/nl/git/) voor de Git-functies die veel van deze prompts gebruiken
+- [Notities, taken en plannen](/nl/notes-todos-plans/) voor de taken en plannen achter de planningsprompts
+- [Parallelle runs](/nl/multi-run/) voor rungroepen en fusie

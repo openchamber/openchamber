@@ -5,7 +5,7 @@
   "command.focusChat.title": "Chat'e odaklan",
   "command.restartApi.title": "API bağlantısını yeniden başlat",
   "command.showOpenCodeStatus.title": "OpenCode durumunu göster",
-  "command.openAgentManager.title": "Agent yöneticisini aç",
+  "command.openAgentManager.title": "Birkaç modelde çalıştır",
   "command.openActiveSessionInEditor.title": "Aktif oturumu düzenleyicide aç",
   "command.openNewSessionInEditor.title": "Düzenleyicide yeni oturum aç",
   "command.openCurrentOrNewSessionInEditor.title": "Oturumu düzenleyicide aç",

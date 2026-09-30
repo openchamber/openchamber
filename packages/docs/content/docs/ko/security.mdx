@@ -36,6 +36,140 @@ openchamber --ui-password be-creative-here
 - 공개 URL이 필요하다면 인터넷에 포트를 여는 것보다 [터널](/ko/tunnels/)이나 사설 네트워크(예: VPN)를 선호하세요.
 - OpenChamber를 자체 HTTPS 서버 뒤에 둔다면 [Reverse Proxy](/ko/reverse-proxy/)를 참고하세요.
 
+## 엔터프라이즈 모드
+
+팀이 OpenCode에 설정한 모델 제공자에게만 대화 내용을 보낼 수 있다면, 엔터프라이즈 모드를 켜세요. 방법은 두 가지이며, 둘 중 하나면 충분합니다.
+
+### 컴퓨터의 정책 파일
+
+관리하는 노트북에서는 이 방법을 쓰세요. 관리자만 쓸 수 있는 폴더에 `policy.json`이라는 파일을 두면 됩니다.
+
+| 시스템 | 경로 |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+경로는 OpenChamber를 어떻게 설치했는지와 관계없습니다. 데스크톱 앱, npm으로 시작한 웹 서버, CLI, VS Code 확장 모두 같은 파일을 읽습니다. 기기 관리 도구(Jamf, Intune 등)로 배포할 수 있습니다. Docker에서 실행하는 서버라면 Linux 경로에 파일을 마운트하세요.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "allowedExtensions": ["https://github.com/acme/"],
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+필요한 것은 `enterpriseMode`뿐입니다. `organization`은 설정에 "Acme에서 관리합니다."로 표시되어, 누가 이 결정을 내렸는지 알 수 있습니다. `relayUrl`과 `jev`는 직접 운영하는 릴레이와 Jev 엔드포인트를 고정하고, `allowNetworkAccess`는 다른 기기가 네트워크를 통해 OpenChamber에 접속할 수 있게 하며, `allowedExtensions`는 신뢰하는 확장 저장소를 나열합니다. 모두 아래에서 설명합니다.
+
+- 사용자가 설정이나 환경에서 무엇을 지정하든, 파일이 켠 것은 꺼지지 않습니다.
+- 파일이 엔터프라이즈 모드를 켜면 파일만 결정합니다. 아래의 릴레이, Jev, 네트워크 접근용 환경 변수는 사용자가 직접 설정할 수 있으므로 무시됩니다.
+- 파일이 있지만 읽을 수 없거나 올바른 JSON이 아니면, 엔터프라이즈 모드는 켜진 채로 있고 아무것도 고정되지 않습니다. 설정에는 정책을 읽을 수 없었다고 표시됩니다. 망가진 파일 때문에 보호가 조용히 풀리는 일은 없습니다.
+- 변경 사항은 재시작 없이 적용됩니다.
+- OpenChamber는 사용자 권한으로 실행되므로 사용자는 이 파일을 읽을 수 있습니다. API 키를 넣기 전에 이 점을 염두에 두세요.
+
+### 환경 변수
+
+환경을 직접 관리하는 서버나 컨테이너에서는 이것으로 충분합니다.
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+노트북에서는 잠금이 약해집니다. 데스크톱 앱은 이 변수를 로그인 셸 프로필(예: `~/.zshrc`)에서 읽는데, 사용자가 그 파일을 편집할 수 있기 때문입니다. 노트북에서는 정책 파일을 쓰세요.
+
+이 변수를 쓸 때는 릴레이, Jev, 네트워크 접근, 허용된 확장도 각자의 변수 `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS`(쉼표로 구분한 저장소 URL), `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`로 정합니다. Docker에서는 서버가 컨테이너 밖에서 오는 연결도 받아야 하므로 네트워크 접근 변수가 필요합니다.
+
+### 예시
+
+Mac에 정책 파일을 두려면 터미널에서 관리자 권한으로 다음을 실행하세요.
+
+```bash
+sudo mkdir -p "/Library/Application Support/OpenChamber"
+sudo tee "/Library/Application Support/OpenChamber/policy.json" > /dev/null <<'JSON'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+JSON
+```
+
+Linux에서도 같으며, 폴더만 `/etc/openchamber`입니다.
+
+Windows에서는 PowerShell을 관리자 권한으로 실행하세요. 마지막 줄은 관리자와 시스템만 폴더에 쓸 수 있게 합니다.
+
+```powershell
+New-Item -ItemType Directory -Force "C:\ProgramData\OpenChamber" | Out-Null
+@'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+'@ | Set-Content -Encoding UTF8 "C:\ProgramData\OpenChamber\policy.json"
+icacls "C:\ProgramData\OpenChamber" /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Users:(OI)(CI)RX"
+```
+
+Docker에서 실행하는 서버라면 `docker-compose.yml`의 `environment`에 추가합니다. 컨테이너가 자신의 밖에서 오는 연결도 받아야 하므로 네트워크 접근을 허용해야 합니다.
+
+```yaml
+environment:
+  OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD}
+  OPENCHAMBER_ENTERPRISE_MODE: "1"
+  OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
+  # Optional:
+  OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_MODEL: acme-classifier
+  OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
+  OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/
+```
+
+제대로 적용됐는지 확인하려면 설정 → 프로바이더를 여세요. 맨 위에 조직 이름과 함께 엔터프라이즈 모드 안내가 표시됩니다.
+
+### 달라지는 점
+
+- 모델 제공자는 OpenCode 설정에서만 가져옵니다. OpenChamber에서 제공자 연결, 로그인, 키 추가, 사용자 지정 제공자 만들기는 꺼집니다. 이미 있는 계정을 삭제하거나 전환하는 것은 계속 됩니다. 이것은 앱을 통한 입구만 닫을 뿐이고, 실제 잠금은 아래에서 설명하는 OpenCode 정책입니다.
+- [분류 제공자 (Jev)](/ko/classification-providers/)는 꺼진 채로 있으며, 누군가 설정에 입력한 사용자 지정 엔드포인트도 마찬가지입니다. 안전망과 Auto는 제공되지 않으며, 세션은 직접 옮길 때만 작업 중이 됩니다. 자체 인프라를 통해 Jev를 쓰려면 정책 파일의 `jev`나 `OPENCHAMBER_JEV_URL`(그리고 `OPENCHAMBER_JEV_MODEL`, 필요하면 `OPENCHAMBER_JEV_API_KEY`)로 엔드포인트를 고정하세요. 그 엔드포인트가 기본값이 되고, 여전히 끌 수는 있지만 다른 것은 고를 수 없습니다.
+- OpenAI를 통한 소리내어 읽기는 꺼집니다. 사용자 지정 음성 합성 또는 전사 서버는 같은 컴퓨터에서 실행되어야 합니다. 로컬 음성과 로컬 받아쓰기 모델은 계속 동작합니다.
+- 휴대폰과 브라우저로 가는 푸시 알림에는 "Agent response is ready" 같은 일반 제목만 담기고, 메시지 본문이나 세션 이름은 들어가지 않습니다. 데스크톱 알림은 사용자의 컴퓨터 안에 머물며 전체 텍스트를 유지합니다.
+- 업데이트 확인은 계속 동작하므로 보안 수정은 여전히 전달되지만, 사용 현황은 절대 보고하지 않으며 익명 설치 ID조차 보내지 않습니다.
+- [외부 터널](/ko/tunnels/)(Cloudflare, ngrok)은 꺼집니다. 터널 제공자는 자신의 엣지에서 트래픽을 복호화하므로 모든 요청을 평문으로 봅니다.
+- [Private Relay](/ko/private-relay/)는 직접 운영하는 릴레이를 통해서만 동작합니다. [셀프 호스팅 릴레이](https://github.com/openchamber/openchamber-relay)를 실행하고 정책 파일의 `relayUrl`이나 `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`로 OpenChamber가 그 릴레이를 가리키게 하세요. 공유 릴레이도 종단 간 암호화되어 있어 트래픽을 읽을 수 없지만, 직접 운영하는 릴레이는 연결 메타데이터와 이 컴퓨터로 들어오는 길을 사용자의 네트워크 안에 둡니다. 직접 운영하는 릴레이가 없으면 기기를 전혀 페어링할 수 없습니다.
+- OpenChamber는 실행 중인 컴퓨터에서만 연결을 받습니다. 로컬 네트워크의 다른 기기가 앱을 열 수 있게 하는 데스크톱 설정은 꺼지고, 서버는 CLI(`--host`, `--lan`)로든 환경으로든 네트워크 주소에서 시작하기를 거부합니다. 앱이 실행 중일 때 정책 파일이 생기면 다른 컴퓨터에서의 연결은 다음 시작 때까지 끊깁니다. 네트워크 접근을 허용하려면 정책 파일에 `"allowNetworkAccess": true`를 넣거나, 환경으로 엔터프라이즈 모드를 켠 경우 `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`을 설정하세요. 연결은 암호화되지 않은 HTTP라서 공유 네트워크에서는 누구나 내용을 읽을 수 있다는 점을 염두에 두세요. 다른 사람이 접속하는 서버는 [직접 구성한 HTTPS](/ko/reverse-proxy/) 뒤에 두세요.
+- 컴퓨터 밖으로 데이터를 보낼 수 있는 [확장](/ko/extensions/)(외부 API와 통신하거나, 외부 주소에서 불러오거나, 백그라운드 서비스를 실행하는 확장)은 `allowedExtensions`에 있는 Git 저장소에서만 설치됩니다. 이런 일을 하지 않는 확장은 평소처럼 설치됩니다. 다른 곳에서 설치한 확장은 꺼진 상태로 남고, 설정에 그 이유가 표시됩니다. 확장은 이름을 스스로 정하므로 목록에는 저장소 URL을 넣습니다. `https://github.com/acme/`처럼 `/`로 끝나는 항목은 그 아래의 모든 저장소를 허용합니다. 확장을 개발하는 사람의 컴퓨터에서는 `"allowLocalExtensions": true`로 로컬 폴더에서 설치하는 것도 허용됩니다. ZIP은 어느 쪽이든 설치할 수 없습니다.
+- VS Code 확장에서는 제공자 연결이 꺼지고, 업데이트 확인은 사용 현황을 보고하지 않습니다. Jev, 릴레이, 터널, 푸시 알림, 클라우드 음성 기능은 처음부터 없습니다.
+
+작은 모델 작업(세션 제목, 요약, 커밋 메시지, 변경 사항 워크스루)에는 특별한 모드가 필요 없습니다. 항상 설정에서 고른 작은 모델, 지금 작업 중인 제공자의 작은 모델, 또는 OpenCode 설정의 기본 모델 중 하나로 실행됩니다. 우연히 연결되어 있는 다른 제공자로 넘어가는 일은 없습니다.
+
+애초에 어떤 모델 제공자를 쓸 수 있는지는 OpenChamber가 아니라 OpenCode가 정합니다. [OpenCode 정책](https://opencode.ai/v2/docs/policies/)으로 고정하세요. 모든 제공자를 거부한 다음 승인한 제공자만 허용합니다.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+거부된 제공자는 누군가 키를 추가해도 사라집니다. 정책은 프로젝트가 해제할 수 없는 전역 `~/.config/opencode/opencode.jsonc`에 두거나, 최종 결정권을 가진 OpenCode Console 워크스페이스에서 배포하세요. 엔터프라이즈 모드는 그 위에 OpenChamber 자체가 보내는 것을 다룹니다.
+
+에이전트의 웹 검색과 페이지 가져오기도 OpenCode를 거쳐 검색 서비스와 해당 페이지로 나갑니다. 이 요청이 네트워크 밖으로 나가면 안 된다면 같은 종류의 정책으로 거부하세요.
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## 관련 항목
 
 - [기기 연결](/ko/connect-devices/) — 일회용 페어링과 기기별 토큰

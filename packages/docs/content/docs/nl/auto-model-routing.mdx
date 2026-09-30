@@ -1,0 +1,61 @@
+---
+title: Automatische modelkeuze
+description: Laat OpenChamber voor elke prompt het model, denkniveau en de agent kiezen.
+---
+
+# Automatische modelkeuze
+
+Kies **Auto** in de modelkiezer en OpenChamber kiest voor elke verzonden prompt een model. Een tikfout gaat naar een snel, goedkoop model; een lastige bug naar uw krachtigste model. U stelt één keer in welk model welk soort taak afhandelt.
+
+## Inschakelen
+
+1. Zorg dat een [classificatieprovider](/nl/classification-providers/) is ingesteld. Auto heeft Jev nodig om prompts in te delen.
+2. Open **Instellingen → Routering** en vink **Auto-modus aanzetten** aan.
+3. Kies een **Terugvalmodel** en het bijbehorende denkniveau. Auto blijft verborgen totdat u dat doet.
+4. Bekijk de categorieën eronder en geef de relevante categorieën een eigen model.
+
+Als alles is ingesteld, toont de pagina **Gereed**. Kies dan bovenaan de modelkiezer van een sessie **Auto**.
+
+## Categorieën
+
+Elke prompt komt in één categorie terecht. Er zijn vier ingebouwde categorieën:
+
+| Categorie | Bedoeld voor |
+| --- | --- |
+| Eenvoudig | routinematig werk: hernoemen, tikfouten, opmaak, opmerkingen en eenvoudige opdrachten |
+| Onderzoek | code lezen en uitleggen zonder deze te wijzigen |
+| Implementeren | een duidelijke wijziging: een uitgewerkte functie, tests of een oplossing waarvan de oorzaak bekend is |
+| Moeilijk | bugs met onbekende oorzaak, ontwerp en planning, beveiliging, authenticatie, gelijktijdigheid, migraties en geldzaken |
+
+Per categorie kunt u instellen:
+
+- **Model:** leeg laten gebruikt het terugvalmodel.
+- **Denken:** het denkniveau voor dat model.
+- **Agent:** de agent die deze taken uitvoert. Leeg laten behoudt de agent die het invoerveld zou gebruiken.
+
+Jev deelt prompts in op basis van de categorienamen en beschrijvingen. Die beschrijvingen werken dus als instructies: vermeld wat wel en niet bij een categorie hoort. U kunt categorieën bewerken, uitschakelen, verwijderen of toevoegen en ingebouwde categorieën herstellen. Auto heeft minstens twee ingeschakelde categorieën nodig.
+
+## Wat gebeurt er bij het versturen?
+
+1. OpenChamber stuurt uw bericht en een kort fragment van de laatste beurten naar Jev.
+2. Jev kiest een categorie en geeft aan hoe zeker het daarvan is.
+3. De sessie schakelt naar het model, denkniveau en de agent van die categorie. Daarna wordt uw bericht verstuurd.
+
+Elk bericht wordt opnieuw ingedeeld. Een sessie kan dus een goedkoop model gebruiken voor een korte vraag en uw krachtigste model voor het volgende verzoek. Het invoerveld blijft **Auto** tonen. De keuzen voor agent en denkniveau zijn verborgen, omdat de categorie die bepaalt.
+
+Het terugvalmodel antwoordt wanneer:
+
+- Jev onvoldoende zeker is, met een zekerheid onder 60%
+- Jev faalt of langer dan vier seconden nodig heeft
+- de categorie geen eigen model heeft
+
+Kiest u een specifiek model, dan verlaat de sessie Auto. Kies opnieuw **Auto** om terug te keren. U kunt Auto ook als standaard voor nieuwe sessies instellen bij **Instellingen → Sessies**.
+
+## Waar werkt het?
+
+Auto draait op de OpenChamber-server: in de desktopapp, de webapp en op uw telefoon wanneer die met een van beide verbonden is. VS Code biedt Auto niet aan, omdat de extensie rechtstreeks met OpenCode communiceert.
+
+## Zie ook
+
+- [Classificatieproviders en Jev](/nl/classification-providers/) om het model voor de indeling in te stellen
+- [Providers, modellen en agents](/nl/providers/) om de modellen te verbinden waaruit Auto mag kiezen

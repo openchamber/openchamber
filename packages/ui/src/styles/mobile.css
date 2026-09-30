@@ -771,6 +771,7 @@
    the morphing shape), but its content stays hidden until the shape has mostly
    finished growing, then fades in — no clipped controls mid-morph. Timings
    follow the 340ms wrapper morph in ChatInput. */
-.oc-composer-morph-content-fade > * {
+/* The glass layer is the background, so it is exempt from the fade. */
+.oc-composer-morph-content-fade > :not([data-dictation-glass]) {
   animation: oc-composer-morph-fade 0.18s ease-out 0.26s both;
 }

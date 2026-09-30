@@ -282,6 +282,12 @@ export function translateWireEvent(payload) {
       })];
     }
 
+    // v2's own `session.compacted` is declared but never published; a finished
+    // compaction is announced only by `session.compaction.ended`.
+    case 'session.compaction.ended':
+      if (!sessionID) return [];
+      return [event('session.compacted', { sessionID })];
+
     // --- requests to the user -------------------------------------------------
 
     case 'permission.asked': {

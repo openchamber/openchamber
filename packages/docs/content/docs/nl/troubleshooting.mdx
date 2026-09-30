@@ -1,0 +1,40 @@
+---
+title: Problemen oplossen
+description: Veelvoorkomende installatie- en gebruiksproblemen snel oplossen.
+---
+
+# Problemen oplossen
+
+Loopt u ergens tegenaan? Zoek hieronder het verschijnsel en probeer de voorgestelde oplossing.
+
+## De OpenChamber-opdracht stopt of start niet
+
+- controleer of Node.js `>=22` is geïnstalleerd
+- voer `openchamber --version` uit
+- installeer zo nodig de nieuwste CLI opnieuw
+
+## De webinterface is niet bereikbaar
+
+- bekijk de serverlogs met `openchamber logs`
+- controleer de actieve poort, standaard `3000`
+- open eerst rechtstreeks `http://localhost:3000` voordat u tunnellinks probeert
+
+## Een remote- of tunnellink werkt niet
+
+- voer `openchamber tunnel status --all` uit
+- herstart de tunnel vanuit dezelfde instantie en op dezelfde poort
+- maak een nieuwe verbindingslink als het vorige token al is gebruikt
+
+Zie [Tunnels](/nl/tunnels/) voor de volledige inrichting en [Reverse proxy](/nl/reverse-proxy/) als u die gebruikt.
+
+## De VS Code-extensie maakt geen verbinding
+
+- controleer of de OpenChamber-server draait
+- controleer of de extensie is bijgewerkt
+- herlaad het VS Code-venster en probeer opnieuw te verbinden
+
+## Zie ook
+
+- [Snel aan de slag](/nl/quickstart/)
+- [Tunnels](/nl/tunnels/)
+- [Reverse proxy](/nl/reverse-proxy/)

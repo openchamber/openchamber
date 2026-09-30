@@ -60,7 +60,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('dispatcher over a real space: docker (liv
     const app = express();
     // The host's auth gate stands in front of the dispatcher in the real server; here the request
     // is taken as authenticated, and one host route records whether it ever ran.
-    host.registerRoutes(app);
+    app.use(host.middleware);
     app.all('/api/git/status', (req, res) => {
       hostRouteRuns += 1;
       res.json({ ranOnHost: true, directory: req.query.directory ?? null });

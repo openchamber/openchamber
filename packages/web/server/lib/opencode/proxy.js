@@ -236,7 +236,7 @@ const SESSION_LIST_ALLOWED_FIELDS = [
   'fork',
 ];
 
-const sanitizeSessionListItem = (session) => {
+export const sanitizeSessionListItem = (session) => {
   if (!session || typeof session !== 'object' || Array.isArray(session)) {
     return session;
   }
@@ -307,6 +307,11 @@ export const registerOpenCodeProxy = (app, deps) => {
     // migrated.
     getArchivedSessions = null,
     getStoredSessionMetadata = null,
+    // Isolated spaces, when the feature's switch is on: the merged session list, and the hub
+    // whose space events the global SSE stream carries beside the host's. Both absent means
+    // the host's own answers go out exactly as before spaces.
+    mergeSpaceSessionList = null,
+    spaceEventHub = null,
   } = deps;
 
   /**
@@ -550,6 +555,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     let heartbeatTimer = null;
     let upstreamStallTimer = null;
     let didUpstreamStall = false;
+    let unsubscribeSpaceEvents = null;
     let writeQueue = Promise.resolve(true);
     const sseBoundary = createSseBoundaryTracker();
 
@@ -644,6 +650,26 @@ export const registerOpenCodeProxy = (app, deps) => {
         return writeQueue;
       };
 
+      // The events of isolated spaces ride the global stream too, one block each, written
+      // only between the upstream's own blocks so a block of the host's is never cut.
+      // A directory in the query or in the header scopes the stream to the host's one directory.
+      const isGlobalStream = !new URL(requestUrl, 'http://localhost').searchParams.get('directory') && !req.get('x-opencode-directory');
+      const pendingSpaceBlocks = [];
+      const flushSpaceBlocks = async () => {
+        while (pendingSpaceBlocks.length > 0 && sseBoundary.isAtBoundary() && !abortController.signal.aborted) {
+          const canContinue = await enqueueSseWrite(pendingSpaceBlocks.shift());
+          if (!canContinue) return false;
+        }
+        return true;
+      };
+      if (spaceEventHub && isGlobalStream) {
+        unsubscribeSpaceEvents = spaceEventHub.subscribeEvent((event) => {
+          if (event.spaceId === null) return;
+          pendingSpaceBlocks.push(`data: ${JSON.stringify(event.payload)}\n\n`);
+          void flushSpaceBlocks();
+        }, { spaces: true });
+      }
+
       scheduleHeartbeat();
       resetUpstreamStallTimer();
 
@@ -658,6 +684,9 @@ export const registerOpenCodeProxy = (app, deps) => {
           sseBoundary.observe(value);
           const canContinue = await enqueueSseWrite(value);
           if (!canContinue) {
+            break;
+          }
+          if (!await flushSpaceBlocks()) {
             break;
           }
         }
@@ -679,6 +708,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.end();
       }
     } finally {
+      unsubscribeSpaceEvents?.();
       if (heartbeatTimer) {
         clearTimeout(heartbeatTimer);
         heartbeatTimer = null;
@@ -763,7 +793,13 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       res.setHeader('content-type', result.contentType);
-      res.json(await overlayOwnedStateOnList(sanitizeSessionListPayload(result.payload)));
+      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(result.payload));
+      // The first page of the global list carries every space's sessions after the host's; a
+      // later page, and a list scoped to one directory, are the host's alone.
+      const listQuery = new URL(upstreamPath, 'http://localhost').searchParams;
+      const scopedToDirectory = Boolean(listQuery.get('directory') || req.get('x-opencode-directory'));
+      const wantsSpaces = typeof mergeSpaceSessionList === 'function' && !listQuery.get('cursor') && !scopedToDirectory;
+      res.json(wantsSpaces ? await mergeSpaceSessionList(hostList) : hostList);
     } catch (error) {
       if (isAbortError(error)) {
         return;

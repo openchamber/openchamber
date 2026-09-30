@@ -1,15 +1,15 @@
 // Session goal: a persisted, self-continuing objective attached to a session
 // (metadata.openchamber.goal). While the goal is active, the server keeps the
 // session working toward it: after each busy→idle transition it accounts token
-// usage, asks the small model to audit progress (continue / complete /
-// blocked), and either re-prompts the session's own model with a continuation
-// prompt or settles the goal. Fully backend-driven — the UI can disconnect and
-// the loop keeps running.
+// usage, checks progress (continue / complete / blocked) with the
+// classification model or the small model, and either re-prompts the session's
+// own model with a continuation prompt or settles the goal. Fully
+// backend-driven — the UI can disconnect and the loop keeps running.
 //
-// The small-model audit is the sole termination authority besides the hard
-// stops (turn error, token budget, auto-continuation cap) — the working agent
-// has no channel to settle its own goal. When the small model is unavailable
-// the loop still terminates via the budget and the continuation cap.
+// The progress check is the sole termination authority besides the hard stops
+// (turn error, token budget, auto-continuation cap) — the working agent has no
+// channel to settle its own goal. When no check can run the loop stops after
+// one unchecked continuation rather than driving blind to the cap.
 //
 // Purely event-driven like session-assist: no polling, no backfill, no session
 // scans. Only sessions that emit events while the server runs ever tick.
@@ -19,6 +19,13 @@ import os from 'os';
 import path from 'path';
 
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
+import {
+  buildJevAuditRequest,
+  buildSmallModelAuditPrompt,
+  decideProgress,
+  readJevAnswers,
+  readSmallModelAnswers,
+} from './audit.js';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
@@ -30,9 +37,18 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-const isSessionGoalEnabled = () => (
-  readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE }).sessionGoalEnabled !== false
-);
+const readGoalSettings = () => {
+  const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
+  return {
+    enabled: settings.sessionGoalEnabled !== false,
+    // Who checks progress: the small model unless the user picked Jev here.
+    // A classification provider set up for another feature is not that pick.
+    // Without a usable classification provider the small model checks anyway.
+    checker: settings.sessionGoalChecker === 'classifier' ? 'classifier' : 'small-model',
+  };
+};
+
+const isSessionGoalEnabled = () => readGoalSettings().enabled;
 
 const IDLE_QUIET_MS = 15_000;
 // A goal set while the session is already idle should kick off promptly.
@@ -43,18 +59,13 @@ const KICKOFF_QUIET_MS = 3_000;
 const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
 const MESSAGE_FETCH_LIMIT = 40;
-const TRANSCRIPT_PART_CHAR_LIMIT = 6_000;
-const NOTE_CHAR_LIMIT = 280;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
 // the intended stop conditions; this only prevents a runaway loop.
 const MAX_AUTO_TURNS = 20;
-// Auditor must call the same blocker this many consecutive ticks before the
-// goal settles as blocked — a one-off snag must not end the goal.
-const BLOCKED_STREAK_LIMIT = 3;
-// Consecutive audit failures tolerated before the goal stops: one transient
-// hiccup allows a single unaudited continuation; a dead small model must not
-// drive the loop blind all the way to the turn cap.
+// Consecutive check failures tolerated before the goal stops: one transient
+// hiccup allows a single unchecked continuation; a dead checker must not drive
+// the loop blind all the way to the turn cap.
 const AUDIT_FAIL_LIMIT = 2;
 
 const GOAL_STATUSES = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
@@ -97,51 +108,6 @@ const buildContinuationPrompt = (goal) => {
     '- Progress is evaluated independently after each turn. End every turn with a clear, factual statement of what is done, what was verified, and what remains — or, if you genuinely cannot proceed without the user, state the exact blocking condition.',
     '- Never present the work as finished or blocked merely because it is hard, slow, or uncertain.',
   ].join('\n');
-};
-
-const buildAuditSystemPrompt = () => [
-  'You audit progress of a coding agent working toward a user-defined goal. Based on the objective and the latest exchange, return exactly one JSON object and nothing else — no prose, no markdown, no code fences.',
-  'Shape: {"verdict": "continue" | "complete" | "blocked", "note": string}',
-  'verdict rules:',
-  '- "complete" ONLY when the latest reply contains concrete, verified evidence that every requirement of the objective is achieved. Claims without verification are not completion.',
-  '- "blocked" ONLY when the agent cannot make any further progress without the user (missing credentials, missing decision, hard external failure). Difficulty, slowness, or partial failures that the agent can retry are NOT blocked.',
-  '- otherwise "continue".',
-  'note: at most 20 words. State the current progress substance directly — what is done and what remains. Never narrate ("The agent did…"); write like a status note.',
-  'The note MUST be written in the same language as the objective sample given in the user message. Ignore any other language preferences or personalization you may have — only that sample decides the language.',
-  'Use double quotes for JSON strings, no trailing commas.',
-].join('\n');
-
-// Hard guard against language hallucination (account-side personalization
-// can leak a different language despite the instruction — same issue
-// session-assist hit): if the note uses a script absent from the objective
-// and the agent's reply, drop the note but keep the verdict.
-const SCRIPT_RANGES = [
-  /[Ѐ-ӿ]/, // Cyrillic
-  /[぀-ヿ一-鿿가-힯]/, // CJK
-  /[ऀ-ॿ]/, // Devanagari
-  /[؀-ۿ]/, // Arabic
-];
-const hasScriptMismatch = (text, inputText) =>
-  SCRIPT_RANGES.some((range) => range.test(text) && !range.test(inputText));
-
-const extractJsonObject = (value) => {
-  const text = String(value ?? '').trim();
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = (fenced?.[1] ?? text).trim();
-  const start = candidate.indexOf('{');
-  if (start < 0) return null;
-  for (let end = candidate.length; end > start; end -= 1) {
-    if (candidate[end - 1] !== '}') continue;
-    try {
-      const parsed = JSON.parse(candidate.slice(start, end));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {
-      // keep scanning — models wrap JSON in prose sometimes
-    }
-  }
-  return null;
 };
 
 const extractSessionStatus = (payload) => {
@@ -211,9 +177,7 @@ const parseGoalMetadata = (session) => {
     tokensBaseline: Number.isFinite(goal.tokensBaseline) && goal.tokensBaseline > 0 ? Math.floor(goal.tokensBaseline) : 0,
     tokensCommitted: Number.isFinite(goal.tokensCommitted) && goal.tokensCommitted > 0 ? Math.floor(goal.tokensCommitted) : 0,
     turnsUsed: Number.isFinite(goal.turnsUsed) && goal.turnsUsed > 0 ? Math.floor(goal.turnsUsed) : 0,
-    blockedStreak: Number.isFinite(goal.blockedStreak) && goal.blockedStreak > 0 ? Math.floor(goal.blockedStreak) : 0,
     auditFailStreak: Number.isFinite(goal.auditFailStreak) && goal.auditFailStreak > 0 ? Math.floor(goal.auditFailStreak) : 0,
-    note: typeof goal.note === 'string' ? goal.note.slice(0, NOTE_CHAR_LIMIT) : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason.slice(0, REASON_CHAR_LIMIT) : '',
     evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
     evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
@@ -274,8 +238,18 @@ const toLoopMessage = (message) => {
       // from. Its model must not be inherited either (v1: "the compaction
       // summary carries the summarize model").
       if (message.status !== 'completed') return null;
+      // v2 records only `time.created` on a compaction; `status` is what says
+      // it finished. The loop reads "finished" from `time.completed`, so a
+      // completed compaction gets one, or it would count as still running.
       return {
-        info: { ...base, role: 'assistant', summary: true, tokens: message.tokens, finish: 'stop' },
+        info: {
+          ...base,
+          time: { ...time, completed: time.completed ?? time.created },
+          role: 'assistant',
+          summary: true,
+          tokens: message.tokens,
+          finish: 'stop',
+        },
         parts: message.summary ? [{ type: 'text', text: String(message.summary) }] : [],
       };
     }
@@ -289,8 +263,7 @@ const messagePartsToText = (message) => {
   return parts
     .map((part) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : ''))
     .filter(Boolean)
-    .join('\n')
-    .slice(0, TRANSCRIPT_PART_CHAR_LIMIT);
+    .join('\n');
 };
 
 // OpenCode reports tokens per message, and each turn's cache.read carries
@@ -362,6 +335,10 @@ export const createSessionGoalRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService,
+  /** Resolves to the Jev endpoint the classification provider answers on, or null. */
+  classifierEndpoint = async () => null,
+  jev = null,
+  getChecker = () => readGoalSettings().checker,
   emitGoalNotification,
   isEnabled = isSessionGoalEnabled,
   idleQuietMs = IDLE_QUIET_MS,
@@ -443,19 +420,18 @@ export const createSessionGoalRuntime = ({
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
-    const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
+  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
+    const written = await writeGoal(sessionId, directory, goal.id, () => ({
       status,
       statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
-      note: note !== undefined ? clampText(note, NOTE_CHAR_LIMIT) : current.note,
-      blockedStreak: 0,
       auditFailStreak: 0,
       ...(tokensUsed !== undefined ? { tokensUsed } : {}),
       ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
       ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
       ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
-      ...(evaluationProviderID ? { evaluationProviderID } : {}),
-      ...(evaluationModelID ? { evaluationModelID } : {}),
+      // Written as a pair: Jev has no provider, and a leftover one from an
+      // earlier small-model check must not be shown next to Jev's model.
+      ...(evaluationModelID !== undefined ? { evaluationProviderID: evaluationProviderID ?? '', evaluationModelID } : {}),
     }));
     if (!written) return;
     console.log(`[session-goal] ${sessionId} settled as ${status}${statusReason ? ` (${statusReason})` : ''}`);
@@ -468,7 +444,24 @@ export const createSessionGoalRuntime = ({
     }
   };
 
-  const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }) => {
+  const checkWithJev = async ({ objective, answer, sessionId }) => {
+    const endpoint = await classifierEndpoint();
+    if (!endpoint || !jev) return null;
+    try {
+      const { answers } = await jev.ask(buildJevAuditRequest({ objective, answer }), endpoint);
+      const scores = readJevAnswers(answers);
+      if (!scores) {
+        console.warn('[session-goal] progress check: Jev left a question unanswered', { sessionId });
+        return null;
+      }
+      return { scores, evaluationProviderID: '', evaluationModelID: endpoint.model };
+    } catch (error) {
+      console.warn('[session-goal] progress check: Jev failed:', error?.message || error);
+      return null;
+    }
+  };
+
+  const checkWithSmallModel = async ({ objective, answer, directory, lastAssistantInfo }) => {
     let service;
     try {
       service = await getSmallModelService();
@@ -481,54 +474,52 @@ export const createSessionGoalRuntime = ({
         // session's own provider unless the user explicitly picked a small
         // model (settings override / opencode config).
         restrictToPreferredProvider: true,
-        // Instruct the language by example, not by description — account-side
-        // personalization otherwise leaks a different language into the note.
-        prompt: `The goal objective:\n\n<objective>\n${goal.objective}\n</objective>\n\nThe agent's latest turn:\n\n${assistantText}\n\nReturn the verdict JSON. Write the note in the SAME language as this sample from the objective: "${goal.objective.slice(0, 200).replace(/\s+/g, ' ').trim()}"`,
-        system: buildAuditSystemPrompt(),
+        prompt: buildSmallModelAuditPrompt({ objective, answer }),
         directory,
         sessionID: typeof lastAssistantInfo?.sessionID === 'string' ? lastAssistantInfo.sessionID : undefined,
         preferredProviderID: typeof lastAssistantInfo?.providerID === 'string' ? lastAssistantInfo.providerID : undefined,
         preferredModelID: typeof lastAssistantInfo?.modelID === 'string' ? lastAssistantInfo.modelID : undefined,
       });
-      const structured = extractJsonObject(generated?.text);
-      const verdict = typeof structured?.verdict === 'string' ? structured.verdict.trim().toLowerCase() : '';
-      if (!structured || !['continue', 'complete', 'blocked'].includes(verdict)) {
-        console.warn('[session-goal:diagnostic] audit parse failed', {
+      const scores = readSmallModelAnswers(generated?.text);
+      if (!scores) {
+        console.warn('[session-goal] progress check: small model reply is not the asked-for JSON', {
           sessionId: lastAssistantInfo?.sessionID ?? null,
           provider: generated?.providerID ?? null,
           model: generated?.modelID ?? null,
-          outputChars: typeof generated?.text === 'string' ? generated.text.length : 0,
-          jsonObjectFound: Boolean(structured),
-          verdict: verdict || null,
+          outputChars: String(generated?.text ?? '').length,
         });
         return null;
       }
-      console.log('[session-goal:diagnostic] audit verdict', {
-        sessionId: lastAssistantInfo?.sessionID ?? null,
-        provider: generated?.providerID ?? null,
-        model: generated?.modelID ?? null,
-        outputChars: generated.text.length,
-        verdict,
-      });
-      let note = clampText(structured?.note, NOTE_CHAR_LIMIT);
-      if (note && hasScriptMismatch(note, `${goal.objective}\n${assistantText}`)) {
-        console.warn('[session-goal] dropped audit note: language mismatch with objective');
-        note = '';
-      }
-      return {
-        verdict,
-        note,
-        evaluationProviderID: generated.providerID,
-        evaluationModelID: generated.modelID,
-      };
+      return { scores, evaluationProviderID: generated.providerID, evaluationModelID: generated.modelID };
     } catch (error) {
-      // No authenticated small model (404) or a transient failure — the loop
-      // still terminates via markers, budget, and the turn cap.
+      // No authenticated small model (404) or a transient failure.
       if (Number(error?.statusCode) !== 404) {
-        console.warn('[session-goal] audit failed:', error?.message || error);
+        console.warn('[session-goal] progress check: small model failed:', error?.message || error);
       }
       return null;
     }
+  };
+
+  /**
+   * One progress check of the latest turn. The classification model answers
+   * when the user left it on and a provider can run it; the small model
+   * answers otherwise, and also when Jev fails this time. Null means no check
+   * could run.
+   */
+  const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }) => {
+    const input = { objective: goal.objective, answer: assistantText };
+    const sessionId = lastAssistantInfo?.sessionID ?? null;
+    const checked = (getChecker() === 'classifier' ? await checkWithJev({ ...input, sessionId }) : null)
+      ?? await checkWithSmallModel({ ...input, directory, lastAssistantInfo });
+    if (!checked) return null;
+    const verdict = decideProgress(checked.scores);
+    console.log('[session-goal:diagnostic] progress check', {
+      sessionId,
+      model: checked.evaluationModelID || null,
+      scores: checked.scores,
+      verdict,
+    });
+    return { verdict, evaluationProviderID: checked.evaluationProviderID, evaluationModelID: checked.evaluationModelID };
   };
 
   // v2 keeps the model and agent on the session itself, so a plain prompt
@@ -760,25 +751,22 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // --- Small-model audit: the sole termination authority besides the hard
+    // --- Progress check: the sole termination authority besides the hard
     // stops above (turn error, budget, continuation cap). The working agent
     // has no channel to settle its own goal.
     //
     // Exception: when the latest message is a compaction summary or was cut off
     // by the output token limit (length stop), the agent by definition ran into
     // the context/output limit mid-work — that IS "in progress, not finished".
-    // No audit call; continue unconditionally.
+    // No check; continue unconditionally.
     let audit = null;
-    let blockedStreak = 0;
     let auditFailStreak = goal.auditFailStreak;
-    if (lastAssistantInfo.summary === true || abortedTail || lengthTail) {
-      blockedStreak = goal.blockedStreak;
-    } else {
+    if (!(lastAssistantInfo.summary === true || abortedTail || lengthTail)) {
       audit = await runAudit({ goal: { ...goal, objective: effectiveObjective }, assistantText, directory, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
 
-      // Audit unavailable: tolerate one consecutive failure (transient
+      // No check could run: tolerate one consecutive failure (transient
       // hiccup), then stop the goal instead of continuing blind. Blocked is
-      // resumable — Resume retries the audit on the next tick.
+      // resumable — Resume retries the check on the next tick.
       if (!audit) {
         auditFailStreak += 1;
         if (auditFailStreak >= AUDIT_FAIL_LIMIT) {
@@ -787,33 +775,27 @@ export const createSessionGoalRuntime = ({
           });
           return;
         }
-        console.warn(`[session-goal] ${sessionId} audit unavailable, continuing unaudited (${auditFailStreak}/${AUDIT_FAIL_LIMIT})`);
+        console.warn(`[session-goal] ${sessionId} progress check unavailable, continuing unchecked (${auditFailStreak}/${AUDIT_FAIL_LIMIT})`);
       } else {
         auditFailStreak = 0;
       }
 
       if (audit?.verdict === 'complete') {
         await settleGoal({
-          sessionId, directory, goal, status: 'complete', statusReason: 'verified by audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+          sessionId, directory, goal, status: 'complete', statusReason: 'verified by audit', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
           evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
         });
         return;
       }
 
+      // The agent is waiting on the user: another nudge would only spend a
+      // turn repeating the question, so the first such check settles.
       if (audit?.verdict === 'blocked') {
-        blockedStreak = goal.blockedStreak + 1;
-        console.warn('[session-goal:diagnostic] blocked audit streak', {
-          sessionId,
-          blockedStreak,
-          blockedStreakLimit: BLOCKED_STREAK_LIMIT,
+        await settleGoal({
+          sessionId, directory, goal, status: 'blocked', statusReason: 'waiting for user input', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+          evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
         });
-        if (blockedStreak >= BLOCKED_STREAK_LIMIT) {
-          await settleGoal({
-            sessionId, directory, goal, status: 'blocked', statusReason: audit.note || 'blocked per audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
-            evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
-          });
-          return;
-        }
+        return;
       }
     }
 
@@ -826,12 +808,9 @@ export const createSessionGoalRuntime = ({
       tokensCommitted,
       lastAccountedMessageID,
       turnsUsed: current.turnsUsed + 1,
-      blockedStreak,
       auditFailStreak,
       statusReason: '',
-      ...(audit?.note ? { note: audit.note } : {}),
-      ...(audit?.evaluationProviderID ? { evaluationProviderID: audit.evaluationProviderID } : {}),
-      ...(audit?.evaluationModelID ? { evaluationModelID: audit.evaluationModelID } : {}),
+      ...(audit ? { evaluationProviderID: audit.evaluationProviderID ?? '', evaluationModelID: audit.evaluationModelID ?? '' } : {}),
     }));
     if (!written) {
       console.log('[session-goal] goal changed during tick, dropping continuation');

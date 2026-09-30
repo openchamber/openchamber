@@ -2,14 +2,22 @@ import { Marked, marked, type Tokens, type TokenizerAndRendererExtension } from 
 import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
-import DOMPurify from 'dompurify';
+import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isAppLinkUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
 import { streamTuning } from '../lib/streamTuningFlags';
-import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
+import {
+  DOCUMENT_HTML_ALLOWED_ATTR,
+  DOCUMENT_HTML_ALLOWED_TAGS,
+  escapeRawMarkdownHtml,
+  isGeneratedMarkdownClass,
+  isLocalFileUrl,
+  isSafeSrcset,
+  MARKDOWN_FORBIDDEN_TAGS,
+} from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -24,6 +32,13 @@ export interface MarkdownImageCandidate {
 }
 
 export type MarkdownImageMode = 'inline' | 'label';
+
+/**
+ * `escape` keeps raw HTML visible as text (assistant output and every other
+ * untrusted surface). `sanitize` renders it through a GitHub-like allowlist and
+ * is for documents a user opens to read, such as a README in the Files preview.
+ */
+export type MarkdownRawHtmlMode = 'escape' | 'sanitize';
 
 export const MAX_MARKDOWN_IMAGE_COUNT = 12;
 
@@ -386,7 +401,26 @@ const renderKatex = (math: string, raw: string, displayMode: boolean): string =>
   }
 };
 
-const inlineMathExtension = {
+type MathRender = (math: string, raw: string, displayMode: boolean) => string;
+
+// KaTeX output depends on inline styles, which the raw-HTML allowlist pass of
+// `sanitize` mode drops. There the extensions leave a placeholder that
+// survives the pass and becomes KaTeX after it; a placeholder written by the
+// author only renders more math.
+const MATH_PLACEHOLDER_RE = /<span data-oc-math="(inline|display)">([^<]*)<\/span>/g;
+
+const renderMathPlaceholder: MathRender = (math, _raw, displayMode) =>
+  `<span data-oc-math="${displayMode ? 'display' : 'inline'}">${escapeAttr(math)}</span>`;
+
+const renderMathPlaceholders = (html: string): string => html.replace(
+  MATH_PLACEHOLDER_RE,
+  (_placeholder, mode: string, escapedMath: string) => {
+    const math = unescapeHtml(escapedMath);
+    return renderKatex(math, escapeAttr(math), mode === 'display');
+  },
+);
+
+const createInlineMathExtension = (render: MathRender) => ({
   name: 'inlineMath',
   level: 'inline' as const,
   start(src: string) {
@@ -400,9 +434,9 @@ const inlineMathExtension = {
   },
   renderer(token: Tokens.Generic) {
     const math = token as MathToken;
-    return renderKatex(math.text, math.raw, false);
+    return render(math.text, math.raw, false);
   },
-};
+});
 
 // `\[` is display math in LaTeX, but it is also CommonMark's escape for a
 // literal `[`, and prose escapes brackets far more often than it opens display
@@ -413,7 +447,7 @@ const inlineMathExtension = {
 const BLOCK_MATH_RE = /^[ \t]*\\\[([\s\S]+?)\\\][ \t]*(?:\n|$)/;
 const BLOCK_MATH_LINE_START_RE = /(?:^|\n)[ \t]*\\\[/;
 
-const blockMathExtension = {
+const createBlockMathExtension = (render: MathRender) => ({
   name: 'blockMath',
   level: 'block' as const,
   start(src: string) {
@@ -428,9 +462,9 @@ const blockMathExtension = {
   },
   renderer(token: Tokens.Generic) {
     const math = token as MathToken;
-    return renderKatex(math.text, math.raw, true);
+    return render(math.text, math.raw, true);
   },
-};
+});
 
 // Own the entire disclosure token, including an unfinished streamed body. HTML
 // token boundaries otherwise split it at blank lines and close the DOM early.
@@ -503,38 +537,52 @@ const detailsExtension: TokenizerAndRendererExtension = {
 // marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
 // to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
 // Plain CJK characters right after a URL are still consumed, matching GitHub.
-const createParser = (imageMode: MarkdownImageMode) => new Marked().use(
-  markedLinkifyIt({ fuzzyLink: false }),
-  {
-    gfm: true,
-    breaks: false,
-    extensions: [inlineMathExtension, blockMathExtension, detailsExtension],
-  renderer: {
-    // Assistant output is untrusted. Markdown constructs still render as HTML,
-    // but raw HTML must remain visible text so it cannot introduce active DOM
-    // such as stylesheets or positioned overlays into the application shell.
-    html({ text }) {
-      return escapeRawMarkdownHtml(text);
+const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
+  const renderMath = rawHtml === 'sanitize' ? renderMathPlaceholder : renderKatex;
+  return new Marked().use(
+    markedLinkifyIt({ fuzzyLink: false }),
+    {
+      gfm: true,
+      breaks: false,
+      extensions: [createInlineMathExtension(renderMath), createBlockMathExtension(renderMath), detailsExtension],
+      renderer: {
+        // Assistant output is untrusted. Markdown constructs still render as
+        // HTML, but raw HTML must remain visible text so it cannot introduce
+        // active DOM such as stylesheets or positioned overlays into the
+        // application shell. Documents keep it for the allowlist pass instead.
+        html({ text }) {
+          return rawHtml === 'sanitize' ? text : escapeRawMarkdownHtml(text);
+        },
+        link({ href, title, tokens }) {
+          // The link text goes through the inline renderer, so an image
+          // inside it (a badge) renders and raw HTML in it follows the mode.
+          const text = this.parser.parseInline(tokens);
+          const target = href ?? '';
+          const agentName = parseAgentHref(target);
+          if (agentName) {
+            return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-openchamber-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
+          }
+          const skillName = parseSkillHref(target);
+          if (skillName) {
+            return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${text}</a>`;
+          }
+          const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+          return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        },
+        ...(imageMode === 'label' ? { image: renderMarkdownImageLabel } : {}),
+      },
     },
-    link({ href, title, text }) {
-      const target = href ?? '';
-      const agentName = parseAgentHref(target);
-      if (agentName) {
-        return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-openchamber-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
-      }
-      const skillName = parseSkillHref(target);
-      if (skillName) {
-        return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${text}</a>`;
-      }
-      const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-      return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
-    },
-    ...(imageMode === 'label' ? { image: renderMarkdownImageLabel } : {}),
-  },
-});
+  );
+};
 
-const inlineImageParser = createParser('inline');
-const imageLabelParser = createParser('label');
+const inlineImageParser = createParser('inline', 'escape');
+const imageLabelParser = createParser('label', 'escape');
+const documentParser = createParser('inline', 'sanitize');
+
+const parserFor = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
+  if (rawHtml === 'sanitize') return documentParser;
+  return imageMode === 'label' ? imageLabelParser : inlineImageParser;
+};
 
 // ---------------------------------------------------------------------------
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
@@ -685,28 +733,84 @@ const SANITIZE_CONFIG = {
 
 let sanitizeHookInstalled = false;
 
-const ensureSanitizeHook = (): void => {
-  if (sanitizeHookInstalled) return;
-  if (typeof window === 'undefined' || !DOMPurify.isSupported) return;
-  sanitizeHookInstalled = true;
-  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+const installAnchorHooks = (purifier: DOMPurifyInstance): void => {
+  purifier.addHook('uponSanitizeAttribute', (node, data) => {
     if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
     // DOMPurify's default URI policy strips custom application schemes
     // (obsidian://, vscode://, ...). Keep them for anchors; dangerous schemes
     // stay excluded via isAppLinkUrl and clicks go through confirmation.
     if (isLocalFileUrl(data.attrValue) || isAppLinkUrl(data.attrValue)) data.forceKeepAttr = true;
   });
-  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  purifier.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement)) return;
     if (node.target !== '_blank') return;
     node.setAttribute('rel', 'noopener noreferrer');
   });
 };
 
+const ensureSanitizeHook = (): void => {
+  if (sanitizeHookInstalled) return;
+  if (typeof window === 'undefined' || !DOMPurify.isSupported) return;
+  sanitizeHookInstalled = true;
+  installAnchorHooks(DOMPurify);
+};
+
 const sanitize = (html: string): string => {
   if (!DOMPurify.isSupported) return '';
   ensureSanitizeHook();
   return DOMPurify.sanitize(html, SANITIZE_CONFIG) as unknown as string;
+};
+
+// Raw HTML in a document passes this allowlist right after marked, before
+// highlighting and KaTeX add the inline styles the final pass has to allow.
+// It runs on its own DOMPurify instance so its hooks never touch that pass.
+const DOCUMENT_HTML_SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [...DOCUMENT_HTML_ALLOWED_TAGS],
+  ALLOWED_ATTR: [...DOCUMENT_HTML_ALLOWED_ATTR],
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+};
+
+let documentPurifier: DOMPurifyInstance | null = null;
+
+const getDocumentPurifier = (): DOMPurifyInstance | null => {
+  if (documentPurifier) return documentPurifier;
+  // The default instance is unsupported exactly when there is no window.
+  if (!DOMPurify.isSupported) return null;
+  const purifier = DOMPurify(window);
+  if (!purifier.isSupported) return null;
+  installAnchorHooks(purifier);
+  purifier.addHook('uponSanitizeAttribute', (_node, data) => {
+    if (data.attrName === 'class' && !isGeneratedMarkdownClass(data.attrValue)) data.keepAttr = false;
+    if (data.attrName === 'srcset' && !isSafeSrcset(data.attrValue)) data.keepAttr = false;
+  });
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    // Only the task-list checkbox marked renders; any other input is a form control.
+    if (node.tagName === 'INPUT') {
+      if (node.getAttribute('type') !== 'checkbox') {
+        node.remove();
+        return;
+      }
+      node.setAttribute('disabled', '');
+    }
+    // Tailwind preflight gives images `height: auto`, which beats the height
+    // attribute, so `<img height="28">` would render at its natural size.
+    const height = node.tagName === 'IMG' ? node.getAttribute('height')?.trim() : undefined;
+    if (height && /^\d+$/.test(height)) node.setAttribute('style', `height:${height}px`);
+  });
+  documentPurifier = purifier;
+  return purifier;
+};
+
+const sanitizeDocumentHtml = (html: string): string => {
+  const purifier = getDocumentPurifier();
+  if (!purifier) return '';
+  return renderMathPlaceholders(purifier.sanitize(html, DOCUMENT_HTML_SANITIZE_CONFIG));
+};
+
+const parseMarkdown = (text: string, imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode): string => {
+  const parsed = parserFor(imageMode, rawHtml).parse(text, { async: false });
+  return rawHtml === 'sanitize' ? sanitizeDocumentHtml(parsed) : parsed;
 };
 
 
@@ -752,7 +856,8 @@ const markdownBlockCacheKey = (
   mode: MarkdownBlock['mode'],
   highlight: boolean,
   imageMode: MarkdownImageMode,
-): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}`;
+  rawHtml: MarkdownRawHtmlMode,
+): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}${rawHtml === 'sanitize' ? ':html' : ''}`;
 
 /** Test-only: clear the render HTML caches between cases. */
 export const resetMarkdownHtmlCacheForTests = (): void => {
@@ -774,6 +879,7 @@ export const __markdownBlockCacheSizesForTests = (): { full: number; live: numbe
 export const getCachedMarkdownBlocks = (
   text: string,
   imageMode: MarkdownImageMode = 'inline',
+  rawHtml: MarkdownRawHtmlMode = 'escape',
 ): RenderedBlock[] | null => {
   if (!text) return [];
 
@@ -781,7 +887,7 @@ export const getCachedMarkdownBlocks = (
   const rendered: RenderedBlock[] = [];
   for (const block of blocks) {
     const contentHash = contentFingerprint(block.raw);
-    const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+    const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode, rawHtml);
     const html = fullBlockCache.get(id);
     if (html === undefined) return null;
     rendered.push({ id, html });
@@ -792,12 +898,15 @@ export const getCachedMarkdownBlocks = (
 const renderPlainText = (text: string): string =>
   `<div class="whitespace-pre-wrap break-words">${escapeRawMarkdownHtml(text)}</div>`;
 
-const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
+const parseBlock = async (
+  block: MarkdownBlock,
+  imageMode: MarkdownImageMode,
+  rawHtml: MarkdownRawHtmlMode,
+): Promise<string> => {
   if (block.plainText) return renderPlainText(block.raw);
-  const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   let parsed: string;
   try {
-    parsed = await parser.parse(block.src);
+    parsed = parseMarkdown(block.src, imageMode, rawHtml);
   } catch {
     // Preserve the original source, not the syntax repaired for streaming.
     return renderPlainText(block.raw);
@@ -819,12 +928,12 @@ const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): P
 export const renderMarkdownSync = (
   text: string,
   imageMode: MarkdownImageMode = 'inline',
+  rawHtml: MarkdownRawHtmlMode = 'escape',
 ): string => {
   if (!text) return '';
-  const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   let parsed: string;
   try {
-    parsed = parser.parse(text, { async: false });
+    parsed = parseMarkdown(text, imageMode, rawHtml);
   } catch {
     return renderPlainText(text);
   }
@@ -853,6 +962,7 @@ export const renderMarkdownBlocks = async (
   text: string,
   streaming: boolean,
   imageMode: MarkdownImageMode = 'inline',
+  rawHtml: MarkdownRawHtmlMode = 'escape',
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
@@ -860,13 +970,13 @@ export const renderMarkdownBlocks = async (
   return Promise.all(
     blocks.map(async (block) => {
       const contentHash = contentFingerprint(block.raw);
-      const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+      const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode, rawHtml);
       const cache = cacheForMode(block.mode);
       const cached = cache.get(id);
       if (cached !== undefined) {
         return { id, html: cached };
       }
-      const html = await parseBlock(block, imageMode);
+      const html = await parseBlock(block, imageMode, rawHtml);
       cache.set(id, html, utf16Bytes(id) + utf16Bytes(html));
       return { id, html };
     }),

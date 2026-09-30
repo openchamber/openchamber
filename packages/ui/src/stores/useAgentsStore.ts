@@ -78,14 +78,21 @@ export const getConfigDirectory = (): string | null => {
 const AGENTS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_AGENTS_CACHE_KEY = '__default__';
 const agentsLastLoadedAt = new Map<string, number>();
-const agentsLoadInFlight = new Map<string, Promise<boolean>>();
+// Each invalidation starts a new load generation. A read that began before the
+// latest invalidation (a delete, a catalog event) may carry the list from
+// before that change, so later callers never join it: they wait for it to
+// settle and read again, and the newest generation's result is the one kept.
+const agentsLoadGeneration = new Map<string, number>();
+const agentsLoadInFlight = new Map<string, { generation: number; request: Promise<boolean> }>();
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
 };
 
 export const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
-  agentsLastLoadedAt.delete(getAgentsCacheKey(directory));
+  const cacheKey = getAgentsCacheKey(directory);
+  agentsLastLoadedAt.delete(cacheKey);
+  agentsLoadGeneration.set(cacheKey, (agentsLoadGeneration.get(cacheKey) ?? 0) + 1);
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -432,11 +439,18 @@ export const useAgentsStore = create<AgentsStore>()(
             return true;
           }
 
-          const inFlight = agentsLoadInFlight.get(cacheKey);
-          if (inFlight) {
-            return inFlight;
+          let inFlight = agentsLoadInFlight.get(cacheKey);
+          while (inFlight) {
+            if (inFlight.generation === (agentsLoadGeneration.get(cacheKey) ?? 0)) {
+              return inFlight.request;
+            }
+            // Started before the latest invalidation: let it settle so it cannot
+            // commit after this read, then read again.
+            await inFlight.request;
+            inFlight = agentsLoadInFlight.get(cacheKey);
           }
 
+          const generation = agentsLoadGeneration.get(cacheKey) ?? 0;
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
@@ -488,13 +502,16 @@ export const useAgentsStore = create<AgentsStore>()(
                           : (data.sources?.json?.exists ? data.sources.json : null);
                         const legacy = activeSource?.legacy === true;
                         const sourcePath: string | null = activeSource?.path ?? null;
+                        // v2's resolved AgentInfo carries no built-in flag; the
+                        // config-entity route derives it from the sources.
+                        const native = data.isBuiltIn === true;
 
                         if (scope === 'project' || scope === 'user') {
-                          return { ...agent, scope: scope as AgentScope, group, legacy, path: sourcePath };
+                          return { ...agent, scope: scope as AgentScope, group, legacy, path: sourcePath, native };
                         }
 
                         // Explicitly set null scope if not found, to clear stale state
-                        return { ...agent, scope: undefined, group, legacy, path: sourcePath };
+                        return { ...agent, scope: undefined, group, legacy, path: sourcePath, native };
                       }
                     } catch (err) {
                       console.warn(`[AgentsStore] Failed to fetch config for agent ${agent.name}:`, err);
@@ -516,7 +533,10 @@ export const useAgentsStore = create<AgentsStore>()(
                 } else {
                   set({ isLoading: false });
                 }
-                agentsLastLoadedAt.set(cacheKey, Date.now());
+                // A stale generation's read must not count as fresh for the TTL.
+                if (generation === (agentsLoadGeneration.get(cacheKey) ?? 0)) {
+                  agentsLastLoadedAt.set(cacheKey, Date.now());
+                }
                 return true;
               } catch {
                 // ignore error
@@ -527,11 +547,12 @@ export const useAgentsStore = create<AgentsStore>()(
             return false;
           })();
 
-          agentsLoadInFlight.set(cacheKey, request);
+          const entry = { generation, request };
+          agentsLoadInFlight.set(cacheKey, entry);
           try {
             return await request;
           } finally {
-            agentsLoadInFlight.delete(cacheKey);
+            if (agentsLoadInFlight.get(cacheKey) === entry) agentsLoadInFlight.delete(cacheKey);
           }
         },
 
@@ -697,7 +718,9 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true, requiresManualRestart: true };
             }
 
-            // OpenCode 2 re-reads the file itself; the store just refreshes its list.
+            // OpenCode 2 re-reads the file itself and then announces
+            // `agent.updated`, which re-reads this list again (catalogRefresh).
+            // This read can land before that and still carry the deleted agent.
             const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });

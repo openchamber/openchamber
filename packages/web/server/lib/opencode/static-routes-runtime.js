@@ -28,11 +28,19 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
+      const hashedAssetsPrefix = path.join(distPath, 'assets') + path.sep;
       app.use(express.static(distPath, {
         setHeaders(res, filePath) {
           // Service workers should never be long-cached; iOS is especially sensitive.
-          if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
+          if (filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
+            return;
+          }
+          // Vite names every file under assets/ by its content hash, so a name
+          // never changes meaning. Without this each lazy chunk costs a
+          // revalidation round trip, which is felt on remote connections.
+          if (filePath.startsWith(hashedAssetsPrefix)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           }
         },
       }));

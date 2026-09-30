@@ -372,6 +372,14 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         ? (currentSessionStatus as { type: 'retry'; next?: number }).next
         : undefined;
 
+    // OpenCode 2.x reports a scheduled retry on the assistant message it will
+    // retry, not as a session status; the next attempt's step start clears it.
+    const assistantRetry = React.useMemo(() => {
+        if (!lastAssistantId) return null;
+        const message = rawSessionMessages.find((candidate) => candidate.id === lastAssistantId);
+        return message?.role === 'assistant' ? message.retry ?? null : null;
+    }, [rawSessionMessages, lastAssistantId]);
+
     const parsedStatus = React.useMemo<ParsedStatusResult>(() => {
         return decodeParsedStatus(lastAssistantStatusSignature);
     }, [lastAssistantStatusSignature]);
@@ -402,7 +410,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         const isWorking = isPhaseWorking;
         const isStreaming = activityPhase === 'busy';
         const isCooldown = false;
-        const isRetry = activityPhase === 'retry';
+        const isRetry = activityPhase === 'retry' || (isWorking && assistantRetry !== null);
 
         let activity: AssistantActivity = 'idle';
         if (isWorking) {
@@ -414,7 +422,10 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const retryInfo = isRetry
-            ? { attempt: sessionRetryAttempt, next: sessionRetryNext }
+            ? {
+                attempt: sessionRetryAttempt ?? assistantRetry?.attempt,
+                next: sessionRetryNext ?? assistantRetry?.at,
+            }
             : null;
 
         return {
@@ -438,7 +449,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             isComplete: false,
             retryInfo,
         };
-    }, [activityPhase, isPhaseWorking, parsedStatus, abortState, sessionRetryAttempt, sessionRetryNext]);
+    }, [activityPhase, isPhaseWorking, parsedStatus, abortState, sessionRetryAttempt, sessionRetryNext, assistantRetry]);
 
     const forming = React.useMemo<FormingSummary>(() => {
         const isActive = isPhaseWorking && parsedStatus.activePartType === 'text';

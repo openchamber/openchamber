@@ -1,0 +1,49 @@
+---
+title: Chats
+description: Plain conversations with the agent, outside any project.
+---
+
+# Chats
+
+A chat is a plain conversation with the agent, outside any project. Use it for things that have nothing to do with your codebases: how to patch KDE for FreeBSD, what a regex does, a draft of an email. The agent works in a throwaway folder, with no repository, no branch and none of your project's context weighing on the conversation.
+
+## Start a chat
+
+The direct way is **+** on the **Chats** section in the sidebar. On the phone, tap **New chat** at the top of the sessions list or **+** on Chats.
+
+**Mod+N** (Cmd+N on macOS, Ctrl+N elsewhere) and **New Session** in the command palette open a new session on the side you used last: a chat if your last new session was a chat, otherwise your project. You can switch it to Chats before you send the first message.
+
+## Where chats live
+
+Chats have their own section at the top of the sidebar, above [In work](/sessions-in-work/) and your projects. They're sorted like other sessions, newest activity first, and pinned chats stay on top. In Timeline mode the section shows the three most recent chats; **Show more** loads the rest. The section folds away like any other.
+
+On the phone, Chats sit above the project list in the sessions sheet.
+
+## What a chat can and can't do
+
+Every chat gets its own empty folder, so the agent can still create and edit files there: a script, a quick prototype, a converted document. What a chat doesn't have:
+
+- git status, branches or worktrees
+- moving into work: chats never show up in [In work](/sessions-in-work/)
+- implementing a plan in a new session
+- starting from a Linear issue
+
+Notes, todos and plans work. All chats share one set, separate from your projects.
+
+A chat stays a chat. There's no way to move a finished chat into a project; if a conversation turns into real work, start a session in the project and bring the useful part along.
+
+## Archive and delete
+
+Archive a chat to hide it from the list. Delete it to remove it for good, together with its folder, once no other session (a fork or a subagent) still uses that folder.
+
+## Where the folders are
+
+Chat folders live in `~/.config/openchamber/chats`, one dated folder per day. If you moved OpenChamber's data with `OPENCHAMBER_DATA_DIR`, they're under that folder instead. To keep chats somewhere else, set `OPENCHAMBER_CHATS_DIR`; see [Environment Variables](/environment/). That matters when OpenCode runs as a different user and can't read your home folder.
+
+> VS Code has no chats. The extension always works in the folder you have open.
+
+## Related
+
+- [Projects](/projects/): sessions tied to a codebase
+- [Sessions in Work](/sessions-in-work/): keep real work in view
+- [Notes, Todos & Plans](/notes-todos-plans/): notes that also work in chats

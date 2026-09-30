@@ -36,6 +36,140 @@ passkey 与当前密码绑定。如果你更改或移除密码，已保存的 pa
 - 如果你需要一个公开 URL，相比向互联网开放一个端口，更推荐使用 [隧道](/zh-cn/tunnels/) 或专用网络（比如 VPN）。
 - 如果你把 OpenChamber 放在你自己的 HTTPS 服务器后面，请参阅 [反向代理](/zh-cn/reverse-proxy/)。
 
+## 企业模式
+
+如果你的团队只能把对话内容发送给你在 OpenCode 中配置的模型提供商，请开启企业模式。有两种方式，任选其一即可。
+
+### 机器上的策略文件
+
+在你管理的笔记本电脑上应使用这种方式。把一个名为 `policy.json` 的文件放到只有管理员才能写入的文件夹中：
+
+| 系统 | 路径 |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+路径与 OpenChamber 的安装方式无关。桌面应用、通过 npm 启动的 Web 服务器、CLI 和 VS Code 扩展都读取同一个文件。你可以用设备管理工具（Jamf、Intune 等）分发它。对于在 Docker 中运行的服务器，把文件挂载到 Linux 路径即可。
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "allowedExtensions": ["https://github.com/acme/"],
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+只有 `enterpriseMode` 是必需的。`organization` 会在设置中显示为“由 Acme 管理”，让大家知道是谁做的决定。`relayUrl` 和 `jev` 用于固定你自己的中继和你自己的 Jev 端点，`allowNetworkAccess` 允许其他设备通过网络访问 OpenChamber，`allowedExtensions` 则列出你信任的扩展仓库。这些都详见下文。
+
+- 用户在设置或环境中做的任何设置，都无法关闭文件开启的功能。
+- 当文件开启企业模式时，只由文件决定。下文中用于中继、Jev 和网络访问的环境变量会被忽略，因为用户可以自行设置它们。
+- 如果文件存在但无法读取，或不是有效的 JSON，企业模式保持开启，且不会固定任何内容。设置中会提示无法读取策略。损坏的文件绝不会悄悄解除保护。
+- 更改无需重启即可生效。
+- OpenChamber 以用户身份运行，因此用户可以读取这个文件。在里面放 API 密钥之前请考虑到这一点。
+
+### 环境变量
+
+在由你控制环境的服务器或容器中，这样就够了：
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+在笔记本电脑上这是一把较弱的锁：桌面应用从登录 shell 的配置文件（例如 `~/.zshrc`）读取它，而用户可以编辑这个文件。在笔记本电脑上请使用策略文件。
+
+使用这个变量时，中继、Jev、网络访问和允许的扩展也来自各自的变量：`OPENCHAMBER_RELAY_URL`、`OPENCHAMBER_JEV_URL`、`OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`、`OPENCHAMBER_ALLOWED_EXTENSIONS`（用逗号分隔的仓库 URL）和 `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`。在 Docker 中你需要网络访问的那个变量，因为服务器必须监听来自容器之外的连接。
+
+### 示例
+
+要在 Mac 上放置策略文件，以管理员身份在终端中运行：
+
+```bash
+sudo mkdir -p "/Library/Application Support/OpenChamber"
+sudo tee "/Library/Application Support/OpenChamber/policy.json" > /dev/null <<'JSON'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+JSON
+```
+
+在 Linux 上也一样，只是文件夹换成 `/etc/openchamber`。
+
+在 Windows 上，以管理员身份运行 PowerShell。最后一行让该文件夹只有管理员和系统可以写入：
+
+```powershell
+New-Item -ItemType Directory -Force "C:\ProgramData\OpenChamber" | Out-Null
+@'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+'@ | Set-Content -Encoding UTF8 "C:\ProgramData\OpenChamber\policy.json"
+icacls "C:\ProgramData\OpenChamber" /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Users:(OI)(CI)RX"
+```
+
+对于 Docker 中的服务器，把下面的内容加到 `docker-compose.yml` 的 `environment` 里。容器需要监听来自自身之外的连接，所以要允许网络访问：
+
+```yaml
+environment:
+  OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD}
+  OPENCHAMBER_ENTERPRISE_MODE: "1"
+  OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
+  # Optional:
+  OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_MODEL: acme-classifier
+  OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
+  OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/
+```
+
+要确认是否生效，打开“设置 → 提供商”：顶部会出现带有你组织名称的企业模式提示。
+
+### 会有哪些变化
+
+- 模型提供商只来自你的 OpenCode 配置。在 OpenChamber 中连接提供商、登录提供商、添加密钥或创建自定义提供商都会关闭；移除或切换已有账户仍然可用。这只是关上了经由应用的入口；真正的锁是下文所述的 OpenCode 策略。
+- [分类提供方（Jev）](/zh-cn/classification-providers/)保持关闭，有人在设置里填写的自定义端点也一样。安全网和 Auto 不会提供，会话只能手动移入进行中。要通过你自己的基础设施使用 Jev，请用策略文件中的 `jev` 或用 `OPENCHAMBER_JEV_URL` 固定一个端点（再加上 `OPENCHAMBER_JEV_MODEL`，如有需要还有 `OPENCHAMBER_JEV_API_KEY`）。它会成为默认选项，仍然可以关闭，但不能选择其他任何来源。
+- 通过 OpenAI 朗读的功能会关闭。自定义的语音合成或转写服务器必须运行在同一台机器上。本地语音和本地口述模型照常工作。
+- 发往手机和浏览器的推送通知只带一个通用标题，例如“Agent response is ready”，不含消息文本或会话名称。桌面通知留在你的机器上，保留完整文本。
+- 更新检查照常运行，安全修复仍能送达，但它从不上报使用情况，连匿名安装 ID 也不上报。
+- [外部隧道](/zh-cn/tunnels/)（Cloudflare、ngrok）会关闭。隧道提供商会在其边缘解密流量，能以明文看到每一个请求。
+- [Private Relay](/zh-cn/private-relay/) 只能通过你自己的中继使用。运行一个[自托管中继](https://github.com/openchamber/openchamber-relay)，并用策略文件中的 `relayUrl` 或 `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws` 让 OpenChamber 指向它。共享中继同样无法读取你的流量，因为它是端到端加密的，但你自己的中继能把连接元数据和进入这台机器的通道留在你的网络内。没有你自己的中继，就完全无法配对设备。
+- OpenChamber 只在它所运行的机器上监听。允许本地网络中其他设备打开应用的桌面设置会关闭，服务器也会拒绝在网络地址上启动，无论是通过 CLI（`--host`、`--lan`）还是通过环境。如果应用运行期间出现了策略文件，来自其他机器的连接会被断开，直到下次启动。要允许网络访问，请在策略文件中设置 `"allowNetworkAccess": true`，或在由环境开启企业模式的情况下设置 `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`。请注意连接是未加密的 HTTP，在共享网络中任何人都能读取；其他人要访问的服务器，请放在[你自己的 HTTPS](/zh-cn/reverse-proxy/) 后面。
+- 能把数据发送到机器之外的[扩展](/zh-cn/extensions/)（与外部 API 通信、从外部地址加载内容或运行后台服务的扩展）只能从 `allowedExtensions` 中列出的 Git 仓库安装。不做这些事的扩展照常安装。从其他地方安装的扩展会保持关闭，设置中会说明原因。列表里填写仓库 URL，因为扩展的名字由它自己决定。以 `/` 结尾的条目（如 `https://github.com/acme/`）会允许其下的所有仓库。在开发扩展的人的机器上，`"allowLocalExtensions": true` 还允许从本地文件夹安装。ZIP 无论如何都不能安装。
+- 在 VS Code 扩展中，连接提供商的功能会关闭，更新检查也不上报使用情况。它本来就没有 Jev、中继、隧道、推送通知或云端语音功能。
+
+小模型任务（会话标题、摘要、提交信息、变更讲解）不需要任何特殊模式。它们始终使用你在设置中选择的小模型、你当前所用提供商的小模型，或你的 OpenCode 配置中的默认模型。它们绝不会退而使用你恰好连接着的其他提供商。
+
+到底能使用哪些模型提供商，由 OpenCode 决定，而不是 OpenChamber。用 [OpenCode 策略](https://opencode.ai/v2/docs/policies/)锁定它：先拒绝所有提供商，再允许你批准的那些。
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+被拒绝的提供商即使有人为它添加了密钥也会消失。把策略放在全局的 `~/.config/opencode/opencode.jsonc` 中，项目无法解除它们；或者从拥有最终决定权的 OpenCode Console 工作区下发。企业模式在此之上负责 OpenChamber 自身发送的内容。
+
+智能体的网页搜索和网页抓取同样经由 OpenCode，发往搜索服务和页面本身。如果它们不应离开你的网络，用同类策略拒绝它们：
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## 相关内容
 
 - [连接设备](/zh-cn/connect-devices/) — 一次性配对与设备级令牌

@@ -114,18 +114,34 @@ describe("session events", () => {
   })
 
   test("an archive patch drops the session and its caches", () => {
-    const draft = state({ session_status: { ses_1: { type: "busy" } }, sessionTotal: 1 })
+    const draft = state({ session_status: { ses_1: { type: "busy" } }, sessionStatusReady: true, sessionTotal: 1 })
     apply(draft, { type: "session.patched", properties: { sessionID: "ses_1", patch: { time: { archived: 9 } } } })
     expect(draft.session).toEqual([])
     expect(draft.message.ses_1).toBeUndefined()
     expect(draft.session_status.ses_1).toBeUndefined()
+    expect(draft.sessionStatusInvalidated?.ses_1).toBe(true)
     expect(draft.sessionTotal).toBe(0)
+
+    // The directory's earlier successful snapshot cannot certify a restored
+    // session idle after archiving discarded its last live status.
+    apply(draft, { type: "session.created", properties: { info: session() } })
+    expect(draft.session_status.ses_1).toBeUndefined()
+    expect(draft.sessionStatusInvalidated?.ses_1).toBe(true)
+    apply(draft, { type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } })
+    expect(draft.session_status.ses_1).toEqual({ type: "busy" })
+    expect(draft.sessionStatusInvalidated?.ses_1).toBeUndefined()
   })
 
   test("an unarchive patch clears the archive marker", () => {
     const draft = state({ session: [session({ time: { created: 1, updated: 1, archived: 5 } })] })
     apply(draft, { type: "session.patched", properties: { sessionID: "ses_1", patch: { time: { archived: null } } } })
     expect(draft.session[0].time).toEqual({ created: 1, updated: 1 })
+  })
+
+  test("deleting an archived session releases its invalidated status marker", () => {
+    const draft = state({ session: [], sessionStatusInvalidated: { ses_1: true } })
+    apply(draft, { type: "session.deleted", properties: { sessionID: "ses_1" } })
+    expect(draft.sessionStatusInvalidated?.ses_1).toBeUndefined()
   })
 
   test("a create echo keeps what the store already learned about the session", () => {
@@ -243,6 +259,25 @@ describe("message events", () => {
       },
     })
     expect(draft.message.ses_1[0]).toMatchObject({ status: "exited", exit: 0, time: { completed: 9 }, output: { output: "a" } })
+  })
+
+  test("a shell killed by a signal keeps the signal", () => {
+    const shell: Message = {
+      id: "msg_s",
+      sessionID: "ses_1",
+      role: "shell",
+      time: { created: 5 },
+      shellID: "sh_1",
+      command: "sleep 60",
+      status: "running",
+    }
+    const draft = state({ message: { ses_1: [shell] } })
+    apply(draft, {
+      type: "message.patched",
+      properties: { sessionID: "ses_1", messageID: "shell:sh_1", patch: { time: { completed: 9 }, shell: { status: "exited", signal: "SIGTERM" } } },
+    })
+    expect(draft.message.ses_1[0]).toMatchObject({ status: "exited", signal: "SIGTERM" })
+    expect("exit" in draft.message.ses_1[0]).toBe(false)
   })
 })
 

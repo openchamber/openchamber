@@ -10,6 +10,7 @@
 //   spaceMetadata(spaceId)   resolves, as text, everything the place's own records show about the space container
 //   gatekeeperMetadata(spaceId)   the same for the gatekeeper container
 //   gatekeeperAddresses(spaceId)  resolves { inner, outer }, the gatekeeper's own addresses
+//   probeFromOuterNetwork(spaceId, script)  runs a Node script in a helper on the space's outer network
 //   startWindowUpstream(spaceId)  a stand-in provider on the space's outer network. It answers with
 //                                 the sha256 of the credentials it saw, never with the credentials
 
@@ -827,6 +828,37 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
           // And not in the journal, which is the one thing about the gatekeeper the host shows a user.
           const journal = await channel().readJournal(spec.id);
           expect(JSON.stringify(journal)).not.toContain(MODEL_KEY);
+        }, 120_000);
+
+        // The obligation of STAGES.md on the first real credential behind the window: on a Linux
+        // Docker host every local process can reach the outer bridge, so the corridor and the
+        // window listen on the gatekeeper's inner address only. A neighbour on the outer network
+        // stands in for such a process here; the same measurement from a Linux host itself is in
+        // the module documentation.
+        it('cannot be reached on its outer address: the corridor and the window listen on the inner network only', async () => {
+          const addresses = await host.gatekeeperAddresses(spec.id);
+          expect(addresses.outer).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+          const fromOutside = async (address, port) => (await host.probeFromOuterNetwork(spec.id, tcpProbe(address, port))).stdout.trim();
+          // Positive control: the neighbour's networking works, it reaches the stand-in upstream beside it.
+          expect(await fromOutside('upstream', 9000)).toMatch(/^connected:/);
+          for (const port of [GATEKEEPER_CORRIDOR_PORT, GATEKEEPER_WINDOW_PORT, GATEKEEPER_CONTROL_PORT]) {
+            expect(await fromOutside(addresses.outer, port), `outer address, port ${port}`).toBe('failed:ECONNREFUSED');
+          }
+          // And the space still reaches both by the gatekeeper's name, which resolves to the inner address.
+          expect(await probe(tcpProbe(GATEKEEPER_ALIAS, GATEKEEPER_CORRIDOR_PORT))).toBe(`connected:${addresses.inner}`);
+          expect(await probe(tcpProbe(GATEKEEPER_ALIAS, GATEKEEPER_WINDOW_PORT))).toBe(`connected:${addresses.inner}`);
+        }, 180_000);
+
+        it('gets no credential from the window for an opened domain, and none of its own reaches the upstream', async () => {
+          await channel().addGrant(spec.id, { id: 'open-registry', upstream: upstream.url });
+          const answer = await probe(windowProbe('/model/open-registry/-/package/left-pad', { 'x-api-key': 'sk-fake-inside', authorization: 'Bearer sk-fake-inside' }));
+          expect(answer).toMatch(/^200 /);
+          const seen = JSON.parse(answer.slice(4));
+          expect(seen.path).toBe('/v1/-/package/left-pad');
+          expect(seen.apiKey).toBe('none');
+          expect(seen.authorization).toBe('none');
+          expect(seen.headerNames.filter((name) => /key|auth|token/i.test(name))).toEqual([]);
+          expect(answer).not.toContain(MODEL_KEY);
         }, 120_000);
 
         it('reaches a real upstream over TLS, with no credential of anyone\'s', async () => {

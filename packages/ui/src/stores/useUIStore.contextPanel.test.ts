@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
+import {
+  forgetBrowserTabOpenedWithAddress,
+  subscribeBrowserTabLoadRequests,
+  wasBrowserTabOpenedWithAddress,
+} from '../lib/browser/devServerWait';
 import { useTerminalStore } from './useTerminalStore';
 import { useUIStore } from './useUIStore';
 
@@ -443,6 +448,45 @@ describe('useUIStore context panel tabs', () => {
 
     const sanitizedDiffTab = getContextPanelTabs('/repo-worktree').find((tab) => tab.mode === 'diff');
     expect(sanitizedDiffTab?.targetDirectory).toBe(null);
+  });
+});
+
+describe('useUIStore browser tabs opened with an address', () => {
+  const url = 'http://localhost:5173/';
+  const tabID = `browser:${url}`;
+
+  test('a new tab counts as opened now, so its first load may wait for the server', () => {
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+    useUIStore.getState().openContextPreview('/repo', url);
+    expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(true);
+    expect(wasBrowserTabOpenedWithAddress('/other', tabID)).toBe(false);
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+  });
+
+  test('opening the address of an existing tab asks that tab to load it again', () => {
+    useUIStore.getState().openContextBrowser('/repo', url);
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+    const requested: string[] = [];
+    const elsewhere: string[] = [];
+    const stop = subscribeBrowserTabLoadRequests('/repo', tabID, (next) => requested.push(next));
+    const stopElsewhere = subscribeBrowserTabLoadRequests('/other', tabID, (next) => elsewhere.push(next));
+
+    useUIStore.getState().openContextPreview('/repo', url);
+    useUIStore.getState().openContextBrowser('/repo', url);
+
+    expect(requested).toEqual([url, url]);
+    expect(elsewhere).toEqual([]);
+    // Loaded through the request, not marked: a later remount still counts as restored.
+    expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(false);
+    stop();
+    stopElsewhere();
+  });
+
+  test('an agent tab opened with an address counts as opened now', () => {
+    const agentTabID = useUIStore.getState().openAgentBrowserTab('/repo', url);
+    expect(agentTabID === null).toBe(false);
+    expect(wasBrowserTabOpenedWithAddress('/repo', agentTabID ?? '')).toBe(true);
+    forgetBrowserTabOpenedWithAddress('/repo', agentTabID ?? '');
   });
 });
 

@@ -1,0 +1,155 @@
+---
+title: UI-kit
+description: Knoppen, velden, keuzelijsten, tabbladen en andere onderdelen van @openchamber/sdk/ui voor extensies in de stijl van OpenChamber.
+---
+
+# UI-kit
+
+`@openchamber/sdk/ui` bevat kant-en-klare bedieningselementen met de kleuren, lettertypen en afstanden van de app. Zo past uw extensie bij OpenChamber zonder stijlen te kopiëren. Elk onderdeel is een functie: u geeft een eigen element en instellingen door, het onderdeel tekent zichzelf daarin en geeft `{ update, dispose }` terug. U stelt zelf het scherm samen en beheert de gegevens. De kit roept uw provider of OpenChamber nooit aan; `host.request`, `host.attach` en andere methoden gebruikt u zelf. Voor wat ontbreekt kunt u eigen HTML en CSS schrijven. Gebruik waar mogelijk de kit: de onderdelen volgen automatisch het thema, de afstanden en toetsenbordbediening van de app. Uw paneel voelt daardoor als onderdeel van OpenChamber in plaats van als een website erin.
+
+## Roep eerst `applyHostReady` aan
+
+Onderdelen lezen kleuren uit CSS-variabelen die `applyHostReady` op de pagina instelt. Die functie zet ook het lettertype en de tekstkleur op het hoofdelement, zodat eigen HTML erbij past. Roep haar binnen `host.onReady` aan vóór het opbouwen van de eerste onderdelen. Bij themawisselingen volgen de kleuren dan automatisch.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  // Mount controls and register listeners once here.
+});
+```
+
+De kit gebruikt door de host berekende tekstkleuren voor lichtgekleurde knoppen, badges, meldingstitels, validatieberichten en links. U hoeft het contrast niet zelf te berekenen.
+
+Voor eigen CSS biedt `applyHostReady` de variabelen `--primary-text`, `--success-text`, `--warning-text`, `--error-text` en `--info-text`, plus bijbehorende `--oc-*-text`-aliassen. Gebruik die voor tekst op neutrale of lichtgetinte achtergronden. Gebruik basiskleuren voor kleurvlakken en `--oc-primary-fg` voor tekst op een volle `--oc-primary`-achtergrond. Pas elke `onReady`-momentopname toe om de kleuren actueel te houden.
+
+`onReady` kan vaak worden aangeroepen terwijl het paneel openstaat, ook bij veranderde sessiecontext. Pas telkens het thema toe, maar bouw onderdelen en registreer listeners slechts één keer. Bewaar conceptwaarden buiten renderfuncties. Verberg bij tabbladwisselingen bestaande panelen of herstel hun waarden uit uw status, in plaats van ze te wissen.
+
+## Selecties en invoer gelijk houden met uw status
+
+`mountTabs`, `mountSelect`, `mountCheckbox` en `mountSwitch` melden wijzigingen via `onChange`. Ze slaan de nieuwe `activeId`, `value` of `checked` niet zelf op. Bewaar die waarde en geef haar met `update` terug. Tekst- en zoekvelden tonen getypte tekst meteen, maar ook hun props moeten via `update({ value })` worden bijgewerkt. Anders kan een latere update een oude waarde terugzetten. `onClick` op een knop wijzigt de variant niet. Gebruik voor een keuze tussen modi bij voorkeur `mountTabs`.
+
+Bouw deze onderdelen één keer op in de bestaande `root` van uw paneel:
+
+```ts
+import { mountSelect, mountTabs } from "@openchamber/sdk/ui";
+
+let activeId = "convert";
+const tabs = mountTabs(root, {
+  items: [{ id: "convert", label: "Convert" }, { id: "format", label: "Format" }],
+  activeId,
+  onChange: (next) => {
+    activeId = next;
+    tabs.update({ activeId });
+    // Show the matching panel without discarding its draft values.
+  },
+});
+
+let format = "json";
+const select = mountSelect(root, {
+  options: [{ id: "json", label: "JSON" }, { id: "yaml", label: "YAML" }],
+  value: format,
+  onChange: (next) => {
+    format = next;
+    select.update({ value: format });
+  },
+});
+```
+
+Voor een knop die twee formaten omwisselt, verwisselt u beide waarden in uw status en roept u op beide bestaande select-handles `update({ value })` aan. Bouw geen vervangende onderdelen om alleen de waarde te wijzigen. Roep `dispose()` aan wanneer u een onderdeel verwijdert.
+
+## Beschikbare onderdelen
+
+| Functie | Wat ze toont |
+| --- | --- |
+| `mountButton` | Een knop. `variant` is `default`, `secondary`, `outline`, `ghost` of `destructive`; `size` is `default`, `sm` of `xs`. `loading` toont een laadindicator en blokkeert klikken. |
+| `mountTextField` | Een invoerveld met label, of met `multiline` een tekstvak. Optionele `helper`- of `error`-tekst, `password` om invoer af te schermen en `mono` voor tokens en ID's. |
+| `mountSearchField` | Een zoekveld met vergrootglas en wisknop. Escape wist de inhoud. |
+| `mountSelect` | Een keuzelijst. `searchable` voegt bovenaan een filterveld toe. Pijltjes verplaatsen de selectie, Enter kiest en Escape sluit. |
+| `mountCheckbox`, `mountSwitch` | Een selectievakje of schakelaar met label en optionele `description`. |
+| `mountTabs` | Afgeronde tabbladen met optioneel een aantal. Links en rechts wisselen tussen tabbladen. |
+| `mountBadge` | Een klein afgerond label. `tone` is `neutral`, `primary`, `success`, `warning`, `error` of `info`. |
+| `mountList` | Een met het toetsenbord bedienbare lijst. Rijen kunnen een sleutel vooraan, titel, subtitel, rechts uitgelijnde metatekst en badge bevatten. |
+| `mountEmpty` | Een gecentreerde leegmelding met titel, tekstregel en optionele knop. |
+| `mountSpinner` | Een laadindicator met optioneel label. |
+| `mountBanner` | Een gekleurde melding met titel, inhoud en optionele actie. |
+| `mountSeparator` | Een dunne scheidingslijn, eventueel met een label in het midden. |
+| `mountProgress` | Een voortgangsbalk van 0 tot 100. |
+| `mountMenu` | Een knop die een actielijst opent. Items kunnen destructief, uitgeschakeld of een scheidingslijn zijn. |
+| `mountText` | Tekst van uw provider. Afbeeldingen in Markdown-stijl en `http(s)`-links worden echte afbeeldingen en links. De rest blijft gewone tekst, zodat niet-vertrouwde inhoud veilig kan worden getoond. |
+
+Naast de onderdelen zijn er drie hulpfuncties. `filterSelectOptions(options, query)` gebruikt dezelfde matching als `mountSelect`. `splitTextMedia(text)` verwerkt tekst zoals `mountText` vóór het tekenen doet. `moveListSelection` levert dezelfde toetsenbordstappen als lijst, keuzelijst en menu, voor als u zelf een lijst bouwt.
+
+## Een lijst met zoekfunctie
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+  const emptyRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(emptyRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  const search = mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      search.update({ value: next });
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` ontvangt alleen gewijzigde instellingen. De lijst behoudt de gemarkeerde rij bij updates zolang die rij nog bestaat.
+
+## Links in providertekst
+
+Uw pagina draait in een sandbox en kan niet zelf een nieuw tabblad openen. Geef bij `mountText` een `onOpenUrl` mee die de link aan OpenChamber overdraagt:
+
+```ts
+import { mountText } from "@openchamber/sdk/ui";
+
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Zie ook
+
+- [Een extensie bouwen](/nl/sdk/) voor mapindeling, manifest en installatie
+- [Host-API](/nl/sdk/host/) voor `connectHost`, koppelen en foutcodes

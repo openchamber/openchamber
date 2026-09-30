@@ -37,6 +37,7 @@ import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
+import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
@@ -301,10 +302,12 @@ export const SessionTabsStrip: React.FC<{
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
 
-  // Opening a session anywhere (sidebar, palette, deep link) adds its tab.
+  // Opening a session anywhere (sidebar, palette, deep link) adds its tab. The
+  // lanes of one multi-run share a tab: opening another lane reuses it.
+  const currentRunMemberIds = useMultiRunMemberIds(currentSessionId);
   React.useEffect(() => {
-    if (currentSessionId) ensureTab(currentSessionId);
-  }, [currentSessionId, ensureTab]);
+    if (currentSessionId) ensureTab(currentSessionId, currentRunMemberIds);
+  }, [currentSessionId, currentRunMemberIds, ensureTab]);
 
   const sessionsById = React.useMemo(() => {
     const map = new Map<string, Session>();

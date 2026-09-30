@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { opencodeClient } from "./client"
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from "../runtime-url"
-import { fetchUsageStats } from "./session-stats"
+import { fetchUsageStats, fetchUsageTools } from "./session-stats"
 
 const previous = getRuntimeUrlResolver()
 beforeEach(() => {
@@ -23,7 +23,14 @@ const wire = {
   steps: 9,
   tokens: tokens(10),
   cost: 1.25,
-  tools: { mode: "none" },
+  tools: {
+    mode: "detail",
+    totals: { calls: 9, succeeded: 7, failed: 1, unfinished: 1 },
+    usage: [
+      { name: "read", calls: 5, succeeded: 4, failed: 1, unfinished: 0, durationP50: 340 },
+      { name: "bash", calls: 4, succeeded: 3, failed: 0, unfinished: 1 },
+    ],
+  },
   activeDays: 2,
   streak: 2,
   activity: [{ date: "2026-09-01", steps: 4 }],
@@ -31,11 +38,11 @@ const wire = {
 }
 
 describe("session.stats boundary", () => {
-  test("sends the range, project, zone and no tool breakdown, and projects the report", async () => {
+  test("asks for the report without the tool scan, and projects it", async () => {
     let url: URL | null = null
     const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       url = new URL(input instanceof Request ? input.url : input.toString())
-      return Response.json({ data: wire })
+      return Response.json({ data: { ...wire, tools: { mode: "none" } } })
     })
     try {
       const stats = await fetchUsageStats({ from: 1_000, projectID: "prj_1", timezone: "Europe/Kyiv" })
@@ -47,9 +54,31 @@ describe("session.stats boundary", () => {
         tools: "none",
       })
       expect(stats.tokens).toEqual({ input: 10, output: 2, reasoning: 1, cacheRead: 3, cacheWrite: 4, total: 20 })
-      expect("tools" in stats).toBe(false)
+      expect(stats.tools).toEqual({ mode: "none" })
       expect(stats.models[0]).toMatchObject({ providerID: "anthropic", modelID: "claude", variant: "high", cost: 1.25 })
       expect(stats.range).toEqual({ from: 1_000, to: 2_000 })
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("asks for the tool breakdown over a fixed window on request", async () => {
+    let url: URL | null = null
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      url = new URL(input instanceof Request ? input.url : input.toString())
+      return Response.json({ data: wire })
+    })
+    try {
+      const tools = await fetchUsageTools({ from: 1_000, to: 2_000, timezone: "UTC" })
+      expect(Object.fromEntries(url!.searchParams)).toEqual({ from: "1000", to: "2000", timezone: "UTC", tools: "detail" })
+      expect(tools).toEqual({
+        mode: "detail",
+        totals: { calls: 9, succeeded: 7, failed: 1, unfinished: 1 },
+        usage: [
+          { name: "read", calls: 5, succeeded: 4, failed: 1, unfinished: 0, durationP50: 340 },
+          { name: "bash", calls: 4, succeeded: 3, failed: 0, unfinished: 1, durationP50: null },
+        ],
+      })
     } finally {
       fetch.mockRestore()
     }

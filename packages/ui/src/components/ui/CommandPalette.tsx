@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useUIStore } from '@/stores/useUIStore';
+import { useEnterpriseMode, useJevBlockedByEnterprise } from '@/stores/useEnterprisePolicyStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
@@ -54,6 +55,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
+import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 
 type CommandEntry = {
   id: string;
@@ -95,7 +97,6 @@ export const CommandPalette: React.FC = () => {
   const openContextSurface = useUIStore((s) => s.openContextSurface);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
-  const openMultiRunLauncher = useUIStore((s) => s.openMultiRunLauncher);
   const setArchivePageOpen = useUIStore((s) => s.setArchivePageOpen);
   const setProjectContextTab = useUIStore((s) => s.setProjectContextTab);
 
@@ -311,7 +312,7 @@ export const CommandPalette: React.FC = () => {
         searchText: t('commandPalette.item.openMultiRun'),
         onSelect: run(() => {
           setSessionSwitcherOpen(false);
-          openMultiRunLauncher();
+          openParallelComposer();
         }),
       },
       {
@@ -407,7 +408,6 @@ export const CommandPalette: React.FC = () => {
     activeProject?.path,
     currentSessionId,
     togglePinnedSession,
-    openMultiRunLauncher,
     setArchivePageOpen,
     setProjectContextTab,
   ]);
@@ -416,10 +416,12 @@ export const CommandPalette: React.FC = () => {
   // Settings sub-pages (only show when there's a query)
   // ---------------------------------------------------------------------------
   const routingAvailable = useUIStore((state) => state.routingFeatureAvailable);
+  const enterpriseMode = useEnterpriseMode();
+  const jevBlockedByEnterprise = useJevBlockedByEnterprise();
   const settingsRuntimeCtx = React.useMemo<SettingsRuntimeContext>(() => {
     const isDesktop = isDesktopShell();
-    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop, isMobile, routingAvailable };
-  }, [isMobile, routingAvailable]);
+    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop, isMobile, routingAvailable, enterpriseMode, jevBlockedByEnterprise };
+  }, [isMobile, routingAvailable, enterpriseMode, jevBlockedByEnterprise]);
 
   const settingsEntries = React.useMemo<CommandEntry[]>(() => {
     return SETTINGS_PAGE_METADATA

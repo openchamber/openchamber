@@ -186,9 +186,14 @@ const resolveConcreteBoundAddress = (value) => {
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters }) => String.raw`    tools.add({
+const createToolEntry = ({ name, description, definitions, parameters, codeMode }) => String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
+      // OpenCode 2 puts a plugin tool behind its Code Mode execute tool
+      // unless told otherwise. There the model sees only a size-limited
+      // catalog, and with a few large MCP servers ours dropped out of it, so
+      // agents concluded the tool did not exist. Direct is the default.
+      options: { codemode: ${codeMode ? 'true' : 'false'} },
       input: {
         type: "object",
         properties: {
@@ -259,7 +264,7 @@ const createToolEntry = ({ name, description, definitions, parameters }) => Stri
     })
 `;
 
-const createPluginSource = ({ includeControl, includeWeb, includeMemory, includeNotify }) => {
+const createPluginSource = ({ includeControl, includeWeb, includeMemory, includeNotify, codeMode }) => {
   const entries = [];
   if (includeControl) {
     entries.push(createToolEntry({
@@ -267,6 +272,7 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory, include
       description: CONTROL_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
       parameters: CONTROL_PARAMETER_PROPERTIES,
+      codeMode,
     }));
   }
   if (includeWeb) {
@@ -275,6 +281,7 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory, include
       description: WEB_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
       parameters: WEB_PARAMETER_PROPERTIES,
+      codeMode,
     }));
   }
   if (includeMemory) {
@@ -283,6 +290,7 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory, include
       description: MEMORY_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
       parameters: MEMORY_PARAMETER_PROPERTIES,
+      codeMode,
     }));
   }
   if (includeNotify) {
@@ -291,6 +299,7 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory, include
       description: NOTIFY_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
       parameters: NOTIFY_PARAMETER_PROPERTIES,
+      codeMode,
     }));
   }
 
@@ -356,13 +365,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeWeb = true, includeMemory = true, includeNotify = false } = {}) => {
+  const materializePlugin = async ({ includeControl = true, includeWeb = true, includeMemory = true, includeNotify = false, codeMode = false } = {}) => {
     if (!includeControl && !includeWeb && !includeMemory && !includeNotify) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory, includeNotify }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory, includeNotify, codeMode }), { mode: 0o600 });
     return pluginDirectory;
   };
 

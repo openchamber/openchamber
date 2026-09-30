@@ -82,10 +82,11 @@ export const createManagedConfigRuntime = ({
     const includeWeb = settings?.agentWebToolEnabled !== false;
     const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
+    const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [];
     if (agentToolRuntime && (includeControl || includeWeb || includeMemory || includeNotify)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeWeb, includeMemory, includeNotify }));
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeWeb, includeMemory, includeNotify, codeMode }));
     }
     return directories;
   };

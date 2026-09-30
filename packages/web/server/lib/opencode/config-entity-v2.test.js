@@ -261,6 +261,33 @@ describe('entity modules speak OpenCode 2 shapes', () => {
     }
   });
 
+  it('lists servers from a global opencode.jsonc next to opencode.json and edits them in place', () => {
+    const configDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    const jsonPath = path.join(configDir, 'opencode.json');
+    const jsoncPath = path.join(configDir, 'opencode.jsonc');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(jsonPath, JSON.stringify({ autoupdate: true }, null, 2), 'utf8');
+    fs.writeFileSync(jsoncPath, [
+      '{',
+      '  // servers live only in the jsonc file',
+      '  "mcp": { "servers": { "docs": { "type": "remote", "url": "https://docs.example.com/mcp" } } }',
+      '}',
+    ].join('\n'), 'utf8');
+
+    try {
+      expect(listMcpConfigs(projectDir).map((entry) => entry.name)).toContain('docs');
+      expect(getMcpConfig('docs', projectDir)).toEqual(expect.objectContaining({ scope: 'user' }));
+
+      updateMcpConfig('docs', { disabled: true }, projectDir);
+
+      expect(getMcpConfig('docs', projectDir)).toEqual(expect.objectContaining({ disabled: true }));
+      expect(readJson(jsonPath)).toEqual({ autoupdate: true });
+    } finally {
+      fs.rmSync(jsonPath, { force: true });
+      fs.rmSync(jsoncPath, { force: true });
+    }
+  });
+
   it('reads a v1 mcp entry and rewrites it under mcp.servers in the same file', () => {
     const configPath = write('opencode.json', JSON.stringify({
       mcp: {

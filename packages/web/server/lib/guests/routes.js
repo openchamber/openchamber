@@ -13,6 +13,7 @@ import {
   GUEST_GENERATE_TEXT_MAX,
   GUEST_FILE_CONTENT_MAX,
   GUEST_FILE_PATH_MAX,
+  guestFramePolicy,
   isGuestRequestPath,
   requestedGuestCapabilities,
   resolveIntegrationAuth,
@@ -20,6 +21,7 @@ import {
 
 import {
   findInstalledGuest,
+  hasGuestFrame,
   isGuestPanelId,
   listInstalledGuests,
   resolveGuestServedFile,
@@ -106,6 +108,11 @@ const generateBodySchema = z.object({
   maxOutputTokens: z.number().int().min(1).max(GUEST_GENERATE_OUTPUT_TOKENS_MAX).optional(),
 });
 
+const providerHeaderSchema = z.string().trim().min(1).max(200);
+
+// A Host header safe to echo into a CSP source: hostname or [IPv6], optional port.
+const guestHostSchema = z.string().regex(/^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/);
+
 const socketOverrideBodySchema = z.object({
   id: z.string().trim().regex(/^[a-z][a-z0-9-]*$/).max(64),
   path: z.union([
@@ -181,6 +188,10 @@ const sendInstallResult = (res, result) => {
     const body = { error: result.code };
     if (result.code === 'host-too-old' && result.required) {
       body.required = result.required;
+    }
+    if (result.code === 'enterprise-mode') {
+      body.capabilities = result.capabilities;
+      return res.status(403).json(body);
     }
     if (conflict && result.id) {
       body.id = result.id;
@@ -588,7 +599,7 @@ export const registerGuestRoutes = (app, {
     try {
       const result = await runGuestStorage(persistPath, req.params.id, parsed.data, async () => {
         const guest = await loadGuest(req.params.id);
-        if (!guest || guest.enabled === false || (!guest.entry && !guest.backgroundEntry && !guest.statusEntry)) throw new Error('Extension is unavailable.');
+        if (!guest || guest.enabled === false || !hasGuestFrame(guest)) throw new Error('Extension is unavailable.');
         if (!requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability))) throw new Error('Extension needs approval.');
       });
       return res.json(result);
@@ -660,6 +671,8 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: 'invalid-request' });
       }
       const { directory } = await resolveOptionalProjectDirectory(req);
+      // The host names the composer's provider; the model stays on it.
+      const provider = providerHeaderSchema.safeParse(req.get('x-openchamber-provider'));
       const { generateSmallModelText } = await getSmallModelService();
       let generated;
       try {
@@ -668,6 +681,7 @@ export const registerGuestRoutes = (app, {
           system: parsed.data.system,
           maxOutputTokens: parsed.data.maxOutputTokens,
           directory: directory || undefined,
+          preferredProviderID: provider.success ? provider.data : undefined,
         });
       } catch (error) {
         const statusCode = Number(error?.statusCode) || 500;
@@ -719,6 +733,10 @@ export const registerGuestRoutes = (app, {
       // partial grant would leave the guest half-working, so both are refused.
       const requested = requestedGuestCapabilities(guest);
       const granted = parsed.data.granted;
+      // Enterprise mode refuses these for this package; approving cannot lift that.
+      if (guest.enterpriseBlocked?.some((capability) => granted.includes(capability))) {
+        return res.status(403).json({ error: 'enterprise-mode', capabilities: guest.enterpriseBlocked });
+      }
       const matchesRequest = granted.length === requested.length && requested.every((capability) => granted.includes(capability));
       if (granted.length > 0 && !matchesRequest) {
         return res.status(400).json({ error: 'invalid-request' });
@@ -822,7 +840,7 @@ export const registerGuestRoutes = (app, {
         return res.status(404).end();
       }
       const served = await resolveGuestServedFile(guest.packageRoot, relativePath, {
-        hasRuntime: Boolean(guest.entry || guest.backgroundEntry || guest.statusEntry),
+        hasRuntime: hasGuestFrame(guest),
       });
       if (!served) {
         return res.status(404).end();
@@ -842,10 +860,27 @@ export const registerGuestRoutes = (app, {
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Cache-Control', 'no-store');
       // Guest files are third-party code served from the OpenChamber origin.
-      // The rail embeds them in a sandboxed iframe; this header makes the
+      // The rail embeds them in a sandboxed iframe; `sandbox` makes the
       // document sandboxed even when opened directly, so a guest page can
-      // never run with the user's session on the app origin.
-      res.setHeader('Content-Security-Policy', 'sandbox allow-scripts');
+      // never run with the user's session on the app origin. The rest keeps
+      // it off the network (`guestFramePolicy`): its connections may reach
+      // only its own package path, named by the host the browser used, since
+      // a sandboxed document has no origin of its own to say `'self'` with.
+      const hostHeader = guestHostSchema.safeParse(req.headers.host);
+      const host = hostHeader.success ? hostHeader.data : null;
+      const connectSource = host ? `${host}/api/guests/${id}/` : null;
+      // Origins the user approved for this exact list (`effectiveGrants`) open too.
+      const origins = guest.capabilityGrants?.includes('origins') && Array.isArray(guest.origins) ? guest.origins : [];
+      res.setHeader('Content-Security-Policy', `sandbox allow-scripts; ${guestFramePolicy(connectSource, origins)}`);
+      // The sandboxed frame's origin is `null`, and fonts (always) and fetch
+      // are CORS requests: without this its own package fonts and files are
+      // refused. `null`, not `*`: only opaque-origin documents may read them.
+      // The app UI's own origin, already allowed by the server's CORS layer,
+      // keeps its answer: the rail draws a package icon as a CSS mask, which is
+      // a CORS fetch from openchamber-ui:// or the dev origin.
+      if (!res.getHeader('Access-Control-Allow-Origin')) {
+        res.setHeader('Access-Control-Allow-Origin', 'null');
+      }
       res.send(body);
     } catch (error) {
       console.error('Failed to serve guest asset:', error);

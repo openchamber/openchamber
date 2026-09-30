@@ -1,3 +1,61 @@
+## [2.0.4] - 2026-09-28
+
+### New
+
+- **Dutch interface:** OpenChamber can be used in Dutch (thanks to @herbkk).
+- Enterprise mode: when an administrator turns it on with the policy file on the machine, connecting providers is off and update checks don't report usage.
+
+### Improvements
+
+- Settings opens right away the first time.
+
+### Fixes
+
+- Chat: comments you add in the message box stay on the message they were sent with. The last comment could drop off the message, also after a reload.
+- Chat: Arabic, Hebrew and Persian text reads right to left in messages and in the message box, with punctuation, lists and quotes on the right side (thanks to @yulia-ivashko).
+- Chat: an error in one session stays in that session and no longer appears in every other session you open (thanks to @internetisalie and @yulia-ivashko).
+- Chat: a collapsed long message has a visible expand button that also works from the keyboard (thanks to @bashrusakh).
+- Settings/Agents: OpenCode's own agents appear under Built-in Agents, without rename and delete (thanks to @DeryFerd).
+- Worktrees: a long error in the New Worktree dialog wraps, so you can read the whole path (thanks to @yulia-ivashko).
+
+## [2.0.3] - 2026-09-28
+
+### New
+
+- **Permissions: every session has a mode: ask, safety net or accept all.** The shield in the composer switches it.
+- Settings/Providers: providers are a card grid, and one provider can hold several accounts.
+- Settings: MCP servers and plugins are cards that show their status at a glance.
+
+### Improvements
+
+- **Run on several models replaces the Agent Manager.** The composer runs one prompt on several models, each run is one row in the sessions list, and its overview compares the answers.
+
+### Fixes
+
+- The extension no longer hangs at startup on Windows when the PowerShell profile sits in a OneDrive folder (thanks to @thewerthon).
+- Settings/Providers: custom providers with an API key save again.
+- OpenCode: the extension connects when you set your own `OPENCODE_PASSWORD`.
+- Models: the model picker scrolls through providers with 40 or more models to the last one.
+- Chat: commands that run as a subagent show a running card and then their result.
+- Chat: subagent answers show formatted text.
+- Chat: a message with only a linked GitHub issue can be sent (thanks to @hiro-nikaitou).
+- Sessions: a session deleted outside the extension closes, and messages no longer fail with "Session not found" (thanks to @hiro-nikaitou).
+- Worktrees: removing a worktree on Windows finishes, even when a session was still using its folder (thanks to @bashrusakh).
+- Settings/Plugins: plugins from a private npm registry no longer show as not found (thanks to @Ex0ry).
+- Usage: the Zhipu Coding Plan card shows its limits again (thanks to @CMBill).
+
+## [2.0.2] - 2026-09-26
+
+### Fixes
+
+- The extension connects to OpenCode running as a background service.
+- Chat: answers typed into a question form survive switching sessions.
+- Agents: agents added by plugins show up in the composer without a reload (thanks to @hiro-nikaitou).
+- Chat: the retry countdown shows again while OpenCode waits to retry.
+- Chat: a dollar sign in regular text no longer turns the rest of the line into math (thanks to @hiro-nikaitou).
+- Chat: long identifiers in Markdown tables wrap properly (thanks to @aiiibolo).
+- Small model: commit messages keep working while plugins are still loading.
+
 ## [2.0.1] - 2026-09-24
 
 ### New

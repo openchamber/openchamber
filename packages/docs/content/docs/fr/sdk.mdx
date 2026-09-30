@@ -110,13 +110,13 @@ Dessiner un panneau et lire la session en cours ne demandent aucune permission. 
 | `files` | lire et écrire des fichiers dans le projet ouvert (`readFile`, `writeFile`, `listDir`, `stat` avec un chemin relatif) |
 | `model` | génération de texte ponctuelle avec le Small Model de l'utilisateur (`generate`), en dehors de toute session |
 
-Quatre autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, et `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)).
+Cinq autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, et `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)).
 
 L'utilisateur voit la liste complète une seule fois, à l'installation de l'extension, et l'approuve ou supprime l'extension. Si une nouvelle version demande davantage, la boîte de dialogue réapparaît. Un appel qui a besoin d'une capacité non approuvée par l'utilisateur échoue avec `NOT_GRANTED`.
 
 ## Générer du texte
 
-Avec la capacité `model`, `host.generate` demande au Small Model de l'utilisateur une réponse ponctuelle : un résumé, un titre, un brouillon. Rien n'entre dans une session, aucun historique n'est conservé, et l'extension ne choisit jamais de fournisseur. OpenChamber utilise le même modèle que pour son propre travail en arrière-plan, choisi dans Paramètres → Sessions → Small Model, ou sélectionné automatiquement parmi les fournisseurs connectés de l'utilisateur.
+Avec la capacité `model`, `host.generate` demande au Small Model de l'utilisateur une réponse ponctuelle : un résumé, un titre, un brouillon. Rien n'entre dans une session, aucun historique n'est conservé, et l'extension ne choisit jamais de fournisseur. OpenChamber utilise le même modèle que pour son propre travail en arrière-plan, choisi dans Paramètres → Sessions → Small Model, ou le petit modèle du fournisseur avec lequel l'utilisateur travaille, ou le modèle par défaut de sa configuration OpenCode.
 
 ```ts
 const { text } = await host.generate({
@@ -130,7 +130,19 @@ Quand aucun modèle n'est disponible, l'appel échoue avec `NO_MODEL` ; un modè
 
 ## Comptes et réseau
 
-Votre page tourne dans un sandbox et ne peut pas appeler internet directement. Déclarez une `integration` et OpenChamber fait les appels pour vous via `host.request`, avec le token de l'utilisateur attaché. Le token n'atteint jamais votre page.
+Votre page tourne dans un sandbox et ne peut pas accéder au réseau d'elle-même : scripts, styles, images, polices et médias ne se chargent que depuis votre paquet, et `fetch` n'atteint que les fichiers de votre paquet. Livrez les polices et les images dans le paquet plutôt que de les charger depuis un CDN.
+
+Pour parler à un service extérieur, déclarez une `integration` et OpenChamber fait les appels pour vous via `host.request`, avec le token de l'utilisateur attaché. Le token n'atteint jamais votre page.
+
+Pour tout le reste dont votre page a besoin directement, comme des polices ou des images depuis un CDN ou une API publique, listez jusqu'à 8 origines https :
+
+```json
+"origins": ["https://fonts.example.com"]
+```
+
+L'utilisateur les voit dans la boîte de dialogue d'approbation comme des adresses auxquelles votre extension peut envoyer des données et dont elle peut en recevoir, et les approuve à nouveau si une mise à jour en ajoute une. Les origines approuvées sont ouvertes à `fetch`, aux images, aux polices, aux styles et aux médias, mais jamais aux scripts : le code doit être livré dans votre paquet. L'origine de la page est `null`, donc pour lire une réponse `fetch`, le serveur doit autoriser CORS pour cette origine.
+
+En [mode entreprise](/security/), une extension avec `origins`, une `integration` ou un `service` ne s'installe que depuis un dépôt Git listé par l'administrateur. Si votre extension peut s'en passer, elle reste installable pour ces équipes. Pour en développer une sur une telle machine, demandez à l'administrateur `allowLocalExtensions`, qui vous permet de l'installer depuis son dossier.
 
 - `token` : l'utilisateur colle un token d'API sur la carte Paramètres → Intégrations. `apiOrigin` est la seule origine que `request` peut appeler. `account` est optionnel : un chemin GET et un nom de champ, pour que la carte affiche qui est connecté. `scheme` indique comment le token est envoyé ; voir le tableau ci-dessous. Vérifiez dans la documentation de l'API du fournisseur quel en-tête elle attend.
 - `oauth` : l'utilisateur colle un client id, et OpenChamber exécute le flux d'autorisation. Nécessite `authorizeUrl`, `tokenUrl` et `apiOrigin`.
@@ -181,6 +193,63 @@ Les écritures sont atomiques : OpenChamber écrit un fichier temporaire puis le
 - `height` est la hauteur de départ en pixels, de 24 à 320 (120 par défaut). Appelez [`host.setHeight()`](/sdk/host/) quand la taille de votre contenu change.
 
 Votre page voit `ctx.surface` à `status`. OpenChamber ne la charge que tant que le panneau Work Status est visible et votre section dépliée, et la décharge quand l'utilisateur replie la section. N'y gardez donc rien que vous ne puissiez reconstruire. Une extension réduite à une section peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `git-graph-status` est une section complète.
+
+## Un éditeur pour votre type de fichier
+
+`contributes.fileEditors` ouvre les fichiers dans votre page au lieu de l'éditeur de texte. Quand l'utilisateur ouvre un fichier correspondant dans Files, OpenChamber y affiche votre éditeur, avec la même bascule vers la source, le même bouton plein écran et le même bouton d'enregistrement que les visionneuses intégrées.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` ne compare que les noms de fichiers, sans tenir compte de la casse. `*` correspond à n'importe quelle suite de caractères et `?` à un seul. Un motif ne peut pas contenir `/` ni se composer uniquement de jokers.
+- `entry` est une page HTML dans votre dossier. `panel.entry` n'est pas nécessaire, et l'extension peut n'être que l'éditeur, sans icône dans la barre latérale.
+- `content` vaut `"text"` (par défaut) ou `"binary"`, voir plus bas.
+- Jusqu'à 8 éditeurs par extension, avec jusqu'à 16 motifs chacun.
+
+OpenChamber garde la main sur le fichier. Votre page ne le lit ni ne l'écrit jamais et n'a besoin d'aucune permission pour cela. OpenChamber vous transmet le texte, vous demande le texte modifié au moment d'enregistrer, et gère Cmd/Ctrl+S, l'enregistrement automatique, l'avertissement de modifications non enregistrées, les fins de ligne et les modifications faites sur le disque :
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // un éditeur de texte reçoit toujours du texte
+  load(file.content); // et aussi file.path, file.name, file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Appelez ceci après chaque modification. `edited` retient l'enregistrement automatique jusqu'à ce que l'utilisateur s'arrête.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Les modifications faites pendant qu'OpenChamber écrivait laissent le fichier non enregistré.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` est n'importe quelle courte chaîne qui change quand le document change, comme un hash. Si un fichier n'est pas quelque chose que votre éditeur sait ouvrir, appelez `host.reportFileUnsupported()` et OpenChamber affiche sa source avec un avertissement. Les fichiers de plus de 20 MB restent dans la vue source.
+
+### Fichiers binaires
+
+Indiquez `"content": "binary"` pour ouvrir des fichiers qui ne sont pas du texte, comme des tableurs, des documents ou des images. Votre éditeur reçoit les octets du fichier et renvoie des octets ; tout le reste fonctionne de la même façon.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // un Uint8Array, exactement comme sur le disque
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Un éditeur binaire peut prendre en charge n'importe quel fichier correspondant à ses motifs, y compris ceux dont OpenChamber affiche lui-même un aperçu, comme les images et les PDF. Il n'a pas de vue source, et quand l'utilisateur le passe en plein écran ou l'en sort avec des modifications non enregistrées, OpenChamber les enregistre d'abord. Lire et écrire le format revient à votre éditeur : OpenChamber réécrit exactement les octets que vous renvoyez.
+
+Votre page voit `ctx.surface` à `file`. OpenChamber la recharge, en lui retransmettant le fichier, quand le fichier change sur le disque, que l'utilisateur annule ses modifications, ou que l'éditeur passe en plein écran ou en sort. La première extension activée dont un motif correspond l'emporte, avant les aperçus propres à OpenChamber. Une extension réduite à un éditeur peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `checklist-editor` est un éditeur complet.
 
 ## Actions, commandes et le badge
 
@@ -234,7 +303,7 @@ Quand votre plugin OpenCode ou serveur MCP ajoute un outil, le chat affiche ses 
 
 `match` est le nom de l'outil tel qu'OpenCode le rapporte ; un `*` final correspond à un préfixe. `icon` est un nom Remixicon ou un fichier `.svg` dans votre paquet, comme `panel.icon`. `title` et `subtitle` sont des gabarits sur `input`, `output` et `metadata` de l'appel. `output` choisit comment le corps est rendu : `text`, `json` (un arbre), `markdown`, `code` avec un `language`, `table` avec `columns` (les lignes viennent du tableau de sortie ou de `output.items`) ou `auto` pour le rendu par défaut. Un `match` exact l'emporte sur un joker, et en cas d'égalité la première extension installée gagne. Aucune permission n'est nécessaire : cela ne change que la façon dont des données déjà dans le chat sont dessinées.
 
-Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et rien d'autre. L'autre exception est une section Work Status avec son propre `entry`, voir plus haut.
+Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et rien d'autre. L'autre exception est une section Work Status ou un éditeur de fichiers avec son propre `entry`, voir plus haut.
 
 ## Premières lignes dans le panneau
 

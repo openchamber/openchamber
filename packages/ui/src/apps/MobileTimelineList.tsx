@@ -13,17 +13,36 @@ import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 
 import { MobileProjectIcon, type MobileProjectIconProject } from './MobileProjectIcon';
 import { MobileSessionRenameForm } from './MobileSessionRenameForm';
-import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
+import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
+import { CollapsedActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
+import { useCollapsedSessionActivityState } from '@/components/session/sidebar/sessions/collapsedActivityState';
+import type { SessionNode } from '@/components/session/sidebar/types';
+import type { MultiRunSummary } from '@/lib/multirun/runs';
+import { useUIStore } from '@/stores/useUIStore';
 import { formatRelativeShort, getSessionTimestamp } from './mobileSessionFields';
+import { MobileRunProviderLogos } from './MobileRunProviderLogos';
+import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
+import { usePendingRequestCounts } from './usePendingRequestCounts';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 
 export type TimelineProject = MobileProjectIconProject & { label: string };
 
 export type TimelineEntry = {
+  kind: 'session';
   session: Session;
   project: TimelineProject;
   /** Worktree branch for worktree sessions, project root branch otherwise.
       Null when no branch is known — the row then drops its third line. */
   branch: string | null;
+} | {
+  /** A multi-run takes one row at its first lane's position. */
+  kind: 'run';
+  run: MultiRunSummary;
+  /** Lanes with their subsessions, for the aggregate activity indicator. */
+  laneNodes: readonly SessionNode[];
+  project: TimelineProject;
 };
 
 export type TimelineRowHandlers = {
@@ -39,12 +58,72 @@ export type TimelineRowHandlers = {
   onRequestRename: (sessionId: string) => void;
   onSubmitRename: (sessionId: string, title: string) => void;
   onCancelRename: () => void;
+  /** Track / Done; absent while the feature is off. */
+  onToggleWork?: (session: Session, inWork: boolean) => void;
+  isPinned: (session: Session) => boolean;
+  onTogglePin: (session: Session) => void;
+  /** Subsessions of a row, for the requests they are waiting on. */
+  descendantIdsOf: (sessionId: string) => readonly string[];
 };
 
 const TIMELINE_ROW_INDENT = 12;
 
+// Timeline rows are three lines inside a button; this padding, not a min-h-*
+// utility, sets their height, because mobile.css gives every button a 36px
+// floor that beats Tailwind's min-h-*.
+const TIMELINE_ROW_LAYOUT_CLASS = 'flex min-w-0 flex-1 flex-col gap-1 py-2.5 pr-3 text-left';
+
+/**
+ * A multi-run in the timeline, shaped like the session rows around it:
+ * project and time, then the title, then the run mark and lane count where a
+ * session shows its branch. Tapping opens the run overview.
+ */
+const MobileTimelineRunRow: React.FC<{
+  entry: Extract<TimelineEntry, { kind: 'run' }>;
+}> = ({ entry }) => {
+  const { t } = useI18n();
+  const { run, project } = entry;
+  const active = useUIStore((state) => state.runOverviewKey === run.key);
+  const activity = useCollapsedSessionActivityState({ nodes: entry.laneNodes, includeUnreadSubtasks: false });
+  const time = formatRelativeShort(run.lastActivity);
+  const laneCount = run.lanes.length;
+  return (
+    <div
+      data-active-session={active || undefined}
+      className={cn('relative bg-background transition-colors', active && 'bg-[color-mix(in_srgb,var(--primary)_10%,var(--background))]')}
+    >
+      <button
+        type="button"
+        className={cn(TIMELINE_ROW_LAYOUT_CLASS, 'w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring')}
+        style={{ paddingLeft: TIMELINE_ROW_INDENT, touchAction: 'manipulation' }}
+        onClick={() => useUIStore.getState().setRunOverviewKey(run.key)}
+        aria-label={t('sessions.sidebar.run.openOverviewAria', { title: run.title })}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <MobileProjectIcon project={project} size="sm" />
+          <span className="block min-w-0 flex-1 truncate typography-micro text-muted-foreground">{project.label}</span>
+          {activity ? <CollapsedActivityIndicator state={activity} /> : null}
+          {time ? <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span> : null}
+        </span>
+        <span className={cn('block min-w-0 truncate typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+          {run.title}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <ArrowsMerge className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="block min-w-0 flex-1 truncate typography-micro">
+            {laneCount === 1
+              ? t('sessions.sidebar.run.laneCountSingle', { count: laneCount })
+              : t('sessions.sidebar.run.laneCountPlural', { count: laneCount })}
+          </span>
+          <MobileRunProviderLogos providerIDs={run.providerIDs} />
+        </span>
+      </button>
+    </div>
+  );
+};
+
 const MobileTimelineRow: React.FC<{
-  entry: TimelineEntry;
+  entry: Extract<TimelineEntry, { kind: 'session' }>;
   active: boolean;
   revealed: boolean;
   confirmingDelete: boolean;
@@ -55,7 +134,7 @@ const MobileTimelineRow: React.FC<{
   const { session, project, branch } = entry;
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const time = formatRelativeShort(getSessionTimestamp(session));
-  const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed);
+  const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed || renaming);
 
   // Live indicators, same conventions as the grouped rows: busy/retry →
   // info dot; unseen activity on a non-active row → success dot.
@@ -64,10 +143,22 @@ const MobileTimelineRow: React.FC<{
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
+  const onToggleWork = handlers.onToggleWork;
+  const inWork = isSessionInWork(session);
+  const work = onToggleWork ? { inWork, onToggle: () => onToggleWork(session, inWork) } : undefined;
+  const pinned = handlers.isPinned(session);
+  const pin = { pinned, onToggle: () => handlers.onTogglePin(session) };
+  // Timeline rows never expand, so their subsessions' requests count here.
+  const { descendantIdsOf } = handlers;
+  const familyIds = React.useMemo(() => [session.id, ...descendantIdsOf(session.id)], [descendantIdsOf, session.id]);
+  const pendingRequests = usePendingRequestCounts(familyIds);
+  const hasPendingRequests = pendingRequests.permissionCount > 0 || pendingRequests.formCount > 0;
+  const hasGoal = getSessionGoal(session) !== null;
 
   return (
     <MobileSwipeActionsRow
-      actionsWidth={ROW_ACTIONS_WIDTH}
+      // Every timeline row is top-level, so Pin is always there.
+      actionsWidth={ROW_ACTIONS_WIDTH + ROW_ACTION_SLOT_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
       onRevealedChange={(next) => handlers.onRevealedChange(session.id, next)}
       dataActiveSession={active}
@@ -77,15 +168,17 @@ const MobileTimelineRow: React.FC<{
       )}
       actions={(
         <MobileSessionRowActions
+          sessionId={session.id}
           title={title}
           revealed={revealed}
           confirmingDelete={confirmingDelete}
-          aiRename={aiRename}
           onArchive={() => handlers.onArchive(session)}
           onRequestDelete={() => handlers.onRequestDelete(session.id)}
           onConfirmDelete={() => handlers.onConfirmDelete(session)}
           onRequestRename={() => handlers.onRequestRename(session.id)}
           onRevealedChange={(next) => handlers.onRevealedChange(session.id, next)}
+          work={work}
+          pin={pin}
         />
       )}
     >
@@ -97,6 +190,9 @@ const MobileTimelineRow: React.FC<{
               <span className="block min-w-0 flex-1 truncate typography-micro text-muted-foreground">
                 {project.label}
               </span>
+              {pinned ? (
+                <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
+              ) : null}
               {aiRename.pending ? (
                 <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
               ) : isStreaming || showUnreadDot ? (
@@ -117,6 +213,7 @@ const MobileTimelineRow: React.FC<{
               <MobileSessionRenameForm
                 initialTitle={title}
                 indent={0}
+                aiRename={aiRename}
                 // One title line tall; the save/cancel controls shrink to fit it.
                 className="h-[1lh] pr-0 typography-ui-label [&_button]:size-6 [&_button>svg]:size-3.5"
                 onSubmit={(next) => handlers.onSubmitRename(session.id, next)}
@@ -127,18 +224,25 @@ const MobileTimelineRow: React.FC<{
                 {title}
               </span>
             )}
-            {branch ? (
+            {branch || hasGoal || hasPendingRequests ? (
+              // Branch on the left; goal and waiting requests close the line,
+              // the same state cluster the desktop timeline row ends with.
               <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                <Icon name="git-branch" className="size-3.5 shrink-0" />
-                <span className="block min-w-0 truncate typography-micro">{branch}</span>
+                {branch ? (
+                  <>
+                    <Icon name="git-branch" className="size-3.5 shrink-0" />
+                    <span className="block min-w-0 truncate typography-micro">{branch}</span>
+                  </>
+                ) : null}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  <MobileSessionGoalGlyph session={session} />
+                  <MobileSessionPendingBadges {...pendingRequests} />
+                </span>
               </span>
             ) : null}
           </>
         );
-        // Explicit padding instead of a min-height utility: mobile.css gives
-        // every button a 36px floor that beats Tailwind's min-h-*, so the
-        // row's height comes from its own three lines plus this padding.
-        const layoutClassName = 'flex min-w-0 flex-1 flex-col gap-1 py-2.5 pr-3 text-left';
+        const layoutClassName = TIMELINE_ROW_LAYOUT_CLASS;
         if (renaming) {
           return <div className={layoutClassName} style={{ paddingLeft: TIMELINE_ROW_INDENT }}>{lines}</div>;
         }
@@ -219,7 +323,9 @@ export const MobileTimelineList: React.FC<{
         <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{entries.length}</span>
       </div>
       <div className="pb-2">
-        {visibleEntries.map((entry) => (
+        {visibleEntries.map((entry) => (entry.kind === 'run' ? (
+          <MobileTimelineRunRow key={`run:${entry.run.key}`} entry={entry} />
+        ) : (
           <MobileTimelineRow
             key={entry.session.id}
             entry={entry}
@@ -229,7 +335,7 @@ export const MobileTimelineList: React.FC<{
             renaming={handlers.renamingSessionId === entry.session.id}
             handlers={handlers}
           />
-        ))}
+        )))}
         {visibleEntries.length < entries.length ? (
           <TimelineEndSentinel
             scrollRootRef={scrollRootRef}

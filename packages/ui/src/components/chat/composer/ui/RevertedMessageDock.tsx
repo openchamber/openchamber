@@ -68,7 +68,9 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
         if (!revertMessageID) return [];
         return revertedState.records.map((record) => ({
             id: record.message.id,
-            text: getRevertedPreview(record.parts, noTextContent),
+            text: record.message.role === 'synthetic'
+                ? (record.message.description?.trim() || noTextContent)
+                : getRevertedPreview(record.parts, noTextContent),
         }));
     }, [noTextContent, revertMessageID, revertedState]);
     const firstRevertedMessageId = items[0]?.id;
@@ -119,12 +121,12 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
                         onClick={() => setCollapsed((value) => !value)}
                         aria-expanded={!collapsed}
                     >
-                    <span className="typography-ui-label font-medium text-foreground flex-shrink-0">
+                    <span className="typography-ui-label font-medium text-foreground truncate">
                         {t('chat.revertPopover.staged', { count: items.length })}
                     </span>
                         <Icon
                             name="arrow-down-s"
-                            className={cn("ml-auto h-4 w-4 text-muted-foreground transition-transform", !collapsed && "rotate-180")}
+                            className={cn("ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform", !collapsed && "rotate-180")}
                             aria-hidden="true"
                         />
                     </button>
@@ -134,6 +136,7 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
                         type="button"
                         variant="secondary"
                         size="xs"
+                        className="shrink-0"
                         disabled={Boolean(settling || forkingId)}
                         onClick={() => { void handleClear(); }}
                     >
@@ -148,13 +151,14 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
                         type="button"
                         variant="destructive"
                         size="xs"
+                        className="shrink-0"
                         disabled={Boolean(settling || forkingId)}
                         onClick={() => { void handleCommit(); }}
                     >
                         {settling === 'commit' ? (
                             <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
                         ) : (
-                            <Icon name="check" className="h-3 w-3" aria-hidden="true" />
+                            <Icon name="delete-bin" className="h-3 w-3" aria-hidden="true" />
                         )}
                         {t('chat.revertPopover.commit')}
                     </Button>

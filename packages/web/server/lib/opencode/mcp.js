@@ -48,9 +48,14 @@ function ensureProjectMcpConfigPath(workingDirectory) {
   return path.join(configDir, 'opencode.json');
 }
 
-/** Same precedence as `getJsonEntrySource`: custom > project > user. */
+/** Same precedence as `getJsonEntrySource`: custom > project > user override > user. */
 function readMcpEntriesAcrossLayers(layers) {
-  return readLayeredMcpEntries([layers?.userConfig, layers?.projectConfig, layers?.customConfig]);
+  return readLayeredMcpEntries([
+    layers?.userConfig,
+    layers?.userOverrideConfig,
+    layers?.projectConfig,
+    layers?.customConfig,
+  ]);
 }
 
 function listMcpConfigs(workingDirectory) {

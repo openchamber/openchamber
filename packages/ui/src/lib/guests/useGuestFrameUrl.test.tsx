@@ -19,7 +19,7 @@ describe('guest frame URL lifecycle', () => {
   const previousGlobals = new Map<string, PropertyDescriptor | undefined>();
   let restoreFetch = () => {};
   let restoreClock = () => {};
-  const initial = { guestId: 'dev-tools', entry: 'panel/index.html', instanceKey: 'v1', enabled: true };
+  const initial: { guestId: string; entry: string; instanceKey: string; enabled: boolean; origins: readonly string[] } = { guestId: 'dev-tools', entry: 'panel/index.html', instanceKey: 'v1', enabled: true, origins: [] };
 
   const Probe = (props: typeof initial) => {
     state = useGuestFrameUrl(props);

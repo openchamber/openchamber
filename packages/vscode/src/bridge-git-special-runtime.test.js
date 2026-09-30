@@ -22,7 +22,7 @@ const rawFetch = mock(async () => {
 mock.module('./gitService', () => gitService);
 mock.module('@opencode/client', () => ({ OpenCode: { make } }));
 
-const { handleSpecialGitBridgeMessage } = await import('./bridge-git-special-runtime');
+const { handleSpecialGitBridgeMessage, setUnavailableRetryDelaysForTest } = await import('./bridge-git-special-runtime');
 
 describe('bridge git special runtime', () => {
   beforeEach(() => {
@@ -111,5 +111,45 @@ describe('bridge git special runtime', () => {
     });
 
     expect(response).toEqual({ id: '2', type: 'api:git/pr-description', success: false, error: 'model unavailable' });
+  });
+
+  describe('while the model is still loading', () => {
+    const unavailable = { _tag: 'InvalidRequestError', message: 'Model unavailable: anthropic/claude-sonnet-4-5' };
+    const request = () => handleSpecialGitBridgeMessage({
+      id: '3',
+      type: 'api:git/pr-description',
+      payload: { directory: '/repo', base: 'main', head: 'feature', providerId: 'anthropic', modelId: 'claude-sonnet-4-5' },
+    }, {
+      manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) },
+    }, { readSettings: () => ({}), execGit: mock() });
+
+    beforeEach(() => setUnavailableRetryDelaysForTest([1, 1]));
+
+    it('retries with backoff until the model appears', async () => {
+      let calls = 0;
+      sdkClient.generate.text.mockImplementation(async () => {
+        calls += 1;
+        if (calls <= 2) throw unavailable;
+        return { text: '{"title":"PR title","body":"PR body"}' };
+      });
+
+      const response = await request();
+
+      expect(response.success).toBe(true);
+      expect(sdkClient.generate.text).toHaveBeenCalledTimes(3);
+      setUnavailableRetryDelaysForTest();
+    });
+
+    it('gives up once the backoff runs out and never retries other errors', async () => {
+      sdkClient.generate.text.mockImplementation(async () => { throw unavailable; });
+      expect((await request()).success).toBe(false);
+      expect(sdkClient.generate.text).toHaveBeenCalledTimes(3);
+
+      sdkClient.generate.text.mockReset();
+      sdkClient.generate.text.mockImplementation(async () => { throw { _tag: 'InvalidRequestError', message: 'Invalid prompt' }; });
+      await request();
+      expect(sdkClient.generate.text).toHaveBeenCalledTimes(1);
+      setUnavailableRetryDelaysForTest();
+    });
   });
 });

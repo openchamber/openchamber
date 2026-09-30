@@ -7,6 +7,7 @@ import { getLastConversationMessage, type Message, type Part, type Session } fro
 import { useLatestSessionError } from '@/sync/notification-store';
 import { useDirectoryStore, useSessionStatus, useSessionStatusSnapshotReady } from '@/sync/sync-context';
 import { refetchSessionMessages } from '@/sync/session-actions';
+import { LongErrorText } from './LongErrorText';
 import { readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
@@ -124,7 +125,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
   const { t } = useI18n();
   const latestError = useLatestSessionError(sessionId);
   const status = useSessionStatus(sessionId, directory);
-  const statusSnapshotReady = useSessionStatusSnapshotReady(directory);
+  const statusSnapshotReady = useSessionStatusSnapshotReady(directory, sessionId);
   const lastMessage = useLastMessageState(sessionId, directory);
   const storedFailure = useStoredFailure(sessionId, directory);
 
@@ -202,7 +203,11 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
           <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
           <span className="typography-meta font-medium text-foreground">{title}</span>
         </div>
-        <div className="mt-1 pl-[1.375rem] typography-meta text-muted-foreground break-words">{detail}</div>
+        <LongErrorText text={detail} buttonClassName="ml-[0.875rem]">
+          {(visibleText) => (
+            <div className="mt-1 pl-[1.375rem] typography-meta text-muted-foreground break-words">{visibleText}</div>
+          )}
+        </LongErrorText>
         {!hasDetails ? (
           <div className="pl-[1.375rem]">
             <Button

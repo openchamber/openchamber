@@ -24,6 +24,7 @@ import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runt
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
@@ -69,6 +70,24 @@ export type EventPipelineInput = {
   onDisconnect?: (reason: string) => void
   /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
   onTransportSwitch?: () => void
+  /**
+   * Called when the host announces that an isolated space's own event connection came or
+   * went; after a gap that one space is re-read. `wasReady` says whether the space's stream
+   * had been connected before.
+   */
+  onSpaceStream?: (details: { spaceId: string; status: "connected" | "disconnected"; wasReady: boolean }) => void
+  /**
+   * Called when the host announces a step of an isolated space's creation, `failed` with the
+   * failure of the step that stopped it.
+   */
+  onSpaceProgress?: (details: SpaceProgress) => void
+  /** Called when the setup commands of an isolated space moved on: began, the next one, or ended. */
+  onSpaceSetup?: (spaceId: string) => void
+  /**
+   * Called whenever the stream receives anything: an event, a WebSocket frame, or a keepalive
+   * that carries no event. Starting an attempt that has received nothing yet does not count.
+   */
+  onStreamActivity?: () => void
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -131,9 +150,42 @@ const openchamberNotificationSchema = z.object({
     .partial(),
 })
 
+// The host's announcement of an isolated space's event connection. It is not an event of any
+// session, so it never enters a directory queue; the pipeline hands it to its owner.
+const openchamberSpaceStreamSchema = z.object({
+  type: z.literal("openchamber:space-stream"),
+  properties: z.object({
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/),
+    status: z.enum(["connected", "disconnected"]),
+    wasReady: z.boolean(),
+  }),
+})
+
+// A step of an isolated space's creation, announced on the host's hub the same way.
+const openchamberSpaceProgressSchema = z.object({
+  type: z.literal("openchamber:space-progress"),
+  properties: z.object({
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/),
+    step: z.union([spaceCreationStepSchema, z.literal("failed")]),
+    failure: z.object({ code: z.string(), message: z.string() }).nullable(),
+  }),
+})
+
+export type SpaceProgress = z.infer<typeof openchamberSpaceProgressSchema>["properties"]
+
+// The setup commands of a space moved on: the list says how.
+const openchamberSpaceSetupSchema = z.object({
+  type: z.literal("openchamber:space-setup"),
+  properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/) }),
+})
+
 const openchamberAutoAcceptSchema = z.object({
   type: z.literal("openchamber:permission-auto-accept.updated"),
-  properties: z.object({ sessions: z.record(z.string(), z.boolean()), revision: z.number().optional() }),
+  properties: z.object({
+    sessions: z.record(z.string(), z.boolean()),
+    modes: z.record(z.string(), z.enum(["ask", "safety", "auto"])).optional(),
+    revision: z.number().optional(),
+  }),
 })
 
 // The wire event contract is generated from the server; the stream is trusted
@@ -284,6 +336,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onReconnect,
     onDisconnect,
     onTransportSwitch,
+    onSpaceStream,
+    onSpaceProgress,
+    onSpaceSetup,
+    onStreamActivity,
     routeDirectory,
     transport = "auto",
     heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
@@ -525,6 +581,21 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueuePayload = (payload: unknown, frameDirectory: string | undefined) => {
+    const spaceStream = openchamberSpaceStreamSchema.safeParse(payload)
+    if (spaceStream.success) {
+      onSpaceStream?.(spaceStream.data.properties)
+      return
+    }
+    const spaceProgress = openchamberSpaceProgressSchema.safeParse(payload)
+    if (spaceProgress.success) {
+      onSpaceProgress?.(spaceProgress.data.properties)
+      return
+    }
+    const spaceSetup = openchamberSpaceSetupSchema.safeParse(payload)
+    if (spaceSetup.success) {
+      onSpaceSetup?.(spaceSetup.data.properties.spaceId)
+      return
+    }
     for (const { directory, event } of translatePayload(payload, frameDirectory)) {
       enqueueEvent(directory, event)
     }
@@ -545,16 +616,22 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     heartbeat = undefined
   }
 
+  // Anything received proves the stream is alive, including keepalives that carry no event.
+  const noteStreamActivity = () => {
+    resetHeartbeat()
+    onStreamActivity?.()
+  }
+
   const runSseAttempt = async (signal: AbortSignal) => {
     // Keepalive comments carry no event but prove the socket is alive.
-    const events = sdk.event.subscribe({ signal, onActivity: resetHeartbeat })
+    const events = sdk.event.subscribe({ signal, onActivity: noteStreamActivity })
 
     let connected = false
     let yielded = Date.now()
     resetHeartbeat()
 
     for await (const event of events) {
-      resetHeartbeat()
+      noteStreamActivity()
       streamErrorLogged = false
       if (!connected) {
         connected = true
@@ -660,7 +737,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       }
 
       socket.onmessage = (messageEvent) => {
-        resetHeartbeat()
+        noteStreamActivity()
         streamErrorLogged = false
 
         let raw: unknown

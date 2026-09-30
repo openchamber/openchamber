@@ -904,9 +904,13 @@ const parseGitErrorText = (error) => {
   // primarily via message/toString; keep String(error) as a last resort so
   // "not a git repository" matching never misses and aborts callers.
   const fallback = !message && error != null ? String(error) : '';
-  return [stderr, stdout, message, fallback]
+  const chunks = [stderr, stdout, message, fallback]
     .map((chunk) => String(chunk || '').trim())
-    .filter(Boolean)
+    .filter(Boolean);
+  // execFile's message already embeds stderr; a chunk another one contains
+  // would print every git error line twice.
+  return chunks
+    .filter((chunk, index) => !chunks.some((other, otherIndex) => otherIndex !== index && other.length > chunk.length && other.includes(chunk)))
     .join('\n')
     .trim();
 };
@@ -1019,11 +1023,11 @@ const isMissingDirectoryError = (error) => {
   return /directory that does not exist|does not exist|no such file or directory/i.test(text);
 };
 
-const runGitCommand = async (cwd, args, { timeoutMs = 0 } = {}) => {
+const runGitCommand = async (cwd, args, { timeoutMs = 0, env: extraEnv } = {}) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
-      env: await buildGitEnv(),
+      env: { ...(await buildGitEnv()), ...extraEnv },
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
       // Only short probes pass a timeout; commands that legitimately run long
@@ -5047,6 +5051,70 @@ export async function getWorktreeBootstrapStatus(directory) {
   );
 }
 
+/**
+ * Releases the OpenCode instance that served a removed worktree. The owning
+ * runtime injects `disposeInstance`; disposal is best-effort, so a failure is
+ * warned about and never fails or rolls back the removal.
+ */
+const disposeWorktreeInstanceBestEffort = async (disposeInstance, worktreeDirectory) => {
+  if (!disposeInstance) {
+    return;
+  }
+  try {
+    await disposeInstance(worktreeDirectory);
+  } catch (error) {
+    console.warn(
+      `Failed to dispose the OpenCode instance for removed worktree ${worktreeDirectory}:`,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+};
+
+// Windows refuses to delete a folder another process still holds (a session's
+// shell, a file watcher, an editor); those handles are usually released
+// moments later, so a busy failure is retried briefly before it is reported.
+const WORKTREE_BUSY_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
+const WORKTREE_BUSY_MESSAGE = 'The worktree folder is still in use by another process (a running session, terminal or editor). Stop it and try again.';
+
+// Only Windows locks a folder that is open elsewhere; on other platforms the
+// same words mean a real permission problem and are reported as they are.
+const isWorktreeBusyError = (text) => process.platform === 'win32'
+  && /Permission denied|EBUSY|EPERM|resource busy|being used by another process/i.test(String(text || ''));
+
+const removeBusyDirectory = async (targetDirectory) => {
+  try {
+    // fs.rm retries EBUSY/EPERM itself with these options.
+    await fsp.rm(targetDirectory, { recursive: true, force: true, maxRetries: WORKTREE_BUSY_RETRY_DELAYS_MS.length, retryDelay: WORKTREE_BUSY_RETRY_DELAYS_MS[0] });
+  } catch (error) {
+    if (isWorktreeBusyError(error?.code) || isWorktreeBusyError(error?.message)) {
+      throw new Error(WORKTREE_BUSY_MESSAGE);
+    }
+    throw error;
+  }
+};
+
+// Resolves true when git removed the worktree, false when git dropped the
+// registration but left the folder behind (the caller removes it as an orphan).
+const removeGitWorktreeWhenFree = async (primaryWorktree, worktreePath, targetCanonical) => {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await runGitCommand(primaryWorktree, ['worktree', 'remove', '--force', worktreePath]);
+    if (result.success) return true;
+    if (!isWorktreeBusyError(result.message)) {
+      throw new Error(result.message || 'Failed to remove git worktree');
+    }
+    const stillRegistered = await (async () => {
+      for (const entry of await listWorktreeEntries(primaryWorktree)) {
+        if (entry?.worktree && await canonicalPath(entry.worktree) === targetCanonical) return true;
+      }
+      return false;
+    })();
+    if (!stillRegistered) return false;
+    const delay = WORKTREE_BUSY_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) throw new Error(WORKTREE_BUSY_MESSAGE);
+    await wait(delay);
+  }
+};
+
 export async function removeWorktree(directory, input = {}) {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
@@ -5079,25 +5147,35 @@ export async function removeWorktree(directory, input = {}) {
     return null;
   })();
 
-  if (!matchedEntry?.worktree) {
+  const removeManagedOrphan = async () => {
     const isManagedOrphan = targetCanonical !== worktreeRootCanonical
       && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
 
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists && isManagedOrphan) {
-      await fsp.rm(targetDirectory, { recursive: true, force: true });
+      await removeBusyDirectory(targetDirectory);
     }
+    // A removal git abandoned halfway leaves `.git/worktrees/<name>` without
+    // its gitdir; prune drops that metadata so it cannot linger.
+    await runGitCommand(context.primaryWorktree, ['worktree', 'prune']);
+  };
 
+  if (!matchedEntry?.worktree) {
+    await removeManagedOrphan();
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
   }
 
-  await runGitCommandOrThrow(
-    context.primaryWorktree,
-    ['worktree', 'remove', '--force', matchedEntry.worktree],
-    'Failed to remove git worktree'
-  );
+  // The directory is a registered linked worktree and still exists here, which
+  // is the only point where its OpenCode instance can be released by path.
+  await disposeWorktreeInstanceBestEffort(input?.disposeInstance, matchedEntry.worktree);
+
+  const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical);
+  if (!removedByGit) {
+    // Git deleted its registration but not the still-locked folder.
+    await removeManagedOrphan();
+  }
   await publishWorktreeTopologyChange(context.primaryWorktree);
 
   if (deleteLocalBranch) {
@@ -5114,6 +5192,63 @@ export async function removeWorktree(directory, input = {}) {
   clearWorktreeBootstrapState(matchedEntry.worktree);
 
   return true;
+}
+
+// Run snapshots live under a private namespace so they never show up as
+// branches or tags, yet stay reachable (and safe from gc) until deleted.
+const RUN_SNAPSHOT_REF_PATTERN = /^refs\/openchamber\/runs\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+const assertRunSnapshotRef = (ref) => {
+  const value = typeof ref === 'string' ? ref.trim() : '';
+  if (!RUN_SNAPSHOT_REF_PATTERN.test(value) || value.includes('..')) {
+    throw new Error('Invalid snapshot ref');
+  }
+  return value;
+};
+
+const SNAPSHOT_IDENTITY_ENV = {
+  GIT_AUTHOR_NAME: 'OpenChamber',
+  GIT_AUTHOR_EMAIL: 'snapshot@openchamber.local',
+  GIT_COMMITTER_NAME: 'OpenChamber',
+  GIT_COMMITTER_EMAIL: 'snapshot@openchamber.local',
+};
+
+/**
+ * Records the complete state of a worktree (committed, staged, unstaged and
+ * untracked-but-not-ignored files) as a commit under `ref`. A throwaway index
+ * is used, so the worktree's real index, HEAD, branch and files are untouched.
+ */
+export async function snapshotWorktree(directory, input = {}) {
+  const worktreeDirectory = normalizeDirectoryPath(directory);
+  if (!worktreeDirectory) {
+    throw new Error('Worktree directory is required');
+  }
+  const ref = assertRunSnapshotRef(input?.ref);
+  const head = (await runGitCommandOrThrow(worktreeDirectory, ['rev-parse', '--verify', 'HEAD'], 'Worktree has no HEAD commit')).stdout.trim();
+
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-snapshot-'));
+  const indexEnv = { GIT_INDEX_FILE: path.join(tempDir, 'index') };
+  try {
+    const run = async (args, message, env = indexEnv) => {
+      const result = await runGitCommand(worktreeDirectory, args, { env });
+      if (!result.success) {
+        throw new Error(result.message || message);
+      }
+      return result.stdout.trim();
+    };
+    await run(['read-tree', head], 'Failed to prepare snapshot index');
+    await run(['add', '-A'], 'Failed to collect worktree changes');
+    const tree = await run(['write-tree'], 'Failed to write snapshot tree');
+    const commit = await run(
+      ['commit-tree', tree, '-p', head, '-m', 'OpenChamber run snapshot'],
+      'Failed to write snapshot commit',
+      { ...indexEnv, ...SNAPSHOT_IDENTITY_ENV },
+    );
+    await run(['update-ref', ref, commit], 'Failed to store snapshot ref', {});
+    return { ref, commit, head };
+  } finally {
+    await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 export async function deleteBranch(directory, branch, options = {}) {

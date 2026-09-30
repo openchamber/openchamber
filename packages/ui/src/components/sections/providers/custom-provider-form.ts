@@ -101,8 +101,10 @@ export type CustomProviderModelConfig = {
 export type CustomProviderPersistPlan = {
   providerID: string;
   name: string;
-  /** Literal API key to send via auth.set; omitted when using {env:VAR} or empty. */
+  /** Literal API key stored as an OpenCode credential after the config write; omitted when using {env:VAR} or empty. */
   apiKey?: string;
+  /** Edit without a new key or env: the provider keeps the credential OpenCode already holds. */
+  keepsStoredCredential?: boolean;
   config: CustomProviderConfig;
 };
 
@@ -583,6 +585,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       providerID,
       name,
       apiKey: key,
+      ...(!env && !key ? { keepsStoredCredential: true } : {}),
       config: buildCustomProviderConfig({
         protocol: input.form.protocol,
         name,
@@ -617,7 +620,9 @@ function buildCustomProviderConfig(input: {
 /**
  * Builds the `integration.connect.key` request body when a literal API key is
  * present. OpenCode v2 stores provider keys as integration credentials; there
- * is no `auth.json` to write any more.
+ * is no `auth.json` to write any more. A custom provider has no catalog entry,
+ * so OpenCode registers its key method only once the provider is in config:
+ * send this after the config write (see `storeKeyAfterConfigWrite`).
  */
 export function buildIntegrationKeyRequest(plan: CustomProviderPersistPlan): {
   integrationID: string;
@@ -644,10 +649,38 @@ export function buildProviderUpsertRequest(
   providerID: string;
   config: CustomProviderConfig;
   scope: ProviderConfigScope;
+  hasCredential: boolean;
 } {
   return {
     providerID: plan.providerID,
     config: plan.config,
     scope: options?.scope ?? 'user',
+    // The server cannot see OpenCode 2 credentials, so the form vouches for a
+    // key it is about to store or one the edited provider already has.
+    hasCredential: Boolean(plan.apiKey || plan.keepsStoredCredential),
   };
+}
+
+const KEY_METHOD_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000];
+
+/**
+ * Stores a custom provider's key right after its config was written. OpenCode
+ * picks the config up from its file watcher, and until then it rejects the key
+ * with "Integration not found"; only that rejection is retried, briefly.
+ */
+export async function storeKeyAfterConfigWrite(
+  connectKey: () => Promise<unknown>,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await connectKey();
+      return;
+    } catch (error) {
+      const delay = KEY_METHOD_RETRY_DELAYS_MS[attempt];
+      const notRegisteredYet = error instanceof Error && /not found/i.test(error.message);
+      if (!notRegisteredYet || delay === undefined) throw error;
+      await wait(delay);
+    }
+  }
 }

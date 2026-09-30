@@ -31,23 +31,33 @@ describe('gatekeeper channel: the program', () => {
     expect(GATEKEEPER_PROGRAM.length).toBeGreaterThan(2_000);
   });
 
-  it('travels on stdin into the tmpfs, through a temporary name, and is in no argument', async () => {
+  it('travels on stdin into the tmpfs, through a temporary name, after the bind address, and is in no argument', async () => {
     const { channel, calls } = channelWith(ok());
-    await channel.writeProgram(ID);
+    await channel.writeProgram(ID, { bindAddress: '172.19.0.2' });
 
     expect(calls).toEqual([{
       spaceId: ID,
       argv: [
         '/bin/sh', '-c',
-        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; mkdir -p /tmp/openchamber-gatekeeper && cat > /tmp/openchamber-gatekeeper/gatekeeper.cjs.new && mv /tmp/openchamber-gatekeeper/gatekeeper.cjs.new /tmp/openchamber-gatekeeper/gatekeeper.cjs',
+        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; mkdir -p /tmp/openchamber-gatekeeper'
+        + " && printf '%s' \"$1\" > /tmp/openchamber-gatekeeper/bind.new && mv /tmp/openchamber-gatekeeper/bind.new /tmp/openchamber-gatekeeper/bind"
+        + ' && cat > /tmp/openchamber-gatekeeper/gatekeeper.cjs.new && mv /tmp/openchamber-gatekeeper/gatekeeper.cjs.new /tmp/openchamber-gatekeeper/gatekeeper.cjs',
+        'sh', '172.19.0.2',
       ],
       options: { stdin: GATEKEEPER_PROGRAM, target: 'gatekeeper' },
     }]);
   });
 
+  // The program refuses these too; the host refuses them first, so a gatekeeper is never asked to listen everywhere.
+  it.each(['', '0.0.0.0', '::', 'gatekeeper', '172.19.0'])('refuses to write the program with %j as the bind address', async (bindAddress) => {
+    const { channel, calls } = channelWith(ok());
+    await expect(channel.writeProgram(ID, { bindAddress })).rejects.toMatchObject({ code: 'gatekeeper_address_unknown' });
+    expect(calls).toEqual([]);
+  });
+
   it('says what failed inside the gatekeeper', async () => {
     const { channel } = channelWith({ code: 1, stdout: '', stderr: 'sh: 1: cannot create: No space left on device\n' });
-    await expect(channel.writeProgram(ID)).rejects.toMatchObject({ code: 'gatekeeper_setup_failed', message: expect.stringContaining('No space left on device') });
+    await expect(channel.writeProgram(ID, { bindAddress: '172.19.0.2' })).rejects.toMatchObject({ code: 'gatekeeper_setup_failed', message: expect.stringContaining('No space left on device') });
   });
 });
 
@@ -74,6 +84,26 @@ describe('gatekeeper channel: control requests', () => {
 
     expect(calls[0].argv.join(' ')).not.toContain(SECRET);
     expect(calls[0].options.stdin).toContain(SECRET);
+  });
+
+  it('sends an opened domain as a grant with no header and no secret', async () => {
+    const { channel, calls } = channelWith(ok(http(200, '{"ok":true}')));
+    await channel.addGrant(ID, { id: 'open-0a1b2c3d4e5f', upstream: 'https://registry.example.com/npm/' });
+    const data = calls[0].options.stdin.split('\n').find((line) => line.startsWith('data-raw = '));
+    expect(JSON.parse(JSON.parse(data.slice('data-raw = '.length)))).toEqual({ id: 'open-0a1b2c3d4e5f', upstream: 'https://registry.example.com/npm/' });
+  });
+
+  it('reads what the gatekeeper holds as data: mode, names and grant ids, capped, and never a secret', async () => {
+    const { channel } = channelWith(ok(http(200, JSON.stringify({ mode: 'open', domains: ['a.example.com', 7, {}], grants: ['anthropic', ['x'], 'open-1'], secret: SECRET }))));
+    expect(await channel.readPolicy(ID)).toEqual({ mode: 'open', domains: ['a.example.com', '7'], grants: ['anthropic', 'open-1'] });
+    const { channel: allowlist } = channelWith(ok(http(200, '{"mode":"anything","domains":[],"grants":[]}')));
+    expect(await allowlist.readPolicy(ID)).toEqual({ mode: 'allowlist', domains: [], grants: [] });
+    for (const body of ['not json', '[]', '{"grants":"anthropic"}', '{"grants":[]}']) {
+      const { channel: broken } = channelWith(ok(http(200, body)));
+      await expect(broken.readPolicy(ID)).rejects.toMatchObject({ code: 'gatekeeper_answer_unreadable' });
+    }
+    const { channel: refused } = channelWith(ok(http(404, '{}')));
+    await expect(refused.readPolicy(ID)).rejects.toMatchObject({ code: 'gatekeeper_answer_unreadable' });
   });
 
   it('reports a refusal from the control channel, with what it said', async () => {
@@ -119,9 +149,14 @@ describe('gatekeeper channel: control requests', () => {
 describe('gatekeeper channel: journal', () => {
   const record = { at: '2026-09-20T10:00:00.000Z', listener: 'corridor', host: 'api.anthropic.com', port: 443, decision: 'allow' };
 
-  it('reads the records and how many the ring buffer dropped', async () => {
-    const { channel } = channelWith(ok(http(200, JSON.stringify({ records: [record], dropped: 12 }))));
-    expect(await channel.readJournal(ID)).toEqual({ records: [record], dropped: 12 });
+  it('reads the records, how many the ring buffer dropped, and since when the gatekeeper records', async () => {
+    const { channel } = channelWith(ok(http(200, JSON.stringify({ records: [record], dropped: 12, since: '2026-09-20T09:00:00.000Z' }))));
+    expect(await channel.readJournal(ID)).toEqual({ records: [record], dropped: 12, since: '2026-09-20T09:00:00.000Z' });
+  });
+
+  it('leaves "since" empty for a gatekeeper that does not say, and never takes an object for it', async () => {
+    const { channel } = channelWith(ok(http(200, JSON.stringify({ records: [], dropped: 0, since: { at: 1 } }))));
+    expect(await channel.readJournal(ID)).toEqual({ records: [], dropped: 0, since: '' });
   });
 
   it('keeps the five fields of a record and nothing else the gatekeeper sends', async () => {
@@ -168,6 +203,7 @@ describe('gatekeeper channel: journal', () => {
         { at: '', listener: '', host: '', port: 0, decision: '' },
       ],
       dropped: 0,
+      since: '',
     });
   });
 });

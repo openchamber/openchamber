@@ -44,7 +44,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
 import { setActionRefs } from "./session-actions"
-import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged } from "./sync-refs"
+import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { upsertSessionRecord } from "./session-records"
@@ -54,6 +54,7 @@ import {
 } from "./session-event-router"
 import { shouldConsumeBulkArchiveEcho } from "./bulk-archive-echo"
 import { applyForkedSession, noteForkedSessionPatched } from "./forked-session"
+import { useUIStore } from "@/stores/useUIStore"
 import { useBtwStore } from "@/stores/useBtwStore"
 import { selectNewChildSessions } from "./child-session-discovery"
 import { syncDebug } from "./debug"
@@ -61,7 +62,8 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { useRoutingStore } from "@/stores/useRoutingStore"
+import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
+import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
 import {
@@ -71,6 +73,8 @@ import {
 import { useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
+import { refreshSpacesJourney, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
@@ -689,10 +693,17 @@ export function applySessionStatusSnapshot(
   store.setState((state: DirectoryStore) => {
     const current = state.session_status ?? {}
     let next: Record<string, SessionStatus> | undefined
+    let nextInvalidated: Record<string, true> | undefined
     const draft = () => (next ??= { ...current })
 
     for (const sessionId of candidateSessionIds) {
       const incoming = toSessionStatus(snapshot[sessionId])
+      if (mode === "authoritative" && state.sessionStatusInvalidated?.[sessionId]) {
+        // The successful snapshot supersedes the archive's discarded status.
+        nextInvalidated ??= { ...state.sessionStatusInvalidated }
+        delete nextInvalidated[sessionId]
+        changed = true
+      }
 
       if (incoming && incoming.type !== "idle") {
         // Confirm or raise active status (catches a busy event the SSE missed).
@@ -717,7 +728,11 @@ export function applySessionStatusSnapshot(
       }
     }
 
-    return next ? { session_status: next } : state
+    if (!next && !nextInvalidated) return state
+    const patch: Partial<DirectoryStore> = {}
+    if (next) patch.session_status = next
+    if (nextInvalidated) patch.sessionStatusInvalidated = nextInvalidated
+    return patch
   })
 
   return changed
@@ -730,11 +745,16 @@ async function resyncDirectorySessionStatuses(
   mode: StatusSnapshotMode,
   isStale?: () => boolean,
 ): Promise<DirectorySessionStatusSnapshot | null> {
-  const nextStatuses = await opencodeClient.getActiveSessionStatuses()
+  const invalidatedAtStart = store.getState().sessionStatusInvalidated
+  const nextStatuses = await opencodeClient.getActiveSessionStatuses(directory)
   // null = fetch failed; preserve existing state. {} or populated = a snapshot
   // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
   if (nextStatuses === null || isStale?.()) return null
-  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
+  const currentInvalidated = store.getState().sessionStatusInvalidated
+  const eligibleIds = candidateSessionIds.filter((id) => (
+    !currentInvalidated?.[id] || currentInvalidated === invalidatedAtStart
+  ))
+  applySessionStatusSnapshot(store, nextStatuses, eligibleIds, mode)
   if (mode === "authoritative") {
     store.setState({ sessionStatusReady: true })
     applyGlobalSessionStatusSnapshot(directory, nextStatuses, getDirectoryOwnedSessionIds(directory, store.getState().session))
@@ -1560,6 +1580,24 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
   })
 }
 
+/**
+ * Whether the server answers this session's requests without the user: `auto`
+ * always, `safety` while the safety net can run. Those raise no toast when
+ * asked; a request the safety net holds is announced when it is held
+ * (`notifyHeldPermission`).
+ */
+const isAnsweredWithoutUser = (sessionID: string): boolean => {
+  const mode = usePermissionStore.getState().getSessionMode(sessionID)
+  return mode === "auto" || (mode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))
+}
+
+/** The toast an `ask` session's request would have raised, for one the safety net left to the user. */
+export const notifyHeldPermission = (permissionID: string, sessionID: string, directory: string | null): void => {
+  if (!directory || isVSCodeRuntime()) return
+  const permission = getDirectoryState(directory)?.permission[sessionID]?.find((entry) => entry.id === permissionID)
+  if (permission) notifyPermissionAsked(permission, directory)
+}
+
 const notifyFormCreated = (form: FormRequest, directory: string): void => {
   const sessionID = form.sessionID
   const toastKey = getFormToastKey(sessionID, form.id)
@@ -1580,7 +1618,7 @@ const notifyBlockingRequestWithoutStore = (payload: SyncEvent, directory: string
   if (isVSCodeRuntime()) return
   if (payload.type === "permission.asked") {
     const permission = payload.properties
-    if (usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) return
+    if (isAnsweredWithoutUser(permission.sessionID)) return
     notifyPermissionAsked(permission, directory)
     return
   }
@@ -1630,8 +1668,7 @@ export function handleEvent(
   }
 
   if (payload.type === "openchamber.permission-auto-accept") {
-    const { sessions, revision } = payload.properties
-    usePermissionStore.getState().applySnapshot({ sessions, revision }, expectedRuntimeKey)
+    usePermissionStore.getState().applySnapshot(policySnapshotFromWire(payload.properties), expectedRuntimeKey)
     return
   }
 
@@ -1815,7 +1852,7 @@ export function handleEvent(
       )
       return
     }
-    if (!isVSCodeRuntime() && usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) {
+    if (!isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
@@ -1940,7 +1977,11 @@ export function handleEvent(
   }
 
   countSyncPerformance("reducerEvents")
-  const reducerResult = applyDirectoryEvent(draft, payload)
+  // A catalog event names the location it was rebuilt in; for an open
+  // directory it lands here rather than in the global branch above.
+  const reducerResult = applyDirectoryEvent(draft, payload, {
+    onCatalogUpdated: (kind) => scheduleCatalogReload(kind, childStores),
+  })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
   // Retire old reads even if a local send already removed the reverted range.
@@ -2228,7 +2269,7 @@ export async function recoverInterruptedTurnAfterMessageLoad(
   if ((initial.permission?.[sessionID] ?? []).length > 0) return
 
   if (!initial.session_status?.[sessionID]) {
-    const snapshot = await opencodeClient.getActiveSessionStatuses()
+    const snapshot = await opencodeClient.getActiveSessionStatuses(directory)
     if (snapshot === null || isStale?.()
       || getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== sdk) return
 
@@ -2562,14 +2603,18 @@ export function SyncProvider(props: {
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
-      onEvents: (directory, payloads) => {
-        // Track ALL stream activity (including heartbeats) as proof of
-        // connection health. The watchdog stale check uses this to distinguish
-        // a genuinely dead stream (no heartbeats for 20s) from a quiet-but-
-        // connected session that is only receiving heartbeats. Excluding
-        // heartbeats here caused issue #1656: the stale timer fired for any
-        // quiet session, triggering redundant full resyncs every ~15s.
+      // Track ALL stream activity (including heartbeats) as proof of
+      // connection health. The watchdog stale check uses this to distinguish
+      // a genuinely dead stream (no heartbeats for 20s) from a quiet-but-
+      // connected session that is only receiving heartbeats. Excluding
+      // heartbeats caused issue #1656: the stale timer fired for any quiet
+      // session, triggering redundant full resyncs every ~15s. OpenCode 2
+      // heartbeats never become events: OpenCode sends an SSE comment and the
+      // WS bridge an `openchamber:heartbeat` frame, so delivered events miss them.
+      onStreamActivity: () => {
         lastStreamActivityAtRef.current = Date.now()
+      },
+      onEvents: (directory, payloads) => {
         const batch = createDirectoryEventBatch()
         try {
           for (const payload of payloads) {
@@ -2584,7 +2629,45 @@ export function SyncProvider(props: {
           publishDirectoryEventBatch(batch)
         }
       },
+      onSpaceStream: ({ spaceId, status }) => {
+        // A space's stream went: its sessions may be old until it answers again. Back: re-read
+        // that one space, the directories the global list knows for it, so a session made or
+        // finished during the gap shows up without a full global reload.
+        useSpacesStore.getState().noteStream(spaceId, status)
+        if (status !== "connected") {
+          // A space that stopped itself for the idle stop ends its stream on its way out. While the
+          // host's list still says it runs, read the list again at each failed reconnect, which the
+          // host paces, so the group says "stopped" rather than "not answering" once it is down.
+          if (useSpacesStore.getState().journey?.get(spaceId)?.state === "running") {
+            void refreshSpacesJourney().catch(() => undefined)
+          }
+          return
+        }
+        const directories = Array.from(useGlobalSessionsStore.getState().sessionsByDirectory.keys())
+          .filter((directory) => spaceIdOfDirectory(directory) === spaceId)
+        const spaceDirectory = useSpacesStore.getState().spaces.get(spaceId)?.directory
+        if (spaceDirectory) directories.push(spaceDirectory)
+        if (directories.length === 0) return
+        void useGlobalSessionsStore.getState().refreshSessionsForDirectories(directories).catch(() => undefined)
+      },
+      onSpaceProgress: (progress) => {
+        // A step of a creation moves the space's group on at once. A space this list has not seen,
+        // made from another window among them, and the end of a creation, whose entry then comes
+        // from the place, are read again from the journey route.
+        const known = useSpacesStore.getState().noteProgress(progress)
+        if (known && progress.step !== "ready" && progress.step !== "failed") return
+        void refreshSpacesJourney().catch(() => undefined)
+      },
+      onSpaceSetup: () => {
+        // The setup commands of a space moved on; what they do now is in the list.
+        void refreshSpacesJourney().catch(() => undefined)
+      },
       onReconnect: ({ replayReset }) => {
+        // The first connection and every one after a gap: spaces being made or whose making failed
+        // are known only to the journey list, and a step announced during the gap was missed.
+        if (useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime()) {
+          void refreshSpacesJourney().catch(() => undefined)
+        }
         // Queue recovery is independent of the directory-bootstrap debounce.
         void useMessageQueueStore.getState().resync().catch(() => undefined)
         useConfigStore.setState({
@@ -3039,12 +3122,16 @@ export function useSessionStatus(sessionID: string, directory?: string) {
 }
 
 /** Whether this directory has received a successful authoritative status snapshot. */
-export function useSessionStatusSnapshotReady(directory?: string): boolean {
+export function useSessionStatusSnapshotReady(directory?: string, sessionID?: string): boolean {
   const store = useDirectoryStore(directory)
-  const getSnapshot = useCallback(() => store.getState().sessionStatusReady === true, [store])
+  const getSnapshot = useCallback(() => {
+    const state = store.getState()
+    return state.sessionStatusReady === true && (!sessionID || !state.sessionStatusInvalidated?.[sessionID])
+  }, [sessionID, store])
   const subscribe = useCallback((notify: () => void) => store.subscribe((state, previous) => {
-    if (state.sessionStatusReady !== previous.sessionStatusReady) notify()
-  }), [store])
+    if (state.sessionStatusReady !== previous.sessionStatusReady
+      || (sessionID && state.sessionStatusInvalidated?.[sessionID] !== previous.sessionStatusInvalidated?.[sessionID])) notify()
+  }), [sessionID, store])
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 

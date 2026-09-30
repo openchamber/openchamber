@@ -21,8 +21,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
+import { LongErrorText } from '../LongErrorText';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import type { Session } from '@/lib/opencode/model';
+import { getMultiRunIdentity } from '@/lib/multirun/identity';
+import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
+import { AskOtherModelsDialog } from '@/components/multirun/AskOtherModelsDialog';
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
@@ -59,6 +65,7 @@ import {
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
 import { cloneMessageImageExportSource } from './imageExport';
 
@@ -1231,7 +1238,6 @@ const AssistantMessageBody = React.memo(({
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
-    const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
     const isReviewSessionView = reviewTransferDirection === 'review-to-original';
@@ -1381,10 +1387,24 @@ const AssistantMessageBody = React.memo(({
             }
 
             const prefilledPrompt = `${MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT}\n\n${assistantPlanText}`;
-            openMultiRunLauncherWithPrompt(prefilledPrompt);
+            openParallelComposer(prefilledPrompt);
         },
-        [assistantPlanText, openMultiRunLauncherWithPrompt]
+        [assistantPlanText]
     );
+
+    const [askOtherModelsSession, setAskOtherModelsSession] = React.useState<Session | null>(null);
+    const handleAskOtherModels = React.useCallback(() => {
+        if (!sessionId) return;
+        const session = useGlobalSessionsStore.getState().activeSessions.find((entry) => entry.id === sessionId);
+        if (!session) return;
+        // A lane is already part of a run: its overview is where more models join.
+        const identity = getMultiRunIdentity(session);
+        if (identity) {
+            useUIStore.getState().setRunOverviewKey(identity.key);
+            return;
+        }
+        setAskOtherModelsSession(session);
+    }, [sessionId]);
 
     const handleSaveAsPlanClick = React.useCallback(
         // Optional event: the footer's action sheet calls this without one.
@@ -1519,11 +1539,7 @@ const AssistantMessageBody = React.memo(({
                     }
                 } else if (isCapacitorMobileApp()) {
                     const blob = await fetch(dataUrl).then((response) => response.blob());
-                    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
-                    if (!navigator.canShare?.({ files: [file] })) {
-                        throw new Error('Image sharing is unavailable in this mobile runtime');
-                    }
-                    await navigator.share({ files: [file] });
+                    await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
                 } else {
                     const link = document.createElement('a');
                     link.download = fileName;
@@ -2227,6 +2243,12 @@ const AssistantMessageBody = React.memo(({
                             <Icon name="chat-new" className="h-3.5 w-3.5" />
                             {t('chat.messageBody.actions.startNewSession')}
                         </DropdownMenuItem>
+                        {canShowMultiRunAction && turnGroupingContext?.turnId ? (
+                            <DropdownMenuItem className="typography-meta" onSelect={handleAskOtherModels}>
+                                <ArrowsMerge className="h-3.5 w-3.5" />
+                                {t('chat.messageBody.actions.askOtherModels')}
+                            </DropdownMenuItem>
+                        ) : null}
                         {canShowMultiRunAction ? (
                             <DropdownMenuItem className="typography-meta" onSelect={handleForkMultiRun}>
                                 <ArrowsMerge className="h-3.5 w-3.5" />
@@ -2235,6 +2257,14 @@ const AssistantMessageBody = React.memo(({
                         ) : null}
                     </DropdownMenuContent>
                 </DropdownMenu>
+            ) : null}
+            {askOtherModelsSession && turnGroupingContext?.turnId ? (
+                <AskOtherModelsDialog
+                    session={askOtherModelsSession}
+                    turnUserMessageId={turnGroupingContext.turnId}
+                    open
+                    onOpenChange={(open) => { if (!open) setAskOtherModelsSession(null); }}
+                />
             ) : null}
         </>
     );
@@ -2283,12 +2313,16 @@ const AssistantMessageBody = React.memo(({
                                 <div className="flex items-center gap-3">
                                     <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
                                     <div className="min-w-0 flex-1 break-words">
-                                        <SimpleMarkdownRenderer
-                                            content={errorMessage ?? ''}
-                                            onShowPopup={onShowPopup}
-                                            className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                                            enableFileReferences={false}
-                                        />
+                                        <LongErrorText text={errorMessage ?? ''}>
+                                            {(visibleText) => (
+                                                <SimpleMarkdownRenderer
+                                                    content={visibleText}
+                                                    onShowPopup={onShowPopup}
+                                                    className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
+                                                    enableFileReferences={false}
+                                                />
+                                            )}
+                                        </LongErrorText>
                                     </div>
                                 </div>
                             </div>

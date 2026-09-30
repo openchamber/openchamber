@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { SpaceError } from '../errors.js';
 import { GATEKEEPER_PROGRAM } from '../gatekeeper-channel.js';
 import { buildSpaceLabels, buildToolsLabels, hashProjectDirectory } from '../labels.js';
-import { SPACE_CONNECT_COMMAND, SPACE_ENVIRONMENT, SPACE_SERVER_COMMAND } from '../layout.js';
+import { SPACE_CONNECT_COMMAND, SPACE_ENVIRONMENT, SPACE_IDLE_EXIT_CODE, SPACE_SERVER_COMMAND } from '../layout.js';
 import { createRegistryToolsSource, toolsContentKey } from '../tools.js';
 import { SPACE_BASE_IMAGE, createDockerPlace } from './docker.js';
 import { bridgeNetworkEntry, createFakeDocker, hardenedContainerEntry, internalNetworkEntry } from './fake-docker.js';
@@ -234,6 +234,7 @@ describe('docker place: create', () => {
       '--env', 'OPENCODE_DISABLE_MODELS_FETCH=1',
       '--env', 'OPENCODE_DISABLE_AUTOUPDATE=1',
       '--env', 'OPENCHAMBER_RELAY_HOST=off',
+      '--env', 'OPENCHAMBER_SPACE_IDLE_STOP_FILE=/home/space/.openchamber-space/idle-stop.json',
       SPACE_BASE_IMAGE,
       '/bin/sh', '-c',
       'while [ ! -s /home/space/.openchamber-space/token ]; do /bin/sleep 0.2; done; OPENCHAMBER_UI_PASSWORD="$(/bin/cat /home/space/.openchamber-space/token)"; export OPENCHAMBER_UI_PASSWORD; exec openchamber serve --foreground --api-only --host 127.0.0.1 --port 27600',
@@ -272,13 +273,21 @@ describe('docker place: create', () => {
       '--env', 'HOME=/tmp',
       SPACE_BASE_IMAGE,
       '/bin/sh', '-c',
-      'while [ ! -s /tmp/openchamber-gatekeeper/gatekeeper.cjs ]; do /bin/sleep 0.2; done; exec /usr/local/bin/node /tmp/openchamber-gatekeeper/gatekeeper.cjs 0.0.0.0 3128 8080 9099 300000 128 64 8',
+      // The bind host is the file the host writes after the start, holding the gatekeeper's own
+      // address on the space's network, never every interface: see "Known limits" of stage 2.
+      'while [ ! -s /tmp/openchamber-gatekeeper/gatekeeper.cjs ]; do /bin/sleep 0.2; done; exec /usr/local/bin/node /tmp/openchamber-gatekeeper/gatekeeper.cjs /tmp/openchamber-gatekeeper/bind 3128 8080 9099 300000 128 64 8',
     ]);
     expect(create).toContain('openchamber.space.role=gatekeeper');
     expect(create).not.toContain('--mount');
     // The program travels on stdin, so it is in no argument list, and no secret is in one either.
     const write = fake.calls.find((call) => isExec('gatekeeper.cjs.new')(call.args));
     expect(write.options.stdin).toBe(GATEKEEPER_PROGRAM);
+    // The address the fake engine gives the gatekeeper on the inner network, read after the start
+    // and written into the bind file before the program.
+    expect(write.args.slice(-2)).toEqual(['sh', '172.19.0.2']);
+    expect(write.args.join(' ')).toContain('> /tmp/openchamber-gatekeeper/bind.new && mv /tmp/openchamber-gatekeeper/bind.new /tmp/openchamber-gatekeeper/bind && cat > /tmp/openchamber-gatekeeper/gatekeeper.cjs.new');
+    const order = fake.calls.map((call) => describeCall(call.args));
+    expect(order.indexOf(`start ${GATEKEEPER}`)).toBeLessThan(order.indexOf('exec write program'));
     expect(write.args[4]).toBe(GATEKEEPER);
   });
 
@@ -381,6 +390,16 @@ describe('docker place: create', () => {
       expect(call.file).toBe('/usr/bin/docker');
       expect(call.options.timeoutMs).toBeGreaterThan(0);
     }
+  });
+
+  it('passes the output window and the tree kill of an exec to the runner, and nothing it was not given', async () => {
+    const fake = createFakeDocker();
+    const place = makePlace(fake);
+    await place.create(SPEC);
+    await place.exec(SPEC.id, ['/bin/true'], { timeoutMs: 5_000, maxOutputBytes: 1024, keepTail: true, killTree: true });
+    expect(fake.calls.at(-1).options).toEqual({ stdin: '', timeoutMs: 5_000, maxOutputBytes: 1024, keepTail: true, killTree: true });
+    await place.exec(SPEC.id, ['/bin/true']);
+    expect(fake.calls.at(-1).options).toEqual({ stdin: '', timeoutMs: 60_000 });
   });
 
   it('refuses when a resource with the same name exists, and touches nothing', async () => {
@@ -608,9 +627,9 @@ describe('docker place: list', () => {
 
     const spaces = await makePlace(fake).list();
     expect(spaces).toEqual([
-      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', orphans: [], damaged: false, missing: [] },
-      { id: '111111111111', name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'exited', orphans: [], damaged: false, missing: [] },
-      { id: orphanId, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'missing', orphans: [{ kind: 'volume', name: orphanVolume }], damaged: false, missing: [] },
+      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] },
+      { id: '111111111111', name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'exited', stoppedIdle: false, gatekeeperRunning: false, orphans: [], damaged: false, missing: [] },
+      { id: orphanId, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'missing', stoppedIdle: false, gatekeeperRunning: false, orphans: [{ kind: 'volume', name: orphanVolume }], damaged: false, missing: [] },
     ]);
   });
 
@@ -618,14 +637,14 @@ describe('docker place: list', () => {
     const fake = createFakeDocker({ resources: spaceResources().filter((resource) => resource.name !== HOME && resource.kind !== 'network') });
 
     expect(await makePlace(fake).list()).toEqual([
-      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', orphans: [], damaged: true, missing: [NETWORK, OUTER_NETWORK, HOME] },
+      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: true, missing: [NETWORK, OUTER_NETWORK, HOME] },
     ]);
   });
 
   it('flags a running space whose gatekeeper is gone, or does not run, as damaged and not as missing', async () => {
     const withoutGatekeeper = createFakeDocker({ resources: spaceResources().filter((resource) => resource.name !== GATEKEEPER) });
     expect(await makePlace(withoutGatekeeper).list()).toEqual([
-      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', orphans: [], damaged: true, missing: [GATEKEEPER] },
+      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', stoppedIdle: false, gatekeeperRunning: false, orphans: [], damaged: true, missing: [GATEKEEPER] },
     ]);
 
     // The space runs and its way out does not. For the space that is as good as no gatekeeper.
@@ -637,6 +656,17 @@ describe('docker place: list', () => {
     // A stopped space with a stopped gatekeeper is whole: `start` brings both up in order.
     const bothStopped = createFakeDocker({ resources: spaceResources({ running: false }) });
     expect(await makePlace(bothStopped).list()).toMatchObject([{ state: 'exited', damaged: false, missing: [] }]);
+  });
+
+  it('tells a space that stopped itself for the idle stop by its exit code, and a gatekeeper left running beside it', async () => {
+    const seeds = spaceResources();
+    const space = seeds.find((resource) => resource.kind === 'container' && resource.name === `openchamber-space-${ID}-space`);
+    space.entry.State = { Running: false, Status: 'exited', ExitCode: SPACE_IDLE_EXIT_CODE };
+    expect(await makePlace(createFakeDocker({ resources: seeds })).list()).toMatchObject([{ state: 'exited', stoppedIdle: true, gatekeeperRunning: true, damaged: false, missing: [] }]);
+
+    // Stopped by `docker stop`: the server ends on SIGTERM with 143, which is no idle stop.
+    space.entry.State = { Running: false, Status: 'exited', ExitCode: 143 };
+    expect(await makePlace(createFakeDocker({ resources: seeds })).list()).toMatchObject([{ state: 'exited', stoppedIdle: false }]);
   });
 
   it('still lists the other spaces when a resource vanishes between the listing and the inspect', async () => {
@@ -1368,7 +1398,7 @@ describe('docker place: new tools at the next start', () => {
     expect(fake.token(CONTAINER)).toBe('seeded-token');
     expect(await place.verify(ID)).toEqual([]);
     expect(await place.list()).toEqual([
-      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', orphans: [], damaged: false, missing: [] },
+      { id: ID, name: SPEC.name, project: SPEC.project, created: SPEC.created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] },
     ]);
     const create = fake.calls.map((call) => call.args).find((args) => args[0] === 'create');
     expect(create[create.indexOf('--memory') + 1]).toBe('4294967296');

@@ -647,6 +647,119 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(cleared.metadata).toEqual({});
   });
 
+  it('hands the first page of the session list to the spaces merge, and later pages not', async () => {
+    const upstream = express();
+    upstream.get('/api/session', (req, res) => res.json({ data: [{ id: 'h1', location: { directory: '/repo' }, title: 'host', permissions: {} }], cursor: { next: req.query.cursor ? undefined : 'p2' } }));
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const merges = [];
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path, OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort: upstreamPort, isOpenCodeReady: true, openCodeNotReadySince: 0, isRestartingOpenCode: false }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      mergeSpaceSessionList: async (payload) => {
+        merges.push(payload);
+        return { ...payload, data: [...payload.data, { id: 's1', location: { directory: '/spaces/a1b2c3d4e5f6/repo' } }], spaces: [{ id: 'a1b2c3d4e5f6', state: 'complete', sessions: 1 }] };
+      },
+    });
+    proxyServer = await listen(app);
+    const base = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    const first = await (await fetch(`${base}/api/session?limit=50`)).json();
+    expect(first.data.map((item) => item.id)).toEqual(['h1', 's1']);
+    expect(first.spaces).toEqual([{ id: 'a1b2c3d4e5f6', state: 'complete', sessions: 1 }]);
+    // The merge sees the host's list already sanitized.
+    expect(merges[0].data[0]).not.toHaveProperty('permissions');
+    const second = await (await fetch(`${base}/api/session?limit=50&cursor=p2`)).json();
+    expect(second.data.map((item) => item.id)).toEqual(['h1']);
+    expect(second.spaces).toBeUndefined();
+    // A list scoped to one directory, as the sidebar reads per project, is the host's alone.
+    const scoped = await (await fetch(`${base}/api/session?limit=50&directory=${encodeURIComponent('/repo')}`)).json();
+    expect(scoped.data.map((item) => item.id)).toEqual(['h1']);
+    expect(scoped.spaces).toBeUndefined();
+    const scopedByHeader = await (await fetch(`${base}/api/session?limit=50`, { headers: { 'x-opencode-directory': '/repo' } })).json();
+    expect(scopedByHeader.spaces).toBeUndefined();
+    expect(merges).toHaveLength(1);
+  });
+
+  it('writes the events of isolated spaces into the global event stream between the upstream\'s blocks', async () => {
+    const upstream = express();
+    let upstreamRes = null;
+    upstream.get('/api/event', (req, res) => {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.flushHeaders();
+      res.write('data: {"id":"h1","type":"host"}\n\n');
+      upstreamRes = res;
+      req.on('close', () => { upstreamRes = null; });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const subscribers = new Set();
+    const spaceEventHub = {
+      subscribeEvent: (subscriber, options) => {
+        const entry = { subscriber, options };
+        subscribers.add(entry);
+        return () => subscribers.delete(entry);
+      },
+    };
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path, OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort: upstreamPort, isOpenCodeReady: true, openCodeNotReadySince: 0, isRestartingOpenCode: false }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      spaceEventHub,
+    });
+    proxyServer = await listen(app);
+    const base = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    // A stream scoped by the directory header is the host's alone: no subscription for it.
+    const scopedController = new AbortController();
+    const scoped = await fetch(`${base}/api/event`, { headers: { Accept: 'text/event-stream', 'x-opencode-directory': '/repo' }, signal: scopedController.signal });
+    expect(scoped.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(subscribers.size).toBe(0);
+    scopedController.abort();
+
+    const controller = new AbortController();
+    const response = await fetch(`${base}/api/global/event`, { headers: { Accept: 'text/event-stream' }, signal: controller.signal });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    const readUntil = async (needle) => {
+      while (!text.includes(needle)) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+    };
+    await readUntil('"h1"');
+    expect(subscribers.size).toBe(1);
+    const [{ subscriber, options }] = subscribers;
+    expect(options).toEqual({ spaces: true });
+    // A host event of the hub is not written twice; a space event is written as one block.
+    subscriber({ spaceId: null, payload: { id: 'x', type: 'host-from-hub' } });
+    subscriber({ spaceId: 'a1b2c3d4e5f6', payload: { id: 's1', type: 'session.execution.started', location: { directory: '/spaces/a1b2c3d4e5f6/repo' } } });
+    await readUntil('"s1"');
+    expect(text).toBe('data: {"id":"h1","type":"host"}\n\ndata: {"id":"s1","type":"session.execution.started","location":{"directory":"/spaces/a1b2c3d4e5f6/repo"}}\n\n');
+    // Half a block of the host's holds a space event back until the block is whole.
+    upstreamRes.write('data: {"id":"h2",');
+    await readUntil('"h2"');
+    subscriber({ spaceId: 'a1b2c3d4e5f6', payload: { id: 's2', type: 'session.execution.succeeded' } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(text).not.toContain('"s2"');
+    upstreamRes.write('"type":"host"}\n\n');
+    await readUntil('"s2"');
+    expect(text.endsWith('data: {"id":"h2","type":"host"}\n\ndata: {"id":"s2","type":"session.execution.succeeded"}\n\n')).toBe(true);
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(subscribers.size).toBe(0);
+  });
+
   it('forwards unparsed SDK JSON bodies to generic API proxy requests', async () => {
     const upstream = express();
     upstream.post('/api/session/abc/revert', express.json(), (req, res) => {

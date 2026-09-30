@@ -110,13 +110,13 @@ Desenhar um painel e ler a sessão atual não exige permissão. Tudo que age em 
 | `files` | ler e escrever arquivos dentro do projeto aberto (`readFile`, `writeFile`, `listDir`, `stat` com um caminho relativo) |
 | `model` | geração de texto avulsa com o Small Model do usuário (`generate`), fora de qualquer sessão |
 
-Outras quatro são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, `filesystem` quando declara padrões `filesystem`, e `conversation` quando uma ação de sessão pede as mensagens (veja [Ações, comandos e o selo](#ações-comandos-e-o-selo)).
+Outras cinco são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, `filesystem` quando declara padrões `filesystem`, `origins` quando declara `origins`, e `conversation` quando uma ação de sessão pede as mensagens (veja [Ações, comandos e o selo](#ações-comandos-e-o-selo)).
 
 O usuário vê a lista completa uma vez, ao instalar a extensão, e aprova ou remove a extensão. Se uma versão nova pedir mais, o diálogo aparece de novo. Uma chamada que precisa de uma capacidade que o usuário não aprovou falha com `NOT_GRANTED`.
 
 ## Gerar texto
 
-Com a capacidade `model`, `host.generate` pede ao Small Model do usuário uma resposta avulsa: um resumo, um título, um rascunho. Nada entra em uma sessão, nenhum histórico é mantido, e a extensão nunca escolhe um provedor. O OpenChamber usa o mesmo modelo que usa para seu próprio trabalho em segundo plano, escolhido em Configurações → Sessões → Small Model, ou escolhido automaticamente entre os provedores conectados do usuário.
+Com a capacidade `model`, `host.generate` pede ao Small Model do usuário uma resposta avulsa: um resumo, um título, um rascunho. Nada entra em uma sessão, nenhum histórico é mantido, e a extensão nunca escolhe um provedor. O OpenChamber usa o mesmo modelo que usa para seu próprio trabalho em segundo plano, escolhido em Configurações → Sessões → Small Model, ou o modelo pequeno do provedor com que o usuário está trabalhando, ou o modelo padrão da configuração do OpenCode dele.
 
 ```ts
 const { text } = await host.generate({
@@ -130,7 +130,19 @@ Quando nenhum modelo está disponível, a chamada falha com `NO_MODEL`; um model
 
 ## Contas e rede
 
-Sua página roda em um ambiente isolado e não consegue chamar a internet diretamente. Declare uma `integration` e o OpenChamber faz as chamadas por você através de `host.request`, com o token do usuário anexado. O token nunca chega à sua página.
+Sua página roda em um ambiente isolado e não consegue acessar a rede por conta própria: scripts, estilos, imagens, fontes e mídia carregam só do seu pacote, e `fetch` alcança só os arquivos do seu pacote. Inclua fontes e imagens dentro do pacote em vez de carregá-las de um CDN.
+
+Para falar com um serviço externo, declare uma `integration` e o OpenChamber faz as chamadas por você através de `host.request`, com o token do usuário anexado. O token nunca chega à sua página.
+
+Para qualquer outra coisa de que sua página precise diretamente, como fontes ou imagens de um CDN ou uma API pública, liste até 8 origens https:
+
+```json
+"origins": ["https://fonts.example.com"]
+```
+
+O usuário as vê no diálogo de aprovação como endereços para os quais sua extensão pode enviar dados e dos quais pode recebê-los, e as aprova de novo se uma atualização adicionar uma. Origens aprovadas ficam abertas para `fetch`, imagens, fontes, estilos e mídia, mas nunca para scripts: o código precisa vir no seu pacote. A origem da página é `null`, então para ler uma resposta de `fetch` o servidor precisa permitir CORS para essa origem.
+
+No [modo empresarial](/security/), uma extensão com `origins`, uma `integration` ou um `service` só é instalada a partir de um repositório Git que o administrador listou. Se a sua extensão funciona sem eles, ela continua instalável para essas equipes. Para desenvolver uma numa máquina assim, peça ao administrador `allowLocalExtensions`, que deixa você instalá-la a partir da pasta dela.
 
 - `token`: o usuário cola um token de API no card de Configurações → Integrações. `apiOrigin` é a única origem que `request` pode chamar. `account` é opcional: um caminho GET e um nome de campo, para o card mostrar quem está conectado. `scheme` diz como o token é enviado; veja a tabela abaixo. Confira na documentação da API do provedor qual header ela espera.
 - `oauth`: o usuário cola um client id, e o OpenChamber executa o fluxo de autorização. Precisa de `authorizeUrl`, `tokenUrl` e `apiOrigin`.
@@ -181,6 +193,63 @@ As escritas são atômicas: o OpenChamber escreve um arquivo temporário e o ren
 - `height` é a altura inicial em pixels, de 24 a 320 (120 por padrão). Chame [`host.setHeight()`](/sdk/host/) quando o tamanho do conteúdo mudar.
 
 Sua página vê `ctx.surface` como `status`. O OpenChamber só a carrega enquanto o painel Work Status está visível e sua seção está expandida, e a descarrega quando o usuário recolhe a seção, então não guarde ali nada que você não consiga reconstruir. Uma extensão só com a seção pode usar permissões, um serviço, uma integração e arquivos, mas não `page`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `git-graph-status` é uma seção completa.
+
+## Um editor para o seu tipo de arquivo
+
+`contributes.fileEditors` abre arquivos na sua página em vez do editor de texto. Quando o usuário abre um arquivo correspondente no Files, o OpenChamber mostra seu editor ali, com o mesmo alternador de código-fonte, botão de tela cheia e botão de salvar que os visualizadores nativos têm.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` compara só nomes de arquivo, sem diferenciar maiúsculas de minúsculas. `*` corresponde a qualquer sequência de caracteres e `?` a um só. Um padrão não pode conter `/` nem ser formado só por curingas.
+- `entry` é uma página HTML na sua pasta. Você não precisa de `panel.entry`, então a extensão pode ser só o editor, sem ícone na barra lateral.
+- `content` é `"text"` (o padrão) ou `"binary"`, veja abaixo.
+- Até 8 editores por extensão, com até 16 padrões cada.
+
+O OpenChamber cuida do arquivo. Sua página nunca o lê nem o escreve e não precisa de nenhuma permissão para isso. O OpenChamber entrega o texto a você, pede o texto editado na hora de salvar e cuida de Cmd/Ctrl+S, do salvamento automático, do aviso de alterações não salvas, das quebras de linha e das mudanças feitas no disco:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // um editor de texto sempre recebe texto
+  load(file.content); // também file.path, file.name, file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Chame isto depois de cada edição. `edited` segura o salvamento automático até o usuário parar.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Edições feitas enquanto o OpenChamber gravava mantêm o arquivo não salvo.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` é qualquer string curta que muda quando o documento muda, como um hash. Se um arquivo não é algo que seu editor consegue abrir, chame `host.reportFileUnsupported()` e o OpenChamber mostra o código-fonte com um aviso. Arquivos acima de 20 MB ficam na visualização do código-fonte.
+
+### Arquivos binários
+
+Defina `"content": "binary"` para abrir arquivos que não são texto, como planilhas, documentos ou imagens. Seu editor recebe os bytes do arquivo e devolve bytes; todo o resto funciona do mesmo jeito.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // um Uint8Array, exatamente como está no disco
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Um editor binário pode assumir qualquer arquivo que corresponda aos seus padrões, inclusive os que o próprio OpenChamber mostra em prévia, como imagens e PDFs. Ele não tem visualização do código-fonte, e quando o usuário o leva para a tela cheia ou o tira dela com alterações não salvas, o OpenChamber as salva primeiro. Ler e gravar o formato é trabalho do seu editor: o OpenChamber grava exatamente os bytes que você devolve.
+
+Sua página vê `ctx.surface` como `file`. O OpenChamber a recarrega, entregando o arquivo de novo, quando o arquivo muda no disco, o usuário descarta as alterações ou o editor entra ou sai da tela cheia. Vence a primeira extensão ativada cujo padrão corresponde, antes das prévias do próprio OpenChamber. Uma extensão só com o editor pode usar permissões, um serviço, uma integração e arquivos, mas não `page`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `checklist-editor` é um editor completo.
 
 ## Ações, comandos e o selo
 
@@ -234,7 +303,7 @@ Quando o seu plugin do OpenCode ou servidor MCP adiciona uma ferramenta, o chat 
 
 `match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
 
-Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e nada mais. A outra exceção é uma seção do Work Status com `entry` próprio, veja acima.
+Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e nada mais. A outra exceção é uma seção do Work Status ou um editor de arquivos com `entry` próprio, veja acima.
 
 ## Primeiras linhas no painel
 

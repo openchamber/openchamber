@@ -104,6 +104,18 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(messageRequests).toBe(0);
   });
 
+  test('a pre-archive snapshot cannot enable turn stats after status invalidation', async () => {
+    await act(async () => store().setState({ sessionStatusReady: true }));
+    expect(dom.container.textContent).toContain('~6 tok/s');
+    await act(async () => store().setState({ sessionStatusInvalidated: { [sessionId]: true } }));
+    expect(dom.container.textContent).not.toContain('~6 tok/s');
+    tokenReads = 0;
+    await act(async () => store().setState({ part: { [assistant.id]: [] } }));
+    expect(tokenReads).toBe(0);
+    await act(async () => store().setState({ sessionStatusInvalidated: {} }));
+    expect(dom.container.textContent).toContain('~6 tok/s');
+  });
+
   test('collapsed remount keeps a usable header and reopening reads fresh data', async () => {
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } } }));
     const button = dom.container.querySelector('button');

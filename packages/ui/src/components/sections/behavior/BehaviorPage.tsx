@@ -95,6 +95,9 @@ export const BehaviorPage: React.FC = () => {
   // What is currently on disk. Every field is compared against this, so a save
   // writes only what actually changed and a refreshed value is never clobbered.
   const savedRef = React.useRef<BehaviorSettingsState | null>(null);
+  // AGENTS.md exactly as last read or written (null: no file). A save sends it
+  // so the server refuses to overwrite a file edited elsewhere in the meantime.
+  const agentsMdOnDiskRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     const abort = new AbortController();
@@ -133,6 +136,7 @@ export const BehaviorPage: React.FC = () => {
           const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
           if (abort.signal.aborted) return;
           setAgentsMdPath(agentsData.path ?? 'AGENTS.md');
+          agentsMdOnDiskRef.current = agentsData.exists ? agentsData.content : null;
           if (agentsData.exists) {
             promptSource = { kind: 'file', content: agentsData.content };
           }
@@ -160,6 +164,46 @@ export const BehaviorPage: React.FC = () => {
     return () => abort.abort();
   }, []);
 
+  // AGENTS.md is often edited in another editor while this page stays open.
+  // Coming back to the window re-reads it; the editor follows only when it
+  // holds no edit of its own, and a pending edit is guarded by the save.
+  const promptRef = React.useRef(prompt);
+  promptRef.current = prompt;
+  React.useEffect(() => {
+    let abort: AbortController | null = null;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible' || !savedRef.current) return;
+      abort?.abort();
+      const controller = new AbortController();
+      abort = controller;
+      try {
+        const response = await runtimeFetch('/api/behavior/agents-md', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const data = agentsMdResponseSchema.parse(await response.json());
+        const saved = savedRef.current;
+        if (controller.signal.aborted || !saved || !data.exists) return;
+        if (data.content === agentsMdOnDiskRef.current || promptRef.current !== saved.prompt) return;
+        agentsMdOnDiskRef.current = data.content;
+        savedRef.current = { ...saved, prompt: data.content };
+        setPrompt(data.content);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) console.warn('Failed to refresh AGENTS.md:', error);
+      }
+    };
+    const onRefresh = () => { void refresh(); };
+    window.addEventListener('focus', onRefresh);
+    document.addEventListener('visibilitychange', onRefresh);
+    return () => {
+      abort?.abort();
+      window.removeEventListener('focus', onRefresh);
+      document.removeEventListener('visibilitychange', onRefresh);
+    };
+  }, []);
+
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     const saved = savedRef.current;
     if (!saved || isLoading) return AUTOSAVE_UNCHANGED;
@@ -178,11 +222,15 @@ export const BehaviorPage: React.FC = () => {
       const response = await runtimeFetch('/api/behavior/agents-md', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, expectedContent: agentsMdOnDiskRef.current }),
       });
+      if (response.status === 409) {
+        return autosaveFailed(t('settings.behavior.page.toast.agentsMdChangedOnDisk'));
+      }
       if (!response.ok) {
         return autosaveFailed(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
+      agentsMdOnDiskRef.current = content;
       // Normalize only the submitted draft. A newer edit must survive this
       // response so the autosave follow-up can still write it.
       setPrompt((current) => current === prompt ? content : current);

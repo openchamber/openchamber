@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | тег мови застосунку |
 | `directory` | тека поточного проєкту або `null` |
 | `session` | `{ id, title, busy }` або `null`. Якщо назви немає, замість неї id сесії. `busy` - поточний статус. `model` і `agent` (агент OpenCode) з'являються, коли вони є в сесії. |
-| `surface` | `panel` на рейці, `dialog` у вікні прикріплення, `page` на повному екрані, `status` у панелі Work Status |
+| `surface` | `panel` на рейці, `dialog` у вікні прикріплення, `page` на повному екрані, `status` у панелі Work Status, `file` як редактор файлів у Files |
 | `item` | для чого відкрита ця поверхня, або `null`: прикріплений елемент, який клацнув користувач (ті самі поля, які ви передали в `attach`, включно з `data`), повідомлення (`kind: "message"`) або сесія (`kind: "session"`) з однієї з оголошених вами дій. Див. [Дії](/sdk/#дії-команди-та-бейдж). |
 | `connection` | `{ connected, account }` для вашої інтеграції |
 | `settings` | значення полів, які ви оголосили в `integration.settings` |
@@ -67,6 +67,12 @@ const host = connectHost();
 | `setBadge(count)` | показати число (від 0 до 999) на вашій іконці в рейці або `null`, щоб прибрати його |
 | `openCommit(sha)` | відкрити Diff view на цьому коміті поточного проєкту. `sha` має від 7 до 64 шістнадцяткових символів; OpenChamber сам читає коміт. |
 | `setHeight(px)` | задати висоту вашої секції Work Status. OpenChamber тримає її в межах від 24 до 320 пікселів; вищий вміст прокручується всередині вашої сторінки. В інших місцях ігнорується. |
+| `onFileOpen(listener)` | редактори файлів: отримати файл для редагування, `{ path, name, readOnly }` плюс `encoding: "text"` з `content` або `encoding: "binary"` з `bytes`. Також вмикає збереження за Cmd/Ctrl+S у вашій сторінці. |
+| `onFileSnapshot(handler)` | редактори файлів: повернути `{ content, version }` (або `{ bytes, version }` для бінарного редактора), увесь змінений файл. OpenChamber викликає це для збереження і перед перемиканням на вихідний код або в повноекранний режим. |
+| `onFileSaved(listener)` | редактори файлів: знімок із цією `version` уже на диску. Відповідайте через `reportFileChange`. |
+| `reportFileChange({ dirty, edited })` | редактори файлів: повідомити OpenChamber, чи є незбережені зміни і чи документ щойно змінився |
+| `requestFileSave()` | редактори файлів: зберегти зараз, як Cmd/Ctrl+S |
+| `reportFileUnsupported()` | редактори файлів: цей файл не можна відкрити тут, показати натомість його вихідний код |
 
 ## attach, startSession і sessionLink
 

@@ -31,5 +31,15 @@ export default defineConfig({
     // suite fail differently on every run.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // A developer who turned on enterprise mode or pinned endpoints for their
+    // own app (often in ~/.zshrc) must not flip what the suites assert; tests
+    // that need them set them themselves.
+    env: {
+      OPENCHAMBER_ENTERPRISE_MODE: '',
+      OPENCHAMBER_RELAY_URL: '',
+      OPENCHAMBER_JEV_URL: '',
+      OPENCHAMBER_JEV_MODEL: '',
+      OPENCHAMBER_JEV_API_KEY: '',
+    },
   },
 });

@@ -67,7 +67,7 @@ test('background install serves sandboxed assets and storage obeys approval and 
   const catalog = await request(app).get('/api/guests').expect(200);
   expect(catalog.body.guests[0].backgroundEntry).toBe('index.html');
   const html = await request(app).get('/api/guests/background-test/index.html?oc_url_token=test-scope').expect(200);
-  expect(html.headers['content-security-policy']).toBe('sandbox allow-scripts');
+  expect(html.headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none';/);
   expect(html.text).toContain('main.js?oc_url_token=test-scope');
   expect((await request(app).get('/api/guests/background-test/main.js').expect(200)).text).toBe('void 0;');
   await request(app).post('/api/guests/background-test/storage').send({ op: 'set', key: 'count', value: 1 }).expect(400);

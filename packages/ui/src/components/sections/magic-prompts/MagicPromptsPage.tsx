@@ -203,6 +203,7 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
     blocks: [
       { id: 'session.fusion.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
       { id: 'session.fusion.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+      { id: 'session.fusion.codeInstructions', titleKey: 'settings.magicPrompts.page.block.codeFusionInstructions' },
     ],
   },
 };

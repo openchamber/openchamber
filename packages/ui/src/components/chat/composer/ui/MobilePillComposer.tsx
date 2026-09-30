@@ -93,12 +93,21 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
             className="mb-1.5"
         />
         <div className="flex items-center">
+            {/* Shadow on the wrapper, never on the glass: see "Floating
+                composer" in composer/DOCUMENTATION.md. The wrapper hugs the
+                box, so the shadow follows the morph's height tween. */}
+            <div
+                className={cn(
+                    'flex min-w-0 flex-1 flex-col shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                    topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
+                )}
+            >
             <div
                 data-mobile-composer-pill="true"
                 // The morph measures and animates this box (see mobileComposerMorph).
                 data-composer-box="true"
                 className={cn(
-                    'oc-glass-composer flex min-w-0 flex-1 flex-col border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                    'oc-glass-composer flex min-w-0 flex-col border border-border/80',
                     topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
                 )}
             >
@@ -193,6 +202,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
             </div>
             {bottomRow}
             </div>
+            </div>
             {/* While running, Abort owns the pill's end slot and this outer
                 button queues the draft, with the same rotated icon and label
                 the expanded composer uses for that state. Collapsed otherwise. */}
@@ -202,11 +212,13 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     // The gap lives on the slot, so a collapsed slot leaves
                     // the pill exactly as wide as the expanded box.
                     showTrailingSendAction ? 'ml-2 w-11 opacity-100' : 'w-0 opacity-0 overflow-hidden',
+                    // The glass button's shadow, kept off its backdrop-filter.
+                    'rounded-full shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
                 )}
             >
                 <button
                     type="button"
-                    className="oc-glass-composer flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-primary shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] hover:text-primary"
+                    className="oc-glass-composer flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-primary hover:text-primary"
                     onClick={onQueueMessage}
                     disabled={!showTrailingSendAction}
                     tabIndex={showTrailingSendAction ? undefined : -1}

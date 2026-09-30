@@ -1,0 +1,100 @@
+---
+title: Repositoryconfiguratie
+description: Bewaar projectacties, worktree-inrichtingsopdrachten, startopties en plannen in de repository zodat het hele team ze krijgt.
+---
+
+# Repositoryconfiguratie
+
+Projectacties, opdrachten voor het inrichten van worktrees en startopties voor nieuwe sessies staan standaard in uw eigen OpenChamber-instellingen. Anderen zien ze niet. Wilt u dat een teamgenoot na het klonen dezelfde ontwikkelserveractie krijgt en bij elke nieuwe worktree ook `bun install` uitvoert, verplaats die onderdelen dan naar de repository.
+
+OpenChamber bewaart ze in `.openchamber/project.json` in de hoofdmap van de repository. Het bestand verschijnt zodra u het eerste onderdeel verplaatst en verdwijnt wanneer u het laatste eruit haalt. Commit het zoals elk ander bestand.
+
+## Wat hoort waar?
+
+| Blijft in uw instellingen | Kan naar de repository |
+|---|---|
+| Notities en taken | Projectacties |
+| Geplande taken | Worktree-inrichtingsopdrachten |
+| Welke repositoryacties u verbergt | Startopties voor nieuwe sessies: vastgezette opdrachten en skills |
+| Uw vertrouwensbeslissing voor repositoryopdrachten | Plannen |
+
+Notities, taken en geplande taken zijn persoonlijk. Ze komen nooit in de repository terecht.
+
+## Een onderdeel verplaatsen
+
+Open **Instellingen → Projecten** en kies het project. Elke actie en inrichtingsopdracht heeft een knop **Naar repository verplaatsen**. Onderdelen uit de repository hebben **Naar mijn instellingen verplaatsen**. Bij startopties op het scherm voor nieuwe sessies verschijnen dezelfde knoppen als u erover beweegt. Bij plannen staan ze op elke rij van het tabblad Plannen.
+
+Het onderdeel wordt echt verplaatst: het verdwijnt op de ene plek en verschijnt op de andere. Er wordt geen kopie gemaakt.
+
+Onderdelen uit de repository krijgen het label **In repo**. Met **Voor mij verbergen** haalt u een repositoryactie alleen uit uw eigen menu, zonder het bestand te wijzigen.
+
+## Het bestand
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Alleen `version` is verplicht. Alle andere sleutels zijn optioneel. OpenChamber schrijft alleen sleutels die iets bevatten.
+
+`setupWorktree` bevat de shell-opdrachten die OpenChamber direct na het maken van een worktree daarin op volgorde uitvoert. Gebruik `$ROOT_PROJECT_PATH` voor het pad naar de hoofdcheckout. Met `setupWorktreeWait: true` wacht OpenChamber op deze opdrachten voordat het een sessie in de worktree start.
+
+`projectActions` bevat de acties in het menu bovenaan de app. `id`, `name` en `command` zijn verplicht. `icon` is optioneel; zonder waarde verschijnt een afspeelpictogram. Bekende namen zijn `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` en `file`. Met `autoOpenUrl: true` opent u het adres dat de opdracht toont. Zie [Voorbeeldweergave en ontwikkelservers](/nl/preview/). `platforms` beperkt de actie tot `macos`, `linux` of `windows`. `runIn: "parent"` voert de actie uit in de hoofdcheckout in plaats van in de huidige worktree.
+
+`draftStarters` zet opdrachten en skills vast op het scherm voor een nieuwe sessie. Elke vermelding heeft de vorm `{ "type": "command" | "skill", "name": "..." }`. De opdracht of skill zelf moet bestaan in de OpenCode-configuratie van de repository.
+
+`plansDir` bepaalt waar repositoryplannen staan. Zonder deze sleutel wordt `.openchamber/plans` gebruikt. Zie hieronder.
+
+U kunt dit bestand ook zelf schrijven. Een sleutel met een onjuiste structuur maakt het hele bestand ongeldig. De projectenpagina toont dan de reden in plaats van het stilzwijgend te negeren.
+
+## Repositoryonderdelen en persoonlijke onderdelen combineren
+
+Inrichtingsopdrachten uit de repository worden eerst uitgevoerd, daarna uw eigen opdrachten. Vink in het gedeelte Worktree **Alleen mijn inrichtingsopdrachten gebruiken** aan om die van de repository helemaal over te slaan.
+
+Acties worden op `id` samengevoegd. Een eigen actie met dezelfde ID vervangt de repositoryactie. Startopties worden op naam samengevoegd.
+
+De instelling om te wachten komt uit uw eigen instellingen als u die hebt opgegeven, en anders uit de repository.
+
+## Vertrouwen
+
+Inrichtingsopdrachten en acties uit de repository draaien op uw computer en kunnen door een `git pull` veranderen. Daarom toont OpenChamber de precieze opdrachten en vraagt het toestemming voordat ze voor het eerst worden uitgevoerd. **Vertrouwen en uitvoeren** onthoudt uw antwoord voor deze instantie. **Deze keer niet** voert alleen uw eigen opdrachten uit.
+
+Het antwoord hoort bij de opdrachttekst zelf. Als een pull een repositoryopdracht wijzigt, wordt opnieuw toestemming gevraagd voor de nieuwe tekst. U kunt de eerdere beslissing wissen met **Vertrouwen resetten** in het gedeelte Worktree van de projectinstellingen.
+
+Een eigen opdracht naar de repository verplaatsen geldt als vertrouwen, omdat u die opdracht zojuist zelf hebt gezien.
+
+## Plannen in de repository
+
+Plannen in het tabblad Plannen kunnen ook als Markdown-bestanden in de repository staan. Standaard is de map `.openchamber/plans`. Stel **Plannenmap** in de projectinstellingen in op een andere map binnen de repository, bijvoorbeeld `docs/plans` als uw team die al gebruikt. Een eigen map vervangt de standaardmap volledig. OpenChamber leest en schrijft dan alleen die map, dus verplaats bestaande bestanden zelf wanneer u dit wijzigt.
+
+Elk `.md`-bestand in die map verschijnt in het tabblad Plannen, ook bestanden van andere tools. Bewerken in OpenChamber slaat de tekst op zoals u die hebt ingevoerd. Een plan behoudt zijn identiteit wanneer u het naar de repository verplaatst. Sessies waaraan het al was gekoppeld, kunnen het dus nog steeds vinden.
+
+## Zie ook
+
+- [Projectacties](/nl/project-actions/)
+- [Worktrees](/nl/worktrees/)
+- [Projectnotities, taken en plannen](/nl/notes-todos-plans/)

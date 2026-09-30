@@ -53,6 +53,8 @@ export type State = {
   session_status: Record<string, SessionStatus>
   /** A successful status snapshot makes omitted sessions authoritatively idle. */
   sessionStatusReady?: boolean
+  /** Archive evicts a session's status; the earlier snapshot no longer covers it. */
+  sessionStatusInvalidated?: Record<string, true>
   permission: Record<string, PermissionRequest[]>
   /** Pending forms (the agent asking the user for input), keyed by session. */
   form: Record<string, FormRequest[]>

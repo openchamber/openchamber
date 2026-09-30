@@ -386,12 +386,13 @@ const sendPlainMessage = async (
     sessionId: sessionID,
     content: text,
     directory,
+    context: sendContext,
     onMessageID: (messageID) => {
       sentMessageID = messageID;
     },
     beforeOptimisticInsert: () => assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey),
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
-    send: (messageID) => {
+    send: (messageID, context) => {
       assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
       // Only a genuine change travels with the prompt; the review session was
       // created on this selection, so normally nothing is switched.
@@ -403,7 +404,7 @@ const sendPlainMessage = async (
         model: selection.model,
         agent: selection.agent,
         text,
-        context: sendContext,
+        context,
         messageId: messageID,
       }).then(() => undefined);
     },
@@ -445,13 +446,15 @@ const getReviewSessionTitle = (original: Session): string => {
 };
 
 // A review session runs tools too (reads other directories, verifies with commands),
-// so a fresh one starts with the same auto-accept choice as the session it reviews.
-// Failure only leaves the reviewer prompting for permissions the way it did before.
+// so a fresh one starts with the same permission mode as the session it reviews.
+// Failure only leaves the reviewer on the default mode the server gave it.
 const inheritPermissionAutoAccept = async (originalSessionID: string, reviewSessionID: string): Promise<void> => {
   const permissions = usePermissionStore.getState();
-  if (!permissions.isSessionAutoAccepting(originalSessionID)) return;
+  // `ask` is copied too: otherwise the server's default could make the
+  // reviewer more permissive than the session it reviews.
+  const mode = permissions.getSessionMode(originalSessionID);
   try {
-    await permissions.setSessionAutoAccept(reviewSessionID, true);
+    await permissions.setSessionMode(reviewSessionID, mode);
   } catch (error) {
     console.warn('[review-flow] failed to inherit permission auto-accept for review session', error);
   }

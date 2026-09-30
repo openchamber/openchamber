@@ -76,10 +76,16 @@ export const useTurnRecords = (
         });
     }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles, options.sessionKey]);
 
+    // The last turn is the live tail only while nothing follows it. A notice
+    // that lands after it (a compaction, a shell run) ends the turn, so the
+    // turn joins the history and keeps its place above that notice.
+    const lastMessageId = messages[messages.length - 1]?.info.id;
+    const tailIsTurn = !lastMessageId || !projection.ungroupedMessageIds.has(lastMessageId);
+
     const staticTurns = React.useMemo(() => {
-        const nextStatic = projection.turns.length <= 1
-            ? []
-            : projection.turns.slice(0, -1);
+        const nextStatic = tailIsTurn
+            ? projection.turns.slice(0, -1)
+            : projection.turns;
         const previousStatic = staticTurnsRef.current;
 
         if (previousStatic.length === nextStatic.length) {
@@ -97,10 +103,10 @@ export const useTurnRecords = (
 
         staticTurnsRef.current = nextStatic;
         return nextStatic;
-    }, [projection.turns]);
+    }, [projection.turns, tailIsTurn]);
 
     const streamingTurn = React.useMemo(() => {
-        const nextStreamingTurn = projection.turns.length === 0
+        const nextStreamingTurn = projection.turns.length === 0 || !tailIsTurn
             ? undefined
             : projection.turns[projection.turns.length - 1];
         if (streamingTurnRef.current === nextStreamingTurn) {
@@ -108,7 +114,7 @@ export const useTurnRecords = (
         }
         streamingTurnRef.current = nextStreamingTurn;
         return nextStreamingTurn;
-    }, [projection.turns]);
+    }, [projection.turns, tailIsTurn]);
 
     return {
         projection,

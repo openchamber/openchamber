@@ -120,6 +120,18 @@ describe("applySessionEventToGlobalSessions", () => {
     expect(upsertedSessions.map((session) => session.title)).toEqual(["Renamed"])
   })
 
+  test("applies a metadata broadcast to the global record at once", () => {
+    currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
+
+    applySessionEventToGlobalSessions({
+      type: "session.patched",
+      properties: { sessionID: "ses_1", patch: { metadata: { openchamber: { work: { state: "open" } } } } },
+    })
+
+    expect(upsertedSessions.map((session) => session.metadata)).toEqual([{ openchamber: { work: { state: "open" } } }])
+    expect(upsertedSessions[0]?.title).toBe("Initial")
+  })
+
   test("cancels a pending global update when the session is deleted", () => {
     currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
 

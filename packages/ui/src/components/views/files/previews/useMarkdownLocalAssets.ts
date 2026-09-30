@@ -42,14 +42,42 @@ const decodeReference = (value: string): string => {
   }
 };
 
+type SrcsetCandidate = { url: string; descriptor: string };
+
+const parseSrcset = (value: string): SrcsetCandidate[] => value.split(',').flatMap((candidate) => {
+  const [url, ...descriptor] = candidate.trim().split(/\s+/);
+  return url ? [{ url, descriptor: descriptor.join(' ') }] : [];
+});
+
+const MEDIA_SOURCE_ATTR = 'data-oc-media';
+const COLOR_SCHEME_FEATURE_RE = /\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/gi;
+
+/**
+ * `<source media="(prefers-color-scheme: dark)">` would follow the OS, while
+ * the preview is painted in the app theme. The color-scheme feature is swapped
+ * for one that is always true or never true for the app theme; the author's
+ * query is kept on the element so a theme change re-evaluates it.
+ */
+const applyColorScheme = (container: HTMLElement, colorScheme: 'light' | 'dark') => {
+  for (const source of Array.from(container.querySelectorAll<HTMLSourceElement>('picture > source[media]'))) {
+    const original = source.getAttribute(MEDIA_SOURCE_ATTR) ?? source.getAttribute('media') ?? '';
+    const media = original.replace(COLOR_SCHEME_FEATURE_RE, (_feature, scheme: string) => (
+      scheme.toLowerCase() === colorScheme ? '(min-width: 0px)' : '(max-width: -1px)'
+    ));
+    if (media === original) continue;
+    if (source.getAttribute(MEDIA_SOURCE_ATTR) !== original) source.setAttribute(MEDIA_SOURCE_ATTR, original);
+    if (source.getAttribute('media') !== media) source.setAttribute('media', media);
+  }
+};
+
 /**
  * Makes a Markdown file's relative images and links work inside the preview.
  *
  * The renderer emits `<img src="./shot.png">` and `<a href="notes.md">` as
  * written; the page would resolve both against the app's own URL and get
  * nothing. Images are fetched through the runtime and swapped for object URLs,
- * links open the target file in the viewer, and `#fragment` links scroll
- * to the heading in this file. Resolution is against the file's
+ * `<picture>`/`srcset` candidates the same way, links open the target file in
+ * the viewer, and `#fragment` links scroll to the heading in this file. Resolution is against the file's
  * directory, not the workspace root, and a target outside the workspace is
  * read the way the File Editor already reads such files.
  */
@@ -59,6 +87,7 @@ export const useMarkdownLocalAssets = ({
   workspaceRoot,
   onOpenFile,
   enabled,
+  colorScheme,
 }: {
   /** The rendered preview; state rather than a ref so mounting re-runs the wiring. */
   container: HTMLElement | null;
@@ -66,9 +95,18 @@ export const useMarkdownLocalAssets = ({
   workspaceRoot: string | null;
   onOpenFile: (absolutePath: string) => void;
   enabled: boolean;
+  /** The app theme's variant, which `prefers-color-scheme` sources follow. */
+  colorScheme: 'light' | 'dark';
 }) => {
   const onOpenFileRef = React.useRef(onOpenFile);
   onOpenFileRef.current = onOpenFile;
+  const colorSchemeRef = React.useRef(colorScheme);
+  colorSchemeRef.current = colorScheme;
+
+  // Theme changes re-evaluate the sources without tearing down loaded images.
+  React.useEffect(() => {
+    if (enabled && container) applyColorScheme(container, colorScheme);
+  }, [colorScheme, container, enabled]);
 
   React.useEffect(() => {
     if (!enabled || !container || !filePath) return;
@@ -124,6 +162,30 @@ export const useMarkdownLocalAssets = ({
             if (!disposed) image.removeAttribute(LOCAL_ASSET_ATTR);
           });
       }
+      // `<picture>` sources and `srcset` candidates, loaded the same way.
+      for (const element of Array.from(container.querySelectorAll<HTMLElement>('source[srcset], img[srcset]'))) {
+        const candidates = parseSrcset(element.getAttribute('srcset') ?? '');
+        if (!candidates.some((candidate) => isRelativeReference(candidate.url))) continue;
+        const resolved = candidates.map((candidate) => ({
+          ...candidate,
+          path: isRelativeReference(candidate.url) ? resolve(candidate.url) : null,
+        }));
+        const marker = resolved.map((candidate) => candidate.path ?? candidate.url).join(',');
+        element.setAttribute(LOCAL_ASSET_ATTR, marker);
+        void Promise.all(resolved.map(async ({ url, descriptor, path }) => {
+          const loaded = path ? await loadImage(path) : url;
+          return descriptor ? `${loaded} ${descriptor}` : loaded;
+        }))
+          .then((parts) => {
+            if (disposed || element.getAttribute(LOCAL_ASSET_ATTR) !== marker) return;
+            const srcset = parts.join(', ');
+            if (element.getAttribute('srcset') !== srcset) element.setAttribute('srcset', srcset);
+          })
+          .catch(() => {
+            if (!disposed) element.removeAttribute(LOCAL_ASSET_ATTR);
+          });
+      }
+      applyColorScheme(container, colorSchemeRef.current);
     };
 
     const handleClick = (event: MouseEvent) => {
@@ -149,7 +211,7 @@ export const useMarkdownLocalAssets = ({
 
     rewriteImages();
     const observer = new MutationObserver(rewriteImages);
-    observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'media'] });
     container.addEventListener('click', handleClick, true);
 
     return () => {

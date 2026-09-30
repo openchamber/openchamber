@@ -14,18 +14,22 @@
 // Arguments: <space-facing bind host> <corridor port> <window port> <control port>
 // [<window deadline in ms>]. They are arguments so that the container command and the tests run
 // the very same program; the last one lets a test watch a deadline pass without waiting five
-// minutes for it. None of them changes a decision this program makes.
+// minutes for it. None of them changes a decision this program makes. The bind host is an
+// address, or the path of a file that holds one: the container command names the file, and the
+// host writes the gatekeeper's own address on the space's network into it before the program,
+// because the host knows that address and this program has no say in where it listens.
 //
 // Everything the space sends is hostile input. Nothing it can send may end the process:
 // a crash of the gatekeeper is a denial of service the agent could trigger at will.
 
 const dns = require('node:dns');
+const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
 const os = require('node:os');
 
-const [bindHost, corridorPort, windowPort, controlPort, windowDeadline, corridorCap, windowCap, controlCap] = process.argv.slice(2);
+const [bindArgument, corridorPort, windowPort, controlPort, windowDeadline, corridorCap, windowCap, controlCap] = process.argv.slice(2);
 
 /**
  * A cap given on the command line, or the production number when there is none.
@@ -105,12 +109,42 @@ const GRANT_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const HEADER_NAME_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const MAX_SECRET_LENGTH = 8192;
 
+/**
+ * The address the corridor and the window listen on. An argument that starts with `/` is the
+ * file the host wrote beside this program, holding the gatekeeper's own address on the space's
+ * network; anything else is the address itself, which is what the tests pass. Whichever it is,
+ * it must be the address of one interface: a file that is missing or empty, or anything that is
+ * not an address or names every interface, ends the program. On a Linux Docker host every local
+ * process can reach the bridge, and a window that listens there spends the user's key for anyone
+ * on the machine. That includes a gatekeeper made before stage 5b, whose command still says
+ * `0.0.0.0` and whose checker never compared the command: it no longer starts, and such a
+ * space has to be made again. Failing to start is the safe answer.
+ */
+function readBindHost(argument) {
+  const given = String(argument ?? '');
+  let text = given;
+  if (given.startsWith('/')) {
+    try {
+      text = fs.readFileSync(given, 'utf8').trim();
+    } catch (error) {
+      console.error(`gatekeeper: cannot read the bind address from ${given} (${error.code || error.message})`);
+      process.exit(2);
+    }
+  }
+  if (net.isIP(text) === 0 || text === '0.0.0.0' || text === '::') {
+    console.error(`gatekeeper: ${given} is not the address of one interface`);
+    process.exit(2);
+  }
+  return text;
+}
 // Everything the host sets, in memory only. Never a file, never an environment variable,
 // never an argument, never a label. A restart starts from "nothing is allowed".
 let networkMode = 'allowlist';
 let allowedDomains = new Set();
 const grants = new Map();
 
+// When this program started, for the journal: nothing before it is on record.
+const STARTED_AT = new Date().toISOString();
 const journal = [];
 let journalDropped = 0;
 
@@ -604,9 +638,9 @@ const answerJson = (response, status, body) => {
  * The gatekeeper's own listeners are not an upstream. A grant is the host's decision, and the
  * user's private network is a legitimate place for one, so only this refusal stands in the way.
  *
- * Every address this container has, not only loopback: the corridor and the window bind
- * `0.0.0.0`, so the address the space reaches them on is the one on the inner network, and a
- * grant pointing there would feed the window into itself until its 64 sockets out were gone.
+ * Every address this container has, not only loopback: the corridor and the window listen on
+ * the gatekeeper's address on the inner network, and a grant pointing there, or at any other
+ * address of its own, would feed the window into itself until its 64 sockets out were gone.
  */
 const ownListenerPorts = new Set([Number(corridorPort), Number(windowPort), Number(controlPort)]);
 const ownAddresses = new Set(Object.values(os.networkInterfaces())
@@ -665,13 +699,18 @@ async function serveWindow(request, response) {
     return;
   }
 
-  // Whatever the space sent as credentials goes, and the grant's own header takes its place.
+  // Whatever the space sent as credentials goes, and the grant's own header takes its place. A
+  // grant without a secret, an opened domain, adds nothing: the upstream sees the request as the
+  // space made it, less the credential headers.
   const headers = { ...request.headers };
   for (const name of Object.keys(headers)) {
-    if (['authorization', 'x-api-key', 'proxy-authorization'].includes(name.toLowerCase())) delete headers[name];
+    const lower = name.toLowerCase();
+    if (['authorization', 'x-api-key', 'proxy-authorization'].includes(lower) || lower === grant.header) delete headers[name];
   }
   headers.host = upstream.host;
-  headers[grant.header] = grant.header.toLowerCase() === 'authorization' ? `Bearer ${grant.secret}` : grant.secret;
+  if (grant.secret !== null) {
+    headers[grant.header] = grant.header === 'authorization' ? `Bearer ${grant.secret}` : grant.secret;
+  }
 
   record('window', normalizeName(upstream.hostname), port, 'allow');
   const transport = upstream.protocol === 'https:' ? https : http;
@@ -757,13 +796,19 @@ function setNetwork(body) {
   return null;
 }
 
+/**
+ * A grant with a secret names the header that carries it; a grant without one, an opened domain,
+ * names no header and the window adds nothing. A body with a header and no secret, or a secret
+ * and no header, is refused: either the grant hides a credential or it does not.
+ */
 function addGrant(body) {
   const id = asText(body.id);
-  const header = asText(body.header);
-  const secret = asText(body.secret);
   if (!GRANT_ID_PATTERN.test(id)) return 'a grant id is 1 to 64 letters, digits, dots, dashes or underscores';
-  if (!HEADER_NAME_PATTERN.test(header)) return 'a header name is 1 to 64 letters, digits or dashes';
-  if (secret.length === 0 || secret.length > MAX_SECRET_LENGTH) return 'a grant needs a secret';
+  const withSecret = body.secret !== undefined || body.header !== undefined;
+  const header = withSecret ? asText(body.header).toLowerCase() : null;
+  const secret = withSecret ? asText(body.secret) : null;
+  if (withSecret && !HEADER_NAME_PATTERN.test(header)) return 'a header name is 1 to 64 letters, digits or dashes';
+  if (withSecret && (secret.length === 0 || secret.length > MAX_SECRET_LENGTH)) return 'a grant with a header needs a secret';
   let upstream;
   try {
     upstream = new URL(asText(body.upstream));
@@ -782,8 +827,15 @@ async function serveControl(request, response) {
     answerJson(response, 200, { ready: true, mode: networkMode, domains: allowedDomains.size, grants: grants.size });
     return;
   }
+  if (request.method === 'GET' && path === '/policy') {
+    // What the host last said, so it can tell a gatekeeper that forgot from one that remembers.
+    // Ids and names only: a secret is never read back, not even by the host.
+    answerJson(response, 200, { mode: networkMode, domains: Array.from(allowedDomains), grants: Array.from(grants.keys()) });
+    return;
+  }
   if (request.method === 'GET' && path === '/journal') {
-    answerJson(response, 200, { records: journal.slice(), dropped: journalDropped });
+    // Since when: the journal is memory only, so the host says that nothing older exists.
+    answerJson(response, 200, { records: journal.slice(), dropped: journalDropped, since: STARTED_AT });
     return;
   }
   if (request.method !== 'POST' || (path !== '/network' && path !== '/grants')) {
@@ -874,6 +926,8 @@ const control = makeServer('control', MAX_CONTROL_CONNECTIONS, (request, respons
 const listen = (server, port, host) => new Promise((resolve) => { server.listen(Number(port), host, resolve); });
 
 async function main() {
+  // Here and not at the top: requiring this file from a test must not read the runner's argv.
+  const bindHost = readBindHost(bindArgument);
   if (!bindHost || !corridorPort || !windowPort || !controlPort) {
     console.error('gatekeeper: arguments are <bind host> <corridor port> <window port> <control port>');
     process.exit(2);
@@ -910,5 +964,5 @@ function describeFailure(error) {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { chooseAddress, isBlockedAddress, isDomainName, joinSockets, parseIPv4, parseIPv6, refuseTarget, setNetwork, splitTarget, walksOutOfGrant };
+  module.exports = { addGrant, chooseAddress, isBlockedAddress, isDomainName, joinSockets, parseIPv4, parseIPv6, refuseTarget, setNetwork, splitTarget, walksOutOfGrant };
 }

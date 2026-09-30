@@ -88,9 +88,9 @@ export const stopGitProcesses = (): Promise<void> => {
 };
 
 export const execGit = async (
-  args: string[], cwd: string, options: { binary?: string; timeoutMs?: number } = {},
+  args: string[], cwd: string, options: { binary?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-  const env = await buildGitEnv();
+  const env = { ...(await buildGitEnv()), ...options.env };
   if (shutdown) return { stdout: '', stderr: 'Git runtime is shutting down', exitCode: 1 };
   const process = spawnOwnedProcess(options.binary ?? 'git', args, { cwd, env });
   activeProcesses.add(process);

@@ -70,11 +70,13 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
+import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1251,10 +1253,15 @@ const spawnLocalServer = async () => {
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
   setDesktopKeepAwakeActive(settings.desktopKeepAwakeEnabled === true);
   const desktopUiPassword = typeof settings.desktopUiPassword === 'string' ? settings.desktopUiPassword.trim() : '';
-  const lanAccessBlockedByMissingPassword = lanAccessEnabled && !desktopUiPassword;
-  const effectiveLanAccessEnabled = lanAccessEnabled && !lanAccessBlockedByMissingPassword;
+  // Enterprise mode keeps the app on this machine unless the administrator
+  // allowed network access (the server refuses a network bind as well).
+  const lanAccessBlockedByEnterprise = lanAccessEnabled && isNetworkAccessBlocked();
+  const lanAccessBlockedByMissingPassword = lanAccessEnabled && !lanAccessBlockedByEnterprise && !desktopUiPassword;
+  const effectiveLanAccessEnabled = lanAccessEnabled && !lanAccessBlockedByEnterprise && !lanAccessBlockedByMissingPassword;
   const bindHost = effectiveLanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
-  if (lanAccessBlockedByMissingPassword) {
+  if (lanAccessBlockedByEnterprise) {
+    log.warn('[desktop] LAN access is turned off by enterprise mode; starting on loopback only.');
+  } else if (lanAccessBlockedByMissingPassword) {
     log.warn('[desktop] LAN access was requested without a desktop UI password; starting on loopback only.');
   }
 
@@ -1279,7 +1286,9 @@ const spawnLocalServer = async () => {
   // both the Electron main and the server running inside it.
   process.env.OPENCHAMBER_HOST = bindHost;
   process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
-  if (lanAccessBlockedByMissingPassword) {
+  if (lanAccessBlockedByEnterprise) {
+    process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'enterprise-mode';
+  } else if (lanAccessBlockedByMissingPassword) {
     process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
   } else {
     delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
@@ -2235,6 +2244,32 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (isAllowedNavigationUrl(url)) return;
     event.preventDefault();
     void shell.openExternal(url).catch(() => {});
+  });
+
+  // An extension frame navigating itself would carry data out in the URL;
+  // refused before the request (see guest-frame-navigation.mjs).
+  browserWindow.webContents.on('will-frame-navigate', (details) => {
+    let frameOrigin;
+    try {
+      frameOrigin = details.frame?.origin;
+    } catch {
+      frameOrigin = undefined;
+    }
+    if (!shouldBlockGuestFrameNavigation({
+      isMainFrame: details.isMainFrame,
+      frameOrigin,
+      url: details.url,
+      isAppOrigin: isAllowedNavigationUrl,
+    })) return;
+    details.preventDefault();
+    let host = '';
+    try {
+      host = new URL(details.url).host;
+    } catch {
+      host = '';
+    }
+    // Only the host: the URL itself may be the data being carried out.
+    log.warn(`[guests] refused an extension frame navigating to ${host || 'an invalid URL'}`);
   });
 
   browserWindow.webContents.setZoomFactor(1);

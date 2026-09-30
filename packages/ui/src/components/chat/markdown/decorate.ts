@@ -234,6 +234,9 @@ const decorateInlineCode = (root: HTMLElement): void => {
     if (code.getAttribute('data-markdown') !== 'inline-code') {
       code.setAttribute('data-markdown', 'inline-code');
     }
+    // Exclude technical text from a containing list item's dir=auto scan.
+    if (code.getAttribute('dir') !== 'ltr') code.setAttribute('dir', 'ltr');
+    if (code.closest('table')) code.classList.add('whitespace-nowrap');
   }
 };
 
@@ -255,6 +258,7 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-component', 'markdown-code');
+    wrapper.setAttribute('dir', 'ltr');
     wrapper.className =
       'my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]';
 
@@ -349,7 +353,7 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
 };
 
 const TABLE_COLUMN_MIN_WIDTH = 120;
-const TABLE_COLUMN_MAX_WIDTH = 320;
+const TABLE_COLUMN_FALLBACK_MAX_WIDTH = 320;
 const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
 
 const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
@@ -402,10 +406,10 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     lastBodyRow?.classList.remove('border-b');
     lastBodyRow?.classList.add('border-0');
     for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
+      th.classList.add('min-w-[120px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
     }
     for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
+      td.classList.add('min-w-[120px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
     }
 
     scroll.appendChild(table);
@@ -477,16 +481,33 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
   });
 
   root.appendChild(measurementRoot);
-  const plans = probes.map(({ table, columnProbes }) => ({
-    table,
-    widths: columnProbes.map((probe) => Math.min(
-      TABLE_COLUMN_MAX_WIDTH,
-      Math.max(TABLE_COLUMN_MIN_WIDTH, Math.ceil(probe.getBoundingClientRect().width)),
-    )),
-  }));
+  const plans = probes.map(({ table, columnProbes }) => {
+    const availableWidth = table.parentElement?.clientWidth ?? 0;
+    // Without layout (for example, a hidden chat), retain the former limit.
+    const maxColumnWidth = Math.max(TABLE_COLUMN_MIN_WIDTH, availableWidth || TABLE_COLUMN_FALLBACK_MAX_WIDTH);
+    const naturalWidths = columnProbes.map((probe) => Math.ceil(probe.getBoundingClientRect().width));
+    return {
+      table,
+      widths: naturalWidths.map((width) => Math.min(maxColumnWidth, Math.max(TABLE_COLUMN_MIN_WIDTH, width))),
+      cappedColumns: naturalWidths.map((width) => width > maxColumnWidth),
+    };
+  });
   measurementRoot.remove();
 
-  for (const { table, widths } of plans) {
+  for (const { table, widths, cappedColumns } of plans) {
+    // Identifiers stay on one line only while the column can hold them; in a
+    // column capped at the available width they wrap instead of overflowing
+    // into the neighbouring cell.
+    for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'))) {
+      const cells = Array.from(row.children).filter((child) => child.tagName === 'TH' || child.tagName === 'TD');
+      cells.forEach((cell, columnIndex) => {
+        const nowrap = !cappedColumns[columnIndex];
+        for (const code of Array.from(cell.querySelectorAll('code[data-markdown="inline-code"]'))) {
+          code.classList.toggle('whitespace-nowrap', nowrap);
+        }
+      });
+    }
+
     const existingColumns = Array.from(table.children).find((child) => (
       child.matches('colgroup[data-md-table-columns]')
     ));
@@ -592,6 +613,8 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
     const href = anchor.getAttribute('href') ?? '';
     if (!isExternalHttpUrl(href)) continue;
     anchor.setAttribute('data-md-link-decorated', 'true');
+    // A bare URL is technical text; a named link remains ordinary prose.
+    if (anchor.textContent === href) anchor.setAttribute('dir', 'ltr');
 
     const faviconUrl = getExternalFaviconUrl(href);
     if (faviconUrl) {
@@ -627,6 +650,12 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  // These blocks own directional layout (markers and quote borders). Paragraphs
+  // use CSS plaintext instead, so a nested paragraph cannot hide its text from
+  // the parent's native dir=auto resolution.
+  for (const block of root.querySelectorAll('li, blockquote')) {
+    if (block.getAttribute('dir') !== 'auto') block.setAttribute('dir', 'auto');
+  }
   decorateDisclosures(root);
   decorateImageLabels(root);
   decorateInlineCode(root);

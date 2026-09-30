@@ -1201,7 +1201,7 @@ describe('routeMessage skill invocation', () => {
     expect(sendCommandCalls).toHaveLength(0);
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].skills.names).toEqual(['grill-with-docs']);
-    expect(sendMessageCalls[0].context).toEqual([{ text: additionalParts[0].text, metadata: additionalParts[0].metadata }]);
+    expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: additionalParts[0].text, metadata: additionalParts[0].metadata }]);
   });
 
   test('a command with a quoted selection still runs as a command', async () => {
@@ -1262,7 +1262,7 @@ describe('routeMessage skill invocation', () => {
 
     expect(sendCommandCalls).toHaveLength(0);
     expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].context).toEqual([{ text: 'Pinned project knowledge', metadata: undefined }]);
+    expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: 'Pinned project knowledge', metadata: undefined }]);
     expect(route).toBe('prompt');
   });
 

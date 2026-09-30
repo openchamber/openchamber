@@ -1,7 +1,7 @@
 import { resolveIntegrationApi } from '@openchamber/sdk';
 
 // What a grant covered when the user approved it. `filesystem` is the
-// declared pattern list, `network` the API origin, `service` the exec names
+// declared pattern list, `origins` the origins the frame may reach, `network` the API origin, `service` the exec names
 // and socket ids the dialog showed. A newer package that changes any of
 // these has not been approved for that capability, whatever the stored
 // grant list says, so the card asks again and the proxies refuse meanwhile.
@@ -16,6 +16,9 @@ export const guestGrantScope = (guest) => {
   const scope = {};
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     scope.filesystem = sortedUnique(guest.filesystem);
+  }
+  if (Array.isArray(guest.origins) && guest.origins.length > 0) {
+    scope.origins = sortedUnique(guest.origins);
   }
   if (guest.integration) {
     const api = resolveIntegrationApi(guest.integration);
@@ -57,7 +60,7 @@ const sameList = (a, b) => a.length === b.length && a.every((value, index) => va
 
 /**
  * The grants that still hold for the package as it is now. A scoped
- * capability (`filesystem`, `network`, `service`) only counts when the stored
+ * capability (`filesystem`, `origins`, `network`, `service`) only counts when the stored
  * scope equals the current one; without a stored scope it never counts.
  * @param {string[]} granted
  * @param {ReturnType<typeof guestGrantScope> | undefined} stored
@@ -66,6 +69,9 @@ const sameList = (a, b) => a.length === b.length && a.every((value, index) => va
 export const effectiveGrants = (granted, stored, current) => granted.filter((capability) => {
   if (capability === 'filesystem') {
     return Boolean(stored?.filesystem) && sameList(stored.filesystem, current.filesystem ?? []);
+  }
+  if (capability === 'origins') {
+    return Boolean(stored?.origins) && sameList(stored.origins, current.origins ?? []);
   }
   if (capability === 'network') {
     return Boolean(stored?.apiOrigin)

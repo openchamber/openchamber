@@ -26,6 +26,7 @@ import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { Icon } from '@/components/icon/Icon';
 import { SessionSidebarFolderItem } from '../folders/SessionSidebarFolderItem';
 import { SessionTreeItem } from '../sessions/SessionTreeItem';
+import { RunSidebarRow } from '../sessions/RunSidebarRow';
 import { computeNodeStructureKey, nodeContainsSessionId } from '../sessions/sessionNodeItemUtils';
 import { DroppableFolderWrapper } from '../folders/sessionFolderDnd';
 import { FolderDeleteConfirmDialog, type DeleteFolderConfirmState } from '../shell/ConfirmDialogs';
@@ -98,7 +99,7 @@ type Actions = {
   toggleProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
   openNewWorktreeDialog: () => void;
   openWorktreesPage: (id: string) => void;
   openProjectEditDialog: (id: string) => void;
@@ -378,6 +379,14 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           }}
         />
       </div>;
+    }
+    if (row.kind === 'run') {
+      return <RunSidebarRow
+        run={row.run} laneNodes={row.laneNodes} renderContext={row.renderContext}
+        projectId={row.projectId} projectLabel={row.projectLabel}
+        expansionKey={row.expansionKey} expanded={row.expanded} forceExpanded={row.forceExpanded}
+        notifyOnSubtasks={model.groupProps.notifyOnSubtasks} toggleParent={model.groupProps.toggleParent}
+      />;
     }
     if (row.kind === 'show-control') {
       // Timeline rows have no left gutter, so the control lines up with their

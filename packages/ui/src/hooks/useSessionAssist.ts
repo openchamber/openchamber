@@ -25,7 +25,7 @@ export function useSessionAssistState(sessionId: string, directory?: string): Se
   const sessionSuggestionEnabled = useUIStore((state) => state.sessionSuggestionEnabled);
 
   const isIdle = !status || status.type === 'idle';
-  // Same freshness rule as the sidebar's next-step mark. Comparing against the
+  // Same freshness rule as the sidebar row's recap tooltip. Comparing against the
   // last loaded message disagreed with it: in v2 the newest record is the
   // turn's `idle` marker (or a model/agent switch), never the assistant answer.
   const assist = isIdle ? getCurrentSessionAssist(session) : null;

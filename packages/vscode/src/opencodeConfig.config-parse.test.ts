@@ -1,3 +1,4 @@
+import './opencodeConfigTestHome';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

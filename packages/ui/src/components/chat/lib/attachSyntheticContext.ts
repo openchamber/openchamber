@@ -9,16 +9,18 @@
  * prompt plumbing the user never wrote.
  *
  * So: the contiguous run of synthetic messages immediately before a user
- * message belongs to that message. The ones carrying context metadata come
+ * message belongs to that message, and so does context right after it whose id
+ * was minted before the prompt's (see the loop). The ones carrying context metadata come
  * back as text parts on the user message, which is exactly where v1 kept them,
- * so they render as context chips inside the user bubble. Everything else the
- * timeline never shows is dropped here instead of rendering as an empty row.
+ * so they render as context chips inside the user bubble. A subagent run report
+ * stays as its own entry. Everything else the timeline never shows is dropped
+ * here instead of rendering as an empty row.
  */
 
 import type { Part, TextPart } from '@/lib/opencode/model';
 import { readContextPart } from '@/lib/messages/contextParts';
 
-import { isSkippedTimelineRole } from './timelineRoles';
+import { isSkippedTimelineRole, isSubagentRunEntry } from './timelineRoles';
 import type { ChatMessageEntry } from './turns/types';
 
 const contextPartFromSyntheticMessage = (message: ChatMessageEntry): TextPart => {
@@ -67,9 +69,18 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
 
     const result: ChatMessageEntry[] = [];
     let pendingContext: Part[] = [];
+    // The last user message, while only invisible records follow it.
+    let openUser: { index: number; source: ChatMessageEntry; contextParts: Part[] } | null = null;
 
     for (const message of messages) {
         const role = message.info.role;
+
+        if (isSubagentRunEntry(message.info)) {
+            pendingContext = [];
+            openUser = null;
+            result.push(message);
+            continue;
+        }
 
         if (role === 'synthetic') {
             if (readContextPart({ type: 'text', metadata: message.info.metadata })) {
@@ -78,22 +89,38 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
                     part = contextPartFromSyntheticMessage(message);
                     contextPartBySyntheticEntry.set(message, part);
                 }
-                pendingContext.push(part);
+                // A send mints its context ids before the prompt's. While the
+                // prompt is still optimistic it carries the client's clock and
+                // the server's context records can land just after it; an id
+                // below the prompt's still names that prompt as the owner.
+                // Echoes arrive one by one, so the records already echoed sit
+                // after the prompt while the rest still sit before it: the ids,
+                // minted in send order, restore the order the user attached.
+                if (openUser && message.info.id < openUser.source.info.id) {
+                    openUser.contextParts = [...openUser.contextParts, part]
+                        .sort((left, right) => (left.messageID < right.messageID ? -1 : 1));
+                    result[openUser.index] = withContextParts(openUser.source, openUser.contextParts);
+                } else {
+                    pendingContext.push(part);
+                }
             }
             continue;
         }
 
         if (isSkippedTimelineRole(role)) continue;
 
-        if (role === 'user' && pendingContext.length > 0) {
-            result.push(withContextParts(message, pendingContext));
+        if (role === 'user') {
+            const contextParts = pendingContext;
             pendingContext = [];
+            openUser = { index: result.length, source: message, contextParts };
+            result.push(contextParts.length > 0 ? withContextParts(message, contextParts) : message);
             continue;
         }
 
         // Anything else ends the run: context only belongs to the user message
         // it was sent with.
         pendingContext = [];
+        openUser = null;
         result.push(message);
     }
 

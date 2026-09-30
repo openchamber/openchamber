@@ -32,6 +32,8 @@ import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-err
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { isSpaceDirectory } from "@/lib/spaces/space-route"
+import { spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spaces-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
@@ -60,7 +62,8 @@ import {
   type Vcs,
 } from "./model"
 import { ascendingId } from "./ids"
-import { mergeConfigDocuments, projectAgent, projectMessages, projectProject, projectSession, projectVcs } from "./projection"
+import { toJsonRecord } from "./json"
+import { deniesAnyProvider, mergeConfigDocuments, projectAgent, projectMessages, projectProject, projectSession, projectVcs } from "./projection"
 
 export type { OpenCodeClient }
 
@@ -397,7 +400,15 @@ export type MessagePage = {
 export type SessionPage = {
   sessions: Session[]
   cursor: { previous?: string; next?: string }
+  /**
+   * The isolated spaces the host merged into a global page, one mark per space, when the
+   * feature is on. Absent on a per-directory page and while the feature is off.
+   */
+  spaces?: SpaceMark[]
 }
+
+// The global list carries the mark beside the SDK's own fields; the SDK types do not know it.
+const sessionPageSpacesSchema = z.object({ spaces: z.array(spaceMarkSchema).optional() })
 
 export type SessionListOptions = {
   directory?: string | null
@@ -455,14 +466,13 @@ const fsHomeResponseSchema = z.object({
   canonicalLegacyChatsRoot: fsAbsolutePathSchema.optional(),
 })
 
-/**
- * Metadata crosses the wire as JSON. Round-tripping drops what JSON cannot
- * carry (undefined, functions) and gives the value the wire type honestly.
- */
-const toJsonRecord = (value: Metadata | ContextPartMetadata): Metadata =>
-  // SAFETY: JSON.stringify emits only JSON values, so parsing its output back
-  // yields a record of JsonValue by construction.
-  JSON.parse(JSON.stringify(value)) as Metadata
+/** One context item admitted as a synthetic message; `id` is client-minted when given. */
+export type SyntheticContextInput = {
+  id?: string
+  text: string
+  metadata?: ContextPartMetadata
+  description?: string
+}
 
 const pageCursor = (cursor: { previous?: string | null; next?: string | null }) =>
   compact({ previous: cursor.previous ?? undefined, next: cursor.next ?? undefined })
@@ -784,9 +794,11 @@ class OpencodeService {
         parentID: options.parentID,
       }),
     )
+    const spaces = options.global ? sessionPageSpacesSchema.safeParse(response).data?.spaces : undefined
     return {
       sessions: response.data.map(projectSession),
       cursor: pageCursor(response.cursor),
+      ...(spaces ? { spaces } : {}),
     }
   }
 
@@ -1064,8 +1076,11 @@ class OpencodeService {
     providerID: string
     text: string
     files?: Array<FileInputLite>
-    /** Context items sent ahead of the prompt as synthetic messages. */
-    context?: Array<{ text: string; metadata?: ContextPartMetadata; description?: string }>
+    /**
+     * Context items sent ahead of the prompt as synthetic messages. A caller
+     * that supplies `messageId` also supplies the item ids, minted before it.
+     */
+    context?: SyntheticContextInput[]
     messageId?: string
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>
     metadata?: Metadata
@@ -1076,6 +1091,11 @@ class OpencodeService {
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey)
 
+    // Context ids are minted before the prompt's, so the transcript's id order
+    // matches the order the records are admitted in.
+    const context = (params.context ?? [])
+      .filter((item) => item.text.trim())
+      .map((item) => ({ ...item, id: item.id ?? ascendingId("msg") }))
     const messageId = params.messageId ?? ascendingId("msg")
     const files = await Promise.all((params.files ?? []).map((file) => this.toPromptFile(file)))
     const agents = (params.agentMentions ?? [])
@@ -1091,11 +1111,12 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID)
 
-    const admitSynthetic = async (item: { text: string; metadata?: ContextPartMetadata; description?: string }) => {
+    const admitSynthetic = async (item: SyntheticContextInput) => {
       this.assertRuntimeUnchanged(params.runtimeKey)
       await call("session.synthetic", () =>
         this.clientFor(params.directory).session.synthetic({
           sessionID: params.id,
+          id: item.id,
           text: item.text,
           description: item.description,
           metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
@@ -1124,8 +1145,7 @@ class OpencodeService {
       await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
       const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
       const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
-      for (const item of params.context ?? []) {
-        if (!item.text.trim()) continue
+      for (const item of context) {
         await admitSynthetic(item)
       }
       if (unresolvedInstruction) await admitSynthetic({ text: unresolvedInstruction })
@@ -1166,7 +1186,7 @@ class OpencodeService {
     command: string
     arguments?: string
     files?: Array<FileInputLite>
-    context?: Array<{ text: string; metadata?: ContextPartMetadata; description?: string }>
+    context?: SyntheticContextInput[]
     delivery?: SessionInboxDelivery
     directory?: string | null
   }): Promise<void> {
@@ -1179,6 +1199,7 @@ class OpencodeService {
       await call("session.synthetic", () =>
         this.clientFor(params.directory).session.synthetic({
           sessionID: params.id,
+          id: item.id,
           text: item.text,
           description: item.description,
           metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
@@ -1263,10 +1284,16 @@ class OpencodeService {
    * `null` vs `{}` matters for reconnect resync: an empty map means every
    * session is idle, so a candidate missing from it is authoritatively idle.
    * A failure must not be conflated with that.
+   *
+   * The host's snapshot is global: one read for every directory of the host.
+   * A directory inside an isolated space is asked of that space instead,
+   * because the host's snapshot never covers a space's sessions, and an empty
+   * answer from the host would settle a turn that is running inside.
    */
-  async getActiveSessionStatuses(): Promise<Record<string, SessionStatus> | null> {
+  async getActiveSessionStatuses(directory?: string | null): Promise<Record<string, SessionStatus> | null> {
     try {
-      const active = activeSessionSnapshotSchema.parse(await call("session.active", () => this.client.session.active()))
+      const client = isSpaceDirectory(directory) && directory ? this.getScopedSdkClient(directory) : this.client
+      const active = activeSessionSnapshotSchema.parse(await call("session.active", () => client.session.active()))
       const statuses: Record<string, SessionStatus> = {}
       for (const sessionID of Object.keys(active)) statuses[sessionID] = { type: "busy" }
       return statuses
@@ -1500,6 +1527,12 @@ class OpencodeService {
     this.configCache.clear()
   }
 
+  /** Whether OpenCode's config for a directory restricts providers with a `provider.use` deny policy. */
+  async configDeniesAnyProvider(directory?: string | null): Promise<boolean> {
+    const entries = await call("config.get", () => this.clientFor(this.resolveDirectory(directory)).config.get())
+    return deniesAnyProvider(entries)
+  }
+
   /** Effective configuration for a directory: every discovered document folded, highest priority last. */
   async getConfig(directory?: string | null): Promise<Config> {
     const effectiveDirectory = this.resolveDirectory(directory)
@@ -1547,7 +1580,13 @@ class OpencodeService {
     return this.getProvidersForConfig(this.currentDirectory)
   }
 
-  /** Providers, models, and the default model OpenCode resolves for a directory. */
+  /**
+   * Providers, models, and the default model OpenCode resolves for a directory.
+   *
+   * The providers of a directory inside an isolated space are the host's: a space offers the
+   * host's catalog, and the host refuses its provider routes across the boundary, so they are
+   * asked of the host with no directory. Models and the default come from the space as usual.
+   */
   async getProvidersForConfig(directory?: string | null): Promise<ProviderCatalog> {
     const effectiveDirectory = this.resolveDirectory(directory)
     const key = effectiveDirectory ?? ""
@@ -1559,8 +1598,9 @@ class OpencodeService {
 
     const request = (async () => {
       const client = this.clientFor(effectiveDirectory)
+      const providerClient = isSpaceDirectory(effectiveDirectory) ? this.client : client
       const [providers, models, fallback] = await Promise.all([
-        call("provider.list", () => client.provider.list().then((r) => r.data)),
+        call("provider.list", () => providerClient.provider.list().then((r) => r.data)),
         call("model.list", () => client.model.list().then((r) => r.data)),
         call("model.default", () => client.model.default().then((r) => r.data)).catch(() => undefined),
       ])

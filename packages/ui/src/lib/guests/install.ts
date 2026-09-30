@@ -21,6 +21,7 @@ const errorSchema = z.object({
     'clone-failed',
     'extract-failed',
     'too-large',
+    'enterprise-mode',
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
@@ -40,6 +41,7 @@ export type InstallGuestErrorCode =
   | 'clone-failed'
   | 'extract-failed'
   | 'too-large'
+  | 'enterprise-mode'
   | 'failed';
 
 type InstallGuestResult =

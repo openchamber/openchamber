@@ -62,7 +62,8 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
 
     it('lists the space as running, with what it was created with', async () => {
       const { id, name, project, created } = spec;
-      expect(await listed()).toEqual({ id, name, project, created, state: 'running', orphans: [], damaged: false, missing: [] });
+      // Stage 5d-3 added `stoppedIdle` and `gatekeeperRunning` to this shape; nothing else changed.
+      expect(await listed()).toEqual({ id, name, project, created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] });
     });
 
     it('refuses to create the same space again, and leaves it alone', async () => {
@@ -139,7 +140,8 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
 
     it('stops the space and lists it as exited', async () => {
       await place.stop(spec.id);
-      expect(await listed()).toMatchObject({ state: 'exited' });
+      // Since 5d-3: a stop by the host is not an idle stop, and it takes the gatekeeper down too.
+      expect(await listed()).toMatchObject({ state: 'exited', stoppedIdle: false, gatekeeperRunning: false });
     });
 
     // Added in stage 4a, for the same reason as the argv: a stopped space has no server to reach.

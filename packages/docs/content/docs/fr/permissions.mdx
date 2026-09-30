@@ -1,0 +1,57 @@
+---
+title: Permissions et filet de sécurité
+description: Choisissez, session par session, ce que l’agent peut faire sans demander.
+---
+
+# Permissions et filet de sécurité
+
+Chaque action de l’agent (lancer une commande, modifier un fichier, appeler un outil MCP, récupérer une page) passe d’abord par ses règles de permission. Les modes de permission d’OpenChamber décident de ce qui se passe quand une règle dit « ask ».
+
+## Allow, ask et deny
+
+Les règles de permission vivent dans OpenCode. Chaque règle donne à une action l’un de trois effets :
+
+- **allow :** l’agent continue
+- **deny :** l’action est bloquée
+- **ask :** l’agent s’arrête et attend une réponse
+
+Par défaut, presque tout est autorisé. OpenCode demande seulement avant que l’agent touche à des dossiers hors du projet ou lise des fichiers `.env`. Ajoutez vos propres règles pour, par exemple, demander avant toute commande shell. Le format des règles est décrit dans la [documentation d’OpenCode sur les permissions](https://opencode.ai/v2/docs/permissions/), et vous pouvez voir les permissions d’un agent dans OpenChamber sous **Paramètres → Agents**.
+
+Les modes de permission changent seulement qui répond au « ask ». Ils ne lèvent jamais un « deny », et « allow » ne demande rien du tout.
+
+## Les trois modes
+
+| Mode | Qui répond au « ask » |
+| --- | --- |
+| **Demander à chaque fois** | Vous. Chaque demande attend votre réponse. |
+| **Filet de sécurité** | Jev laisse passer les actions courantes et vous garde les risquées. |
+| **Tout accepter** | OpenChamber, toujours oui. Chaque demande est autorisée tout de suite, sans vérification. |
+
+**Tout accepter** n’a besoin de rien d’autre : ce mode considère simplement chaque « ask » comme autorisé. Utilisez-le quand vous faites confiance à la tâche et ne voulez pas être interrompu.
+
+## Changer de mode
+
+- **Pour une session :** cliquez sur le bouton en forme de bouclier dans le champ de saisie. Chaque clic passe au mode suivant.
+- **Pour les nouvelles sessions :** choisissez le mode par défaut dans **Paramètres → Sessions → Permissions**. Les sessions existantes gardent leur mode.
+
+Les sous-agents suivent la session qui les a lancés.
+
+## Le filet de sécurité
+
+Dans ce mode, OpenChamber interroge [Jev](/fr/classification-providers/) sur chaque demande : est-ce courant, ou est-ce à vous de décider ? Lire, compiler, lancer les tests, modifier les fichiers du projet et faire des commits ordinaires passent. Réécrire l’historique git, supprimer des données, modifier le système, déployer, publier quelque part ou envoyer des fichiers à l’extérieur attendent votre décision, comme tout ce qui n’est pas clair.
+
+Une demande retenue affiche la carte de permission habituelle avec une ligne en plus, **Le filet de sécurité a retenu cette action pour que vous décidiez**, et le type d’action. Si Jev ne répond pas en quatre secondes, l’action vous attend aussi. Le filet de sécurité n’autorise jamais rien parce que la vérification a échoué.
+
+Le filet de sécurité a besoin d’un [fournisseur de classification](/fr/classification-providers/). Sans lui, le bouton bouclier saute ce mode et il est désactivé dans les paramètres.
+
+## Continue pendant votre absence
+
+Le mode vit dans le serveur OpenChamber : il continue donc de répondre aux demandes après que vous avez fermé l’onglet ou verrouillé votre téléphone, et il survit aux redémarrages.
+
+> VS Code n’a pas de filet de sécurité. L’extension propose « Demander à chaque fois » et « Tout accepter », et ne répond aux demandes que tant qu’un panneau OpenChamber est ouvert.
+
+## Voir aussi
+
+- [Permissions dans la documentation d’OpenCode](https://opencode.ai/v2/docs/permissions/) : écrire vos propres règles allow, ask et deny
+- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer le modèle derrière le filet de sécurité
+- [Notifications](/fr/notifications/) : être prévenu quand une demande vous attend

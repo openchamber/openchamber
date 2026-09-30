@@ -17,7 +17,7 @@ the user can want independently:
   `agentNotifyToolEnabled` is `true`, and the control service refuses the
   action when the setting is off, so a stale plugin cannot keep paging.
 
-Both default to on, are toggled in Settings → General → OpenCode CLI, and take
+Both default to on, are toggled in Settings → General → OpenChamber Tools, and take
 effect in the running OpenCode within a couple of seconds — OpenChamber rewrites
 the managed config file OpenCode watches (see
 `lib/opencode/managed-config-file.js`). Installs where the user's own
@@ -28,6 +28,13 @@ from the schema rather than leaving them visible. The plugin is injected only
 when OpenChamber launches and owns the OpenCode process, and not at all when
 both settings are `false`.
 
+- Every tool is registered with `options: { codemode: false }`, so it is a
+  direct tool in the model's tool list. OpenCode 2 otherwise puts plugin tools
+  behind its Code Mode `execute` tool, where the model sees only a
+  size-limited catalog; with a few large MCP servers ours dropped out of it and
+  agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
+  "Run through Code Mode" checkbox in the same section, off by default) flips
+  all of them to `codemode: true`.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

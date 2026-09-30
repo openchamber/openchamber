@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 test('a slow prompt save preserves and then persists the newer blurred draft', async () => {
-  const writes: Array<{ content: string; finish: () => void }> = [];
+  const writes: Array<{ content: string; expectedContent: string | null; finish: () => void }> = [];
   const settingsWrites: Array<() => void> = [];
   let persisted = 'initial';
   fetchSpy.mockImplementation(async (input, init) => {
@@ -49,9 +49,9 @@ test('a slow prompt save preserves and then persists the newer blurred draft', a
       if (request.method === 'GET') {
         return Response.json({ content: persisted, exists: true, path: '/test/AGENTS.md' });
       }
-      const body: { content: string } = await request.json();
+      const body: { content: string; expectedContent: string | null } = await request.json();
       return new Promise<Response>((resolve) => {
-        writes.push({ content: body.content, finish: () => {
+        writes.push({ content: body.content, expectedContent: body.expectedContent, finish: () => {
           persisted = body.content;
           resolve(Response.json({ success: true }));
         } });
@@ -98,10 +98,18 @@ test('a slow prompt save preserves and then persists the newer blurred draft', a
   await act(async () => { settingsWrites[0](); });
   await settle();
   expect(writes.map((write) => write.content)).toEqual(['older\n', 'newer\n']);
+  // Each write names the file it replaces, so an edit made elsewhere is refused.
+  expect(writes.map((write) => write.expectedContent)).toEqual(['initial', 'older\n']);
   await act(async () => { writes[1].finish(); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
   expect(settingsWrites).toHaveLength(2);
   await act(async () => { settingsWrites[1](); });
   expect(prompt.value).toBe('newer\n');
   expect(persisted).toBe('newer\n');
+
+  // An edit made in another editor shows up when the window is focused again.
+  persisted = 'edited elsewhere\n';
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  await settle();
+  expect(prompt.value).toBe('edited elsewhere\n');
 });

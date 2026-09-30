@@ -59,6 +59,20 @@ describe('tts routes', () => {
     }
   });
 
+  it('refuses OpenAI cloud speech in enterprise mode and says so in the status', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = 'true';
+    try {
+      const app = createApp();
+      const status = await request(app).get('/api/tts/status');
+      expect(status.body).toMatchObject({ available: false, enterpriseMode: true });
+      const speak = await request(app).post('/api/tts/speak').send({ text: 'The migration is done', apiKey: 'sk-test' });
+      expect(speak.status).toBe(403);
+      expect((await request(app).post('/api/voice/token').send({})).status).toBe(403);
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+  });
+
   it('returns local note fallback while model summarization is retired', async () => {
     const response = await request(createApp())
       .post('/api/text/summarize')
@@ -155,6 +169,18 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-server.com/v1/?key=123');
     expect(result.value).toBe('https://my-server.com/v1');
+  });
+
+  it('keeps custom servers on this machine in enterprise mode, whatever else allows remote', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'true';
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').error).toMatch(/enterprise mode/);
+      expect(normalizeCustomOpenAIBaseURL('http://127.0.0.1:8880/v1').value).toBe('http://127.0.0.1:8880/v1');
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
   });
 
   it('denies remote URLs on desktop when env var is explicitly false', () => {

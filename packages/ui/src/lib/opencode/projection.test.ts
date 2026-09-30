@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { ConfigEntry, SessionInfo, SessionMessageAssistant, SessionMessageInfo } from "@opencode/client"
 
-import { partIds } from "./model"
+import { partIds, type ConfigDocument } from "./model"
 import {
+  deniesAnyProvider,
   mergeConfigDocuments,
   projectAgent,
   projectAssistantContent,
@@ -268,6 +269,29 @@ describe("mergeConfigDocuments", () => {
 
   test("no documents yields an empty config", () => {
     expect(mergeConfigDocuments([])).toEqual({})
+  })
+})
+
+describe("deniesAnyProvider", () => {
+  const doc = (path: string, experimental?: ConfigDocument["info"]["experimental"]): ConfigEntry =>
+    ({ type: "document", path, info: experimental ? { experimental } : {} })
+
+  test("sees a provider.use deny in any layer, even when a later document has its own experimental block", () => {
+    const entries = [
+      doc("/home/u/.config/opencode/opencode.json", { policies: [{ action: "provider.use", resource: "*", effect: "deny" }] }),
+      doc("/repo/opencode.json", { policies: [{ action: "permission", resource: "shell:*", effect: "deny" }] }),
+    ]
+    expect(deniesAnyProvider(entries)).toBe(true)
+  })
+
+  test("an allow or a permission policy alone is no restriction", () => {
+    expect(deniesAnyProvider([
+      doc("/repo/opencode.json", { policies: [
+        { action: "provider.use", resource: "anthropic", effect: "allow" },
+        { action: "permission", resource: "shell:*", effect: "deny" },
+      ] }),
+    ])).toBe(false)
+    expect(deniesAnyProvider([doc("/repo/opencode.json")])).toBe(false)
   })
 })
 

@@ -19,13 +19,14 @@ mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime-a' })
 
 const { useMarkdownLocalAssets } = await import('./useMarkdownLocalAssets');
 
-function Preview({ container, filePath, onOpenFile, enabled }: {
+function Preview({ container, filePath, onOpenFile, enabled, colorScheme = 'light' }: {
   container: HTMLElement | null;
   filePath: string;
   onOpenFile: (path: string) => void;
   enabled: boolean;
+  colorScheme?: 'light' | 'dark';
 }) {
-  useMarkdownLocalAssets({ container, filePath, workspaceRoot: '/repo', onOpenFile, enabled });
+  useMarkdownLocalAssets({ container, filePath, workspaceRoot: '/repo', onOpenFile, enabled, colorScheme });
   return null;
 }
 
@@ -137,6 +138,39 @@ describe('useMarkdownLocalAssets', () => {
     expect(click(external)).toBe(false);
     expect(opened).toEqual(['/repo/docs/data.csv']);
     expect(scrolled).toEqual(['Next steps!']);
+  });
+
+  test('loads relative srcset candidates through the runtime, keeping descriptors and remote candidates', async () => {
+    const source = document.createElement('source');
+    source.setAttribute('srcset', 'badges/dark.svg 1x, https://cdn.test/dark@2x.svg 2x');
+    container.append(source);
+    await act(async () => {
+      root.render(<Preview container={container} filePath="/repo/README.md" onOpenFile={() => {}} enabled />);
+    });
+    await flush();
+    await flush();
+
+    expect(fetchCalls).toEqual(['/api/fs/raw?path=%2Frepo%2Fbadges%2Fdark.svg&directory=%2Frepo']);
+    expect(source.getAttribute('srcset')).toBe('blob:1 1x, https://cdn.test/dark@2x.svg 2x');
+  });
+
+  test('picks prefers-color-scheme sources by the app theme and follows a theme change', async () => {
+    const picture = document.createElement('picture');
+    const source = document.createElement('source');
+    source.setAttribute('media', '(prefers-color-scheme: dark)');
+    source.setAttribute('srcset', 'https://cdn.test/dark.svg');
+    picture.append(source, document.createElement('img'));
+    container.append(picture);
+    await act(async () => {
+      root.render(<Preview container={container} filePath="/repo/README.md" onOpenFile={() => {}} enabled colorScheme="light" />);
+    });
+    expect(source.getAttribute('media')).toBe('(max-width: -1px)');
+
+    await act(async () => {
+      root.render(<Preview container={container} filePath="/repo/README.md" onOpenFile={() => {}} enabled colorScheme="dark" />);
+    });
+    expect(source.getAttribute('media')).toBe('(min-width: 0px)');
+    expect(source.getAttribute('data-oc-media')).toBe('(prefers-color-scheme: dark)');
   });
 
   test('does nothing while disabled', async () => {

@@ -14,6 +14,14 @@ const message = (id: string, created: number): Message => ({
   time: { created },
 })
 
+const context = (id: string, created: number): Message => ({
+  id,
+  sessionID: "session-a",
+  role: "synthetic",
+  time: { created },
+  text: "ctx",
+})
+
 describe("message chronology", () => {
   test("orders post-rollover IDs after legacy IDs by creation time", () => {
     const legacy = message("msg_ffffffffffffLegacy", 100)
@@ -34,6 +42,20 @@ describe("message chronology", () => {
     const messages = [second]
     insertMessageChronologically(messages, first)
     expect(messages).toEqual([first, second])
+  })
+
+  test("puts context that shares the prompt's millisecond before the prompt", () => {
+    // Real records: the prompt id is minted on the client before the server
+    // admits its context, so every context id sorts after the prompt's.
+    const prompt = message("msg_0e9dc5bf3001QxTq3rvK2OQgcE", 52)
+    const earlierContext = context("msg_0e9dc5c52001runEUuNdAOJEFu", 51)
+    const sameMsContext = context("msg_0e9dc5c570010BvEsKh7unRZV5", 52)
+
+    expect(sortMessagesChronologically([prompt, sameMsContext, earlierContext])).toEqual([earlierContext, sameMsContext, prompt])
+
+    const messages = [earlierContext, prompt]
+    insertMessageChronologically(messages, sameMsContext)
+    expect(messages).toEqual([earlierContext, sameMsContext, prompt])
   })
 
   test("splits a revert branch by marker position instead of ID value", () => {

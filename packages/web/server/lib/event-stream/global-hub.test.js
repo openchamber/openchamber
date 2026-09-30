@@ -321,3 +321,38 @@ describe('createGlobalMessageStreamHub', () => {
     }
   });
 });
+
+describe('events of isolated spaces in the global hub', () => {
+  const makeHub = () => createGlobalMessageStreamHub({
+    buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    deltaCoalesceWindowMs: 0,
+    fetchImpl: async () => createSseResponse({ blocks: [] }),
+  });
+
+  it('delivers an injected space event to subscribers that asked for spaces only, numbered and replayable like the host\'s', () => {
+    const hub = makeHub();
+    const plain = [];
+    const withSpaces = [];
+    hub.subscribeEvent(event => plain.push(event));
+    hub.subscribeEvent(event => withSpaces.push(event), { spaces: true });
+    hub.injectEvent({ payload: { type: 'session.execution.started', data: { sessionID: 's1' } }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
+    expect(plain).toHaveLength(0);
+    expect(withSpaces).toHaveLength(1);
+    expect(withSpaces[0]).toMatchObject({ spaceId: 'a1b2c3d4e5f6', directory: '/spaces/a1b2c3d4e5f6/repo' });
+    expect(withSpaces[0].eventId).toMatch(/^oc-/);
+    expect(withSpaces[0].translated()).toEqual([expect.objectContaining({ type: 'session.status' })]);
+    expect(JSON.parse(withSpaces[0].serialize())).toMatchObject({ type: 'event', directory: '/spaces/a1b2c3d4e5f6/repo', payload: { type: 'session.execution.started' } });
+    hub.injectEvent({ payload: { type: 'session.execution.succeeded', data: { sessionID: 's1' } }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
+    expect(hub.replayAfter(withSpaces[0].eventId).map(entry => entry.eventId)).toEqual([withSpaces[1].eventId]);
+  });
+
+  it('marks a host event with no space, so every subscriber sees it', () => {
+    const hub = makeHub();
+    const seen = [];
+    hub.subscribeEvent(event => seen.push(event.spaceId));
+    hub.subscribeEvent(event => seen.push(event.spaceId), { spaces: true });
+    hub.injectEvent({ payload: { type: 'session.execution.started', data: { sessionID: 's1' } }, directory: '/home/me', spaceId: null });
+    expect(seen).toEqual([null, null]);
+  });
+});

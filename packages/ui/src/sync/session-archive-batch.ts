@@ -47,6 +47,7 @@ export async function requestSessionArchiveBatch(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ directory, ids, archivedAt }),
+      directory,
     });
   } catch (error) {
     return { outcome: 'unavailable', reason: error instanceof Error ? error.message : 'archive request failed' };
@@ -88,13 +89,14 @@ export type SessionUnarchiveBatchResult =
   | { outcome: 'unavailable'; reason: string };
 
 /** Clears `time.archived` for a batch of sessions. Mirrors the archive route. */
-export async function requestSessionUnarchiveBatch(ids: string[]): Promise<SessionUnarchiveBatchResult> {
+export async function requestSessionUnarchiveBatch(ids: string[], directory?: string | null): Promise<SessionUnarchiveBatchResult> {
   let response: Response;
   try {
     response = await runtimeFetch('/api/openchamber/sessions/unarchive', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ids }),
+      directory,
     });
   } catch (error) {
     return { outcome: 'unavailable', reason: error instanceof Error ? error.message : 'unarchive request failed' };
@@ -145,6 +147,7 @@ export type SessionMetadataUpdateResult =
 export async function requestSessionMetadataUpdate(
   sessionID: string,
   patch: Metadata,
+  directory?: string | null,
 ): Promise<SessionMetadataUpdateResult> {
   let response: Response;
   try {
@@ -152,6 +155,7 @@ export async function requestSessionMetadataUpdate(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ patch }),
+      directory,
     });
   } catch (error) {
     return { outcome: 'unavailable', reason: error instanceof Error ? error.message : 'metadata request failed' };

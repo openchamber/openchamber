@@ -48,9 +48,10 @@ const classifyOpenCodeVersion = (version) => {
     detail: `${OPENCODE_VERSION_REQUIREMENT_DETAIL}, found ${version.trim()}. Update OpenCode and start OpenChamber again.`,
   };
 };
-// Last-used directory plus the three most recently opened projects — deeper
-// tails are unlikely to be the user's first click and just add background work.
-const WARMUP_DIRECTORY_LIMIT = 4;
+// Only the directory the user will open anyway. On OpenCode 2 the first
+// directory-scoped read boots that location's whole MCP fleet, so warming
+// other projects "just in case" started processes nobody asked for (#4018).
+const WARMUP_DIRECTORY_LIMIT = 1;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
@@ -775,6 +776,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ...process.env,
           ...managedOpenCodeEnv,
           PATH: envPath,
+          // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+          // user's own OPENCODE_PASSWORD would otherwise win and every request
+          // we send with openCodePassword would get 401.
+          OPENCODE_PASSWORD: openCodePassword,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         })),
       });
@@ -1208,8 +1213,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // directory-scoped request, and that initialization takes seconds on large
   // session stores. Without warming, the user's first session open pays it
   // interactively (the chat waits on the message fetch until the directory
-  // finishes initializing). Warm the most recently used directories right
-  // after readiness so the work overlaps UI startup instead. Sequential and
+  // finishes initializing). Warm the last-used directory right after
+  // readiness so the work overlaps UI startup instead. Sequential and
   // best-effort: a failed or slow directory never blocks the others for long,
   // and a restart invalidates the pass via the port/readiness guard.
   const warmOpenCodeDirectories = async () => {

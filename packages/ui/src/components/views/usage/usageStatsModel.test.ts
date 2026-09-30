@@ -1,6 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildActivitySeries, isEmptyReport, isSameLocalDay, projectDisplayName, rangeStart } from './usageStatsModel';
+import {
+  averagePer,
+  buildActivitySeries,
+  cacheHitRate,
+  costPerMillionTokens,
+  isEmptyReport,
+  isSameLocalDay,
+  projectDisplayName,
+  rangeStart,
+  reasoningShare,
+  tokenSegments,
+  toolSuccessRate,
+} from './usageStatsModel';
 
 const local = (year: number, month: number, day: number, hour = 0) => new Date(year, month - 1, day, hour).getTime();
 
@@ -60,4 +72,60 @@ test('a project reads as its label, else its folder name', () => {
 test('same local day compares calendar dates, not 24 hours', () => {
   expect(isSameLocalDay(local(2026, 9, 23, 0), local(2026, 9, 23, 23))).toBe(true);
   expect(isSameLocalDay(local(2026, 9, 22, 23), local(2026, 9, 23, 0))).toBe(false);
+});
+
+describe('cacheHitRate', () => {
+  test('reads over everything that could have been a miss', () => {
+    expect(cacheHitRate({ input: 10, cacheRead: 30, cacheWrite: 10 })).toEqual(0.6);
+    expect(cacheHitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBeNull();
+    expect(cacheHitRate({ input: 5, cacheRead: 0, cacheWrite: 0 })).toBe(0);
+  });
+});
+
+describe('averagePer', () => {
+  test('divides only when there is something to divide by', () => {
+    expect(averagePer(10, 4)).toEqual(2.5);
+    expect(averagePer(10, 0)).toBeNull();
+  });
+});
+
+describe('toolSuccessRate', () => {
+  test('succeeded over completed calls, unfinished excluded', () => {
+    expect(toolSuccessRate({ succeeded: 3, failed: 1 })).toEqual(0.75);
+    expect(toolSuccessRate({ succeeded: 0, failed: 0 })).toBeNull();
+  });
+});
+
+describe('costPerMillionTokens', () => {
+  test('scales spend to a million tokens', () => {
+    expect(costPerMillionTokens(2, 1_000_000)).toEqual(2);
+    expect(costPerMillionTokens(1, 250_000)).toEqual(4);
+    expect(costPerMillionTokens(3, 0)).toBeNull();
+  });
+});
+
+describe('reasoningShare', () => {
+  test('reasoning over everything the model produced', () => {
+    expect(reasoningShare({ output: 30, reasoning: 10 })).toEqual(0.25);
+    expect(reasoningShare({ output: 0, reasoning: 5 })).toEqual(1);
+    expect(reasoningShare({ output: 0, reasoning: 0 })).toBeNull();
+  });
+});
+
+describe('tokenSegments', () => {
+  test('fixed order with reasoning folded into output, zeros kept for the legend', () => {
+    const segments = tokenSegments({ input: 10, output: 2, reasoning: 3, cacheRead: 30, cacheWrite: 5, total: 50 });
+    expect(segments).toEqual([
+      { key: 'input', value: 10 },
+      { key: 'output', value: 5 },
+      { key: 'cacheRead', value: 30 },
+      { key: 'cacheWrite', value: 5 },
+    ]);
+    expect(tokenSegments({ input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 }).map((segment) => segment.key)).toEqual([
+      'input',
+      'output',
+      'cacheRead',
+      'cacheWrite',
+    ]);
+  });
 });
