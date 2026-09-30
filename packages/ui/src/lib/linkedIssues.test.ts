@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getLinkedGitHubPullRequests, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
 type LinkedGitHubIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
 
@@ -279,5 +279,25 @@ describe('canOpenLinearIssueInContextPanel', () => {
       inDedicatedMobileShell: false,
       directory: '  ',
     })).toBe(false);
+  });
+});
+
+describe('getLinkedGitHubPullRequests', () => {
+  test('reads the repository of each linked GitHub PR from its id', () => {
+    const session = sessionWith([
+      issue(),
+      issue({ id: 'acme/app#7', number: 7, kind: 'pull', title: 'Fix', url: 'https://github.com/acme/app/pull/7' }),
+      { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Linear', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 },
+    ]);
+    expect(getLinkedGitHubPullRequests(session)).toEqual([
+      { owner: 'acme', repo: 'app', number: 7, url: 'https://github.com/acme/app/pull/7', title: 'Fix' },
+    ]);
+  });
+
+  test('skips a PR whose id could not name its repository', () => {
+    const session = sessionWith([
+      issue({ id: 'https://ghe.example/acme/app/pull/7#7', number: 7, kind: 'pull', url: 'https://ghe.example/acme/app/pull/7' }),
+    ]);
+    expect(getLinkedGitHubPullRequests(session)).toEqual([]);
   });
 });

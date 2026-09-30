@@ -383,7 +383,7 @@ Important properties:
 - parameter changes advance an entry revision; stale queued, successful, and failed requests cannot update a newer authority
 - `startWatching()` / `stopWatching()` are for true live PR consumers only
 - `refreshTargets()` supports one-shot multi-target bootstrap without turning on live watching
-- `syncOpenPrSummaries()` keeps unwatched open PRs live through one batched summary request; it skips watched entries and PRs checked within `minAgeMs`, applies only answers newer than the entry's `fetchedAt`, leaves semantically unchanged entries untouched, and drops a batch that outlived a runtime switch
+- `syncOpenPrSummaries()` keeps unwatched open PRs live through one batched summary request; it skips watched entries and PRs checked within `minAgeMs`, applies only answers newer than the entry's `fetchedAt`, leaves semantically unchanged entries untouched, and drops a batch that outlived a runtime switch; `linkedRefs` add the PRs linked to sessions on screen to the same batch, answered into the runtime-only `linkedSummaries` map (merged links are final and not asked again)
 - runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
 - persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
 - a closed/merged PR is the branch's history, not live status: it is displayed and persisted, but never treated as authority

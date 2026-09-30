@@ -11,6 +11,8 @@ import type {
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { LinkedGitHubPullRequest } from '@/lib/linkedIssues';
+import { useShallow } from 'zustand/react/shallow';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
 const PR_REVALIDATE_INTERVAL_MS = 15_000;
@@ -106,7 +108,13 @@ type GitHubPrStatusStore = {
   stopWatching: (key: string) => void;
   refresh: (key: string, options?: RefreshOptions) => Promise<void>;
   refreshTargets: (targets: PrTrackingTarget[], options?: RefreshOptions) => Promise<void>;
-  syncOpenPrSummaries: (keys: string[], github: GitHubAPI, options: { minAgeMs: number }) => Promise<void>;
+  /** Live status of PRs linked to sessions, keyed like live-summary batches. Runtime-only. */
+  linkedSummaries: Record<string, GitHubPullRequestLiveSummary>;
+  syncOpenPrSummaries: (
+    keys: string[],
+    github: GitHubAPI,
+    options: { minAgeMs: number; linkedRefs?: GitHubPullRequestRef[] },
+  ) => Promise<void>;
   updateStatus: (key: string, updater: (prev: GitHubPullRequestStatus | null) => GitHubPullRequestStatus | null) => void;
   resetForRuntimeSwitch: () => void;
 };
@@ -424,6 +432,18 @@ const sameChecks = (left: GitHubPullRequestStatus['checks'], right: GitHubPullRe
     && left.pending === right.pending)
 );
 
+const sameLiveSummary = (
+  left: GitHubPullRequestLiveSummary | undefined,
+  right: GitHubPullRequestLiveSummary,
+): boolean => Boolean(left
+  && left.state === right.state
+  && left.draft === right.draft
+  && left.title === right.title
+  && left.mergeable === right.mergeable
+  && left.mergeableState === right.mergeableState
+  && left.headSha === right.headSha
+  && sameChecks(left.checks, right.checks));
+
 /** Status with the summary's live fields, or null when nothing changed. */
 const applyLiveSummary = (
   status: GitHubPullRequestStatus,
@@ -481,6 +501,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
   persist(
     (set, get) => ({
       entries: {},
+      linkedSummaries: {},
       activeRequestCount: 0,
       totalRequestCount: 0,
 
@@ -495,6 +516,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
         liveSummaryCheckedAt.clear();
         liveSummarySyncInFlight = false;
         set((state) => ({
+          linkedSummaries: {},
           activeRequestCount: 0,
           entries: Object.fromEntries(Object.entries(state.entries).map(([key, entry]) => [key, {
             ...entry,
@@ -922,33 +944,43 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
         await mapWithConcurrency(keys, PR_STATUS_REFRESH_CONCURRENCY, (key) => get().refresh(key, options));
       },
 
-      syncOpenPrSummaries: async (keys, github, { minAgeMs }) => {
+      syncOpenPrSummaries: async (keys, github, { minAgeMs, linkedRefs = [] }) => {
         if (liveSummarySyncInFlight) {
           return;
         }
         const runtimeKey = getRuntimeKey();
         const runtimeGeneration = prRuntimeGeneration;
         const now = Date.now();
-        const entries = get().entries;
-        // Several keys (remote variants, worktrees on one branch) can share a
-        // PR; it goes out once and its answer lands on all of them.
-        const candidates = new Map<string, { ref: GitHubPullRequestRef; keys: string[]; lastRefreshAt: number }>();
+        const { entries, linkedSummaries } = get();
+        // Several keys (remote variants, worktrees on one branch) and linked
+        // sessions can share a PR; it goes out once and its answer lands on
+        // all of them.
+        const candidates = new Map<string, { ref: GitHubPullRequestRef; keys: string[]; linked: boolean; lastRefreshAt: number }>();
+        const addCandidate = (ref: GitHubPullRequestRef, key: string | null, lastRefreshAt: number) => {
+          const prKey = getLiveSummaryPrKey(runtimeKey, ref);
+          const candidate = candidates.get(prKey) ?? { ref, keys: [], linked: false, lastRefreshAt };
+          if (key) {
+            candidate.keys.push(key);
+          } else {
+            candidate.linked = true;
+          }
+          candidate.lastRefreshAt = Math.min(candidate.lastRefreshAt, lastRefreshAt);
+          candidates.set(prKey, candidate);
+        };
         for (const key of keys) {
           const entry = entries[key];
           const ref = getLiveSummaryRef(entry);
-          if (!entry || !ref) {
-            continue;
-          }
-          const prKey = getLiveSummaryPrKey(runtimeKey, ref);
-          const candidate = candidates.get(prKey);
-          if (candidate) {
-            candidate.keys.push(key);
-            candidate.lastRefreshAt = Math.min(candidate.lastRefreshAt, entry.lastRefreshAt);
-          } else {
-            candidates.set(prKey, { ref, keys: [key], lastRefreshAt: entry.lastRefreshAt });
+          if (entry && ref) {
+            addCandidate(ref, key, entry.lastRefreshAt);
           }
         }
-        const keysByPrKey = new Map<string, string[]>();
+        for (const ref of linkedRefs) {
+          // A merged PR cannot change any more; a closed one can reopen.
+          if (linkedSummaries[getLiveSummaryPrKey(runtimeKey, ref)]?.state !== 'merged') {
+            addCandidate(ref, null, 0);
+          }
+        }
+        const due = new Map<string, { keys: string[]; linked: boolean }>();
         const refs: GitHubPullRequestRef[] = [];
         candidates.forEach((candidate, prKey) => {
           const checkedAt = Math.max(liveSummaryCheckedAt.get(prKey) ?? 0, candidate.lastRefreshAt);
@@ -956,7 +988,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             return;
           }
           liveSummaryCheckedAt.set(prKey, now);
-          keysByPrKey.set(prKey, candidate.keys);
+          due.set(prKey, { keys: candidate.keys, linked: candidate.linked });
           refs.push(candidate.ref);
         });
         if (refs.length === 0) {
@@ -976,8 +1008,18 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             const { fetchedAt, summaries } = result;
             set((prev) => {
               let nextEntries: Record<string, PrStatusEntry> | null = null;
+              let nextLinked: Record<string, GitHubPullRequestLiveSummary> | null = null;
               for (const summary of summaries) {
-                for (const key of keysByPrKey.get(getLiveSummaryPrKey(runtimeKey, summary)) ?? []) {
+                const prKey = getLiveSummaryPrKey(runtimeKey, summary);
+                const target = due.get(prKey);
+                if (!target) {
+                  continue;
+                }
+                if (target.linked && !sameLiveSummary(prev.linkedSummaries[prKey], summary)) {
+                  nextLinked = nextLinked ?? { ...prev.linkedSummaries };
+                  nextLinked[prKey] = summary;
+                }
+                for (const key of target.keys) {
                   const current = (nextEntries ?? prev.entries)[key];
                   // A watcher may have started, or a full refresh landed,
                   // while this batch was in flight; both are authoritative.
@@ -993,7 +1035,13 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
                   nextEntries[key] = { ...current, status, lastRefreshAt: Date.now() };
                 }
               }
-              return nextEntries ? { entries: nextEntries } : prev;
+              if (!nextEntries && !nextLinked) {
+                return prev;
+              }
+              const next: Partial<GitHubPrStatusStore> = {};
+              if (nextEntries) next.entries = nextEntries;
+              if (nextLinked) next.linkedSummaries = nextLinked;
+              return next;
             });
           }
         } catch {
@@ -1094,9 +1142,9 @@ const derivePrVisualState = (status: GitHubPullRequestStatus | null): string | n
   return 'open';
 };
 
-const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
-  const vs = derivePrVisualState(entry.status ?? null);
-  const pr = entry.status?.pr;
+const deriveSummary = (status: GitHubPullRequestStatus | null): PrVisualSummary | null => {
+  const vs = derivePrVisualState(status);
+  const pr = status?.pr;
   if (!vs || !pr?.number) return null;
   return {
     number: pr.number,
@@ -1107,12 +1155,12 @@ const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
     url: typeof pr.url === 'string' && pr.url.trim().length > 0 ? pr.url : null,
     base: typeof pr.base === 'string' && pr.base.trim().length > 0 ? pr.base : null,
     head: typeof pr.head === 'string' && pr.head.trim().length > 0 ? pr.head : null,
-    checks: entry.status?.checks
-      ? { state: entry.status.checks.state, total: entry.status.checks.total, success: entry.status.checks.success, failure: entry.status.checks.failure, pending: entry.status.checks.pending }
+    checks: status?.checks
+      ? { state: status.checks.state, total: status.checks.total, success: status.checks.success, failure: status.checks.failure, pending: status.checks.pending }
       : null,
-    canMerge: typeof entry.status?.canMerge === 'boolean' ? entry.status.canMerge : null,
+    canMerge: status?.canMerge ?? null,
     mergeableState: typeof pr.mergeableState === 'string' ? pr.mergeableState : null,
-    repo: entry.status?.repo ? { owner: entry.status.repo.owner, repo: entry.status.repo.repo } : null,
+    repo: status?.repo ? { owner: status.repo.owner, repo: status.repo.repo } : null,
   };
 };
 
@@ -1128,8 +1176,8 @@ const summarySignature = (s: PrVisualSummary): string =>
 const PR_SUMMARY_CACHE_MAX_ENTRIES = 300;
 const prSummaryCacheByKey = new Map<string, { sig: string; summary: PrVisualSummary }>();
 
-const getCachedPrSummary = (cacheKey: string, entry: PrStatusEntry | null | undefined): PrVisualSummary | null => {
-  const summary = entry ? deriveSummary(entry) : null;
+const getCachedPrSummary = (cacheKey: string, status: GitHubPullRequestStatus | null | undefined): PrVisualSummary | null => {
+  const summary = status ? deriveSummary(status) : null;
   if (!summary) {
     prSummaryCacheByKey.delete(cacheKey);
     return null;
@@ -1150,8 +1198,41 @@ const getCachedPrSummary = (cacheKey: string, entry: PrStatusEntry | null | unde
 export const usePrVisualSummary = (key: string | null): PrVisualSummary | null => {
   return useGitHubPrStatusStore((state) => {
     if (!key) return null;
-    return getCachedPrSummary(key, state.entries[key]);
+    return getCachedPrSummary(key, state.entries[key]?.status);
   });
+};
+
+// A linked PR's live summary in the status shape the badge derivation reads.
+const linkedPrStatus = (link: LinkedGitHubPullRequest, summary: GitHubPullRequestLiveSummary): GitHubPullRequestStatus => ({
+  connected: true,
+  repo: { owner: link.owner, repo: link.repo, url: '' },
+  pr: {
+    number: summary.number,
+    title: summary.title || link.title,
+    url: link.url,
+    state: summary.state,
+    draft: summary.draft,
+    base: '',
+    head: '',
+    headSha: summary.headSha,
+    mergeable: summary.mergeable,
+    mergeableState: summary.mergeableState,
+  },
+  checks: summary.checks,
+});
+
+/**
+ * Visual summaries of the PRs linked to a session, in link order. A PR whose
+ * live state has not arrived yet is left out rather than shown as unknown.
+ */
+export const useLinkedPrVisualSummaries = (links: readonly LinkedGitHubPullRequest[]): PrVisualSummary[] => {
+  const runtimeKey = getRuntimeKey();
+  return useGitHubPrStatusStore(useShallow((state) => links.flatMap((link) => {
+    const prKey = getLiveSummaryPrKey(runtimeKey, link);
+    const summary = state.linkedSummaries[prKey];
+    const visual = summary ? getCachedPrSummary(`linked:${prKey}`, linkedPrStatus(link, summary)) : null;
+    return visual ? [visual] : [];
+  })));
 };
 
 export const useFreshestPrVisualSummaryForBranch = (
@@ -1161,6 +1242,6 @@ export const useFreshestPrVisualSummaryForBranch = (
   const cacheKey = directory && branch ? JSON.stringify(['branch', getRuntimeKey(), directory, branch]) : null;
   return useGitHubPrStatusStore((state) => {
     if (!directory || !branch || !cacheKey) return null;
-    return getCachedPrSummary(cacheKey, getFreshestPrEntryForBranch(state.entries, directory, branch));
+    return getCachedPrSummary(cacheKey, getFreshestPrEntryForBranch(state.entries, directory, branch)?.status);
   });
 };

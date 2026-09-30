@@ -627,7 +627,7 @@ describe("open PR live summaries", () => {
 
   beforeEach(() => {
     runtimeKey = "runtime-a"
-    useGitHubPrStatusStore.setState({ entries: {}, activeRequestCount: 0, totalRequestCount: 0 })
+    useGitHubPrStatusStore.setState({ entries: {}, linkedSummaries: {}, activeRequestCount: 0, totalRequestCount: 0 })
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
   })
 
@@ -743,6 +743,49 @@ describe("open PR live summaries", () => {
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
 
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
+  })
+
+  test("a PR linked to a session goes out once with the branch PR it shares", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const { github, calls } = summariesApi(async () => ({
+      connected: true,
+      fetchedAt: Date.now(),
+      summaries: [liveSummary({ state: "merged", checks: null }), liveSummary({ number: 9, title: "Linked", checks: null })],
+    }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, {
+      minAgeMs: 0,
+      linkedRefs: [{ owner: "acme", repo: "app", number: 7 }, { owner: "Acme", repo: "App", number: 9 }],
+    })
+
+    expect(calls).toEqual([[{ owner: "acme", repo: "app", number: 7 }, { owner: "Acme", repo: "App", number: 9 }]])
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("merged")
+    const linked = Object.values(useGitHubPrStatusStore.getState().linkedSummaries)
+    expect(linked.map((summary) => [summary.number, summary.state])).toEqual([[7, "merged"], [9, "open"]])
+  })
+
+  test("a merged linked PR is not asked about again", async () => {
+    const { github, calls } = summariesApi(async () => ({
+      connected: true,
+      fetchedAt: Date.now(),
+      summaries: [liveSummary({ number: 9, state: "merged", checks: null })],
+    }))
+    const linkedRefs = [{ owner: "acme", repo: "app", number: 9 }]
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], github, { minAgeMs: 0, linkedRefs })
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], github, { minAgeMs: 0, linkedRefs })
+
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a runtime switch forgets linked PR status", async () => {
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ number: 9 })] }))
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], github, { minAgeMs: 0, linkedRefs: [{ owner: "acme", repo: "app", number: 9 }] })
+
+    useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
+
+    expect(useGitHubPrStatusStore.getState().linkedSummaries).toEqual({})
   })
 
   test("a batch from before a runtime switch is dropped", async () => {

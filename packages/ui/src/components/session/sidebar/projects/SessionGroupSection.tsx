@@ -33,6 +33,7 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 
 type FolderScope = { scopeKey: string; directory: string | null };
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
@@ -370,6 +371,9 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const groupPrSummary = usePrVisualSummary(groupPrKey);
   const groupPrColor = groupPrSummary ? `var(--pr-${groupPrSummary.visualState})` : undefined;
   const groupPrStatusLabel = getPrStatusLabel(groupPrSummary, t);
+  const groupPrLabel = groupPrSummary
+    ? (groupPrStatusLabel ? `#${groupPrSummary.number} · ${groupPrStatusLabel}` : `#${groupPrSummary.number}`)
+    : undefined;
   const childStores = useChildStoreManager();
   const bootstrapDirectories = React.useMemo(() => {
     const directories = group.folderScopes?.map((scope) => normalizePath(scope.directory))
@@ -1093,12 +1097,23 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                   {spaceStaleIndicator}
                   {groupActivityIndicator}
                   {groupPrSummary ? (
-                    <span
-                      className="ml-auto flex-shrink-0 text-[0.72rem] font-medium leading-none"
+                    // Opens the PR; it sits inside the collapse toggle and the
+                    // drag handle, so it keeps its pointer and keys to itself.
+                    <button
+                      type="button"
+                      className="ml-auto flex-shrink-0 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
                       style={groupPrColor ? { color: groupPrColor } : undefined}
+                      disabled={!groupPrSummary.url}
+                      aria-label={groupPrLabel}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (groupPrSummary.url) void openExternalUrl(groupPrSummary.url);
+                      }}
                     >
                       #{groupPrSummary.number}
-                    </span>
+                    </button>
                   ) : null}
                 </span>
               ) : (

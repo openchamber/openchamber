@@ -47,7 +47,9 @@ import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openExternalUrl } from '@/lib/url';
-import { usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useLinkedPrVisualSummaries, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getLinkedGitHubPullRequests, type LinkedGitHubPullRequest } from '@/lib/linkedIssues';
+import { combineSessionPrSummaries } from './sessionPrSummaries';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -171,6 +173,7 @@ const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNod
 // (px-1.5 = 6px), the marker slot is icon-wide (14px) with a 6px gap, so row
 // text starts exactly where the zone-header label starts. Nested children
 // shift by one gutter step per depth level.
+const EMPTY_LINKED_PULL_REQUESTS: readonly LinkedGitHubPullRequest[] = [];
 const ROW_GUTTER_LEFT_PX = 6;
 const ROW_DEPTH_STEP_PX = 14;
 const ROW_TEXT_LEFT_PX = ROW_GUTTER_LEFT_PX + 14 + 6;
@@ -418,12 +421,36 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     () => resolveSessionPrLookupKey(node.worktree, isVSCode),
     [isVSCode, node.worktree],
   );
-  const prSummary = usePrVisualSummary(prLookupKey);
+  const branchPrSummary = usePrVisualSummary(prLookupKey);
+  const linkedPullRequests = React.useMemo(
+    () => (isVSCode ? EMPTY_LINKED_PULL_REQUESTS : getLinkedGitHubPullRequests(session)),
+    [isVSCode, session],
+  );
+  const linkedPrSummaries = useLinkedPrVisualSummaries(linkedPullRequests);
+  // The branch's PR and the PRs linked to the session; the row leads with
+  // the one that needs attention first.
+  const prSummaries = React.useMemo(
+    () => combineSessionPrSummaries(branchPrSummary, linkedPrSummaries),
+    [branchPrSummary, linkedPrSummaries],
+  );
+  const prSummary = prSummaries[0] ?? null;
+  const morePrCount = Math.max(0, prSummaries.length - 1);
   const prIconColor = prSummary ? `var(--pr-${prSummary.visualState})` : undefined;
+  // The branch icon speaks for the branch, not for PRs linked from elsewhere.
+  const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
   // The project tree already shows the branch on the worktree sub-header, so
   // the per-row marker only appears in the mixed-context recent list.
   const showInlineBranchMarker = Boolean(tooltipBranchLabel) && renderContext === 'recent';
-  const prStatusLabel = React.useMemo(() => getPrStatusLabel(prSummary, t), [prSummary, t]);
+  const prStatusLines = React.useMemo(() => prSummaries.map((summary) => {
+    const label = getPrStatusLabel(summary, t);
+    return {
+      key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
+      color: `var(--pr-${summary.visualState})`,
+      url: summary.url,
+      text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
+    };
+  }), [prSummaries, t]);
+  const prBadgeLabel = prStatusLines.map((line) => line.text).join(', ');
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
@@ -794,6 +821,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               <span className="inline-flex flex-shrink-0 items-center gap-1 typography-micro" style={prIconColor ? { color: prIconColor } : undefined}>
                 <Icon name="git-pull-request" className="h-3 w-3" style={prIconColor ? { color: prIconColor } : undefined} />
                 <span className="leading-none tabular-nums">#{prSummary.number}</span>
+                {morePrCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{morePrCount}</span> : null}
               </span>
             ) : null}
             zombieIndicator={null}
@@ -1426,7 +1454,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           className="inline-flex flex-shrink-0 items-center gap-1 rounded typography-micro hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
           style={prIconColor ? { color: prIconColor } : undefined}
           disabled={!prSummary.url}
-          aria-label={prStatusLabel ? `#${prSummary.number} · ${prStatusLabel}` : `#${prSummary.number}`}
+          aria-label={prBadgeLabel}
           onPointerDown={handleRowActionPointerDown}
           onMouseDown={handleRowActionMouseDown}
           onClick={(event) => {
@@ -1438,10 +1466,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         >
           <Icon name="git-pull-request" className="h-3 w-3" style={prIconColor ? { color: prIconColor } : undefined} />
           <span className="leading-none tabular-nums">#{prSummary.number}</span>
+          {morePrCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{morePrCount}</span> : null}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={6}>
-        <p>{prStatusLabel ? `#${prSummary.number} · ${prStatusLabel}` : `#${prSummary.number}`}</p>
+        {prStatusLines.map((line) => <p key={line.key}>{line.text}</p>)}
       </TooltipContent>
     </Tooltip>
   ) : null;
@@ -1645,8 +1674,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                               {showInlineBranchMarker ? (
                                 <Icon
                                   name="git-branch"
-                                  className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
-                                  style={prIconColor ? { color: prIconColor } : undefined}
+                                  className={cn('h-3 w-3', !branchPrIconColor && 'text-muted-foreground/60')}
+                                  style={branchPrIconColor ? { color: branchPrIconColor } : undefined}
                                 />
                               ) : null}
                               {sessionCompactUpdatedLabel}
@@ -1676,8 +1705,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                                 {showInlineBranchMarker ? (
                                   <Icon
                                     name="git-branch"
-                                    className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
-                                    style={prIconColor ? { color: prIconColor } : undefined}
+                                    className={cn('h-3 w-3', !branchPrIconColor && 'text-muted-foreground/60')}
+                                    style={branchPrIconColor ? { color: branchPrIconColor } : undefined}
                                   />
                                 ) : null}
                                 {/* The recent activity list shows its compact
@@ -1730,18 +1759,30 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                     ) : null}
                     {tooltipBranchLabel ? (
                       <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                        <Icon name="git-branch" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
+                        <Icon name="git-branch" className="h-3 w-3 flex-shrink-0" style={branchPrIconColor ? { color: branchPrIconColor } : undefined} />
                         <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
                       </div>
                     ) : null}
-                    {prSummary && prStatusLabel ? (
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
-                        <span className="min-w-0 truncate" style={prIconColor ? { color: prIconColor } : undefined}>
-                          #{prSummary.number} · {prStatusLabel}
-                        </span>
-                      </div>
-                    ) : null}
+                    {prStatusLines.map((line) => (
+                      <button
+                        key={line.key}
+                        type="button"
+                        className="flex min-w-0 items-center gap-1.5 rounded text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
+                        style={{ color: line.color }}
+                        disabled={!line.url}
+                        // React events from the portaled tooltip still bubble
+                        // through the row: keep them from selecting or
+                        // dragging the session.
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (line.url) void openExternalUrl(line.url);
+                        }}
+                      >
+                        <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" />
+                        <span className="min-w-0 truncate">{line.text}</span>
+                      </button>
+                    ))}
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}

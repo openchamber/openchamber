@@ -1,5 +1,5 @@
 import React from 'react';
-import type { GitHubAPI } from '@/lib/api/types';
+import type { GitHubAPI, GitHubPullRequestRef } from '@/lib/api/types';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 
 // How often a shown open PR is re-asked, and the floor when the user comes
@@ -14,28 +14,37 @@ const OPEN_PR_SUMMARY_RETURN_MIN_AGE_MS = 15_000;
 const isDocumentVisible = () => document.visibilityState === 'visible';
 
 /**
- * Keeps the open PRs behind `keys` current through batched live summaries:
- * on a fixed cadence while the window is visible, and again when the user
- * returns to it. Entries without an open PR, and watched ones, are skipped by
- * the store, so callers pass every key they show.
+ * Keeps the open PRs behind `keys`, and the PRs linked to the sessions on
+ * screen, current through batched live summaries: on a fixed cadence while the
+ * window is visible, and again when the user returns to it. Entries without an
+ * open PR, watched ones and merged links are skipped by the store, so callers
+ * pass everything they show.
  */
-export function useOpenPrSummarySync(keys: string[], github: GitHubAPI | undefined, enabled: boolean) {
+export function useOpenPrSummarySync(
+  keys: string[],
+  linkedRefs: GitHubPullRequestRef[],
+  github: GitHubAPI | undefined,
+  enabled: boolean,
+) {
   const syncOpenPrSummaries = useGitHubPrStatusStore((state) => state.syncOpenPrSummaries);
   const keysRef = React.useRef(keys);
+  const linkedRefsRef = React.useRef(linkedRefs);
 
   const sync = React.useCallback((minAgeMs: number) => {
     if (!enabled || !github || !isDocumentVisible()) {
       return;
     }
-    void syncOpenPrSummaries(keysRef.current, github, { minAgeMs });
+    void syncOpenPrSummaries(keysRef.current, github, { minAgeMs, linkedRefs: linkedRefsRef.current });
   }, [enabled, github, syncOpenPrSummaries]);
 
-  // New keys (a project expanded, a reload restored cached open PRs) are asked
-  // about right away; keys seen recently wait for their cadence.
+  // New keys and links (a project expanded, a PR just linked, a reload
+  // restored cached open PRs) are asked about right away; ones seen recently
+  // wait for their cadence.
   React.useEffect(() => {
     keysRef.current = keys;
+    linkedRefsRef.current = linkedRefs;
     sync(OPEN_PR_SUMMARY_DUE_AGE_MS);
-  }, [keys, sync]);
+  }, [keys, linkedRefs, sync]);
 
   React.useEffect(() => {
     if (!enabled || !github) {

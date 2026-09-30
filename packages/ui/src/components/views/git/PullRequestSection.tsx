@@ -27,6 +27,9 @@ import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthr
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -77,6 +80,23 @@ const statusColor = (state: string | undefined | null): string => {
     default:
       return 'bg-muted-foreground/40';
   }
+};
+
+// A PR opened here belongs to the session the user is working in, but only
+// when that session works in this directory: the Git view can show another
+// worktree than the open chat.
+const linkCreatedPrToCurrentSession = (directory: string, pr: GitHubPullRequest) => {
+  const { currentSessionId, getDirectoryForSession } = useSessionUIStore.getState();
+  const sessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : null;
+  if (!currentSessionId || !sessionDirectory || normalizePath(sessionDirectory) !== normalizePath(directory)) {
+    return;
+  }
+  void sessionActions.setLinkedIssue(
+    currentSessionId,
+    sessionDirectory,
+    buildLinkedIssue({ url: pr.url, number: pr.number, title: pr.title, kind: 'pull', linkedAt: Date.now() }),
+    true,
+  ).catch(() => undefined);
 };
 
 const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'open' | 'blocked' | 'merged' | 'closed' | null => {
@@ -1334,6 +1354,7 @@ export const PullRequestSection: React.FC<{
             }),
       });
       toast.success(t('gitView.pr.toast.prCreated'));
+      linkCreatedPrToCurrentSession(directory, pr);
       updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
       await refresh({ force: true });
       scheduleActionRefresh();

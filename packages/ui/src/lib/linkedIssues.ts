@@ -229,6 +229,30 @@ export const getLinkedIssues = (session: Session | null | undefined): LinkedIssu
   return openchamber.linked_issues.filter(isLinkedIssue);
 };
 
+export type LinkedGitHubPullRequest = {
+  owner: string;
+  repo: string;
+  number: number;
+  url: string;
+  title: string;
+};
+
+const LINKED_ISSUE_ID_PATTERN = /^([^/\s]+)\/([^/#\s]+)#(\d+)$/;
+
+/**
+ * GitHub pull requests linked to a session, with the repository read from the
+ * entry id. Entries whose URL did not name a GitHub repository at link time
+ * (their id is the URL) cannot be looked up and are left out.
+ */
+export const getLinkedGitHubPullRequests = (session: Session | null | undefined): LinkedGitHubPullRequest[] => (
+  getLinkedIssues(session).flatMap((entry) => {
+    if (entry.kind !== 'pull') return [];
+    const match = LINKED_ISSUE_ID_PATTERN.exec(entry.id);
+    if (!match || Number(match[3]) !== entry.number) return [];
+    return [{ owner: match[1], repo: match[2], number: entry.number, url: entry.url, title: entry.title }];
+  })
+);
+
 export const withLinkedIssue = (
   metadata: SessionMetadataRecord,
   issue: LinkedIssue,
