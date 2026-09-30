@@ -2809,6 +2809,7 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.error.noActiveDirectoryForAction': 'アクションのアクティブなディレクトリがありません',
   'projectActions.error.failedToCreateTerminalSession': 'ターミナルセッションの作成に失敗しました',
   'projectActions.error.invalidCustomUrlFormat': '無効なカスタムURL形式です',
+  'projectActions.error.openUrlTemplateUnresolved': 'アクション URL のブランチを読み取れませんでした',
   'projectActions.error.selectedDesktopSshForwardUnavailable': '選択したデスクトップSSH転送は利用できません',
   'projectActions.error.failedToRunAction': 'アクションの実行に失敗しました',
   'mcpDropdown.title': 'MCPサーバー',

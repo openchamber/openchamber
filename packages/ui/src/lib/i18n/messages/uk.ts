@@ -2776,6 +2776,7 @@ export const dict: Record<I18nKey, string> = {
   "projectActions.error.noActiveDirectoryForAction": "Немає активного каталогу для дії",
   "projectActions.error.failedToCreateTerminalSession": "Не вдалося створити термінальну сесію",
   "projectActions.error.invalidCustomUrlFormat": "Неправильний формат власного URL",
+  "projectActions.error.openUrlTemplateUnresolved": "Не вдалося прочитати гілку для адреси дії",
   "projectActions.error.selectedDesktopSshForwardUnavailable": "Вибране SSH-перенаправлення недоступне",
   "projectActions.error.failedToRunAction": "Не вдалося виконати дію",
   "mcpDropdown.title": "MCP Сервери",

@@ -2810,6 +2810,7 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.error.noActiveDirectoryForAction': '작업을 실행할 활성 디렉터리가 없습니다',
   'projectActions.error.failedToCreateTerminalSession': '터미널 세션 생성에 실패했습니다',
   'projectActions.error.invalidCustomUrlFormat': '사용자 지정 URL 형식이 올바르지 않습니다',
+  'projectActions.error.openUrlTemplateUnresolved': '작업 URL에 사용할 브랜치를 읽을 수 없습니다',
   'projectActions.error.selectedDesktopSshForwardUnavailable': '선택한 데스크톱 SSH 포워딩을 사용할 수 없음',
   'projectActions.error.failedToRunAction': '작업 실행에 실패했습니다',
   'mcpDropdown.title': 'MCP 서버',

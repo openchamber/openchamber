@@ -569,6 +569,9 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                               {t('settings.projects.actions.field.overrideUrlTooltip')}
                             </SettingsInfoHint>
                           </div>
+                          <p className="typography-meta mt-0.5 max-w-[24rem] text-muted-foreground">
+                            {t('settings.projects.actions.field.overrideUrlVariables')}
+                          </p>
 
                           {isDesktopShellApp ? (
                             <div className="mt-2">

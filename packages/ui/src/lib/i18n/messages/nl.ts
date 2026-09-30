@@ -2810,6 +2810,7 @@ export const dict = {
   'projectActions.error.noActiveDirectoryForAction': 'Geen actieve map voor deze actie',
   'projectActions.error.failedToCreateTerminalSession': 'Kan terminalsessie niet aanmaken',
   'projectActions.error.invalidCustomUrlFormat': 'Ongeldig formaat voor de aangepaste URL',
+  'projectActions.error.openUrlTemplateUnresolved': 'De branch voor de actie-URL kon niet worden gelezen',
   'projectActions.error.selectedDesktopSshForwardUnavailable': 'De geselecteerde SSH-forward van de desktop is niet beschikbaar',
   'projectActions.error.failedToRunAction': 'Kan actie niet uitvoeren',
   'mcpDropdown.title': 'MCP-servers',

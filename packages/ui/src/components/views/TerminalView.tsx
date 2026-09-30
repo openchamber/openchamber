@@ -25,7 +25,8 @@ import type { IconName } from '@/components/icon/icons';
 import { useDeviceInfo } from '@/lib/device';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { terminalSnapshotSize } from '@/lib/terminalApi';
-import { extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
+import { extractProxiedPorts, extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
+import { reachesDevServersThroughTunnel } from '@/lib/browser/devTunnel';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICONS } from '@/lib/projectActions';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -216,9 +217,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const previewScanTailRef = React.useRef('');
     const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
     const previewProbeGenerationRef = React.useRef(0);
+    // Loopback ports portless announced a named address for; the server's own
+    // announcement of that port must not replace the name.
+    const previewProxiedPortsRef = React.useRef<number[]>([]);
 
     const resetTerminalPreviewScan = React.useCallback(() => {
         previewScanTailRef.current = '';
+        previewProxiedPortsRef.current = [];
         pendingPreviewProbeUrlsRef.current.clear();
         previewProbeGenerationRef.current += 1;
     }, []);
@@ -332,7 +337,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                 return;
             }
 
-            const candidate = extractTerminalPreviewUrl(completeText);
+            for (const port of extractProxiedPorts(completeText)) {
+                if (!previewProxiedPortsRef.current.includes(port)) previewProxiedPortsRef.current.push(port);
+            }
+            const candidate = extractTerminalPreviewUrl(completeText, {
+                proxiedPorts: previewProxiedPortsRef.current,
+                namedAddressesReachable: !reachesDevServersThroughTunnel(),
+            });
             if (!candidate || pendingPreviewProbeUrlsRef.current.has(candidate)) {
                 return;
             }

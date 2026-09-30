@@ -497,6 +497,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': '명령 출력에서 감지한 URL 또는 아래의 사용자 정의 URL을 엽니다',
   'settings.projects.actions.field.overrideUrlPlaceholder': '대체 URL(선택 사항)',
   'settings.projects.actions.field.overrideUrlTooltip': '이 항목을 입력하면 사용자 정의 URL을 사용합니다. 비워 두면 출력에서 가장 적절한 URL을 엽니다.',
+  'settings.projects.actions.field.overrideUrlVariables': '{worktree} 또는 {branch}로 작업이 실행되는 체크아웃을 지정합니다. 예: https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': 'Desktop SSH 포워딩',
   'settings.projects.actions.field.useOutputManualUrl': '출력/수동 URL 사용',
   'settings.projects.actions.actions.add': '작업 추가',

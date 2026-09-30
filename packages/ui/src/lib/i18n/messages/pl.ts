@@ -2759,6 +2759,7 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.error.failedToCreateTerminalSession': 'Nie udało się utworzyć sesji terminala',
   'projectActions.error.failedToRunAction': 'Nie udało się uruchomić akcji',
   'projectActions.error.invalidCustomUrlFormat': 'Nieprawidłowy format własnego adresu URL',
+  'projectActions.error.openUrlTemplateUnresolved': 'Nie udało się odczytać gałęzi dla URL akcji',
   'projectActions.error.noActiveDirectory': 'Brak aktywnego katalogu',
   'projectActions.error.noActiveDirectoryForAction': 'Brak aktywnego katalogu dla akcji',
   'projectActions.error.selectedDesktopSshForwardUnavailable': 'Wybrane przekierowanie SSH z desktopu jest niedostępne',

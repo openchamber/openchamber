@@ -530,6 +530,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': '出力または以下のカスタム URL から URL を開く',
   'settings.projects.actions.field.overrideUrlPlaceholder': '上書き URL（任意）',
   'settings.projects.actions.field.overrideUrlTooltip': 'このフィールドが入力されている場合、カスタム URL が使用されます。空の場合、アプリは出力から最適な URL を開きます。',
+  'settings.projects.actions.field.overrideUrlVariables': '{worktree} または {branch} で、アクションを実行するチェックアウトを指定できます。例: https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': 'Desktop SSH 転送',
   'settings.projects.actions.field.useOutputManualUrl': '出力/手動 URL を使用',
   'settings.projects.actions.actions.add': 'アクションを追加',

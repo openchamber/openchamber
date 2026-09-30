@@ -2731,6 +2731,7 @@ export const dict = {
   'projectActions.error.noActiveDirectoryForAction': 'Eylem için etkin dizin yok',
   'projectActions.error.failedToCreateTerminalSession': 'Terminal session\'ı oluşturulamadı',
   'projectActions.error.invalidCustomUrlFormat': 'Geçersiz özel URL biçimi',
+  'projectActions.error.openUrlTemplateUnresolved': 'Eylem URL\'si için dal okunamadı',
   'projectActions.error.selectedDesktopSshForwardUnavailable': 'Seçilen masaüstü SSH forward\'ı kullanılamıyor',
   'projectActions.error.failedToRunAction': 'Eylem çalıştırılamadı',
   'mcpDropdown.title': 'MCP Sunucuları',

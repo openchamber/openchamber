@@ -2776,6 +2776,7 @@ export const dict: Record<I18nKey, string> = {
   "projectActions.error.noActiveDirectoryForAction": "Não há diretório ativo para a ação",
   "projectActions.error.failedToCreateTerminalSession": "Não foi possível criar a sessão de terminal",
   "projectActions.error.invalidCustomUrlFormat": "Formato de URL personalizada inválido",
+  "projectActions.error.openUrlTemplateUnresolved": "Não foi possível ler o branch para a URL da ação",
   "projectActions.error.selectedDesktopSshForwardUnavailable": "A conexão SSH na máquina desktop selecionada não está disponível",
   "projectActions.error.failedToRunAction": "Não foi possível executar a ação",
   "mcpDropdown.title": "Servidores MCP",

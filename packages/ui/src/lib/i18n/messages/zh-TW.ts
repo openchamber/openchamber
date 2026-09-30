@@ -2780,6 +2780,7 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.error.noActiveDirectoryForAction': '沒有可用於該操作的活動目錄',
   'projectActions.error.failedToCreateTerminalSession': '建立終端機會話失敗',
   'projectActions.error.invalidCustomUrlFormat': '自訂 URL 格式無效',
+  'projectActions.error.openUrlTemplateUnresolved': '無法讀取動作 URL 所需的分支',
   'projectActions.error.selectedDesktopSshForwardUnavailable': '所選桌面 SSH 轉發無法使用',
   'projectActions.error.failedToRunAction': '執行操作失敗',
   'mcpDropdown.title': 'MCP 伺服器',

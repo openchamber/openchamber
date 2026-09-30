@@ -23,6 +23,8 @@ Eylemler uygulama başlığındaki bir menüde görünür. Birine tıklayın ve 
 
 Sunucu başlatan bir eylem için **auto-open URL** seçeneğini açın. OpenChamber çıktıda yerel bir adres arar ve açmayı önerir. Ayrıntılar için [Preview & Dev Servers](/preview/) sayfasına bakın. Masaüstünde bunu bir SSH port yönlendirmesi üzerinden de geçirebilirsiniz.
 
+Sunucunun sabit bir adresi varsa onu eylemin URL alanına yazın. `{worktree}` ve `{branch}` eylemin çalıştığı çalışma kopyasını yerleştirir, böylece tek bir eylem her worktree'de çalışır. [portless](https://github.com/vercel-labs/portless) ile `https://{worktree}.myapp.localhost`, `feature/auth` üzerindeki bir worktree'de `https://auth.myapp.localhost`, ana çalışma kopyasında `https://myapp.localhost` açar. Alana hiç ihtiyacınız olmayabilir: portless adresini yazdırdığında OpenChamber arkasındaki port yerine o adresi açar. Uzak bir örneğe bağlı masaüstünde bunun yerine portu açar, çünkü tünelden uzak makineye yalnızca loopback portları geçer.
+
 ## İlgili
 
 - [Depo yapılandırması](/repository-config/) — eylemleri ve kurulum komutlarını tüm ekip için depoda tutun

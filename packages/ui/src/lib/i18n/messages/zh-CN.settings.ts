@@ -497,6 +497,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': '从输出中打开 URL，或使用下面的自定义 URL',
   'settings.projects.actions.field.overrideUrlPlaceholder': '覆盖 URL（可选）',
   'settings.projects.actions.field.overrideUrlTooltip': '如果填写此字段，将使用自定义 URL。为空时，应用会从输出中选择最佳 URL 打开。',
+  'settings.projects.actions.field.overrideUrlVariables': '使用 {worktree} 或 {branch} 表示操作运行所在的检出目录，例如 https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': '桌面 SSH 转发',
   'settings.projects.actions.field.useOutputManualUrl': '使用输出/手动 URL',
   'settings.projects.actions.actions.add': '添加操作',

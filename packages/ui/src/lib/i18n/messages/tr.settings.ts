@@ -525,6 +525,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': 'Çıktıdaki URL\'yi veya aşağıdaki özel URL\'yi aç',
   'settings.projects.actions.field.overrideUrlPlaceholder': 'Geçersiz kılınacak URL (isteğe bağlı)',
   'settings.projects.actions.field.overrideUrlTooltip': 'Bu alan doluysa özel URL kullanılır. Boşsa uygulama çıktıdan en iyi URL\'yi açar.',
+  'settings.projects.actions.field.overrideUrlVariables': 'Eylemin çalıştığı çalışma kopyası için {worktree} veya {branch} kullanın, örn. https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': 'Masaüstü SSH yönlendirmesi',
   'settings.projects.actions.field.useOutputManualUrl': 'Çıktı/manuel URL kullan',
   'settings.projects.actions.actions.add': 'Eylem ekle',

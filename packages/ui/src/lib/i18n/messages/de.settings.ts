@@ -507,6 +507,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': 'URL aus der Ausgabe oder benutzerdefinierte URL unten öffnen',
   'settings.projects.actions.field.overrideUrlPlaceholder': 'URL überschreiben (optional)',
   'settings.projects.actions.field.overrideUrlTooltip': 'Wenn dieses Feld ausgefüllt ist, wird die benutzerdefinierte URL verwendet. Wenn leer, öffnet die App die beste URL aus der Ausgabe.',
+  'settings.projects.actions.field.overrideUrlVariables': 'Mit {worktree} oder {branch} wird der Checkout eingesetzt, in dem die Aktion läuft, z. B. https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': 'Desktop SSH-Weiterleitung',
   'settings.projects.actions.field.useOutputManualUrl': 'Ausgabe-/manuelle URL verwenden',
   'settings.projects.actions.actions.add': 'Aktion hinzufügen',

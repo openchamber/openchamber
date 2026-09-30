@@ -2810,6 +2810,7 @@ export const dict = {
   'projectActions.error.noActiveDirectoryForAction': 'No active directory for action',
   'projectActions.error.failedToCreateTerminalSession': 'Failed to create terminal session',
   'projectActions.error.invalidCustomUrlFormat': 'Invalid custom URL format',
+  'projectActions.error.openUrlTemplateUnresolved': 'Couldn\'t read the branch for the action URL',
   'projectActions.error.selectedDesktopSshForwardUnavailable': 'Selected desktop SSH forward is unavailable',
   'projectActions.error.failedToRunAction': 'Failed to run action',
   'mcpDropdown.title': 'MCP Servers',

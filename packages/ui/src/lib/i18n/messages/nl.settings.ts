@@ -530,6 +530,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': 'URL uit de uitvoer of de aangepaste URL hieronder openen',
   'settings.projects.actions.field.overrideUrlPlaceholder': 'URL overschrijven (optioneel)',
   'settings.projects.actions.field.overrideUrlTooltip': 'Als dit veld is ingevuld, wordt de aangepaste URL gebruikt. Als het leeg is, opent de app de beste URL uit de uitvoer.',
+  'settings.projects.actions.field.overrideUrlVariables': 'Gebruik {worktree} of {branch} voor de checkout waarin de actie draait, bijv. https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': 'SSH-forward van de desktop',
   'settings.projects.actions.field.useOutputManualUrl': 'URL uit uitvoer of handmatig gebruiken',
   'settings.projects.actions.actions.add': 'Actie toevoegen',

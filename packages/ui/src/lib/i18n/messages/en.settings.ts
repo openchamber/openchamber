@@ -529,6 +529,7 @@ export const settingsDict = {
   'settings.projects.actions.field.autoOpenUrlDescription': 'Open URL from output or custom URL below',
   'settings.projects.actions.field.overrideUrlPlaceholder': 'Override URL (optional)',
   'settings.projects.actions.field.overrideUrlTooltip': 'If this field is filled, custom URL is used. If empty, app opens best URL from output.',
+  'settings.projects.actions.field.overrideUrlVariables': 'Use {worktree} or {branch} for the checkout the action runs in, e.g. https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.desktopSshForward': 'Desktop SSH forward',
   'settings.projects.actions.field.useOutputManualUrl': 'Use output/manual URL',
   'settings.projects.actions.actions.add': 'Add action',

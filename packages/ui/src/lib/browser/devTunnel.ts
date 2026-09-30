@@ -93,6 +93,16 @@ const isRemoteRuntime = (baseUrl: string): boolean => {
 };
 
 /**
+ * True when the desktop reaches the instance's dev servers through this
+ * tunnel. Only loopback addresses can go through it: a named local address
+ * (portless `https://auth.myapp.localhost`) resolves on this machine, and the
+ * tunnel rewrites the host the name-based proxy routes on.
+ */
+export const reachesDevServersThroughTunnel = (): boolean => (
+  isDesktopRuntime() && isRemoteRuntime(getRuntimeApiBaseUrl())
+);
+
+/**
  * The port a loopback URL addresses, including the one it leaves implicit.
  * Both callers must agree on this: an omitted port is 80 or 443, not nothing.
  */

@@ -23,6 +23,8 @@ Acties staan in een menu bovenaan de app. Klik op een actie en OpenChamber voert
 
 Schakel **URL automatisch openen** in voor een actie die een server start. OpenChamber zoekt in de uitvoer naar een lokaal adres en biedt aan dat te openen. Zie [Voorbeeldweergave en ontwikkelservers](/nl/preview/). Op de desktop kunt u het adres ook via SSH-poortdoorsturing bereiken.
 
+Heeft de server een vast adres, vul het dan in het URL-veld van de actie in. `{worktree}` en `{branch}` vullen de checkout in waarin de actie draait, zodat één actie in elke worktree werkt. Met [portless](https://github.com/vercel-labs/portless) opent `https://{worktree}.myapp.localhost` in een worktree op `feature/auth` het adres `https://auth.myapp.localhost` en in de hoofdcheckout `https://myapp.localhost`. Vaak is het veld niet eens nodig: als portless zijn adres toont, opent OpenChamber dat adres in plaats van de poort erachter. Op een desktop die met een externe instantie is verbonden, opent het in plaats daarvan de poort, omdat alleen loopbackpoorten via de tunnel naar de externe machine gaan.
+
 ## Zie ook
 
 - [Repositoryconfiguratie](/nl/repository-config/) om acties en inrichtingsopdrachten met het hele team te delen

@@ -2597,6 +2597,7 @@ export const dict = {
   'projectActions.error.noActiveDirectoryForAction': 'Kein aktives Verzeichnis für Aktion',
   'projectActions.error.failedToCreateTerminalSession': 'Erstellung der Terminal-Sitzung fehlgeschlagen',
   'projectActions.error.invalidCustomUrlFormat': 'Ungültiges benutzerdefiniertes URL-Format',
+  'projectActions.error.openUrlTemplateUnresolved': 'Der Branch für die Aktions-URL konnte nicht gelesen werden',
   'projectActions.error.selectedDesktopSshForwardUnavailable': 'Ausgewählte Desktop-SSH-Weiterleitung ist nicht verfügbar',
   'projectActions.error.failedToRunAction': 'Aktion konnte nicht ausgeführt werden',
   'mcpDropdown.title': 'MCP-Server',

@@ -497,6 +497,7 @@ export const settingsDict = {
   "settings.projects.actions.field.autoOpenUrlDescription": "Відкрити URL із виведення або власний URL нижче",
   "settings.projects.actions.field.overrideUrlPlaceholder": "Перевизначити URL (необов'язково)",
   "settings.projects.actions.field.overrideUrlTooltip": "Якщо це поле заповнене, буде використано власний URL. Якщо воно порожнє, застосунок відкриє найкращий URL з виводу.",
+  "settings.projects.actions.field.overrideUrlVariables": "{worktree} або {branch} підставляють checkout, у якому працює дія, напр. https://{worktree}.myapp.localhost",
   "settings.projects.actions.field.desktopSshForward": "SSH-перенаправлення Desktop",
   "settings.projects.actions.field.useOutputManualUrl": "Використовувати вихід/вручну URL",
   "settings.projects.actions.actions.add": "Додати дію",

@@ -497,6 +497,7 @@ export const settingsDict = {
   "settings.projects.actions.field.autoOpenUrlDescription": "Abrir URL desde la salida o la URL personalizada de abajo",
   "settings.projects.actions.field.overrideUrlPlaceholder": "URL de reemplazo (opcional)",
   "settings.projects.actions.field.overrideUrlTooltip": "Si este campo está lleno, se usa la URL personalizada. Si está vacío, la aplicación abre la mejor URL de la salida.",
+  "settings.projects.actions.field.overrideUrlVariables": "Usa {worktree} o {branch} para la copia de trabajo donde se ejecuta la acción, p. ej. https://{worktree}.myapp.localhost",
   "settings.projects.actions.field.desktopSshForward": "Forward SSH de escritorio",
   "settings.projects.actions.field.useOutputManualUrl": "Usar URL de salida/manual",
   "settings.projects.actions.actions.add": "Añadir acción",

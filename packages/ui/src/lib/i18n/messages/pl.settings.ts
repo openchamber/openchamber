@@ -1458,6 +1458,7 @@ export const settingsDict = {
   'settings.projects.actions.field.iconAria': 'Ikona {icon}',
   'settings.projects.actions.field.overrideUrlPlaceholder': 'Nadpisz URL (opcjonalnie)',
   'settings.projects.actions.field.overrideUrlTooltip': 'Jeśli to pole jest wypełnione, używany jest własny URL. Jeśli jest puste, aplikacja otwiera najlepszy URL z wyniku.',
+  'settings.projects.actions.field.overrideUrlVariables': 'Użyj {worktree} lub {branch}, aby wstawić checkout, w którym działa akcja, np. https://{worktree}.myapp.localhost',
   'settings.projects.actions.field.selectIconAria': 'Wybierz ikonę',
   'settings.projects.actions.field.useOutputManualUrl': 'Użyj URL-a z wyniku lub ręcznego',
   'settings.projects.actions.state.empty': 'Nie skonfigurowano jeszcze żadnych akcji.',
