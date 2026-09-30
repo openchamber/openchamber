@@ -880,6 +880,45 @@ the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
 loads history only on an explicit tap.
 
+A message link opens the session on one message instead. Links are built and
+parsed in `lib/sessionLinks.ts`: the web copies `?session=<id>&message=<id>` on
+its own origin, desktop and the Capacitor app copy
+`openchamber://session/<id>?message=<id>`, and VS Code offers no link because
+its sessions live on its own OpenCode. Every entry point (the web route, the
+desktop `openchamber:open-session` event, mobile deep links, a session link
+clicked in chat content) calls `openSessionLink`, which records the message in
+`lib/router/messageFocus.ts` and opens the session through the route opener so
+a cross-project session resolves its directory. The timeline serves the
+request on entry, ahead of a remembered position, or immediately when that
+session is already open. Being shown does not end the request: a link can
+select its session twice, first under a guessed directory and then under the
+one the session list reports, and the second timeline must show the message
+again whether the first was torn down mid-search or had already shown it. The
+request ends when the message proves missing, when the reader takes the
+viewport (any real gesture), when another session is entered, or after a
+minute. A repeated click on the same link is a new request and is shown
+again. The message lands just below the scroller's top fade
+(`--scroll-shadow-size` plus a small gap), not inside it where it reads as
+cut off, and is tinted briefly (`[data-message-link-target]`). A linked message outside the
+loaded window is first checked with one `session.message.get` request: a 404
+shows a "not in this session" toast, anything else loads older history until
+the message or the start of the history, on every runtime including mobile.
+Chat markdown keeps `openchamber://` hrefs only for session links and turns
+pasted ones into links; pairing and other routes stay stripped. A web session
+link opens in place when it points at the page's origin or at the instance
+the app is connected to (the desktop page has its own scheme, so a link to
+its connected remote host would otherwise leave through the host-window
+path). On desktop a link to a saved instance opens in that instance's app
+window: an open window for the instance takes it (brought to the front and
+moved to the session through `openchamber:open-session`), otherwise
+`openHostWindow` creates one on the session route; "New window" from the
+instance switcher always opens a fresh one. A link to any other address
+keeps the external path. A session
+deep link that launches the desktop app arrives before the renderer listens:
+`main.mjs` keeps it pending and the main window takes it on mount through
+`desktop_take_pending_session_links` (`takePendingDesktopSessionLinks`); a
+late flush still emits it to a renderer that never asks.
+
 On launch the app reopens the session that was open when it closed
 (`sync/last-session-restore.ts`, used by `App` for web and desktop and by the
 Capacitor shell). `setCurrentSession` persists the pointer per runtime and a

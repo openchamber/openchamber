@@ -106,6 +106,18 @@ describe('markdown sanitization', () => {
     expect(html).not.toContain('href="ms-msdt:/id%20PCWDiagnostic"');
   });
 
+  test('keeps session links, including pasted ones, and strips other OpenChamber routes', () => {
+    const html = renderMarkdownSync([
+      'Pasted: openchamber://session/ses_abc?message=msg_123',
+      '[labelled](openchamber://session/ses_abc)',
+      '[pairing](openchamber://connect?v=2&p=secret)',
+    ].join('\n\n'), 'inline');
+
+    expect(html).toContain('href="openchamber://session/ses_abc?message=msg_123"');
+    expect(html).toContain('href="openchamber://session/ses_abc"');
+    expect(html).not.toContain('href="openchamber://connect');
+  });
+
 });
 
 describe('Markdown parser failures', () => {

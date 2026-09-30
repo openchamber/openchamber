@@ -2,6 +2,7 @@ import React from 'react';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
+import { isOpencodeNotFound, opencodeClient } from '@/lib/opencode/client';
 
 import { ChatInput } from './ChatInput';
 import { ChatColumnSessionContext, type ChatColumnSession } from './chatColumnSession';
@@ -37,10 +38,8 @@ const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
 // Mirrors the oc-chat-hydration-reveal duration in index.css.
 const TIMELINE_REVEAL_FADE_MS = 100;
-// History batches loaded to reach a remembered reading position that lies
-// before the loaded window; past that the session stays on its end.
-const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
 import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
+import { toast } from '@/components/ui';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
@@ -48,7 +47,7 @@ import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
-import { useChatTimelineScroll, type TimelineListHandle } from '@/hooks/useChatTimelineScroll';
+import { useChatTimelineScroll, type LinkedMessageState, type TimelineListHandle } from '@/hooks/useChatTimelineScroll';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
@@ -1078,11 +1077,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // nothing) for one commit, and acting on that would open a draft over the
     // session the user just chose.
     React.useEffect(() => {
-        if (autoOpenDraft && !liveSessionId && !draftOpen) {
-            // Programmatic fallback, not user navigation — must not clear the
-            // persisted last-session pointer the cold-launch restore reads.
-            openNewSessionDraft({ automatic: true });
-        }
+        if (!autoOpenDraft || liveSessionId || draftOpen) return;
+        // Checked again against the store when the effect runs: a session link
+        // can select a session between this render and the effect (a startup
+        // route, Strict Mode's effect replay), and a draft opened from the
+        // stale render would throw that selection away.
+        const live = useSessionUIStore.getState();
+        if (live.currentSessionId || live.newSessionDraft.open) return;
+        // Programmatic fallback, not user navigation — must not clear the
+        // persisted last-session pointer the cold-launch restore reads.
+        openNewSessionDraft({ automatic: true });
     }, [autoOpenDraft, liveSessionId, draftOpen, openNewSessionDraft]);
 
     const activeTurnChangeRef = React.useRef<(turnId: string | null) => void>(() => {});
@@ -1124,11 +1128,25 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, []);
     // The timeline controller owns history loading and needs this hook's
     // scroll commands, so the hook reaches the loader through a ref.
-    const loadHistoryUntilMessageRef = React.useRef<(messageId: string) => Promise<boolean>>(async () => false);
+    const loadHistoryUntilMessageRef = React.useRef<(messageId: string, maxBatches: number) => Promise<boolean>>(async () => false);
     const loadHistoryUntilMessage = React.useCallback(
-        (messageId: string) => loadHistoryUntilMessageRef.current(messageId),
+        (messageId: string, maxBatches: number) => loadHistoryUntilMessageRef.current(messageId, maxBatches),
         [],
     );
+    const handleLinkedMessageMissing = React.useCallback(() => {
+        toast.info(t('chat.messageLink.notFound'));
+    }, [t]);
+    // One request settles whether a linked message exists before the timeline
+    // pages through the whole history toward it. Only a 404 means missing.
+    const checkLinkedMessage = React.useCallback(async (messageId: string): Promise<LinkedMessageState> => {
+        if (!currentSessionId) return 'unknown';
+        try {
+            await opencodeClient.getSessionMessage(currentSessionId, messageId, effectiveSessionDirectory);
+            return 'exists';
+        } catch (error) {
+            return isOpencodeNotFound(error) ? 'missing' : 'unknown';
+        }
+    }, [currentSessionId, effectiveSessionDirectory]);
     const {
         scrollRef,
         scrollNode,
@@ -1151,6 +1169,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         composerOverlayHeight,
         messageListRef,
         loadHistoryUntilMessage,
+        checkLinkedMessage,
+        onLinkedMessageMissing: handleLinkedMessageMissing,
         sessionIsWorking,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
@@ -1213,9 +1233,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // Assigned during render: the entry restore runs in a layout effect of
     // this same commit, before passive effects could update the ref.
     const controllerLoadHistoryUntilMessage = timelineController.loadHistoryUntilMessage;
-    loadHistoryUntilMessageRef.current = (messageId) => controllerLoadHistoryUntilMessage(messageId, {
-        maxBatches: REMEMBERED_POSITION_HISTORY_BATCHES,
-    });
+    loadHistoryUntilMessageRef.current = (messageId, maxBatches) => controllerLoadHistoryUntilMessage(messageId, { maxBatches });
     const chatQuoteHighlights = useChatQuoteHighlightStore();
 
     const navigation = useChatTurnNavigation({

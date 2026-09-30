@@ -28,7 +28,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, takePendingDesktopSessionLinks } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -40,6 +40,7 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { restoreLastActiveSession } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -678,18 +679,33 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
+      // A link (a desktop deep link, a link to this window's instance) carries
+      // no directory; the route opener resolves it from the global session
+      // list, as for a web link.
+      if (!directory) {
+        void openSessionLink(sessionId, typeof detail?.messageId === 'string' ? detail.messageId.trim() : null);
+        return;
+      }
       void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
+    // A link that launched the app arrived before this listener existed; the
+    // desktop shell keeps it until the window asks. Taking is one-shot, so a
+    // cleanup must not drop links already taken (Strict Mode re-runs this).
+    if (!embeddedSessionChat) {
+      void takePendingDesktopSessionLinks().then((links) => {
+        for (const link of links) void openSessionLink(link.sessionId, link.messageId);
+      });
+    }
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
-  }, []);
+  }, [embeddedSessionChat]);
 
   // Launch continuity: reopen the session that was open when the app last
   // closed, once per page load. A link or route that already opened

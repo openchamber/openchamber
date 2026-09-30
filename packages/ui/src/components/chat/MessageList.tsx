@@ -1462,8 +1462,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (Math.abs(delta) <= 0.5) {
             return 'aligned';
         }
+        const before = container.scrollTop;
         container.scrollTop += delta;
-        return 'moved';
+        // A message near either end of the timeline cannot reach the offset:
+        // the scroll is clamped, and where it stopped is as close as it gets.
+        return Math.abs(container.scrollTop - before) < 0.5 ? 'aligned' : 'moved';
     }, [findMessageElement, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView]);
 
     // Installed during layout so a parent's layout effect (session entry
