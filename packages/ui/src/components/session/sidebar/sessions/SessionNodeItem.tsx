@@ -447,6 +447,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
       color: `var(--pr-${summary.visualState})`,
       url: summary.url,
+      title: summary.title,
       text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
     };
   }), [prSummaries, t]);
@@ -1470,7 +1471,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={6}>
-        {prStatusLines.map((line) => <p key={line.key}>{line.text}</p>)}
+        <div className="flex max-w-xs flex-col gap-1">
+          {prStatusLines.map((line) => (
+            <div key={line.key} className="min-w-0">
+              <p>{line.text}</p>
+              {line.title ? <p className="truncate text-muted-foreground">{line.title}</p> : null}
+            </div>
+          ))}
+        </div>
       </TooltipContent>
     </Tooltip>
   ) : null;
@@ -1767,7 +1775,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       <button
                         key={line.key}
                         type="button"
-                        className="flex min-w-0 items-center gap-1.5 rounded text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
+                        className="group/pr flex min-w-0 flex-col rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
                         style={{ color: line.color }}
                         disabled={!line.url}
                         // React events from the portaled tooltip still bubble
@@ -1779,8 +1787,13 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                           if (line.url) void openExternalUrl(line.url);
                         }}
                       >
-                        <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" />
-                        <span className="min-w-0 truncate">{line.text}</span>
+                        <span className="flex min-w-0 items-center gap-1.5 group-hover/pr:underline group-disabled/pr:no-underline">
+                          <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" />
+                          <span className="min-w-0 truncate">{line.text}</span>
+                        </span>
+                        {line.title ? (
+                          <span className="min-w-0 truncate pl-[18px] text-muted-foreground">{line.title}</span>
+                        ) : null}
                       </button>
                     ))}
                     {currentRecap ? (

@@ -1143,6 +1143,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       {groupPrSummary && groupPrStatusLabel ? (
         <TooltipContent side="right" sideOffset={8} className="max-w-xs">
           <p>#{groupPrSummary.number} · {groupPrStatusLabel}</p>
+          {groupPrSummary.title ? <p className="truncate text-muted-foreground">{groupPrSummary.title}</p> : null}
         </TooltipContent>
       ) : null}
       </Tooltip>
