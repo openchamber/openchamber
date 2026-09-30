@@ -23,6 +23,14 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeM
   };
 }
 
+// Deleting a worktree force-removes its files and force-deletes its branch, so
+// skipping the confirmation is allowed only when nothing would be lost: no
+// uncommitted changes and a branch with an upstream that has every commit.
+// A branch never pushed has no upstream and always goes through the dialog.
+export function canDeleteWorktreeWithoutConfirm(status: WorktreeMetadata['status']): boolean {
+  return Boolean(status && !status.isDirty && status.upstream && status.ahead === 0);
+}
+
 // Resolving a project's root (primary worktree) requires shelling out to
 // `git rev-parse`, whose answer is effectively static for the lifetime of a
 // session — the location of a repo's git directory does not change while the

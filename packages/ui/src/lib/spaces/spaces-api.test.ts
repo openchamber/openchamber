@@ -48,6 +48,12 @@ describe('spaces-api', () => {
     expect(space).toMatchObject({ id: ID, state: 'preparing', step: 'checking_place', network: { mode: 'allowlist' } });
   });
 
+  test('reads the folder a space was made for, and names none for a host before 5e-3', async () => {
+    const orphan = { ...entry, projectDirectory: null, directory: null, projectFolder: { path: '/home/me/app', found: false } };
+    answer(200, JSON.stringify({ spaces: [entry, orphan] }));
+    expect((await listSpaces()).map((space) => space.projectFolder)).toEqual([{ path: null, found: null }, { path: '/home/me/app', found: false }]);
+  });
+
   test('reads a space as not stopped for the idle stop unless the host says so', async () => {
     answer(200, JSON.stringify({ spaces: [entry, { ...entry, state: 'exited', stoppedIdle: true }] }));
     expect((await listSpaces()).map((space) => space.stoppedIdle)).toEqual([false, true]);

@@ -149,7 +149,8 @@ shows its name alone. Every pill opens the turn diff: OpenCode 2 computes it on
 request (`GET /api/session/:id/diff`, `DiffView`'s "Last turn" scope) from the
 turn's start and end snapshots, merged per file, so it also covers a `write`
 result and the edits a `subagent` made in its child session, which the pills
-themselves cannot list. The list is projected once the last assistant message
+themselves cannot list. Past four pills the rest wait behind one `+N` pill
+that reveals them in the row; the same pill then hides them again. The list is projected once the last assistant message
 finished with `stop`, so no tool patch is parsed while the turn streams.
 
 ### Message parts

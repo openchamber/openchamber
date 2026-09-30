@@ -9,6 +9,9 @@ export type SessionDeleteRequest = {
   dateLabel?: string;
   mode?: 'session' | 'worktree';
   worktree?: WorktreeMetadata | null;
+  // Worktree mode only: delete the worktree and its local branch without the
+  // dialog when a fresh check finds nothing to lose; otherwise the dialog opens.
+  skipDialogIfSafe?: boolean;
 };
 
 export type SessionCreateRequest = {

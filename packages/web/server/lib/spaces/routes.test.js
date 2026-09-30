@@ -118,7 +118,7 @@ describe('space routes', () => {
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/setup`)).toEqual({ status: 200, body: { setup: null, output: null } });
     expect(await call('DELETE', `${SPACES_ROUTE}/${ID}`)).toEqual({ status: 200, body: { id: ID, removed: true } });
     expect(journey.calls).toEqual([
-      ['listSpaces', { access: true }], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['restartSpace', ID], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID],
+      ['listSpaces', { access: true }], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['restartSpace', ID], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID, { allowUnsaved: false }],
     ]);
   });
 

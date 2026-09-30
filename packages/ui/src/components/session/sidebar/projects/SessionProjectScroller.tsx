@@ -14,7 +14,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { requestDirectoryAccess } from '@/lib/desktop';
+import { isVSCodeRuntime, requestDirectoryAccess } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -125,6 +125,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
+  // A project's isolated spaces page: while the feature's switch is on, and never in VS Code (decision 16).
+  const spacesPageAvailable = useUIStore((state) => state.isolatedSpacesEnabled) && !isVSCodeRuntime();
   const [folderDeleteConfirm, setFolderDeleteConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [stickyIdentity, setStickyIdentity] = React.useState<string | null>(null);
   const [focusedRowKey, setFocusedRowKey] = React.useState<string | null>(null);
@@ -305,6 +307,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           actions.openNewWorktreeDialog();
         }}
         onManageWorktrees={() => actions.openWorktreesPage(project.id)}
+        onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(project.id) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
         onClose={() => actions.removeProject(project.id)}
         showCreateButtons
@@ -421,7 +424,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     return <div className="py-1 pl-[26px] text-left typography-micro text-muted-foreground">
       {row.emptyKind === 'archived' ? t('sessions.sidebar.group.empty.noArchivedSessions') : row.group?.emptyMessage ?? t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
     </div>;
-  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, showDeletionDialog, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => row.kind === 'project-header' ? [row.section.project.id] : row.kind === 'group-header' ? [row.groupKey] : []), [model.rowModel.rows]);
   const projectDragIds = React.useMemo(() => new Set(model.sectionsForRender.map((section) => section.project.id)), [model.sectionsForRender]);

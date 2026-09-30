@@ -16,6 +16,10 @@ type Props = {
 };
 
 function sectionSpacingAfter(row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string | undefined {
+  if (row.key.startsWith('activity:active-now:')
+    && (nextRow?.kind === 'project-header' || nextRow?.kind === 'group-header')) {
+    return 'pb-4';
+  }
   const startsSection = nextRow?.kind === 'activity-header'
     || nextRow?.kind === 'project-header'
     || (nextRow?.kind === 'group-header' && row.kind !== 'project-header');

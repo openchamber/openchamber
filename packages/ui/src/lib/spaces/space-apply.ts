@@ -10,7 +10,7 @@
 
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { applySpaceWork, SpacesRequestError, type SpaceApplyOutcome, type SpaceApplyRequest, type SpaceFailure, type SpaceFailureDetails, type SpaceReportedPaths } from './spaces-api';
-import { forgetRemovedSpace } from './space-repair';
+import { forgetRemovedSpace, noteRemoval } from './space-repair';
 import { refreshSpacesJourney, spacesRuntimeGeneration, useSpacesStore } from './spaces-store';
 
 const FALLBACK_BRANCH = 'space';
@@ -149,7 +149,9 @@ export const applySpace = async (spaceId: string, request: SpaceApplyRequest): P
   if (outcome.applied.status === 'nothing_to_apply') return { kind: 'refused', refusal: { kind: 'nothing_to_apply' } };
   const removalFailure = outcome.removal?.failures[0] ?? null;
   if (removalFailure) useSpacesStore.getState().noteAction(spaceId, { kind: 'failed', action: 'remove', failure: removalFailure });
-  if (outcome.removal && !removalFailure) await forgetRemovedSpace(spaceId);
-  else await refreshSpacesJourney().catch(() => {});
+  if (outcome.removal && !removalFailure) {
+    noteRemoval(spaceId, outcome.removal.chats);
+    await forgetRemovedSpace(spaceId);
+  } else await refreshSpacesJourney().catch(() => {});
   return { kind: 'applied', outcome };
 };

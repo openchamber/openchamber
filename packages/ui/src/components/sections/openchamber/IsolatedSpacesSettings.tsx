@@ -18,7 +18,8 @@ import {
 } from '@/lib/spaces/spaces-api';
 import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
-import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
+import { refreshSpacesJourney, spacesWithoutProject, useSpacesJourneyRead, useSpacesStore } from '@/lib/spaces/spaces-store';
+import { SpaceRow } from '@/components/session/spaces/SpaceRow';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import {
@@ -26,6 +27,7 @@ import {
   SETTINGS_NUMBER_INPUT_CLASS,
   SETTINGS_OPTION_STACK_CLASS,
   SettingsCheckboxRow,
+  SettingsControlGroup,
   SettingsFieldRow,
   SettingsInset,
   SettingsSection,
@@ -132,6 +134,28 @@ type TurnOffNotice = { kind: 'stops'; count: number } | { kind: 'unknown' };
  * part of this. Never mounted in VS Code (decision 16), and nowhere until the feature is
  * released, see `lib/spaces/release.ts`.
  */
+/**
+ * The spaces whose project is no longer registered here (DESIGN.md, user journey step 9, and
+ * decision 12): removed from OpenChamber or added again under another path, so no project menu
+ * leads to them. Listed only when there are any, with the folder each was made for and the same
+ * actions as a space's group. A read that fails lists nothing here rather than saying there are
+ * none: this list is a way out, not the spaces' status.
+ */
+const SpacesWithoutProject: React.FC = () => {
+  const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const { journey } = useSpacesJourneyRead();
+  const spaces = journey ? spacesWithoutProject(journey) : [];
+  if (spaces.length === 0) return null;
+  return (
+    <SettingsControlGroup title={t('settings.openchamber.spaces.withoutProject.title')} className="pt-2">
+      <div className="space-y-1">
+        {spaces.map((entry) => <SpaceRow key={entry.id} entry={entry} actions={isMobile ? 'sheet' : 'menu'} showFolder />)}
+      </div>
+    </SettingsControlGroup>
+  );
+};
+
 export const IsolatedSpacesSettings: React.FC = () => {
   const { t } = useI18n();
   const enabled = useUIStore((state) => state.isolatedSpacesEnabled);
@@ -226,6 +250,7 @@ export const IsolatedSpacesSettings: React.FC = () => {
         {error ? <p className="pl-6 typography-ui-label text-[var(--status-error)]">{error}</p> : null}
         {enabled ? <SpaceIdleStopSettings /> : null}
       </div>
+      {enabled ? <SpacesWithoutProject /> : null}
     </SettingsSection>
   );
 };

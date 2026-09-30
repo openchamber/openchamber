@@ -118,6 +118,7 @@ import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
 import { createSpacesHost } from './lib/spaces/host.js';
+import { createSpaceArchive } from './lib/spaces/space-archive.js';
 import { readIdleStopSetting, startIdleStop } from './lib/spaces/idle-stop.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
@@ -136,6 +137,7 @@ import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
+import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
@@ -1927,6 +1929,21 @@ async function main(options = {}) {
   // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
   const sayTTSCapability = detectSayTtsCapability(process);
 
+  // The chats of deleted spaces, imported into the host's OpenCode and kept read-only there
+  // (DESIGN.md, decision 9). It reads a folder of the data directory and runs nothing else, so it
+  // exists with the switch on or off: an archived chat must stay read-only either way.
+  const hostOpenCodeClient = () => createOpenCodeClient({
+    baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
+    headers: getOpenCodeAuthHeaders(),
+  });
+  const spaceArchive = createSpaceArchive({
+    dataDir: OPENCHAMBER_DATA_DIR,
+    hostOpenCode: {
+      importChat: (chat) => hostOpenCodeClient().session.import(chat),
+      removeChat: (sessionID) => hostOpenCodeClient().session.remove({ sessionID }),
+    },
+  });
+
   // The isolated-spaces switch, read here at start and changed live through its route below.
   // While it is off the feature has no place, no manager, no route and runs no `docker`.
   const buildSpacesHost = () => createSpacesHost({
@@ -1942,6 +1959,7 @@ async function main(options = {}) {
     },
     readIdleStop: async () => readIdleStopSetting((await readSettingsFromDiskMigrated())?.isolatedSpacesIdleStop),
     saveIdleStop: (setting) => persistSettings({ isolatedSpacesIdleStop: setting }),
+    archive: spaceArchive,
   });
   const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
   if (startupSettings?.isolatedSpacesEnabled === true) {
@@ -2134,6 +2152,8 @@ async function main(options = {}) {
   // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
   // The slot is mounted once and reads the host at call time, so the switch can turn the feature
   // on and off live: with no host it passes every request on and no upgrade is taken.
+  // An archived chat of a deleted space is read and deleted, never run or changed.
+  app.use(spaceArchive.guard);
   app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
   server.on('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
   const startSpacesHost = (host) => {
@@ -2156,6 +2176,7 @@ async function main(options = {}) {
     getPlaces: () => spacesHost?.places() ?? [],
     readSwitch: spacesSwitch.readSwitch,
     setSwitch: spacesSwitch.setSwitch,
+    getArchive: () => spaceArchive,
   });
   realtimeProxyRuntime = attachRealtimeProxy({
     app,

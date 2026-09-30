@@ -1,4 +1,5 @@
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
 import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -75,6 +76,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   useSpacesStore.getState().resetForRuntimeSwitch();
+  useSpaceArchivesStore.getState().resetForRuntimeSwitch();
   resetSpaceModelAccess();
   resetSpaceCreationRequests();
   useMultiRunStore.getState().resetForRuntimeSwitch();

@@ -22,6 +22,7 @@ import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
 import { SpaceSetupOutputDialog } from '@/components/session/spaces/SpaceSetupOutput';
 import { ArchiveView } from '@/components/views/ArchiveView';
 import { WorktreesView } from '@/components/views/WorktreesView';
+import { SpacesView } from '@/components/views/SpacesView';
 import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { RunOverview } from '@/components/multirun/RunOverview';
@@ -65,6 +66,8 @@ export const MainLayout: React.FC = () => {
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
     const isUsageStatsPageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    // The spaces page exists only while the feature's switch is on.
+    const isSpacesPageOpen = useUIStore((state) => state.isolatedSpacesEnabled && state.spacesPageProjectId !== null);
     const openGuestPageId = useUIStore((state) => state.openGuestPageId);
     const guestPages = useGuestPages();
     const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
@@ -75,7 +78,7 @@ export const MainLayout: React.FC = () => {
     // Any full-page surface replacing the chat area. While open, the chat is
     // fully hidden (not just covered) so none of its floating chrome bleeds
     // through, and selecting a session or draft anywhere closes the surface.
-    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isUsageStatsPageOpen || Boolean(worktreesPageProjectId) || isRunOverviewOpen || Boolean(guestPage);
+    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isUsageStatsPageOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
 
     React.useEffect(() => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
@@ -151,6 +154,7 @@ export const MainLayout: React.FC = () => {
                                                 </div>
                                             )}
                                             <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                                            {isSpacesPageOpen ? <ErrorBoundary><SpacesView /></ErrorBoundary> : null}
                                             {guestPage && <div className="absolute inset-0 z-10 bg-background">
                                                 <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
                                                     onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>

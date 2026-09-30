@@ -117,7 +117,8 @@ export function readOrCreateOwner(dataDir) {
  * process, injectable for the same reason. `listProjectDirectories` answers the host's registered
  * project paths, so a space's project label can be resolved to the project it was made for;
  * without it every space is marked as of an unknown project. `readIdleStop` and `saveIdleStop`
- * read and keep the user's idle stop setting in the host's settings.
+ * read and keep the user's idle stop setting in the host's settings. `archive` is the chat archive
+ * of `space-archive.js`, which a delete saves the space's chats to; without it they go with it.
  */
 export function createSpacesHost({
   dataDir,
@@ -127,6 +128,7 @@ export function createSpacesHost({
   listProjectDirectories = async () => [],
   readIdleStop,
   saveIdleStop,
+  archive = null,
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
   place = null,
@@ -151,7 +153,6 @@ export function createSpacesHost({
   const codeIn = createCodeIn({ git, place: dockerPlace });
   const codeOut = createCodeOut({ git, place: dockerPlace });
   const records = createSpaceRecords({ dataDir, logger });
-  const spaceOpenCode = createSpaceOpenCode({ exec: dockerPlace.exec });
 
   const listSpaces = () => manager.listSpaces({ placeId: dockerPlace.id });
   const dispatcher = createSpaceDispatcher({
@@ -162,6 +163,8 @@ export function createSpacesHost({
       readToken: (spaceId) => serverInside.readToken(spaceId),
     },
   });
+
+  const spaceOpenCode = createSpaceOpenCode({ exec: dockerPlace.exec, requestInside: dispatcher.requestInside });
 
   const index = createSpaceSessionIndex({ logger });
   let events = null;
@@ -241,6 +244,21 @@ export function createSpacesHost({
     serverInside,
     restartOpenCodeInside: (spaceId) => restartOpenCodeInside(dispatcher.requestInside, spaceId),
     listProjectDirectories,
+    archiveChats: archive ? ({ spaceId, name, projectDirectory, running, allowUnsaved }) => archive.saveChats({
+      spaceId,
+      name,
+      projectDirectory,
+      allowUnsaved,
+      source: {
+        // The space's own list, read whole; a stopped space that did not start has none to give.
+        listChats: async () => {
+          if (!running) throw new SpaceError('space_not_running', 'The space is not running');
+          const { records: chats, complete } = await readSpaceSessions(spaceId);
+          return { chats: chats.map((chat) => ({ id: chat?.id, title: chat?.title })), complete };
+        },
+        exportChat: (chatId) => spaceOpenCode.exportChat(spaceId, chatId),
+      },
+    }) : null,
     // A key named by an environment variable is read from the host's own environment, now, and
     // its value is kept nowhere (decision 5).
     readHostSecret: (name) => hostEnvironment[name],

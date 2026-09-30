@@ -6,8 +6,10 @@
 // the project's setup commands again.
 
 import { failureOfError } from '@/components/session/spaces/spaceFailureText';
+import { refreshSpaceArchives } from './space-archives';
 import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import {
+  SpacesRequestError,
   removeSpace,
   restartSpace,
   restartSpaceOpenCode,
@@ -16,7 +18,7 @@ import {
   type SpaceEntry,
   type SpaceFailure,
 } from './spaces-api';
-import { refreshSpacesJourney, spacesRuntimeGeneration, useSpacesStore, type SpaceAction, type SpaceActionState, type SpaceMark } from './spaces-store';
+import { refreshSpacesJourney, spacesRuntimeGeneration, useSpacesStore, type SpaceAction, type SpaceActionState, type SpaceMark, type SpaceUnsavedChats } from './spaces-store';
 import { runSpaceSetupAgain } from './space-setup';
 
 /**
@@ -70,17 +72,27 @@ export const spaceMenuActionsOf = (entry: SpaceEntry | undefined): SpaceAction[]
 /**
  * Whether the space's work can be applied from its menu: a running space, or a stopped one that a
  * start brings back, which the apply dialog offers. A stopped space whose gatekeeper is gone never
- * starts again, so its work cannot be reached.
+ * starts again, so its work cannot be reached. Nor can a space whose project folder is gone from
+ * the host: its work has nowhere to go.
  */
-export const isSpaceApplicable = (entry: SpaceEntry | undefined): boolean => entry?.state === 'running'
-  || (entry?.state === 'exited' && entry.damage !== 'gatekeeper_gone');
+export const isSpaceApplicable = (entry: SpaceEntry | undefined): boolean => entry?.projectFolder.found !== false
+  && (entry?.state === 'running' || (entry?.state === 'exited' && entry.damage !== 'gatekeeper_gone'));
 
 /** An action of the menu that cannot run now: the setup commands again while they still run. */
 export const isSpaceActionUnavailable = (entry: SpaceEntry | undefined, action: SpaceAction): boolean => (
   action === 'setup' && entry?.setup?.state === 'running'
 );
 
-const call = (spaceId: string, action: SpaceAction): Promise<SpaceFailure | null> => {
+type SpaceActionOptions = { deleteUnsavedChats?: boolean };
+
+/** A removal went through: its chats are on the Archive page, and the notice says so. */
+export const noteRemoval = (spaceId: string, chats: { saved: number } | null): void => {
+  if (!chats || chats.saved === 0) return;
+  const store = useSpacesStore.getState();
+  store.noteChatsArchived(store.journey?.get(spaceId)?.name ?? null);
+};
+
+const call = (spaceId: string, action: SpaceAction, options: SpaceActionOptions): Promise<SpaceFailure | null> => {
   switch (action) {
     case 'start': return startSpace(spaceId).then(() => null);
     case 'stop': return stopSpace(spaceId).then(() => null);
@@ -92,7 +104,10 @@ const call = (spaceId: string, action: SpaceAction): Promise<SpaceFailure | null
       return runSpaceSetupAgain(entry).then(() => null);
     }
     // A removal can go through in part; what stayed is the failure the line shows.
-    case 'remove': return removeSpace(spaceId).then((outcome) => outcome.failures[0] ?? null);
+    case 'remove': return removeSpace(spaceId, options).then((outcome) => {
+      noteRemoval(spaceId, outcome.chats);
+      return outcome.failures[0] ?? null;
+    });
   }
 };
 
@@ -102,21 +117,31 @@ const call = (spaceId: string, action: SpaceAction): Promise<SpaceFailure | null
  * stopped. A start or a restart that went through answered once the server inside was ready, so
  * the space is reachable again. The failure stays on the status line until the next action.
  */
-export const runSpaceAction = async (spaceId: string, action: SpaceAction): Promise<void> => {
+export const runSpaceAction = async (spaceId: string, action: SpaceAction, options: SpaceActionOptions = {}): Promise<void> => {
   const store = useSpacesStore.getState();
   if (store.actions.get(spaceId)?.kind === 'running') return;
   const generation = spacesRuntimeGeneration();
   store.noteAction(spaceId, { kind: 'running', action });
   let failure: SpaceFailure | null;
+  let unsaved: SpaceUnsavedChats | null = null;
   try {
-    failure = await call(spaceId, action);
+    failure = await call(spaceId, action, options);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     failure = failureOfError(error);
+    if (error instanceof SpacesRequestError && error.code === 'chats_not_saved') {
+      unsaved = { tooLarge: error.details.tooLarge ?? [], failed: error.details.failed ?? 0 };
+    }
   }
   // An action a runtime switch overtook belongs to the runtime it ran on; nothing of it is kept.
   if (generation !== spacesRuntimeGeneration()) return;
   const after = useSpacesStore.getState();
+  // The space stayed because its chats could not be saved: the confirmation asks again.
+  if (unsaved) {
+    after.noteAction(spaceId, null);
+    after.openDeleteDialog(spaceId, unsaved);
+    return;
+  }
   after.noteAction(spaceId, failure ? { kind: 'failed', action, failure } : null);
   if (!failure && action === 'remove') {
     await forgetRemovedSpace(spaceId);
@@ -138,6 +163,8 @@ export const forgetRemovedSpace = async (spaceId: string): Promise<void> => {
   if (store.actionsSheet === spaceId) store.closeActionsSheet();
   if (store.applyDialog === spaceId) store.closeApplyDialog();
   await refreshSpacesJourney().catch(() => {});
+  // Its chats are on the Archive page now, under the space's name.
+  await refreshSpaceArchives().catch(() => {});
   // The sidebar's group of a space comes from the session list's mark as well, which the host
   // drops only in its next complete list; without asking for it now, a space the user just
   // deleted stayed in the sidebar for about forty seconds, measured.

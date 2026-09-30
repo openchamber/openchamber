@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, dataDir = null } = {}) => {
+const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, dataDir = null, archiveChats = null } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -78,7 +78,11 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
       return { spacePath: `/spaces/${request.spaceId}/project`, projectPath: `/spaces/${request.spaceId}/project`, base: BASE, identityCopied: { name: true, email: false } };
     },
     sendHistory: async (request) => { calls.push(['sendHistory', request]); fail('sendHistory'); return { status: historyStatus }; },
-    removeSpaceRefs: async (request) => { calls.push(['removeSpaceRefs', request]); fail('removeSpaceRefs'); },
+    removeSpaceRefs: async (request) => {
+      calls.push(['removeSpaceRefs', request]);
+      fail('removeSpaceRefs');
+      if (failAt === 'projectFolderGone') throw new SpaceError('project_folder_missing', `${request.repository} does not exist, or is not a folder.`);
+    },
   };
   const codeOut = {
     bringCodeOut: async (request) => { calls.push(['bringCodeOut', request]); if (holdCodeOut) await codeOutHeld; fail('bringCodeOut'); return { result: 'c'.repeat(40), changedPaths: 3, changedBytes: 10, nestedRepositories: { count: 0, paths: [] }, unmerged: { count: 0, paths: [] } }; },
@@ -91,7 +95,9 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
   const journey = createSpaceJourney({
     manager, place, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
     listProjectDirectories: async () => projects,
+    archiveChats,
     readHostSecret: (name) => hostEnvironment[name],
+    folderExists: async () => true,
     readIdleStop: async () => idle.saved ?? { enabled: true, hours: 4 },
     saveIdleStop: async (setting) => { if (holdIdleSave) await idleSaveHeld; fail('saveIdleStop'); idle.saved = setting; },
     announce: (spaceId, payload) => { events.push({ spaceId, ...payload.properties }); },
@@ -150,7 +156,7 @@ describe('the journey: create', () => {
     expect(await journey.listSpaces()).toEqual([expect.objectContaining({ id, state: 'failed', step: 'failed', failure: expect.objectContaining({ code: `${failAt}_failed` }) })]);
 
     // The failure is dismissed by removing it; the place is not asked, there is nothing there.
-    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: null, failures: [] });
+    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: null, failures: [], chats: null });
     expect(await journey.listSpaces()).toEqual([]);
   });
 
@@ -236,7 +242,7 @@ describe('the journey: start, stop, remove', () => {
 
   it('removes the space, the refs in the user\'s repository and the record', async () => {
     const { journey, place, records, calls, id } = await ready();
-    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: true, failures: [] });
+    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: true, failures: [], chats: null });
     expect(calls).toEqual([['removeSpaceRefs', { repository: PROJECT, spaceId: id }]]);
     expect(await place.list()).toEqual([]);
     expect(records.read(id).status).toBe('missing');
@@ -248,6 +254,13 @@ describe('the journey: start, stop, remove', () => {
     const outcome = await journey.removeSpace(id);
     expect(outcome).toMatchObject({ id, removed: true, refsRemoved: false, failures: [expect.objectContaining({ code: 'removeSpaceRefs_failed' })] });
     expect(await place.list()).toEqual([]);
+  });
+
+  it('counts a delete as done when the project folder is gone and its refs with it', async () => {
+    const { journey, place, records, id } = await ready({ failAt: 'projectFolderGone' });
+    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: false, failures: [], chats: null });
+    expect(await place.list()).toEqual([]);
+    expect(records.read(id).status).toBe('missing');
   });
 
   it('refuses to start, stop or remove a space that is still being made', async () => {
@@ -748,7 +761,56 @@ describe('the journey: journal and apply', () => {
     const orphan = journeyWith({ projects: [] });
     const other = await orphan.manager.createSpace({ placeId: 'memory', projectDirectory: PROJECT, name: 'Orphan' });
     await expect(orphan.journey.previewApply(other.id)).rejects.toMatchObject({ code: 'project_not_registered' });
-    expect((await orphan.journey.listSpaces())[0]).toMatchObject({ id: other.id, projectDirectory: null, directory: null });
+    expect((await orphan.journey.listSpaces())[0]).toMatchObject({ id: other.id, projectDirectory: null, directory: null, projectFolder: { path: null, found: null } });
+  });
+});
+
+describe('the journey: the project folder of a space', () => {
+  const made = async () => {
+    const first = journeyWith();
+    const { id } = await first.journey.createSpace(REQUEST);
+    await until(() => steps(first.events, id).includes('ready'));
+    await until(() => first.records.read(id).record?.history !== 'pending');
+    return { id, first };
+  };
+
+  it('names the folder the space was made for and whether it is there, while the project is registered and after it is gone', async () => {
+    const { id, first } = await made();
+    const asked = [];
+    // The record names the folder: a journey that no longer has the project still lists it.
+    const unregistered = createSpaceJourney({
+      manager: first.manager, place: first.place, gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: first.records,
+      spaceOpenCode: {}, serverInside: {}, restartOpenCodeInside: async () => {},
+      listProjectDirectories: async () => [],
+      folderExists: async (directory) => { asked.push(directory); return false; },
+      logger: quiet,
+    });
+    expect((await unregistered.listSpaces())[0]).toMatchObject({ id, projectDirectory: null, directory: null, projectFolder: { path: PROJECT, found: false } });
+    expect(asked).toEqual([PROJECT]);
+  });
+
+  it('says the folder is there by looking at the host', async () => {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-journey-project-'));
+    folders.push(folder);
+    const file = path.join(folder, 'a-file');
+    fs.writeFileSync(file, '');
+    const { first } = await made();
+    const look = (directory) => createSpaceJourney({
+      manager: first.manager, place: first.place, gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: { read: () => ({ record: { repository: directory } }) },
+      spaceOpenCode: {}, serverInside: {}, restartOpenCodeInside: async () => {},
+      listProjectDirectories: async () => [],
+      logger: quiet,
+    }).listSpaces();
+    expect((await look(folder))[0].projectFolder).toEqual({ path: folder, found: true });
+    // A file where the folder was is not the folder, and neither is nothing.
+    expect((await look(file))[0].projectFolder).toEqual({ path: file, found: false });
+    expect((await look(path.join(folder, 'gone')))[0].projectFolder).toEqual({ path: path.join(folder, 'gone'), found: false });
+  });
+
+  it('lists a creation under way with its folder not looked at yet', async () => {
+    const { journey } = journeyWith({ holdCodeIn: true });
+    const { id } = await journey.createSpace(REQUEST);
+    expect((await journey.listSpaces()).find((space) => space.id === id)).toMatchObject({ projectFolder: { path: PROJECT, found: null } });
   });
 });
 
@@ -977,5 +1039,71 @@ describe('the journey: setup commands', () => {
     // Another process on the same data: it has no run in its memory.
     const second = journeyWith({ place, dataDir: first.dataDir });
     expect((await second.journey.listSpaces()).find((space) => space.id === id).setup).toEqual({ state: 'interrupted', total: 2 });
+  });
+});
+
+describe('the journey: the chat archive of a deleted space', () => {
+  // A stand-in archive that records what it was asked and the state of the space at that moment.
+  const archiveWith = (place, answer) => {
+    const asked = [];
+    const archiveChats = async (request) => {
+      asked.push({ ...request, stateThen: (await place.list()).find((space) => space.id === request.spaceId)?.state });
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+    return { asked, archiveChats };
+  };
+  const ready = async (answer = { saved: 2, tooLarge: [], failed: 0, listed: true }) => {
+    const place = createMemoryPlace();
+    const archive = archiveWith(place, answer);
+    const made = journeyWith({ place, archiveChats: archive.archiveChats });
+    const { id } = await made.journey.createSpace(REQUEST);
+    await until(() => steps(made.events, id).includes('ready'));
+    await until(() => made.records.read(id).record?.history !== 'pending');
+    made.calls.splice(0);
+    return { ...made, ...archive, id };
+  };
+  const notSaved = () => new SpaceError('chats_not_saved', 'The chats of "Fix login" could not be saved.', { name: 'Fix login', tooLarge: ['Big one'], failed: 0, listed: true });
+
+  it('saves the chats of a running space before it goes, and says how many', async () => {
+    const { journey, place, asked, calls, id } = await ready();
+    const outcome = await journey.removeSpace(id);
+    expect(asked).toEqual([{ spaceId: id, name: 'Fix login', projectDirectory: PROJECT, running: true, allowUnsaved: false, stateThen: 'running' }]);
+    expect(outcome).toEqual({ id, removed: true, refsRemoved: true, failures: [], chats: { saved: 2, tooLarge: [], failed: 0, listed: true } });
+    expect(calls.map(([name]) => name)).toEqual(['removeSpaceRefs']);
+    expect(await place.list()).toEqual([]);
+  });
+
+  it('starts a stopped space to take its chats', async () => {
+    const { journey, asked, id } = await ready();
+    await journey.stopSpace(id);
+    await journey.removeSpace(id);
+    expect(asked).toEqual([expect.objectContaining({ running: true, stateThen: 'running' })]);
+  });
+
+  it('deletes nothing when the chats cannot all be saved, and deletes anyway when the user says so', async () => {
+    const { journey, place, records, calls, asked, id } = await ready(notSaved());
+    await expect(journey.removeSpace(id)).rejects.toMatchObject({ code: 'chats_not_saved', details: { tooLarge: ['Big one'] } });
+    expect(await place.list()).toEqual([expect.objectContaining({ id })]);
+    expect(records.read(id).status).toBe('ok');
+    expect(calls).toEqual([]);
+    await expect(journey.removeSpace(id, { allowUnsaved: true })).rejects.toMatchObject({ code: 'chats_not_saved' });
+    expect(asked.map((request) => request.allowUnsaved)).toEqual([false, true]);
+  });
+
+  it('stops a stopped space again when it was started for its chats and they could not be saved', async () => {
+    const { journey, place, id } = await ready(notSaved());
+    await journey.stopSpace(id);
+    await expect(journey.removeSpace(id)).rejects.toMatchObject({ code: 'chats_not_saved' });
+    expect((await place.list()).find((space) => space.id === id)?.state).toBe('exited');
+  });
+
+  it('keeps a space asked to go after an apply when its chats cannot be saved, with the work applied', async () => {
+    const { journey, place, id } = await ready(notSaved());
+    const outcome = await journey.applySpace(id, { as: 'branch', branch: 'space/fix-login', removeAfterwards: true });
+    expect(outcome.applied).toMatchObject({ status: 'applied', branch: 'space/fix-login' });
+    expect(outcome.removal).toBeNull();
+    expect(outcome.kept).toMatchObject({ code: 'chats_not_saved' });
+    expect(await place.list()).toEqual([expect.objectContaining({ id })]);
   });
 });

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { getPrStatusLabel } from '../prStatusLabel';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
@@ -422,27 +423,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // The project tree already shows the branch on the worktree sub-header, so
   // the per-row marker only appears in the mixed-context recent list.
   const showInlineBranchMarker = Boolean(tooltipBranchLabel) && renderContext === 'recent';
-  const prStatusLabel = React.useMemo(() => {
-    if (!prSummary) return null;
-    switch (prSummary.visualState) {
-      case 'merged':
-        return t('sessions.sidebar.group.pr.status.merged');
-      case 'open':
-        return (prSummary.canMerge === true || prSummary.mergeableState === 'clean' || prSummary.checks?.state === 'success')
-          ? t('sessions.sidebar.group.pr.status.readyToMerge')
-          : t('sessions.sidebar.group.pr.status.open');
-      case 'blocked':
-        return prSummary.mergeableState === 'dirty'
-          ? t('sessions.sidebar.group.pr.status.mergeConflicts')
-          : t('sessions.sidebar.group.pr.status.mergeBlocked');
-      case 'draft':
-        return t('sessions.sidebar.group.pr.status.draft');
-      case 'closed':
-        return t('sessions.sidebar.group.pr.status.closed');
-      default:
-        return null;
-    }
-  }, [prSummary, t]);
+  const prStatusLabel = React.useMemo(() => getPrStatusLabel(prSummary, t), [prSummary, t]);
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);

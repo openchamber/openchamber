@@ -298,6 +298,19 @@ div[data-chat-input-footer="true"] {
      variable inline (the hook-based chat scroller). Inline styles from the
      ScrollShadow component still override this. */
   --scroll-shadow-size: 48px;
+  /* The band at the scroller's end that floating chrome covers. The end fade
+     sits above it, so content dissolves before it reaches that chrome. */
+  --scroll-shadow-end-inset: 0px;
+}
+
+/* The chat composer floats over the transcript's tail (plus any panel docked
+   above it), and the working row sits in the gap the tail spacer leaves. While
+   a live reply outruns the follow glide, its newest lines land in that gap;
+   fading them out above the composer keeps the composer's top edge from
+   cutting a line in half. In flow (draft, expanded editor) the inset is unset
+   and the fade returns to the scroller's edge. */
+.chat-scroll {
+  --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px));
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"] {
@@ -315,16 +328,16 @@ div[data-chat-input-footer="true"] {
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
 
@@ -365,14 +378,14 @@ div[data-chat-input-footer="true"] {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
 

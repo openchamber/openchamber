@@ -725,7 +725,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}
-        onOpenUsage={() => setUsageStatsPageOpen(true)}
+        onOpenUsage={() => setUsageStatsPageOpen(!useUIStore.getState().isUsageStatsPageOpen)}
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}

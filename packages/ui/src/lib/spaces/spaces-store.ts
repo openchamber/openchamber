@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { z } from 'zod';
 
 import { listSpaces, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
+import { normalizePath } from '@/lib/pathNormalization';
 import type { SpaceProgress } from '@/sync/event-pipeline';
 
 /**
@@ -41,6 +42,12 @@ type SpaceCreationAccess = { kind: 'giving' } | { kind: 'failed'; failures: read
 
 /** The actions on a space the user can take from its group, from soft to hard; `setup` runs the project's setup commands again. */
 export type SpaceAction = 'start' | 'stop' | 'restart_opencode' | 'restart' | 'setup' | 'remove';
+
+/**
+ * Chats a delete could not save to the Archive page: the titles of those too large to save and
+ * how many others failed. The confirmation asks again, with "Delete anyway".
+ */
+export type SpaceUnsavedChats = { tooLarge: readonly string[]; failed: number };
 
 /** An action this window started on a space: under way, or failed with the server's reason. */
 export type SpaceActionState =
@@ -90,8 +97,13 @@ type SpacesState = {
   closeApplyDialog: () => void;
   /** The confirmation before a space is deleted, open on one space. */
   deleteDialog: string | null;
-  openDeleteDialog: (spaceId: string) => void;
+  /** Set when the confirmation opened again because the space's chats could not be saved. */
+  deleteUnsaved: SpaceUnsavedChats | null;
+  openDeleteDialog: (spaceId: string, unsaved?: SpaceUnsavedChats | null) => void;
   closeDeleteDialog: () => void;
+  /** The name of a space whose chats just went to the Archive page, for the notice that says so. */
+  archivedNotice: string | null;
+  noteChatsArchived: (name: string | null) => void;
   /** The window with the end of a failed setup command's output, open on one space. */
   setupOutputDialog: string | null;
   openSetupOutputDialog: (spaceId: string) => void;
@@ -192,8 +204,11 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   openApplyDialog: (spaceId) => set({ applyDialog: spaceId }),
   closeApplyDialog: () => set({ applyDialog: null }),
   deleteDialog: null,
-  openDeleteDialog: (spaceId) => set({ deleteDialog: spaceId }),
-  closeDeleteDialog: () => set({ deleteDialog: null }),
+  deleteUnsaved: null,
+  openDeleteDialog: (spaceId, unsaved = null) => set({ deleteDialog: spaceId, deleteUnsaved: unsaved }),
+  closeDeleteDialog: () => set({ deleteDialog: null, deleteUnsaved: null }),
+  archivedNotice: null,
+  noteChatsArchived: (name) => set({ archivedNotice: name }),
   setupOutputDialog: null,
   openSetupOutputDialog: (spaceId) => set({ setupOutputDialog: spaceId }),
   closeSetupOutputDialog: () => set({ setupOutputDialog: null }),
@@ -227,7 +242,7 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   resetForRuntimeSwitch: () => {
     progressAt.clear();
     journeyGeneration += 1;
-    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, setupOutputDialog: null, actionsSheet: null });
+    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
   },
   forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
 }));
@@ -272,4 +287,39 @@ export const useSidebarSpaces = (): SpaceMark[] => {
   const marks = useSpacesStore((state) => state.spaces);
   const journey = useSpacesStore((state) => state.journey);
   return React.useMemo(() => mergeSidebarSpaces(marks, journey), [journey, marks]);
+};
+
+/** The spaces of one registered project, in the host's order, for its spaces page (journey step 9). */
+export const spacesOfProject = (journey: ReadonlyMap<string, SpaceEntry>, projectPath: string): SpaceEntry[] => {
+  const project = normalizePath(projectPath);
+  return Array.from(journey.values()).filter((entry) => project !== null && normalizePath(entry.projectDirectory) === project);
+};
+
+/**
+ * The spaces whose project is no longer registered on this host: removed from OpenChamber, or
+ * added again under another path. Nothing else lists them, so Settings does.
+ */
+export const spacesWithoutProject = (journey: ReadonlyMap<string, SpaceEntry>): SpaceEntry[] => (
+  Array.from(journey.values()).filter((entry) => entry.projectDirectory === null)
+);
+
+/**
+ * How a screen that lists spaces stands with the journey list: it asks for a fresh read when it
+ * opens, shows what the store already holds meanwhile, and a read that failed is kept apart from
+ * the list, so it never reads as "no spaces".
+ */
+type SpacesJourneyRead = { journey: ReadonlyMap<string, SpaceEntry> | null; error: Error | null };
+
+export const useSpacesJourneyRead = (): SpacesJourneyRead => {
+  const journey = useSpacesStore((state) => state.journey);
+  const [error, setError] = React.useState<Error | null>(null);
+  React.useEffect(() => {
+    let current = true;
+    refreshSpacesJourney().then(
+      () => { if (current) setError(null); },
+      (failure: Error) => { if (current) setError(failure); },
+    );
+    return () => { current = false; };
+  }, []);
+  return { journey, error };
 };

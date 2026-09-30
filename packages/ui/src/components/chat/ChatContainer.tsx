@@ -83,6 +83,7 @@ import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
+import { ensureSpaceArchives, useSpaceArchiveOf } from '@/lib/spaces/space-archives';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
@@ -599,19 +600,15 @@ const HYDRATING_SKELETON_ITEMS: Array<{
     },
 ];
 
-const ReadOnlyPromptBanner: React.FC = () => {
-    const { t } = useI18n();
-
-    return (
-        <div className="w-full py-3">
-            <div className="chat-input-column">
-                <div className="rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 text-center typography-ui-label text-muted-foreground">
-                    {t('chat.container.readOnlySubagentPromptBanner')}
-                </div>
+const ReadOnlyPromptBanner: React.FC<{ text: string }> = ({ text }) => (
+    <div className="w-full py-3">
+        <div className="chat-input-column">
+            <div className="rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 text-center typography-ui-label text-muted-foreground">
+                {text}
             </div>
         </div>
-    );
-};
+    </div>
+);
 
 const getProjectDisplayLabel = (project: { label?: string; path: string }): string => {
     const label = project.label?.trim();
@@ -1021,7 +1018,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
-    const promptReadOnly = resolveChatPromptReadOnly(
+    // A chat of a deleted isolated space is on the Archive page and read-only; the server refuses
+    // to run it whatever the screen shows. Its directory is the archive's own, and the list of
+    // archives is read once per runtime.
+    React.useEffect(() => {
+        ensureSpaceArchives();
+    }, []);
+    const spaceArchive = useSpaceArchiveOf(effectiveSessionDirectory);
+    const promptReadOnly = spaceArchive !== null || resolveChatPromptReadOnly(
         currentSession,
         embeddedAllowPrompting ?? allowPromptingSubagentSessions,
         readOnly,
@@ -1702,7 +1706,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     </div>
                 )}
                 {promptReadOnly ? (
-                    <ReadOnlyPromptBanner />
+                    <ReadOnlyPromptBanner
+                        text={spaceArchive
+                            ? t('spaces.archive.readOnlyBanner', { name: spaceArchive.name })
+                            : t('chat.container.readOnlySubagentPromptBanner')}
+                    />
                 ) : (
                     <ChatInput
                         active={active}

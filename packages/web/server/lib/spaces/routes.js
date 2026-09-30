@@ -5,8 +5,10 @@
 //
 // Every route but the switch exists only while the switch is on: `getJourney()` answers null
 // while it is off, and then the journey routes say so with 404 and `isolated_spaces_off`, the same
-// answer a route that does not exist would give. The switch itself is the one thing reachable
-// while the feature is off, because turning it on is what makes the feature exist (decision 19).
+// answer a route that does not exist would give. The switch itself is reachable while the feature
+// is off, because turning it on is what makes the feature exist (decision 19), and so is the list
+// of chat archives: those chats stay on the Archive page with the switch on or off, and reading
+// that list is a file of the host's, which runs nothing of the feature.
 // `/api/openchamber/spaces` is on the JSON-body allowlist of `core-routes.js`.
 
 import { z } from 'zod';
@@ -59,6 +61,7 @@ const STATUS_BY_CODE = new Map([
   ['gatekeeper_missing', 409],
   ['invalid_setup_commands', 400],
   ['space_setup_running', 409],
+  ['chats_not_saved', 409],
 ]);
 
 /** One JSON answer per failure, with a stable code. Details travel as data; a stack never does. */
@@ -133,7 +136,7 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
  * `readSwitch()` and `setSwitch(enabled)` the switch: `setSwitch(false)` stops the spaces and takes
  * the feature down, `setSwitch(true)` brings it up, and each resolves what the client shows.
  */
-export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], readSwitch, setSwitch }) {
+export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], readSwitch, setSwitch, getArchive = () => null }) {
   const withJourney = (handler) => async (req, res) => {
     const journey = getJourney();
     if (!journey) {
@@ -174,6 +177,11 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
     } catch (error) {
       answerFailure(res, error);
     }
+  });
+
+  // The archives of deleted spaces, for the Archive page: which directory holds which space's chats.
+  app.get(`${SPACES_ROUTE}/archives`, (_req, res) => {
+    res.json({ archives: getArchive()?.listArchives() ?? [] });
   });
 
   // The idle stop setting (decision 11): kept in the settings and told to every running space.
@@ -217,7 +225,8 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
   }));
 
   app.delete(`${SPACES_ROUTE}/:id`, withJourney(async (journey, req, res) => {
-    res.json(await journey.removeSpace(spaceIdOf(req)));
+    // `?unsavedChats=delete` is the user's "Delete anyway" after chats could not be saved.
+    res.json(await journey.removeSpace(spaceIdOf(req), { allowUnsaved: req.query?.unsavedChats === 'delete' }));
   }));
 
   // A grant for a running space; the key in the body goes to the gatekeeper and nowhere else.
