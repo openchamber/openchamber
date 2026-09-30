@@ -345,14 +345,34 @@ const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 't
 // containing a `.git` entry — a directory, a worktree pointer file, or a
 // symlink). A repository boundary stops descent: nested repos inside repos
 // are not reported. The root itself, when it is a repo, yields no results.
+// Symlinked directories are followed, the way the file tree follows them: a
+// parent folder of links to repositories kept elsewhere is a common way to
+// group them into one project. Each real directory is walked once, so a link
+// loop or two links to one repository cannot repeat it, and repositories are
+// reported under the path the link gives them inside the project.
 const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxDepth, maxDirs }) => {
   const results = [];
+  const walkedRealPaths = new Set();
   let visited = 0;
 
   const walk = async (dir, depth) => {
     if (visited >= maxDirs) {
       return;
     }
+
+    let realPath;
+    try {
+      realPath = await fsPromises.realpath(dir);
+    } catch (error) {
+      if (dir === rootPath) {
+        throw error;
+      }
+      return;
+    }
+    if (walkedRealPaths.has(realPath)) {
+      return;
+    }
+    walkedRealPaths.add(realPath);
 
     let dirents;
     try {
@@ -374,7 +394,7 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
         isRepoBoundary = true;
         continue;
       }
-      if (!dirent.isDirectory() || dirent.isSymbolicLink()) {
+      if (!dirent.isDirectory() && !dirent.isSymbolicLink()) {
         continue;
       }
       if (GIT_DIRS_SKIP_LIST.has(dirent.name)) {
@@ -382,6 +402,13 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
       }
       if (depth >= maxDepth) {
         continue;
+      }
+      if (dirent.isSymbolicLink()) {
+        // A link to a file, or a dangling one, is not a place to look.
+        const target = await fsPromises.stat(pathModule.join(dir, dirent.name)).catch(() => null);
+        if (!target?.isDirectory()) {
+          continue;
+        }
       }
       subdirectories.push(dirent.name);
     }

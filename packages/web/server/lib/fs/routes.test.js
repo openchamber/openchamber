@@ -1254,14 +1254,14 @@ describe('fs git-dirs', () => {
   });
 
   // tree maps directory path -> [[name, type], ...]
-  const registerGitDirs = (tree, { stat, readdir: readdirOverride } = {}) => {
+  const registerGitDirs = (tree, { stat, readdir: readdirOverride, realpath } = {}) => {
     const { app, getRoute } = createRouteRegistry();
     const readdir = readdirOverride ?? vi.fn(async (dirPath) => (tree[dirPath] ?? []).map(([name, type]) => createDirent(name, type)));
     registerFsRoutes(app, {
       os: { homedir: () => '/home/user' },
       path: path.posix,
       fsPromises: {
-        realpath: async (targetPath) => targetPath,
+        realpath: realpath ?? (async (targetPath) => targetPath),
         stat: stat ?? vi.fn(async (targetPath) => ({ isDirectory: () => Boolean(tree[targetPath]) })),
         readdir,
       },
@@ -1369,16 +1369,42 @@ describe('fs git-dirs', () => {
     expect(readdir).not.toHaveBeenCalledWith('/workspace/node_modules', { withFileTypes: true });
   });
 
-  it('never descends into symbolic links', async () => {
+  it('follows symlinked directories and reports repositories under the link path', async () => {
+    // /workspace groups repositories kept elsewhere through links.
+    const links = { '/workspace/api': '/src/api', '/workspace/web': '/src/web' };
     const { handler } = registerGitDirs({
-      '/workspace': [['link', 'symlink'], ['real', 'dir']],
-      '/workspace/real': [['.git', 'dir']],
+      '/workspace': [['api', 'symlink'], ['web', 'symlink'], ['notes.md', 'symlink']],
+      '/workspace/api': [['.git', 'dir']],
+      '/workspace/web': [['.git', 'file']],
+    }, {
+      realpath: async (targetPath) => links[targetPath] ?? targetPath,
     });
 
     const res = await callGitDirs(handler, { path: '/workspace' });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([{ path: '/workspace/real', name: 'real' }]);
+    expect(res.body.repositories).toEqual([
+      { path: '/workspace/api', name: 'api' },
+      { path: '/workspace/web', name: 'web' },
+    ]);
+  });
+
+  it('walks each real directory once, so a link loop or a second link to a repository does not repeat it', async () => {
+    const links = { '/workspace/loop': '/workspace', '/workspace/again': '/workspace/real' };
+    const { handler, readdir } = registerGitDirs({
+      '/workspace': [['again', 'symlink'], ['loop', 'symlink'], ['real', 'dir']],
+      '/workspace/real': [['.git', 'dir']],
+      '/workspace/again': [['.git', 'dir']],
+      '/workspace/loop': [['again', 'symlink'], ['loop', 'symlink'], ['real', 'dir']],
+    }, {
+      realpath: async (targetPath) => links[targetPath] ?? targetPath,
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.repositories).toEqual([{ path: '/workspace/again', name: 'again' }]);
+    expect(readdir).toHaveBeenCalledTimes(2);
   });
 
   it('returns repositories in deterministic order', async () => {
