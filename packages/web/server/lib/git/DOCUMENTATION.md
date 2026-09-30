@@ -123,7 +123,7 @@ mount these Git panels and keeps its separate extension-host Git implementation.
 
 The following functions are internal helpers used by exported functions:
 - `buildSshCommand(sshKeyPath)`: Build SSH command string for git config.
-- `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution and `GIT_TERMINAL_PROMPT=0` (unless the server was started with it set): the server has no terminal a user could answer, so a Git command that would ask for a username or password fails instead of waiting forever on a console nobody sees. Credential helpers, including GUI ones, still run before Git would prompt.
+- `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution and `GIT_TERMINAL_PROMPT=0` (unless the server was started with it set): the server has no terminal a user could answer, so a Git command that would ask for a username or password fails instead of waiting forever on a console nobody sees. Credential helpers, including GUI ones, still run before Git would prompt. Inside a Linux AppImage it also drops what the AppImage launcher added to `PATH`, `LD_LIBRARY_PATH`, `GSETTINGS_SCHEMA_DIR` and `XDG_DATA_DIRS` (`stripAppImageLauncherEnv`, #4177), so hooks run with the user's values.
 - `createGit(directory)`: Create simple-git instance with environment.
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.

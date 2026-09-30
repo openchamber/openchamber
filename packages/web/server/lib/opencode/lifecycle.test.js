@@ -694,6 +694,35 @@ describe('OpenCode lifecycle', () => {
     expect(server.signalCode).toBe('SIGTERM');
   });
 
+  it('removes AppImage launcher entries from the managed OpenCode launch env', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const previous = { APPDIR: process.env.APPDIR, LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH };
+    process.env.APPDIR = '/tmp/.mount_OpenChAbC123';
+    process.env.LD_LIBRARY_PATH = '/tmp/.mount_OpenChAbC123/usr/lib:/opt/x:';
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    try {
+      const runtime = createRuntime();
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+
+      expect(options.env.LD_LIBRARY_PATH).toBe('/opt/x');
+
+      await server.close();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it('strips AppImage ARGV0 from managed OpenCode launch env', async () => {
     delete process.env.OPENCODE_BINARY;
     const previousArgv0 = process.env.ARGV0;

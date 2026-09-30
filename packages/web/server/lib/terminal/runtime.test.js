@@ -459,6 +459,25 @@ describe('terminal runtime', () => {
     }
   });
 
+  it('removes the AppImage launcher entries from the PTY environment', async () => {
+    const previous = { APPDIR: process.env.APPDIR, LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH };
+    process.env.APPDIR = '/tmp/.mount_OpenChAbC123';
+    process.env.LD_LIBRARY_PATH = '/tmp/.mount_OpenChAbC123/usr/lib:/opt/cuda/lib64:';
+    const harness = createHarness();
+    try {
+      const response = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-ld-path', cwd: '/repo', cols: 80, rows: 24 } }, response);
+      expect(response.statusCode).toBe(200);
+      expect(harness.processes[0].options.env.LD_LIBRARY_PATH).toBe('/opt/cuda/lib64');
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await harness.runtime.shutdown();
+    }
+  });
+
   it('lists available shells and uses the selected shell for create and restart', async () => {
     const executables = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
     const harness = createHarness({

@@ -1,5 +1,6 @@
 import simpleGit from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
+import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -343,7 +344,9 @@ const resolveSshAuthSock = async () => {
 };
 
 const buildGitEnv = async () => {
-  const env = { ...process.env };
+  // Git runs the user's hooks, so they must not see what the AppImage launcher
+  // added to LD_LIBRARY_PATH and friends (#4177).
+  const env = stripAppImageLauncherEnv({ ...process.env });
   if (!env.SSH_AUTH_SOCK || !env.SSH_AUTH_SOCK.trim()) {
     const resolved = await resolveSshAuthSock();
     if (resolved) {

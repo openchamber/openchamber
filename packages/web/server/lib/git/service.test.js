@@ -2882,3 +2882,52 @@ describe('getStatus untracked directories', () => {
     }
   });
 });
+
+describe('git environment inside an AppImage', () => {
+  it('runs the worktree post-checkout hook without the AppImage launcher library path', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const previous = {
+      APPDIR: process.env.APPDIR,
+      LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH,
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+    };
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    process.env.APPDIR = '/tmp/.mount_OpenChAbC123';
+    process.env.LD_LIBRARY_PATH = '/tmp/.mount_OpenChAbC123/usr/lib:/opt/x:';
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const hookLog = path.join(dataHome, 'post-checkout-env.log');
+      const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout');
+      fs.writeFileSync(hookPath, `#!/bin/sh\nprintf '%s' "\${LD_LIBRARY_PATH-<unset>}" > ${JSON.stringify(hookLog)}\n`);
+      fs.chmodSync(hookPath, 0o755);
+
+      await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-env-test',
+        branchName: 'openchamber/hook-env-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(() => {
+        try {
+          return fs.readFileSync(hookLog, 'utf8');
+        } catch {
+          return '';
+        }
+      }, { timeout: 5_000 }).toBe('/opt/x');
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});

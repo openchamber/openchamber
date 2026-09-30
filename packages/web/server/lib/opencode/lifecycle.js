@@ -1,7 +1,7 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
-import { stripAppImageArgv0Leak } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
@@ -771,7 +771,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: managedStartupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: stripAppImageArgv0Leak(applyProviderEnvAliases({
+        env: stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
           ...shellEnv,
           ...process.env,
           ...managedOpenCodeEnv,
@@ -781,7 +781,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           // we send with openCodePassword would get 401.
           OPENCODE_PASSWORD: openCodePassword,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
-        })),
+        }))),
       });
 
       if (!serverInstance || !serverInstance.url) {
