@@ -78,7 +78,7 @@
     "react-drawio": "1.0.7",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
-    "remend": "^1.2.1",
+    "remend": "^1.4.0",
     "shiki": "^3.23.0",
     "simple-git": "^3.36.0",
     "sonner": "^2.0.7",

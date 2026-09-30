@@ -414,6 +414,52 @@ describe('CJK-aware link parsing', () => {
   });
 });
 
+describe('Streaming heal', () => {
+  const streamed = async (text: string): Promise<string> =>
+    (await renderMarkdownBlocks(text, true)).map((block) => block.html).join('');
+
+  test('an unfinished image is left out while it streams', async () => {
+    resetMarkdownHtmlCacheForTests();
+    expect(await streamed('See ![alt](https://exampl')).toBe('<p>See</p>\n');
+    const html = await streamed('x ![a](https://e.test/a.png) z ![b](htt');
+    expect(html).toContain('<img src="https://e.test/a.png"');
+    expect(html).not.toContain('streamdown:');
+    expect(html).not.toContain('alt="b"');
+    // Brackets or an opened marker in the alt text must not leave a broken
+    // image or a stray closer behind.
+    expect(await streamed('x ![a [b] c](https://e')).toBe('<p>x</p>\n');
+    expect(await streamed('a ![alt **bold](http')).toBe('<p>a</p>\n');
+  });
+
+  test('a finished paragraph streams the way it settles', async () => {
+    resetMarkdownHtmlCacheForTests();
+    // remend reads a ``` mid-sentence as an open fence. Healing finished
+    // blocks showed this paragraph as code until the stream ended.
+    const finished = 'Wrap it in ``` fences.';
+    const html = await streamed(`${finished}\n\nNext paragraph`);
+    expect(html.startsWith(renderMarkdownSync(finished))).toBe(true);
+    expect(html).not.toContain('<code>');
+  });
+
+  test('a single tilde between words streams the way it settles', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const text = 'temp 20~25C and 30~40C';
+    expect(await streamed(text)).toBe(renderMarkdownSync(text));
+  });
+
+  test('healing a long streamed block full of underscores stays fast', async () => {
+    resetMarkdownHtmlCacheForTests();
+    // One list of snake_case rows: marked parses it in tens of ms, and remend
+    // 1.2.1 took about 3 s per stream step on it (openchamber/openchamber#4204).
+    const list = Array.from({ length: 5000 }, (_, i) => `- row_${i} has value_a and value_b_${i}`).join('\n');
+    expect(list.length).toBeGreaterThan(190_000);
+    const started = performance.now();
+    const html = await streamed(list);
+    expect(performance.now() - started).toBeLessThan(1_500);
+    expect(html).toContain('row_4999 has value_a and value_b_4999');
+  });
+});
+
 describe('Escaped brackets versus display math', () => {
   // `\[...\]` is display math in LaTeX and an escaped bracket pair in
   // CommonMark. Prose escapes brackets far more often than it opens display

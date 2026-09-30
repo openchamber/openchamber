@@ -235,9 +235,31 @@ const hasOpenFence = (raw: string): boolean => {
 // pass when the fence closes.
 const OPEN_FENCE_HIGHLIGHT_LINE_LIMIT = 300;
 
+// A single `~` between word characters would be escaped only while streaming,
+// so the settled message could render differently.
+const HEAL_OPTIONS = { linkMode: 'text-only', singleTilde: false } as const;
+
+// remend 1.4 turns an unfinished image into one pointing at this placeholder,
+// which our sanitizer drops, leaving a broken image while the message streams.
+// Earlier versions removed the unfinished image, so the source is cut at its
+// `![` and the rest healed again; closers for markers opened inside its alt
+// text go with it. remend may rewrite the alt text, so the cut uses the last
+// `![` of the source rather than matching the alt. A tail of many nested
+// unfinished images stops after a few cuts and streams unhealed.
+const INCOMPLETE_IMAGE_TARGET = '](streamdown:incomplete-image)';
+const INCOMPLETE_IMAGE_MAX_CUTS = 4;
+
 const heal = (text: string): string => {
   try {
-    return remend(text, { linkMode: 'text-only' });
+    let source = text;
+    let healed = remend(source, HEAL_OPTIONS);
+    for (let cuts = 0; healed.includes(INCOMPLETE_IMAGE_TARGET); cuts += 1) {
+      const start = source.lastIndexOf('![');
+      if (start < 0 || cuts === INCOMPLETE_IMAGE_MAX_CUTS) return text;
+      source = source.slice(0, start);
+      healed = remend(source, HEAL_OPTIONS);
+    }
+    return healed;
   } catch {
     return text;
   }
@@ -367,7 +389,10 @@ const lexStreamBlocks = (text: string): MarkdownBlock[] => {
       && raw.split('\n').length <= OPEN_FENCE_HIGHLIGHT_LINE_LIMIT;
     blocks.push({
       raw,
-      src: openFence ? raw : heal(raw),
+      // A finished block renders from its own text, as it will once the
+      // message settles: healing it made, say, a ``` mentioned mid-sentence
+      // show as code until the stream ended.
+      src: openFence || !isLast ? raw : heal(raw),
       mode: isLast ? 'live' : 'full',
       highlight: !openFence || openFenceHighlight,
     });
