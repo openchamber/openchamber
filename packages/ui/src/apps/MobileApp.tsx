@@ -59,6 +59,7 @@ import {
 } from '@/lib/worktrees/worktreeManager';
 import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import { useUIStore } from '@/stores/useUIStore';
+import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
@@ -350,6 +351,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // (opened from the drawer footer / workspace tabs), so they close before the
   // drawers underneath.
   const handleNativeBack = React.useCallback(() => {
+    // A sheet, dialog, select or menu open on top of everything goes first,
+    // so back inside a surface's editor does not close the whole surface.
+    if (closeTopmostBackLayer()) {
+      return true;
+    }
     if (openPlan) {
       setOpenPlan(null);
       return true;
