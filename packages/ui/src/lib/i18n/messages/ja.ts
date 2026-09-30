@@ -694,6 +694,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.status.open': 'PR公開中',
   'sessions.sidebar.group.pr.status.mergeConflicts': 'マージ競合',
   'sessions.sidebar.group.pr.status.mergeBlocked': 'マージブロック中',
+  'sessions.sidebar.group.pr.status.checksFailing': 'チェック失敗',
   'sessions.sidebar.group.pr.status.draft': '下書きPR',
   'sessions.sidebar.group.pr.status.closed': 'クローズ',
   'sessions.sidebar.group.empty.noArchivedSessions': 'まだアーカイブ済みセッションはありません。',

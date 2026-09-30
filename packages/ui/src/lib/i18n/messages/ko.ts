@@ -694,6 +694,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.status.open': 'PR 열기',
   'sessions.sidebar.group.pr.status.mergeConflicts': '병합 충돌',
   'sessions.sidebar.group.pr.status.mergeBlocked': '병합 차단됨',
+  'sessions.sidebar.group.pr.status.checksFailing': '검사 실패',
   'sessions.sidebar.group.pr.status.draft': '드래프트 PR',
   'sessions.sidebar.group.pr.status.closed': '닫힘',
   'sessions.sidebar.group.empty.noArchivedSessions': '보관된 세션이 없습니다',

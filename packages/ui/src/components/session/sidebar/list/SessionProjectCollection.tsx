@@ -5,6 +5,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { usePrefetchSessionMessages } from '@/sync/use-sync';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { useArchivedAutoFolders } from '../folders/useArchivedAutoFolders';
@@ -324,10 +325,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const setParams = useGitHubPrStatusStore((state) => state.setParams);
   const refreshTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
   const retriedRef = React.useRef(new Set<string>());
-  React.useEffect(() => {
-    if (!github || !githubAuthChecked || !githubAuthStatus?.connected) return;
+  // Worktree branches of expanded projects: the rows whose PR badge is on
+  // screen.
+  const shownPrTargets = React.useMemo(() => {
     const targets = new Map<string, { directory: string; branch: string }>();
-    const now = Date.now();
     projectSections.forEach((section) => {
       if (projectView.collapsedProjects.has(section.project.id)) return;
       section.groups.forEach((group) => {
@@ -335,24 +336,38 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         const directory = normalizePath(group.directory ?? null);
         const branch = group.branch?.trim() || topology.gitBranches.get(directory || '')?.trim();
         if (!directory || !branch) return;
-        const key = getGitHubPrStatusKey(directory, branch);
-        const entry = useGitHubPrStatusStore.getState().entries[key];
-        const terminal = entry?.status?.pr?.state === 'closed' || entry?.status?.pr?.state === 'merged';
-        const retryKey = `${directory}::${branch}`;
-        const lastChecked = Math.max(entry?.lastRefreshAt ?? 0, entry?.lastDiscoveryPollAt ?? 0);
-        const retry = Boolean(entry?.isInitialStatusResolved && (!entry.status?.pr || terminal) && (!retriedRef.current.has(retryKey) || now - lastChecked >= PR_NO_PR_RETRY_MS));
-        if (!entry || !entry.isInitialStatusResolved || retry) {
-          if (retry) retriedRef.current.add(retryKey);
-          targets.set(key, { directory, branch });
-        }
+        targets.set(getGitHubPrStatusKey(directory, branch), { directory, branch });
       });
+    });
+    return targets;
+  }, [projectSections, projectView.collapsedProjects, topology.gitBranches]);
+  const shownPrKeys = React.useMemo(() => [...shownPrTargets.keys()], [shownPrTargets]);
+  const githubConnected = Boolean(githubAuthChecked && githubAuthStatus?.connected);
+  // Discovery: find the PR of a branch that has none yet, or whose PR is
+  // closed/merged (a newer one may have opened). Open PRs stay live through
+  // the batched summaries below instead.
+  React.useEffect(() => {
+    if (!github || !githubConnected) return;
+    const targets = new Map<string, { directory: string; branch: string }>();
+    const now = Date.now();
+    shownPrTargets.forEach(({ directory, branch }, key) => {
+      const entry = useGitHubPrStatusStore.getState().entries[key];
+      const terminal = entry?.status?.pr?.state === 'closed' || entry?.status?.pr?.state === 'merged';
+      const retryKey = `${directory}::${branch}`;
+      const lastChecked = Math.max(entry?.lastRefreshAt ?? 0, entry?.lastDiscoveryPollAt ?? 0);
+      const retry = Boolean(entry?.isInitialStatusResolved && (!entry.status?.pr || terminal) && (!retriedRef.current.has(retryKey) || now - lastChecked >= PR_NO_PR_RETRY_MS));
+      if (!entry || !entry.isInitialStatusResolved || retry) {
+        if (retry) retriedRef.current.add(retryKey);
+        targets.set(key, { directory, branch });
+      }
     });
     targets.forEach((target, key) => {
       ensureEntry(key);
-      setParams(key, { ...target, remoteName: null, canShow: true, github, githubAuthChecked, githubConnected: githubAuthStatus.connected });
+      setParams(key, { ...target, remoteName: null, canShow: true, github, githubAuthChecked, githubConnected });
     });
     if (targets.size) void refreshTargets([...targets.values()], { silent: true, markInitialResolved: true });
-  }, [ensureEntry, github, githubAuthChecked, githubAuthStatus?.connected, projectSections, projectView.collapsedProjects, refreshTargets, setParams, topology.gitBranches]);
+  }, [ensureEntry, github, githubAuthChecked, githubConnected, refreshTargets, setParams, shownPrTargets]);
+  useOpenPrSummarySync(shownPrKeys, github, githubConnected);
   const sessionOrderIndex = React.useMemo(
     () => new Map(collection.orderedSessions.map((session, index) => [session.id, index])),
     [collection.orderedSessions],

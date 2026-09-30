@@ -110,3 +110,76 @@ describe('GET /api/github/pulls/list free-text search', () => {
     expect((await search().expect(500)).body.error).toBe('GitHub search unavailable');
   });
 });
+
+describe('POST /api/github/pr/summaries', () => {
+  let app;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-summaries-'));
+
+  beforeAll(async () => {
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
+    setGhCliDisabled(true);
+    setGitHubAuth({ accessToken: 'fake-test-token', accountId: 'test' });
+    app = express();
+    app.use(express.json());
+    registerGitHubRoutes(app);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  afterAll(() => {
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const summaries = (refs) => request(app).post('/api/github/pr/summaries').send({ refs });
+
+  const serveGraphql = (body) => {
+    const fetch = vi.fn(async () => response(body));
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  };
+
+  it('rejects malformed refs before asking GitHub', async () => {
+    const fetch = serveGraphql({ data: {} });
+
+    const res = await summaries([{ owner: 'example', repo: 'project', number: 'seven' }]);
+
+    expect(res.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('answers with the live state of each resolved PR', async () => {
+    serveGraphql({
+      data: {
+        p0: { pullRequest: { number: 7, title: 'Fix', state: 'MERGED', isDraft: false, mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN', headRefOid: 'abc', commits: { nodes: [] } } },
+        p1: null,
+      },
+      errors: [{ type: 'NOT_FOUND', path: ['p1'], message: 'Could not resolve to a Repository' }],
+    });
+
+    const res = await summaries([
+      { owner: 'example', repo: 'project', number: 7 },
+      { owner: 'example', repo: 'gone', number: 8 },
+    ]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(true);
+    expect(res.body.summaries).toEqual([
+      expect.objectContaining({ owner: 'example', repo: 'project', number: 7, state: 'merged', checks: null }),
+    ]);
+  });
+
+  // Last in the file: the rate-limit cooldown it records is process-global.
+  it('reports a GraphQL rate limit as a transient failure', async () => {
+    serveGraphql({ data: null, errors: [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded' }] });
+
+    const res = await summaries([{ owner: 'example', repo: 'project', number: 7 }]);
+
+    expect(res.status).toBe(503);
+  });
+});

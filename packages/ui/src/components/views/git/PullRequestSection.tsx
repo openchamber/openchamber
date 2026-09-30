@@ -95,7 +95,9 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
   }
   const checksFailed = status?.checks?.state === 'failure';
   const mergeableState = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
-  const notMergeable = pr.mergeable === false || mergeableState === 'blocked' || mergeableState === 'dirty';
+  // A `blocked` merge state alone (usually a missing review) keeps the open
+  // colour; orange is for failed checks and conflicts.
+  const notMergeable = pr.mergeable === false || mergeableState === 'dirty';
   if (checksFailed || notMergeable) {
     return 'blocked';
   }

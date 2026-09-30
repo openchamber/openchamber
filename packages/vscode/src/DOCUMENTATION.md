@@ -223,7 +223,7 @@ Handlers with no reachable caller in the VS Code webview.
 | `api:git/diff`, `api:git/file-diff` | `DiffView` only |
 | `api:git/pr-description` | `views/git/PullRequestSection.tsx` only |
 | `api:git/identity` | `git` settings page is VS Code-gated |
-| `api:github/pr:create`, `api:github/pr:merge`, `api:github/pr:ready`, `api:github/pr:update` | `views/git/PullRequestSection.tsx` only. `api:github/pr:status` stays reachable through `useGitHubPrStatusStore` in the sidebar |
+| `api:github/pr:create`, `api:github/pr:merge`, `api:github/pr:ready`, `api:github/pr:update` | `views/git/PullRequestSection.tsx` only. `api:github/pr:status` and `api:github/pr:summaries` stay reachable through `useGitHubPrStatusStore` in the sidebar and answer with the disabled-backend error |
 | `api:fs:write`, `api:fs:rename`, `api:fs:delete`, `api:fs:reveal`, `api:fs:mkdir` | `FilesView`, `SidebarFilesTree`, `PlanView` only |
 | `api:fs:exec` | Terminal API is a throwing stub; no other caller |
 

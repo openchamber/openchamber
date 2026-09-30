@@ -694,6 +694,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.status.open': 'PR otwarty',
   'sessions.sidebar.group.pr.status.mergeConflicts': 'Konflikty scalania',
   'sessions.sidebar.group.pr.status.mergeBlocked': 'Scalanie zablokowane',
+  'sessions.sidebar.group.pr.status.checksFailing': 'Sprawdzenia nie przeszły',
   'sessions.sidebar.group.pr.status.draft': 'Szkic PR',
   'sessions.sidebar.group.pr.status.closed': 'Zamknięty',
   'sessions.sidebar.group.empty.noArchivedSessions': 'Brak zarchiwizowanych sesji.',

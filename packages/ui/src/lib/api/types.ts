@@ -1040,6 +1040,30 @@ export type GitHubPullRequestStatus = {
   resolvedRemoteName?: string | null;
 };
 
+export type GitHubPullRequestRef = GitHubRepoSelector & { number: number };
+
+/** Live fields of a known PR, refreshed in batches for list surfaces. */
+export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
+  state: GitHubPullRequest['state'];
+  draft: boolean;
+  title: string;
+  headSha?: string;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+  /** Null for closed/merged PRs, whose checks are not actionable. */
+  checks: GitHubChecksSummary | null;
+};
+
+export type GitHubPullRequestSummariesResult =
+  | { connected: false }
+  | {
+      connected: true;
+      /** Server-side stamp of when GitHub was asked (ms epoch). */
+      fetchedAt: number;
+      /** PRs GitHub could not resolve are absent: unknown, not closed. */
+      summaries: GitHubPullRequestLiveSummary[];
+    };
+
 export type GitHubPullRequestCreateInput = {
   directory: string;
   title: string;
@@ -1382,6 +1406,7 @@ export interface GitHubAPI {
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
+  prSummaries(refs: GitHubPullRequestRef[]): Promise<GitHubPullRequestSummariesResult>;
   prCreate(payload: GitHubPullRequestCreateInput): Promise<GitHubPullRequest>;
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;

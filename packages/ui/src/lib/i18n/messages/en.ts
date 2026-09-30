@@ -693,6 +693,7 @@ export const dict = {
   'sessions.sidebar.group.pr.status.open': 'PR open',
   'sessions.sidebar.group.pr.status.mergeConflicts': 'Merge conflicts',
   'sessions.sidebar.group.pr.status.mergeBlocked': 'Merge blocked',
+  'sessions.sidebar.group.pr.status.checksFailing': 'Checks failing',
   'sessions.sidebar.group.pr.status.draft': 'Draft PR',
   'sessions.sidebar.group.pr.status.closed': 'Closed',
   'sessions.sidebar.group.empty.noArchivedSessions': 'No archived sessions yet.',

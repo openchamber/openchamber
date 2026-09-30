@@ -605,6 +605,7 @@ export const dict = {
   'sessions.sidebar.group.pr.status.open': 'PR offen',
   'sessions.sidebar.group.pr.status.mergeConflicts': 'Zusammenführungskonflikte',
   'sessions.sidebar.group.pr.status.mergeBlocked': 'Zusammenführung blockiert',
+  'sessions.sidebar.group.pr.status.checksFailing': 'Checks fehlgeschlagen',
   'sessions.sidebar.group.pr.status.draft': 'Entwurf PR',
   'sessions.sidebar.group.pr.status.closed': 'Geschlossen',
   'sessions.sidebar.group.empty.noArchivedSessions': 'Noch keine archivierten Sitzungen.',

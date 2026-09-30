@@ -694,6 +694,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.pr.status.open": "PR відкрито",
   "sessions.sidebar.group.pr.status.mergeConflicts": "Конфлікти злиття",
   "sessions.sidebar.group.pr.status.mergeBlocked": "Злиття заблоковано",
+  "sessions.sidebar.group.pr.status.checksFailing": "Перевірки не пройшли",
   "sessions.sidebar.group.pr.status.draft": "Чернетка PR",
   "sessions.sidebar.group.pr.status.closed": "Закрито",
   "sessions.sidebar.group.empty.noArchivedSessions": "Заархівованих сесій ще немає.",

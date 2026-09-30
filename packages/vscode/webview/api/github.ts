@@ -14,6 +14,8 @@ import type {
   GitHubPullRequestReadyResult,
   GitHubPullRequestUpdateInput,
   GitHubPullRequestStatus,
+  GitHubPullRequestRef,
+  GitHubPullRequestSummariesResult,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
   GitHubRepoUpstreamResult,
@@ -37,6 +39,8 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
 
   prStatus: async (directory: string, branch: string) =>
     sendBridgeMessage<GitHubPullRequestStatus>('api:github/pr:status', { directory, branch }),
+  prSummaries: async (refs: GitHubPullRequestRef[]) =>
+    sendBridgeMessage<GitHubPullRequestSummariesResult>('api:github/pr:summaries', { refs }),
   prCreate: async (payload: GitHubPullRequestCreateInput) =>
     sendBridgeMessage<GitHubPullRequest>('api:github/pr:create', payload),
   prUpdate: async (payload: GitHubPullRequestUpdateInput) =>

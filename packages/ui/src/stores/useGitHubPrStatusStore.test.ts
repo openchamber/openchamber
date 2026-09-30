@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import type { GitHubPullRequestStatus, RuntimeAPIs } from "@/lib/api/types"
+import type {
+  GitHubAPI,
+  GitHubPullRequestLiveSummary,
+  GitHubPullRequestRef,
+  GitHubPullRequestStatus,
+  GitHubPullRequestSummariesResult,
+  RuntimeAPIs,
+} from "@/lib/api/types"
 
 let runtimeKey = "runtime-a"
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
@@ -573,5 +580,182 @@ describe("GitHub PR status stale terminal associations", () => {
     // Restored history must not inherit a fresh discovery timestamp, otherwise
     // a newer open PR would wait a full discovery interval after every reload.
     expect(hydrated.entries[key]?.lastDiscoveryPollAt).toBe(0)
+  })
+})
+
+describe("open PR live summaries", () => {
+  const openStatus = (overrides: Partial<GitHubPullRequestStatus> = {}): GitHubPullRequestStatus => ({
+    connected: true,
+    fetchedAt: 1,
+    repo: { owner: "acme", repo: "app", url: "https://github.com/acme/app" },
+    pr: { number: 7, title: "feature", url: "u7", state: "open", draft: false, base: "main", head: "feature", mergeable: true, mergeableState: "clean" },
+    checks: { state: "success", total: 2, success: 2, failure: 0, pending: 0 },
+    canMerge: true,
+    ...overrides,
+  })
+
+  const liveSummary = (overrides: Partial<GitHubPullRequestLiveSummary> = {}): GitHubPullRequestLiveSummary => ({
+    owner: "acme",
+    repo: "app",
+    number: 7,
+    state: "open",
+    draft: false,
+    title: "feature",
+    mergeable: true,
+    mergeableState: "clean",
+    checks: { state: "success", total: 2, success: 2, failure: 0, pending: 0 },
+    ...overrides,
+  })
+
+  const summariesApi = (answer: (refs: GitHubPullRequestRef[]) => Promise<GitHubPullRequestSummariesResult>) => {
+    const calls: GitHubPullRequestRef[][] = []
+    const prSummaries = async (refs: GitHubPullRequestRef[]) => {
+      calls.push(refs)
+      return answer(refs)
+    }
+    // SAFETY: the sync only calls prSummaries; the rest of the API is unused here.
+    return { github: { prSummaries } as unknown as GitHubAPI, calls }
+  }
+
+  const seed = (key: string, status: GitHubPullRequestStatus, lastRefreshAt = 0) => {
+    useGitHubPrStatusStore.getState().ensureEntry(key)
+    useGitHubPrStatusStore.getState().updateStatus(key, () => status)
+    useGitHubPrStatusStore.setState((state) => ({
+      entries: { ...state.entries, [key]: { ...state.entries[key]!, lastRefreshAt } },
+    }))
+  }
+
+  beforeEach(() => {
+    runtimeKey = "runtime-a"
+    useGitHubPrStatusStore.setState({ entries: {}, activeRequestCount: 0, totalRequestCount: 0 })
+    useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
+  })
+
+  test("a PR merged on GitHub turns merged and drops its checks", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const { github } = summariesApi(async () => ({
+      connected: true,
+      fetchedAt: Date.now(),
+      summaries: [liveSummary({ state: "merged", mergeable: null, mergeableState: "unknown", checks: null })],
+    }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    const status = useGitHubPrStatusStore.getState().entries[key]?.status
+    expect(status?.pr?.state).toBe("merged")
+    expect(status?.checks).toBe(null)
+    expect(status?.canMerge).toBe(false)
+  })
+
+  test("failing checks reach the entry", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const failing = { state: "failure" as const, total: 2, success: 1, failure: 1, pending: 0, inProgress: 0, queued: 0 }
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ checks: failing })] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.checks?.state).toBe("failure")
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.canMerge).toBe(true)
+  })
+
+  test("an unchanged PR leaves the store untouched", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const before = useGitHubPrStatusStore.getState().entries
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary()] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    expect(useGitHubPrStatusStore.getState().entries).toBe(before)
+  })
+
+  test("a PR shared by several keys goes out once and updates every key", async () => {
+    const automatic = getGitHubPrStatusKey("/repo", "feature")
+    const origin = getGitHubPrStatusKey("/repo", "feature", "origin")
+    seed(automatic, openStatus())
+    seed(origin, openStatus())
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ state: "closed", checks: null })] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([automatic, origin], github, { minAgeMs: 0 })
+
+    expect(calls).toEqual([[{ owner: "acme", repo: "app", number: 7 }]])
+    expect(useGitHubPrStatusStore.getState().entries[automatic]?.status?.pr?.state).toBe("closed")
+    expect(useGitHubPrStatusStore.getState().entries[origin]?.status?.pr?.state).toBe("closed")
+  })
+
+  test("skips closed, missing, watched and recently checked entries", async () => {
+    const closed = getGitHubPrStatusKey("/repo", "closed")
+    const none = getGitHubPrStatusKey("/repo", "none")
+    const watched = getGitHubPrStatusKey("/repo", "watched")
+    const fresh = getGitHubPrStatusKey("/repo", "fresh")
+    seed(closed, openStatus({ pr: { ...openStatus().pr!, state: "closed" } }))
+    seed(none, openStatus({ pr: null }))
+    seed(watched, openStatus())
+    useGitHubPrStatusStore.setState((state) => ({
+      entries: { ...state.entries, [watched]: { ...state.entries[watched]!, watchers: 1 } },
+    }))
+    seed(fresh, openStatus(), Date.now())
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([closed, none, watched, fresh], github, { minAgeMs: 60_000 })
+
+    expect(calls).toEqual([])
+  })
+
+  test("a PR asked about recently waits for its cadence", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary()] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 60_000 })
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 60_000 })
+
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a failed batch keeps the last known status", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const { github } = summariesApi(async () => { throw new Error("GitHub rate limited") })
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
+  })
+
+  test("a PR GitHub did not resolve keeps its status", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
+  })
+
+  test("a full refresh newer than the batch wins", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus({ fetchedAt: Date.now() + 60_000 }))
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ state: "merged", checks: null })] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
+  })
+
+  test("a batch from before a runtime switch is dropped", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus())
+    const request = deferred<GitHubPullRequestSummariesResult>()
+    const { github } = summariesApi(() => request.promise)
+
+    const syncing = useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+    useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
+    request.resolve({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ state: "merged", checks: null })] })
+    await syncing
+
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
   })
 })

@@ -694,6 +694,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.pr.status.open": "PR abierto",
   "sessions.sidebar.group.pr.status.mergeConflicts": "Conflictos de merge",
   "sessions.sidebar.group.pr.status.mergeBlocked": "Fusión bloqueada",
+  "sessions.sidebar.group.pr.status.checksFailing": "Checks fallidos",
   "sessions.sidebar.group.pr.status.draft": "PR en borrador",
   "sessions.sidebar.group.pr.status.closed": "Cerrado",
   "sessions.sidebar.group.empty.noArchivedSessions": "No hay sesiones archivadas aún.",

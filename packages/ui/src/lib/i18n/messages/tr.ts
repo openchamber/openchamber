@@ -674,6 +674,7 @@ export const dict = {
   'sessions.sidebar.group.pr.status.open': 'PR açık',
   'sessions.sidebar.group.pr.status.mergeConflicts': 'Merge çakışmaları',
   'sessions.sidebar.group.pr.status.mergeBlocked': 'Merge engellendi',
+  'sessions.sidebar.group.pr.status.checksFailing': 'Check\'ler başarısız',
   'sessions.sidebar.group.pr.status.draft': 'Taslak PR',
   'sessions.sidebar.group.pr.status.closed': 'Kapalı',
   'sessions.sidebar.group.empty.noArchivedSessions': 'Henüz arşivlenmiş session yok.',

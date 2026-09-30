@@ -517,6 +517,7 @@ export const dict = {
   'sessions.sidebar.group.pr.status.open': 'PR ouverte',
   'sessions.sidebar.group.pr.status.mergeConflicts': 'Fusionner les conflits',
   'sessions.sidebar.group.pr.status.mergeBlocked': 'Fusion bloquée',
+  'sessions.sidebar.group.pr.status.checksFailing': 'Vérifications en échec',
   'sessions.sidebar.group.pr.status.draft': 'PR en brouillon',
   'sessions.sidebar.group.pr.status.closed': 'Fermé',
   'sessions.sidebar.group.empty.noArchivedSessions': 'Aucune session archivée pour l\'instant.',

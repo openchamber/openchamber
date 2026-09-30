@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { persist } from 'zustand/middleware';
-import type { GitHubPullRequestStatus, RuntimeAPIs } from '@/lib/api/types';
+import type {
+  GitHubAPI,
+  GitHubPullRequestLiveSummary,
+  GitHubPullRequestRef,
+  GitHubPullRequestStatus,
+  RuntimeAPIs,
+} from '@/lib/api/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -17,6 +23,9 @@ const PR_STATUS_REFRESH_CONCURRENCY = 4;
 const PR_PERSIST_TTL_MS = 12 * 60 * 60_000;
 const PR_STATUS_STORAGE_KEY = 'openchamber.github-pr-status';
 const PR_MAX_ENTRIES = 200;
+// Refs per live-summary request; the server splits them into GraphQL
+// documents of 25.
+const PR_LIVE_SUMMARY_BATCH_SIZE = 100;
 
 const isTerminalPrState = (state: string | null | undefined): boolean => state === 'closed' || state === 'merged';
 const isPendingChecks = (status: GitHubPullRequestStatus | null): boolean => {
@@ -97,6 +106,7 @@ type GitHubPrStatusStore = {
   stopWatching: (key: string) => void;
   refresh: (key: string, options?: RefreshOptions) => Promise<void>;
   refreshTargets: (targets: PrTrackingTarget[], options?: RefreshOptions) => Promise<void>;
+  syncOpenPrSummaries: (keys: string[], github: GitHubAPI, options: { minAgeMs: number }) => Promise<void>;
   updateStatus: (key: string, updater: (prev: GitHubPullRequestStatus | null) => GitHubPullRequestStatus | null) => void;
   resetForRuntimeSwitch: () => void;
 };
@@ -105,6 +115,10 @@ const timers = new Map<string, number>();
 const bootstrapTimers = new Map<string, number[]>();
 const inFlightBySignature = new Map<string, symbol>();
 const lastRefreshBySignature = new Map<string, number>();
+// When each open PR last went out in a live-summary batch, keyed by runtime
+// and PR. Failed batches count too, so an outage waits for the next cadence.
+const liveSummaryCheckedAt = new Map<string, number>();
+let liveSummarySyncInFlight = false;
 let prRuntimeGeneration = 0;
 
 // Global concurrency gate for PR-status network requests.
@@ -385,6 +399,70 @@ const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry 
   };
 };
 
+const getLiveSummaryPrKey = (runtimeKey: string, ref: GitHubPullRequestRef): string =>
+  JSON.stringify([runtimeKey, ref.owner.toLowerCase(), ref.repo.toLowerCase(), ref.number]);
+
+// The open PR of an entry that list surfaces keep live through batched
+// summaries. Watched entries are skipped: their watcher already runs full
+// refreshes, which carry more than a summary does.
+const getLiveSummaryRef = (entry: PrStatusEntry | undefined): GitHubPullRequestRef | null => {
+  const pr = entry?.status?.pr;
+  const repo = entry?.status?.repo;
+  if (!entry || entry.watchers > 0 || !pr || pr.state !== 'open' || !repo) {
+    return null;
+  }
+  return { owner: repo.owner, repo: repo.repo, number: pr.number };
+};
+
+const sameChecks = (left: GitHubPullRequestStatus['checks'], right: GitHubPullRequestStatus['checks']): boolean => (
+  (left ?? null) === (right ?? null)
+  || Boolean(left && right
+    && left.state === right.state
+    && left.total === right.total
+    && left.success === right.success
+    && left.failure === right.failure
+    && left.pending === right.pending)
+);
+
+/** Status with the summary's live fields, or null when nothing changed. */
+const applyLiveSummary = (
+  status: GitHubPullRequestStatus,
+  summary: GitHubPullRequestLiveSummary,
+  fetchedAt: number,
+): GitHubPullRequestStatus | null => {
+  const pr = status.pr;
+  if (!pr || pr.number !== summary.number) {
+    return null;
+  }
+  const isOpen = summary.state === 'open';
+  const unchanged = pr.state === summary.state
+    && pr.draft === summary.draft
+    && pr.title === summary.title
+    && (pr.mergeable ?? null) === summary.mergeable
+    && (pr.mergeableState ?? null) === summary.mergeableState
+    && (!summary.headSha || pr.headSha === summary.headSha)
+    && sameChecks(status.checks, summary.checks);
+  if (unchanged) {
+    return null;
+  }
+  return {
+    ...status,
+    fetchedAt,
+    pr: {
+      ...pr,
+      state: summary.state,
+      draft: summary.draft,
+      title: summary.title,
+      headSha: summary.headSha ?? pr.headSha,
+      mergeable: summary.mergeable,
+      mergeableState: summary.mergeableState,
+    },
+    checks: summary.checks,
+    // Merge permission only matters while the PR is open, as in the REST route.
+    canMerge: isOpen ? status.canMerge : false,
+  };
+};
+
 const boundEntries = (entries: Record<string, PrStatusEntry>): Record<string, PrStatusEntry> => {
   const all = Object.entries(entries);
   if (all.length <= PR_MAX_ENTRIES) return entries;
@@ -414,6 +492,8 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
         bootstrapTimers.clear();
         inFlightBySignature.clear();
         lastRefreshBySignature.clear();
+        liveSummaryCheckedAt.clear();
+        liveSummarySyncInFlight = false;
         set((state) => ({
           activeRequestCount: 0,
           entries: Object.fromEntries(Object.entries(state.entries).map(([key, entry]) => [key, {
@@ -842,6 +922,89 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
         await mapWithConcurrency(keys, PR_STATUS_REFRESH_CONCURRENCY, (key) => get().refresh(key, options));
       },
 
+      syncOpenPrSummaries: async (keys, github, { minAgeMs }) => {
+        if (liveSummarySyncInFlight) {
+          return;
+        }
+        const runtimeKey = getRuntimeKey();
+        const runtimeGeneration = prRuntimeGeneration;
+        const now = Date.now();
+        const entries = get().entries;
+        // Several keys (remote variants, worktrees on one branch) can share a
+        // PR; it goes out once and its answer lands on all of them.
+        const candidates = new Map<string, { ref: GitHubPullRequestRef; keys: string[]; lastRefreshAt: number }>();
+        for (const key of keys) {
+          const entry = entries[key];
+          const ref = getLiveSummaryRef(entry);
+          if (!entry || !ref) {
+            continue;
+          }
+          const prKey = getLiveSummaryPrKey(runtimeKey, ref);
+          const candidate = candidates.get(prKey);
+          if (candidate) {
+            candidate.keys.push(key);
+            candidate.lastRefreshAt = Math.min(candidate.lastRefreshAt, entry.lastRefreshAt);
+          } else {
+            candidates.set(prKey, { ref, keys: [key], lastRefreshAt: entry.lastRefreshAt });
+          }
+        }
+        const keysByPrKey = new Map<string, string[]>();
+        const refs: GitHubPullRequestRef[] = [];
+        candidates.forEach((candidate, prKey) => {
+          const checkedAt = Math.max(liveSummaryCheckedAt.get(prKey) ?? 0, candidate.lastRefreshAt);
+          if (now - checkedAt < minAgeMs) {
+            return;
+          }
+          liveSummaryCheckedAt.set(prKey, now);
+          keysByPrKey.set(prKey, candidate.keys);
+          refs.push(candidate.ref);
+        });
+        if (refs.length === 0) {
+          return;
+        }
+
+        liveSummarySyncInFlight = true;
+        try {
+          for (let start = 0; start < refs.length; start += PR_LIVE_SUMMARY_BATCH_SIZE) {
+            const batch = refs.slice(start, start + PR_LIVE_SUMMARY_BATCH_SIZE);
+            await acquirePrStatusNetworkSlot();
+            const result = await runBackgroundNetworkTask(() => github.prSummaries(batch))
+              .finally(releasePrStatusNetworkSlot);
+            if (runtimeGeneration !== prRuntimeGeneration || !result.connected) {
+              return;
+            }
+            const { fetchedAt, summaries } = result;
+            set((prev) => {
+              let nextEntries: Record<string, PrStatusEntry> | null = null;
+              for (const summary of summaries) {
+                for (const key of keysByPrKey.get(getLiveSummaryPrKey(runtimeKey, summary)) ?? []) {
+                  const current = (nextEntries ?? prev.entries)[key];
+                  // A watcher may have started, or a full refresh landed,
+                  // while this batch was in flight; both are authoritative.
+                  if (!current?.status || !getLiveSummaryRef(current)
+                    || (current.status.fetchedAt ?? 0) > fetchedAt) {
+                    continue;
+                  }
+                  const status = applyLiveSummary(current.status, summary, fetchedAt);
+                  if (!status) {
+                    continue;
+                  }
+                  nextEntries = nextEntries ?? { ...prev.entries };
+                  nextEntries[key] = { ...current, status, lastRefreshAt: Date.now() };
+                }
+              }
+              return nextEntries ? { entries: nextEntries } : prev;
+            });
+          }
+        } catch {
+          // Keep the last known status; the next cadence retries.
+        } finally {
+          if (runtimeGeneration === prRuntimeGeneration) {
+            liveSummarySyncInFlight = false;
+          }
+        }
+      },
+
       updateStatus: (key, updater) => {
         set((state) => {
           const current = state.entries[key] ?? createEntry();
@@ -923,7 +1086,10 @@ const derivePrVisualState = (status: GitHubPullRequestStatus | null): string | n
   if (pr.draft) return 'draft';
   const checksFailed = status?.checks?.state === 'failure';
   const ms = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
-  const notMergeable = pr.mergeable === false || ms === 'blocked' || ms === 'dirty';
+  // `blocked` merge state alone usually means a required review is missing:
+  // nothing to fix, so it keeps the open colour. Orange is for failed checks
+  // and conflicts.
+  const notMergeable = pr.mergeable === false || ms === 'dirty';
   if (checksFailed || notMergeable) return 'blocked';
   return 'open';
 };

@@ -707,6 +707,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.status.open': 'PR 已開啟',
   'sessions.sidebar.group.pr.status.mergeConflicts': '存在合併衝突',
   'sessions.sidebar.group.pr.status.mergeBlocked': '合併被阻止',
+  'sessions.sidebar.group.pr.status.checksFailing': '檢查未通過',
   'sessions.sidebar.group.pr.status.draft': '草稿 PR',
   'sessions.sidebar.group.pr.status.closed': '已關閉',
   'sessions.sidebar.group.empty.noArchivedSessions': '暫無已封存會話。',

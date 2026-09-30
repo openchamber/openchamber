@@ -694,6 +694,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.status.open': 'PR 已打开',
   'sessions.sidebar.group.pr.status.mergeConflicts': '存在合并冲突',
   'sessions.sidebar.group.pr.status.mergeBlocked': '合并被阻止',
+  'sessions.sidebar.group.pr.status.checksFailing': '检查未通过',
   'sessions.sidebar.group.pr.status.draft': '草稿 PR',
   'sessions.sidebar.group.pr.status.closed': '已关闭',
   'sessions.sidebar.group.empty.noArchivedSessions': '暂无已归档会话。',
