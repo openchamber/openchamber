@@ -229,3 +229,26 @@
 .wide-chat-layout .chat-message-column {
   width: min(100%, 64rem);
 }
+
+/* The assistant message body clips its overflow. In the wide layout that
+   clip box is widened to the visible chat width (negative margin, equal
+   padding), so a breakout block below is not cut while text stays put. */
+.wide-chat-layout .chat-message-column .message-content-text {
+  margin-inline: calc((100% - var(--chat-scroll-width, 100%)) / 2);
+  padding-inline: calc((var(--chat-scroll-width, 100%) - 100%) / 2);
+}
+
+/* Wide layout keeps prose at the column width, but a top-level table or code
+   block whose content is wider than the column grows past it, centred on the
+   column, up to the visible chat width (`--chat-scroll-width`, published by
+   ChatContainer). Anything that fits the column keeps its usual box: the
+   minimum width is the column itself. Unlayered so it outranks the table
+   wrapper's `w-fit max-w-full` utilities. */
+.wide-chat-layout .chat-message-column :is([data-markdown-content], [data-markdown-content] > [data-md-block]) > :is([data-component="markdown-code"], [data-markdown="table-wrapper"]) {
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  min-width: 100%;
+  max-width: calc(var(--chat-scroll-width, 100%) - 2 * clamp(1rem, 2.5vw, 1.5rem));
+}
