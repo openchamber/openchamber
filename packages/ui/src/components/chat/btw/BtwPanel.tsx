@@ -395,6 +395,7 @@ const BtwExpandedSheet: React.FC<{
             <ChatSurfaceProvider mode="peek">
                 <BtwMessages
                     data={data}
+                    directory={sessionRef.directory}
                     bodyRef={bodyRef}
                     contentRef={contentRef}
                     onBodyScroll={handleBodyScroll}
@@ -407,11 +408,12 @@ const BtwExpandedSheet: React.FC<{
 
 const BtwMessages: React.FC<{
     data: BtwSessionData;
+    directory: string;
     bodyRef: React.RefObject<HTMLDivElement | null>;
     contentRef: React.RefObject<HTMLDivElement | null>;
     onBodyScroll: (event: React.UIEvent<HTMLDivElement>) => void;
     maxHeight?: number;
-}> = ({ data, bodyRef, contentRef, onBodyScroll, maxHeight }) => {
+}> = ({ data, directory, bodyRef, contentRef, onBodyScroll, maxHeight }) => {
     const { t } = useI18n();
 
     if (data.isEmpty) {
@@ -452,7 +454,7 @@ const BtwMessages: React.FC<{
                             <FormCard key={form.id} form={form} />
                         ))}
                         {data.sessionPermissions.map((permission) => (
-                            <PermissionCard key={permission.id} permission={permission} />
+                            <PermissionCard key={permission.id} permission={permission} directory={directory} />
                         ))}
                     </div>
                 ) : null}

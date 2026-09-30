@@ -162,6 +162,22 @@ per session, permissions the safety net is holding). Nothing is persisted; a
 failed read keeps what was known and records `loadError` instead of reading as
 "routing is off". See `packages/web/server/lib/routing/DOCUMENTATION.md`.
 
+`usePermissionReviewStore.ts` owns permission presentation, shared by the dock,
+BTW cards, tray and response guards. An unknown request starts hidden and triggers
+a deduplicated, bounded disposition lookup. Explicit manual outcomes expose
+controls; reviewing and answered outcomes stay hidden within their original
+deadline. Missing snapshot IDs remain unknown. Lookup failure, unsupported server,
+disconnect and expiry expose controls with sticky per-request fallback. Reconnect
+cannot hide an exposed request. Runtime reset invalidates pending reads and clears
+ownership. Raw pending requests still block sending and are removed only by sync.
+VS Code bypasses coordination. See the backend permission-auto-accept documentation
+for endpoint, retention, timeout and mixed-version contracts.
+
+Cards receive the owning session directory explicitly, including cold BTW panels.
+Unscoped consumers do not register request IDs or query the host's default
+directory. Isolated-space cards bypass host lookup. Showing fallback controls
+does not cancel server classification or transfer reply ownership to the client.
+
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
 On web, desktop, and mobile the server delivers the queue independently of the
 UI. The store projects authoritative snapshots and revisioned session updates.

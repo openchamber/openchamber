@@ -1852,12 +1852,11 @@ export function handleEvent(
       )
       return
     }
-    if (!isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)) {
-      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      return
+    // Server-side auto-accept can leave a request pending (for example when
+    // the safety net cannot classify it). Suppress the toast, not the request.
+    if (isVSCodeRuntime() || !isAnsweredWithoutUser(permission.sessionID)) {
+      notifyPermissionAsked(permission, resolvedDirectory)
     }
-
-    notifyPermissionAsked(permission, resolvedDirectory)
   }
 
   if (payload.type === "permission.replied") {

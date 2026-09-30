@@ -3,6 +3,7 @@ import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import { usePermissionReviewStore } from '@/stores/usePermissionReviewStore';
 
 // Newest pending card owns the keyboard; older cards wait their turn.
 const activePermissionCardIds: string[] = [];
@@ -32,6 +33,7 @@ export const usePermissionResponse = (
   const respondToPermission = sessionActions.respondToPermission;
 
   const respond = React.useCallback(async (response: PermissionReply) => {
+    if (!usePermissionReviewStore.getState().visible(permission.id)) return;
     setIsResponding(true);
     try {
       await respondToPermission(permission.sessionID, permission.id, response);

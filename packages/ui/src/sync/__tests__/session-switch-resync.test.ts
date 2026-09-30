@@ -9,6 +9,7 @@ let pendingFormsResponse: FormRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
 let pendingFormsShouldThrow = false
 let pendingPermissionsShouldThrow = false
+let permissionMode: "ask" | "auto" | "safety" = "ask"
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
@@ -33,7 +34,7 @@ const autoAcceptSnapshots: Array<{ snapshot: { modes: Record<string, string>; re
 mock.module("@/stores/permissionStore", () => ({
   usePermissionStore: {
     getState: () => ({
-      getSessionMode: () => "ask",
+      getSessionMode: () => permissionMode,
       applySnapshot: (snapshot: { modes: Record<string, string>; revision?: number }, runtimeKey?: string) => {
         autoAcceptSnapshots.push({ snapshot, runtimeKey })
       },
@@ -84,6 +85,8 @@ import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { useRoutingStore } from "@/stores/useRoutingStore"
+import { resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from "../global-blocking-requests"
 const {
   createEventRoutingIndex,
   handleEvent,
@@ -359,6 +362,85 @@ describe("resyncBlockingRequestsForDirectory", () => {
       expect(refreshes).toHaveLength(3)
     } finally {
       unsubscribe()
+      childStores.disposeAll()
+    }
+  })
+})
+
+describe("server-answered permission events", () => {
+  for (const mode of ["auto", "safety"] as const) {
+    const scenario = mode === "safety" ? "classifier failure without a hold marker" : "auto mode awaiting a reply"
+    test(`${scenario} keeps pending requests without announcing them and removes them on reply`, () => {
+      const childStores = new ChildStoreManager()
+      const store = childStores.ensureChild("/repo", { bootstrap: false })
+      const routingIndex = createEventRoutingIndex()
+      const permission = buildPermission({ id: `perm_${mode}` })
+      const send = (event: SyncEvent) => handleEvent("/repo", event, childStores, routingIndex, getRuntimeKey())
+      permissionMode = mode
+      useRoutingStore.setState({ available: true, jevAvailable: true })
+      infoToasts.length = 0
+      try {
+        send({ type: "permission.asked", properties: permission })
+        expect(store.getState().permission.ses_a).toEqual([permission])
+        expect(useRoutingStore.getState().held[permission.id]).toBeUndefined()
+        expect(infoToasts).toEqual([])
+        send({ type: "permission.asked", properties: permission })
+        expect(store.getState().permission.ses_a).toEqual([permission])
+        send({ type: "permission.replied", properties: { sessionID: "ses_a", requestID: permission.id } })
+        expect(store.getState().permission.ses_a ?? []).toEqual([])
+        expect(infoToasts).toEqual([])
+      } finally {
+        permissionMode = "ask"
+        useRoutingStore.getState().resetForRuntime()
+        resetGlobalBlockingRequests()
+        childStores.disposeAll()
+      }
+    })
+  }
+
+  for (const order of ["before", "after"] as const) {
+    test(`safety hold ${order} permission.asked preserves an actionable request`, () => {
+      const childStores = new ChildStoreManager()
+      const store = childStores.ensureChild("/repo", { bootstrap: false })
+      const permission = buildPermission({ id: `perm_hold_${order}` })
+      permissionMode = "safety"
+      useRoutingStore.setState({ available: true, jevAvailable: true })
+      const hold = () => useRoutingStore.getState().holdPermission({ permissionId: permission.id, score: 90, kind: "deletes_data" })
+      try {
+        if (order === "before") hold()
+        handleEvent("/repo", { type: "permission.asked", properties: permission }, childStores, createEventRoutingIndex(), getRuntimeKey())
+        if (order === "after") hold()
+        expect(store.getState().permission.ses_a).toEqual([permission])
+        expect(useRoutingStore.getState().held[permission.id]).toBeDefined()
+      } finally {
+        permissionMode = "ask"
+        useRoutingStore.getState().resetForRuntime()
+        resetGlobalBlockingRequests()
+        childStores.disposeAll()
+      }
+    })
+  }
+
+  test("safety mode keeps unopened-directory requests in the global index without bootstrapping or announcing them", () => {
+    const childStores = new ChildStoreManager()
+    const permission = buildPermission({ id: "perm_unopened" })
+    const routingIndex = createEventRoutingIndex()
+    permissionMode = "safety"
+    useRoutingStore.setState({ available: true, jevAvailable: true })
+    infoToasts.length = 0
+    try {
+      handleEvent("/repo", { type: "permission.asked", properties: permission }, childStores, routingIndex, getRuntimeKey())
+      expect(useGlobalBlockingRequestsStore.getState().bySession.get("ses_a")?.permissions).toEqual([{
+        id: permission.id, sessionID: permission.sessionID, action: permission.action, resources: permission.resources,
+      }])
+      expect(childStores.children.size).toBe(0)
+      expect(infoToasts).toEqual([])
+      handleEvent("/repo", { type: "permission.replied", properties: { sessionID: "ses_a", requestID: permission.id } }, childStores, routingIndex, getRuntimeKey())
+      expect(useGlobalBlockingRequestsStore.getState().bySession.has("ses_a")).toBe(false)
+    } finally {
+      permissionMode = "ask"
+      useRoutingStore.getState().resetForRuntime()
+      resetGlobalBlockingRequests()
       childStores.disposeAll()
     }
   })

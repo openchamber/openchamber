@@ -89,6 +89,11 @@ Auto. There is no env gate — the feature shipped dark behind
 - Held permission decisions are cached for 15 minutes per request id so
   reconnect reconciliation in `permission-auto-accept` does not re-ask Jev;
   `permission.replied` forgets them.
+- `evaluatePermission` accepts an optional third `AbortSignal` from the
+  permission operation. Cancellation stops classifier HTTP and suppresses late
+  held/skipped events and cache writes, including when a classifier ignores the
+  signal. Access resolution and classifier completion both check cancellation.
+  Jev's own timeout still reports a skipped check; caller cancellation does not.
 - The send rewrite reads a body only in a session already marked as routed,
   which the URL alone answers; every other send, and anything that is not JSON,
   reaches the proxy as the stream it arrived as.

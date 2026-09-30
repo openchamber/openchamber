@@ -1026,7 +1026,8 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
-  evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
+  broadcastPermissionReviewEvent: broadcastOpenChamberUiEvent,
+  evaluatePermission: (permission, directory, signal) => routingRuntime.evaluatePermission(permission, directory, signal),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
   resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
 });

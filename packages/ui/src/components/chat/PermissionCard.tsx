@@ -3,6 +3,7 @@ import { cn, formatPathForDisplay } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import { useVisiblePermissions } from '@/stores/usePermissionReviewStore';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
@@ -49,6 +50,7 @@ const PERMISSION_JSON_CUSTOM_STYLE: React.CSSProperties = {
 
 interface PermissionCardProps {
   permission: PermissionRequest;
+  directory: string;
   onResponse?: (response: 'once' | 'always' | 'reject') => void;
 }
 
@@ -451,7 +453,12 @@ export const PermissionActions: React.FC<{
 };
 
 /** The inline card the BTW sheet shows for its child session's requests. */
-export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onResponse }) => {
+export const PermissionCard: React.FC<PermissionCardProps> = (props) => {
+  const visible = useVisiblePermissions([props.permission], props.directory);
+  return visible.length ? <PendingPermissionCard {...props} /> : null;
+};
+
+const PendingPermissionCard: React.FC<PermissionCardProps> = ({ permission, onResponse }) => {
   const { t } = useI18n();
   const { isResponding, hasResponded, respond } = usePermissionResponse(permission, onResponse);
   const isFromSubagent = usePermissionFromSubagent(permission);

@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { PERMISSION_MODES, isAutoAnsweringMode, isPermissionMode, toPermissionMode } from './modes.js';
 
 const SETTINGS_KEY = 'permissionAutoAccept';
 const DEFAULT_MODE_SETTINGS_KEY = 'permissionDefaultMode';
 const RETRY_DELAYS_MS = [0, 250, 1000];
 const REQUEST_TIMEOUT_MS = 5000;
+const REVIEW_TIMEOUT_MS = 25000;
 const SESSION_CACHE_LIMIT = 10000;
 const OUTCOME_CACHE_LIMIT = 1000;
 
@@ -36,8 +38,6 @@ const normalizePolicy = (value, legacyEnabledMode = 'auto') => {
   return { policy: { sessions, revision: stored.revision }, hadLegacy: hasLegacyEntries(stored) };
 };
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export function createPermissionAutoAcceptRuntime({
   globalEventHub,
   buildOpenCodeUrl,
@@ -45,6 +45,7 @@ export function createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  broadcastPermissionReviewEvent,
   // The routing safety net, asked once per request in a `safety` session.
   // `accept` replies; anything else leaves the request for the user. Absent
   // means `safety` sessions wait for the user on every request.
@@ -56,7 +57,15 @@ export function createPermissionAutoAcceptRuntime({
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
   requestTimeoutMs = REQUEST_TIMEOUT_MS,
+  reviewTimeoutMs = REVIEW_TIMEOUT_MS,
+  now = () => performance.now(),
 }) {
+  if (!z.function().safeParse(broadcastPermissionReviewEvent).success) {
+    throw new TypeError('broadcastPermissionReviewEvent is required');
+  }
+  if (!Number.isFinite(reviewTimeoutMs) || reviewTimeoutMs <= 0 || reviewTimeoutMs > REVIEW_TIMEOUT_MS) {
+    throw new TypeError('reviewTimeoutMs must be positive and at most 25000');
+  }
   let policy = normalizePolicy().policy;
   let loaded = false;
   let loadPromise = null;
@@ -68,13 +77,79 @@ export function createPermissionAutoAcceptRuntime({
   // request the safety net held (the user must hear about it) from one it
   // accepted.
   const outcomes = new Map();
+  const reviews = new Map();
+  const manual = new Map();
+  let reviewRevision = 0;
+  const instanceId = randomUUID();
+  let stopped = false;
+
+  const reviewSnapshot = () => {
+    const at = now();
+    const permissions = [];
+    for (const [permissionId, review] of reviews) {
+      const remainingMs = Math.min(reviewTimeoutMs, review.deadline - at);
+      if (remainingMs > 0) permissions.push({ permissionId, remainingMs, phase: review.phase });
+    }
+    for (const permissionId of manual.keys()) permissions.push({ permissionId, remainingMs: 0, phase: 'manual' });
+    return { dispositionVersion: 1, instanceId, revision: reviewRevision, permissions };
+  };
+
+  const publishReview = () => {
+    reviewRevision += 1;
+    broadcastPermissionReviewEvent({ type: 'openchamber:permission-review.updated', properties: reviewSnapshot() });
+  };
+
+  const endReview = (permissionId) => {
+    const review = reviews.get(permissionId);
+    if (!review) return;
+    clearTimeout(review.timer);
+    reviews.delete(permissionId);
+    manual.set(permissionId, true);
+    if (manual.size > OUTCOME_CACHE_LIMIT) manual.delete(manual.keys().next().value);
+    publishReview();
+  };
+
+  const beginReview = (permissionId, operation) => {
+    manual.delete(permissionId);
+    clearTimeout(reviews.get(permissionId)?.timer);
+    operation.deadline = now() + reviewTimeoutMs;
+    const timer = setTimeout(() => {
+      if (reviews.get(permissionId)?.phase !== 'answered') {
+        console.warn('[permission-auto-accept] review lease expired', { permissionId });
+        operation.cancel();
+      }
+      if (reviews.get(permissionId)?.phase === 'answered') {
+        reviews.delete(permissionId);
+        publishReview();
+      } else endReview(permissionId);
+    }, reviewTimeoutMs);
+    timer.unref?.();
+    reviews.set(permissionId, { deadline: operation.deadline, timer, phase: 'admitting' });
+    publishReview();
+  };
+
+  const setReviewPhase = (permissionId, phase) => {
+    const review = reviews.get(permissionId);
+    if (!review || review.phase === phase) return;
+    review.phase = phase;
+    publishReview();
+  };
+
+  const recordAnswered = (permissionId) => {
+    manual.delete(permissionId);
+    if (reviews.has(permissionId)) return setReviewPhase(permissionId, 'answered');
+    const timer = setTimeout(() => { reviews.delete(permissionId); publishReview(); }, reviewTimeoutMs);
+    timer.unref?.();
+    reviews.set(permissionId, { deadline: now() + reviewTimeoutMs, timer, phase: 'answered' });
+    publishReview();
+  };
 
   // `sessions` keeps the on/off shape clients from before the modes read;
   // `modes` is the policy itself.
   const snapshot = () => {
     const legacySessions = {};
     for (const [sessionId, mode] of Object.entries(policy.sessions)) legacySessions[sessionId] = isAutoAnsweringMode(mode);
-    return { sessions: legacySessions, modes: { ...policy.sessions }, revision: policy.revision };
+    return { sessions: legacySessions, modes: { ...policy.sessions }, revision: policy.revision, review: reviewSnapshot() };
   };
 
   const readPolicy = async () => {
@@ -127,13 +202,24 @@ export function createPermissionAutoAcceptRuntime({
     const next = toPermissionMode(mode);
     if (!next) throw new TypeError('mode must be ask, safety or auto');
     await load();
-    const result = await persistUpdate((current) => ({
+    await persistUpdate((current) => ({
       ...current,
       sessions: { ...current.sessions, [sessionId.trim()]: next },
       revision: current.revision + 1,
     }));
-    if (isAutoAnsweringMode(next)) await reconcilePending({ directories: [directory] });
-    return result;
+    if (next === 'ask') {
+      await Promise.all(Array.from(inFlight.values(), async (operation) => {
+        let revision;
+        let currentMode;
+        do {
+          revision = policy.revision;
+          currentMode = await resolveSessionMode(operation.sessionId, operation.directory);
+        } while (revision !== policy.revision);
+        if (currentMode === 'ask') operation.cancel();
+      }));
+    }
+    if (isAutoAnsweringMode(next)) await reconcilePending({ directories: [directory], retry: true });
+    return snapshot();
   };
 
   /**
@@ -232,21 +318,48 @@ export function createPermissionAutoAcceptRuntime({
   const isSessionAutoAccepting = async (sessionId, directory) => isAutoAnsweringMode(await resolveSessionMode(sessionId, directory));
 
   /** `replied`, `held` (left for the user by the safety net), or `ignored` (an `ask` session). */
-  const replyOnce = async (permission, directory) => {
+  const replyOnce = async (permission, directory, operation) => {
+    operation.replyAttempted = false;
     if (!permission?.id || !permission?.sessionID) return 'ignored';
     const mode = await resolveSessionMode(permission.sessionID, directory);
+    if (operation.cancelled) return 'held';
     if (mode === 'ask') return 'ignored';
     if (mode === 'safety') {
-      const verdict = evaluatePermission ? await evaluatePermission(permission, directory) : null;
-      if (verdict?.action !== 'accept') return 'held';
+      if (!evaluatePermission) return 'held';
+      if (!operation.accepted) {
+        setReviewPhase(permission.id, 'reviewing');
+        // Classifier errors are not reply errors, especially a provider 404.
+        const verdict = await evaluatePermission(permission, directory, operation.controller.signal);
+        if (verdict?.action !== 'accept') return 'held';
+        operation.accepted = true;
+      }
     }
+    // Classification and lineage lookup both yield. Re-read committed policy,
+    // then check the lease synchronously before sending, even if its timer has
+    // not run yet. A policy write during lookup requires another read.
+    if (operation.cancelled) return 'held';
+    let revision;
+    let currentMode;
+    do {
+      revision = policy.revision;
+      currentMode = await resolveSessionMode(permission.sessionID, directory);
+    } while (revision !== policy.revision);
+    if (currentMode === 'ask' || (currentMode === 'safety' && !operation.accepted)
+      || (operation.deadline !== null && now() >= operation.deadline)) operation.cancel();
+    if (operation.cancelled) return 'held';
     // v2 scopes a permission reply under its session.
-    await request(`/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`, {
-      directory,
-      method: 'POST',
-      // OpenCode 2.0.8 renamed the reply body field `reply` to `decision`.
-      body: { decision: 'once' },
-    });
+    operation.replyAttempted = true;
+    try {
+      await request(`/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`, {
+        directory,
+        method: 'POST',
+        // OpenCode 2.0.8 renamed the reply body field `reply` to `decision`.
+        body: { decision: 'once' },
+      });
+    } catch (error) {
+      if (error?.status === 404) return 'replied';
+      throw error;
+    }
     return 'replied';
   };
 
@@ -257,25 +370,78 @@ export function createPermissionAutoAcceptRuntime({
   };
 
   /** Resolves to whether the request was handled here (replied to, or deliberately held). */
-  const processPermission = (permission, directory) => {
-    if (!permission?.id) return Promise.resolve(false);
+  const processPermission = (permission, directory, { retry = false } = {}) => {
+    if (stopped || !permission?.id || !permission?.sessionID) return Promise.resolve(false);
     const key = permission.id;
     const existing = inFlight.get(key);
-    if (existing) return existing;
-    const outcome = (async () => {
+    if (existing) return existing.task;
+    if (reviews.get(key)?.phase === 'answered') return Promise.resolve(true);
+    if (!retry && outcomes.has(key)) return outcomes.get(key).then((result) => result !== 'ignored' && result !== 'failed');
+    let resolveCancellation;
+    const cancellation = new Promise((resolve) => { resolveCancellation = resolve; });
+    const operation = {
+      cancelled: false,
+      accepted: false,
+      replyAttempted: false,
+      controller: new AbortController(),
+      deadline: null,
+      sessionId: permission.sessionID,
+      directory,
+      cancel: (result = 'held') => {
+        operation.cancelled = true;
+        operation.controller.abort();
+        if (result === 'replied') setReviewPhase(key, 'answered');
+        else endReview(key);
+        resolveCancellation(result);
+      },
+    };
+    // Admission is synchronous with pending delivery, before policy lookup yields.
+    // Its deadline covers every phase and is never renewed by retries or reads.
+    beginReview(key, operation);
+    const processing = (async () => {
       for (const delay of retryDelaysMs) {
-        if (delay > 0) await wait(delay);
+        if (delay > 0) {
+          let timer;
+          try {
+            await Promise.race([new Promise((resolve) => { timer = setTimeout(resolve, delay); }), cancellation]);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        if (operation.cancelled) return 'held';
         try {
-          return await replyOnce(permission, directory);
+          return await replyOnce(permission, directory, operation);
         } catch (error) {
-          if (error?.status === 404) return 'replied';
+          if (operation.cancelled) return 'held';
+          const status = z.number().int().min(100).max(599).safeParse(error?.status);
+          // Provider/fetch error text may contain credentials or request data.
+          // Report trusted HTTP status and standard failure categories instead.
+          const message = status.success ? `Upstream returned HTTP ${status.data}`
+            : error?.name === 'TimeoutError' ? 'Upstream request timed out'
+              : error?.name === 'AbortError' ? 'Upstream request aborted'
+                : 'Upstream operation failed; untrusted error text withheld';
+          console.warn('[permission-auto-accept] permission processing failed', {
+            permissionId: key,
+            sessionId: permission.sessionID,
+            status: status.success ? status.data : null,
+            message,
+          });
+          // A failed evaluation exposes the request immediately. Only an
+          // accepted verdict or auto mode may retry the reply.
+          if (!operation.replyAttempted) return 'failed';
         }
       }
       return 'failed';
     })();
+    const outcome = Promise.race([processing, cancellation]).then((result) => {
+      if (result === 'replied') setReviewPhase(key, 'answered');
+      else endReview(key);
+      return result;
+    });
     rememberOutcome(key, outcome);
     const task = outcome.then((result) => result !== 'ignored' && result !== 'failed').finally(() => inFlight.delete(key));
-    inFlight.set(key, task);
+    operation.task = task;
+    inFlight.set(key, operation);
     return task;
   };
 
@@ -291,7 +457,7 @@ export function createPermissionAutoAcceptRuntime({
     return outcome ? (await outcome) === 'replied' : false;
   };
 
-  async function reconcilePending({ directories = [] } = {}) {
+  async function reconcilePending({ directories = [], retry = false } = {}) {
     const normalizedDirectories = Array.from(new Set(
       directories.filter((directory) => typeof directory === 'string' && directory.trim()).map((directory) => directory.trim()),
     ));
@@ -317,7 +483,7 @@ export function createPermissionAutoAcceptRuntime({
         }
       }
       await Promise.all(Array.from(pendingById.values()).map(({ permission, directory }) =>
-        processPermission(permission, directory)));
+        processPermission(permission, directory, { retry })));
     })().finally(() => { reconcilePromises.delete(key); });
     reconcilePromises.set(key, task);
     return task;
@@ -343,16 +509,21 @@ export function createPermissionAutoAcceptRuntime({
         void processPermission(payload.properties, directory ?? payload.properties?.directory);
         continue;
       }
-      // The routing safety net holds a request instead of replying; once the
-      // user answers it, stop tracking it.
+      // The authoritative event can beat our own POST response. Settle as
+      // replied so notifications do not mistake that success for a hold.
       if (payload.type === 'permission.replied') {
         const permissionId = payload.properties?.requestID;
-        if (typeof permissionId === 'string' && permissionId) onPermissionReplied?.(permissionId);
+        if (typeof permissionId === 'string' && permissionId) {
+          inFlight.get(permissionId)?.cancel('replied');
+          recordAnswered(permissionId);
+          onPermissionReplied?.(permissionId);
+        }
       }
     }
   };
 
   const start = () => {
+    stopped = false;
     const unsubscribeEvent = globalEventHub.subscribeEvent(processEvent);
     const unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
       if (status?.type === 'connect') void reconcilePending();
@@ -361,12 +532,39 @@ export function createPermissionAutoAcceptRuntime({
       console.warn('[permission-auto-accept] failed to load policy:', error?.message ?? error);
     });
     return () => {
+      stopped = true;
+      for (const operation of inFlight.values()) operation.cancel();
+      for (const permissionId of reviews.keys()) endReview(permissionId);
       unsubscribeEvent();
       unsubscribeStatus();
     };
   };
 
   return {
+    async dispositions(requests) {
+      await Promise.all(requests.map(async ({ id, sessionID, directory }) => {
+        if (reviews.has(id) || manual.has(id)) return;
+        let permission;
+        try {
+          const response = await request(`/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(id)}`, { directory });
+          permission = response?.data ?? response;
+          if (permission?.id !== id || permission?.sessionID !== sessionID) throw new Error('Invalid pending permission response');
+        } catch (error) {
+          if (error?.status === 404) { recordAnswered(id); return; }
+          throw error;
+        }
+        // A reply or classification may have completed during the upstream read.
+        if (reviews.has(id) || manual.has(id)) return;
+        const mode = await resolveSessionMode(sessionID, directory);
+        if (reviews.has(id) || manual.has(id)) return;
+        if (mode === 'ask' || (mode === 'safety' && !evaluatePermission)) {
+          manual.set(id, true);
+          if (manual.size > OUTCOME_CACHE_LIMIT) manual.delete(manual.keys().next().value);
+          publishReview();
+        } else void processPermission(permission, directory);
+      }));
+      return reviewSnapshot();
+    },
     snapshot,
     load,
     setSessionPolicy,
@@ -380,6 +578,18 @@ export function createPermissionAutoAcceptRuntime({
 }
 
 export function registerPermissionAutoAcceptRoutes(app, runtime) {
+  app.post('/api/permission-auto-accept/dispositions', async (req, res) => {
+    const parsed = z.object({ requests: z.array(z.object({
+      id: z.string().min(1), sessionID: z.string().min(1), directory: z.string().optional(),
+    })).max(100) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid disposition request' });
+    try {
+      res.json(await runtime.dispositions(parsed.data.requests));
+    } catch {
+      console.warn('[permission-auto-accept] disposition lookup failed');
+      res.status(503).json({ error: 'Permission disposition lookup failed' });
+    }
+  });
   app.get('/api/permission-auto-accept', async (_req, res) => {
     try {
       res.json(await runtime.load());

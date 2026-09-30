@@ -23,8 +23,8 @@ export const buildRoutingRequest = ({ categories, history, request }) => {
 export const buildPermissionRequest = (permission) => ({
   state: {
     permission: {
-      type: permission.permission,
-      patterns: permission.patterns,
+      type: permission.action,
+      patterns: permission.resources,
       metadata: permission.metadata,
     },
   },
@@ -66,10 +66,13 @@ const responseSchema = z.object({ answers: z.record(z.string(), z.unknown()) });
 export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS } = {}) => ({
   /**
    * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
-   * throws with `status` on an HTTP error and `code: 'timeout'` on abort.
+   * Throws with `status` on an HTTP error, `code: 'timeout'` on its own
+   * timeout, or the caller's abort reason on cancellation.
    */
-  ask: async (request, endpoint) => {
+  ask: async (request, endpoint, signal) => {
+    signal?.throwIfAborted();
     const abort = new AbortController();
+    const requestSignal = signal ? AbortSignal.any([abort.signal, signal]) : abort.signal;
     const timer = setTimeout(() => abort.abort(), timeoutMs);
     const started = Date.now();
     try {
@@ -77,9 +80,10 @@ export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS 
         method: 'POST',
         headers: { ...endpoint.headers, 'content-type': 'application/json' },
         body: JSON.stringify({ ...request, model: endpoint.model }),
-        signal: abort.signal,
+        signal: requestSignal,
       });
       const text = await response.text();
+      requestSignal.throwIfAborted();
       if (!response.ok) {
         throw Object.assign(new Error(`Jev responded ${response.status}`), { status: response.status });
       }
@@ -87,7 +91,8 @@ export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS 
       if (!body.success) throw new Error('Jev response has no answers');
       return { answers: body.data.answers, ms: Date.now() - started };
     } catch (error) {
-      if (error?.name === 'AbortError') throw Object.assign(new Error(`Jev timed out after ${timeoutMs}ms`), { code: 'timeout' });
+      signal?.throwIfAborted();
+      if (abort.signal.aborted) throw Object.assign(new Error(`Jev timed out after ${timeoutMs}ms`), { code: 'timeout' });
       throw error;
     } finally {
       clearTimeout(timer);

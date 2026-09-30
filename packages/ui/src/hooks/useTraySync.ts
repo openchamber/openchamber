@@ -14,6 +14,7 @@ import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync
 import { useNotificationStore } from '@/sync/notification-store';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { respondToPermission } from '@/sync/session-actions';
+import { usePermissionReviewStore } from '@/stores/usePermissionReviewStore';
 import {
   useGlobalSessionsStore,
   resolveGlobalSessionDirectory,
@@ -264,6 +265,8 @@ const collectLiveData = (): LiveData => {
     for (const [sessionId, requests] of Object.entries(state.permission ?? {})) {
       for (const request of requests ?? []) {
         if (!request?.id) continue;
+        void usePermissionReviewStore.getState().ensure([{ id: request.id, sessionID: request.sessionID || sessionId, directory }]);
+        if (!usePermissionReviewStore.getState().visible(request.id)) continue;
         const sid = request.sessionID || sessionId;
         approvals.push({ kind: 'permission', id: request.id, sessionId: sid, sessionTitle: '', label: permissionLabel(request), directory });
       }
@@ -394,6 +397,8 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     const sessionTitle = titleById.get(sessionId) || '';
     for (const request of pending.permissions) {
       if (seen.has(request.id)) continue;
+      void usePermissionReviewStore.getState().ensure([{ id: request.id, sessionID: request.sessionID, directory: pending.directory }]);
+      if (!usePermissionReviewStore.getState().visible(request.id)) continue;
       seen.add(request.id);
       approvals.push({ kind: 'permission', id: request.id, sessionId, sessionTitle, label: permissionLabel(request), directory: pending.directory });
     }
@@ -515,6 +520,7 @@ export const useTraySync = (): void => {
     // each of them; the host seed covers the same startup gap for free.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
     const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
+    const unsubscribeReviews = usePermissionReviewStore.subscribe(() => scheduleFlush());
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
     const unsubscribePinnedSessions = useSessionPinnedStore.subscribe(() => scheduleFlush());
 
@@ -543,6 +549,7 @@ export const useTraySync = (): void => {
       unsubscribeGit();
       unsubscribeGlobalStatus();
       unsubscribeGlobalRequests();
+      unsubscribeReviews();
       unsubscribeSessionOrder();
       unsubscribePinnedSessions();
       unsubscribeQuota();
@@ -561,6 +568,7 @@ export const useTraySync = (): void => {
     const handle = (action: TrayAction) => {
       switch (action.type) {
         case 'respond-permission':
+          if (!usePermissionReviewStore.getState().visible(action.id)) return;
           void respondToPermission(action.sessionId, action.id, action.response).catch(() => {
             toast.error('Failed to respond to permission request');
           });

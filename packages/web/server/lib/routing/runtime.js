@@ -340,20 +340,23 @@ export function createRoutingRuntime({
    * waits quietly, the way an `ask` session's would; when Jev fails it waits
    * too, and the UI is told why (`skipped`).
    */
-  const evaluatePermission = async (permission, directory) => {
-    if (!permission?.id) return { action: 'hold' };
+  const evaluatePermission = async (permission, directory, signal) => {
+    if (!permission?.id || signal?.aborted) return { action: 'hold' };
     const cached = permissionDecisions.get(permission.id);
     if (cached && now() - cached.at < PERMISSION_DECISION_TTL_MS) return cached.result;
     const [config, access] = await Promise.all([store.readConfig(), resolveAccess()]);
+    if (signal?.aborted) return { action: 'hold' };
     if (!access.endpoint) return { action: 'hold', unavailable: true };
     let result;
     try {
-      const { answers } = await jev.ask(buildPermissionRequest(permission), access.endpoint);
+      const { answers } = await jev.ask(buildPermissionRequest(permission), access.endpoint, signal);
+      if (signal?.aborted) return { action: 'hold' };
       const verdict = decidePermission(answers, { threshold: config.safetyNet.threshold });
       result = verdict.hold
         ? { action: 'hold', score: verdict.score, kind: verdict.kind }
         : { action: 'accept', score: verdict.score, kind: verdict.kind };
     } catch (error) {
+      if (signal?.aborted) return { action: 'hold' };
       // Not remembered: reconnect reconciliation asks Jev again, and may accept.
       const skipped = errorMessage(error);
       broadcast('openchamber:routing.safety-skipped', {
@@ -361,11 +364,13 @@ export function createRoutingRuntime({
       });
       return { action: 'hold', skipped };
     }
+    if (signal?.aborted) return { action: 'hold' };
     if (result.action === 'hold') {
       broadcast('openchamber:routing.permission-held', {
         permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, score: result.score, kind: result.kind,
       });
     }
+    if (signal?.aborted) return { action: 'hold' };
     permissionDecisions.set(permission.id, { at: now(), result });
     return result;
   };

@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { PermissionRequest } from '@/types/permission';
 import { useScopedBlockingPermissions } from '@/sync/sync-context';
+import { useVisiblePermissions } from '@/stores/usePermissionReviewStore';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import {
     PermissionActions,
@@ -31,7 +32,8 @@ interface PermissionDockProps {
 }
 
 export const PermissionDock: React.FC<PermissionDockProps> = ({ sessionId, directory, hidden }) => {
-    const permissions = useScopedBlockingPermissions(sessionId, directory);
+    const pending = useScopedBlockingPermissions(sessionId, directory);
+    const permissions = useVisiblePermissions(pending, directory);
     if (hidden || permissions.length === 0) return null;
     return <PermissionDockPanel permissions={permissions} />;
 };

@@ -5,6 +5,7 @@ import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { z } from 'zod';
+import { permissionReviewSchema } from '@/stores/usePermissionReviewStore';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -138,6 +139,8 @@ const notificationPropertiesSchema = z.object({
 type OpenChamberEvent =
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   | { type: 'event-stream-ready' }
+  | { type: 'event-stream-disconnected' }
+  | { type: 'permission-review-updated'; review: z.infer<typeof permissionReviewSchema> }
   | RoutingUpdatedEvent
   | RoutingDecisionEvent
   | RoutingPermissionHeldEvent
@@ -189,6 +192,7 @@ const scheduleReconnect = () => {
 };
 
 const cleanupSource = () => {
+  const hadSource = Boolean(relayAbortController || eventSource);
   clearHeartbeatTimer();
   relayAbortController?.abort();
   relayAbortController = null;
@@ -196,6 +200,9 @@ const cleanupSource = () => {
     eventSource.close();
   }
   eventSource = null;
+  if (hadSource) {
+    for (const listener of listeners) listener({ type: 'event-stream-disconnected' });
+  }
 };
 
 const connectRelay = (canControlBrowser: boolean) => {
@@ -293,6 +300,13 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'openchamber:permission-review.updated') {
+    const parsed = permissionReviewSchema.safeParse(envelope.properties);
+    if (parsed.success) {
+      for (const listener of listeners) listener({ type: 'permission-review-updated', review: parsed.data });
+    }
+    return;
+  }
   if (envelope.type === 'openchamber:notification') {
     const parsed = notificationPropertiesSchema.safeParse(envelope.properties);
     if (parsed.success) {

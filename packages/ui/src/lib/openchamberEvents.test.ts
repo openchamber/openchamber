@@ -102,12 +102,33 @@ describe('openchamber events', () => {
       for (let i = 0; i < 20 && events.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
       expect(events).toEqual(['event-stream-ready', 'browser-control-request']);
       expect(browserRequests).toEqual([{ requestId: 'req-1', action: 'browser.open' }]);
+      streamController?.close();
+      for (let i = 0; i < 20 && events.length < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(['event-stream-ready', 'browser-control-request', 'event-stream-disconnected']);
     } finally {
       unsubscribe();
     }
     expect(requests[0].signal?.aborted).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(events).toEqual(['event-stream-ready', 'browser-control-request']);
+    expect(events).toEqual(['event-stream-ready', 'browser-control-request', 'event-stream-disconnected']);
+  });
+
+  test('native source failure emits one disconnect and ignores retired source events', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: string[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event.type));
+    const source = MockEventSource.instances[0];
+    try {
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:permission-review.updated', properties: {
+        revision: 1, permissions: [{ permissionId: 'request', remainingMs: 1000 }],
+      } }) });
+      source.onerror?.();
+      source.onerror?.();
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready' }) });
+      expect(events).toEqual(['permission-review-updated', 'event-stream-disconnected']);
+      expect(source.readyState).toBe(MockEventSource.CLOSED);
+      expect(MockEventSource.instances).toHaveLength(1);
+    } finally { unsubscribe(); }
   });
 
   test('dispatches externally created session events', async () => {

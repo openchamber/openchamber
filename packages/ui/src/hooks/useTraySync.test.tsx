@@ -7,6 +7,8 @@ import { useTraySync } from './useTraySync';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useNotificationStore } from '@/sync/notification-store';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { usePermissionReviewStore } from '@/stores/usePermissionReviewStore';
 
 const session = (id: string, parentID?: string): Session => ({
   id, parentID, projectID: 'project', directory: '/project', title: id, cost: 0,
@@ -138,5 +140,38 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     expect(counts).toEqual([]);
     expect(intervalCount).toBe(0);
     expect(listenerCount).toBe(0);
+  });
+
+  test('review changes refresh tray approvals while retaining raw requests', async () => {
+    const snapshots: Array<{ approvals: Array<{ id: string }> }> = [];
+    const previousRequests = useGlobalBlockingRequestsStore.getState();
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async () => Response.json({ dispositionVersion: 1, instanceId: 'server', revision: 1, permissions: [{ permissionId: 'permission', phase: 'reviewing', remainingMs: 10_000 }] }), previousFetch);
+    Object.assign(dom, {
+      __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
+      __OPENCHAMBER_API_BASE_URL__: 'http://localhost',
+      __OPENCHAMBER_LOCAL_ORIGIN__: 'http://localhost',
+      __OPENCHAMBER_DESKTOP__: { listen, invoke: async (command: string, args: { approvals: Array<{ id: string }> }) => {
+        if (command === 'desktop_tray_update') snapshots.push(args);
+        return null;
+      } },
+    });
+    useGlobalBlockingRequestsStore.setState({ bySession: new Map([['root', {
+      directory: '/project', forms: [], permissions: [{ id: 'permission', sessionID: 'root', action: 'read', resources: ['file'] }],
+    }]]) });
+    try {
+      await act(async () => root.render(<Harness />));
+      await flush();
+      expect(snapshots.at(-1)?.approvals).toEqual([]);
+      expect(useGlobalBlockingRequestsStore.getState().bySession.get('root')?.permissions).toHaveLength(1);
+      usePermissionReviewStore.getState().applySnapshot({ dispositionVersion: 1, instanceId: 'server', revision: 2, permissions: [{ permissionId: 'permission', phase: 'manual', remainingMs: 0 }] });
+      await flush();
+      expect(snapshots.at(-1)?.approvals.map((entry) => entry.id)).toEqual(['permission']);
+    } finally {
+      await act(async () => root.unmount());
+      usePermissionReviewStore.getState().reset();
+      useGlobalBlockingRequestsStore.setState(previousRequests);
+      globalThis.fetch = previousFetch;
+    }
   });
 });

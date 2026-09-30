@@ -1,7 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createPermissionAutoAcceptRuntime } from './runtime.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createPermissionAutoAcceptRuntime, registerPermissionAutoAcceptRoutes } from './runtime.js';
+import express from 'express';
+import { createGlobalUiEventBroadcaster } from '../event-stream/runtime.js';
+import { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode } = {}) => {
+const stops = [];
+const reviewState = (revision, permissions = []) => ({ dispositionVersion: 1, instanceId: expect.any(String), revision, permissions });
+const lease = (permissionId, phase = 'reviewing', remainingMs = expect.any(Number)) => ({ permissionId, phase, remainingMs });
+const manual = (permissionId = 'p') => lease(permissionId, 'manual', 0);
+afterEach(() => {
+  for (const stop of stops.splice(0)) stop();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode, now, reviewTimeoutMs, broadcastGlobalUiEvent = vi.fn(), broadcastPermissionReviewEvent = vi.fn() } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -19,10 +32,17 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermiss
     evaluatePermission,
     onPermissionReplied,
     resolveLegacyEnabledMode,
+    broadcastGlobalUiEvent,
+    broadcastPermissionReviewEvent,
+    now,
+    reviewTimeoutMs,
   });
-  runtime.start();
+  const stop = runtime.start();
+  stops.push(stop);
   return {
     runtime,
+    stop,
+    reviewEvents: () => broadcastPermissionReviewEvent.mock.calls.map(([event]) => event.properties),
     getSettings: () => settings,
     // The hub hands server-side subscribers already-translated events.
     emit: (payload, directory = '/project') => eventHandler({ payload, directory, translated: () => [payload] }),
@@ -51,6 +71,7 @@ describe('permission auto-accept runtime', () => {
       sessions: { root: true, manual: false },
       modes: { root: 'safety', manual: 'ask' },
       revision: 2,
+      review: reviewState(0),
     });
   });
 
@@ -215,7 +236,7 @@ describe('permission auto-accept runtime', () => {
     expect(replyPaths).toEqual(['/api/session/root/permission/root-pending/reply']);
     // OpenCode 2.x scopes the pending list by header, not by query.
     expect(fetchImpl.mock.calls.some(([, init]) => directoryHeader(init) === '/project')).toBe(true);
-    expect(await runtime.load()).toEqual({ sessions: { root: true }, modes: { root: 'auto' }, revision: 1 });
+    expect(await runtime.load()).toMatchObject({ sessions: { root: true }, modes: { root: 'auto' }, revision: 1, review: { permissions: [lease('root-pending', 'answered'), manual('other-pending')] } });
   });
 
   it('leaves a request held by the safety net unanswered and forgets it once replied', async () => {
@@ -284,5 +305,403 @@ describe('permission auto-accept runtime', () => {
     emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'manual', permission: 'bash', metadata: {} } });
     await flush();
     expect(evaluatePermission).not.toHaveBeenCalled();
+  });
+});
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+};
+
+describe('server permission disposition lookup', () => {
+  const permission = { id: 'lookup', sessionID: 'root', action: 'bash', resources: ['echo test'] };
+  const requests = [{ id: permission.id, sessionID: permission.sessionID, directory: '/project' }];
+
+  it('serves the batch disposition contract and rejects malformed identifiers over HTTP', async () => {
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'ask' } } },
+      fetchImpl: async (url) => Response.json(String(url).endsWith('/permission/lookup') ? { data: permission } : []),
+    });
+    const app = express();
+    app.use(express.json());
+    registerPermissionAutoAcceptRoutes(app, runtime);
+    const server = await new Promise((resolve) => {
+      const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    const post = (body) => fetch(`http://127.0.0.1:${server.address().port}/api/permission-auto-accept/dispositions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(2000),
+    });
+    try {
+      const response = await post({ requests });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(reviewState(1, [manual('lookup')]));
+      expect((await post({ requests: [{ id: 'lookup' }] })).status).toBe(400);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it('resolves an initially unknown Ask request without calling or waiting for Jev', async () => {
+    const evaluatePermission = vi.fn(() => new Promise(() => {}));
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'ask' } } }, evaluatePermission,
+      fetchImpl: async (url) => Response.json(String(url).endsWith('/permission/lookup') ? { data: permission } : []),
+    });
+    expect(runtime.snapshot().review.permissions).toEqual([]);
+    expect((await runtime.dispositions(requests)).permissions).toEqual([manual('lookup')]);
+    expect(evaluatePermission).not.toHaveBeenCalled();
+  });
+
+  it('returns review disposition while classification remains unresolved', async () => {
+    let finish;
+    const evaluation = new Promise((resolve) => { finish = resolve; });
+    const evaluatePermission = vi.fn(() => evaluation);
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } }, evaluatePermission,
+      fetchImpl: async (url) => Response.json(String(url).endsWith('/permission/lookup') ? { data: permission } : []),
+    });
+    const snapshot = await runtime.dispositions(requests);
+    expect(snapshot.permissions[0].permissionId).toBe('lookup');
+    expect(snapshot.permissions[0].remainingMs).toBeGreaterThan(0);
+    finish({ action: 'hold' });
+    await runtime.processPermission(permission);
+    expect((await runtime.dispositions(requests)).permissions).toEqual([manual('lookup')]);
+    expect(evaluatePermission).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['hold', 'unavailable', 'error'])('retains %s before pending and in reload snapshots', async (result) => {
+    const evaluatePermission = vi.fn(async () => {
+      if (result === 'error') throw new Error('classifier failed');
+      return { action: 'hold', skipped: result === 'unavailable' ? 'unavailable' : undefined };
+    });
+    const { runtime } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: 'safety' } } }, evaluatePermission });
+    await runtime.processPermission(permission);
+    expect((await runtime.load()).review.permissions).toEqual([manual('lookup')]);
+    expect((await runtime.dispositions(requests)).permissions).toEqual([manual('lookup')]);
+    expect(evaluatePermission).toHaveBeenCalledTimes(1);
+  });
+
+  it('distinguishes authoritative missing from a failed pending read', async () => {
+    let status = 503;
+    const { runtime } = createRuntime({ fetchImpl: async (url) => String(url).endsWith('/permission/lookup') ? new Response(null, { status }) : Response.json([]) });
+    await expect(runtime.dispositions(requests)).rejects.toThrow('503');
+    expect(runtime.snapshot().review.permissions).toEqual([]);
+    status = 404;
+    expect((await runtime.dispositions(requests)).permissions).toEqual([lease('lookup', 'answered')]);
+  });
+});
+
+describe('server permission review visibility', () => {
+  const stored = { permissionAutoAccept: { sessions: { root: 'safety' } } };
+  const permission = { id: 'p', sessionID: 'root' };
+
+  it('requires an explicit review broadcaster instead of falling back to notifications', () => {
+    expect(() => createPermissionAutoAcceptRuntime({ broadcastGlobalUiEvent: vi.fn() }))
+      .toThrow('broadcastPermissionReviewEvent is required');
+  });
+
+  it.each(['hold', 'accept'])('delivers deferred review %s on control SSE and policy on notification SSE', async (action) => {
+    const controlEvents = [];
+    const notificationEvents = [];
+    const wsFrames = [];
+    const { writeSseEvent } = createNotificationEmitterRuntime({});
+    // Production has separate SSE client sets and one shared WebSocket set.
+    const controlClients = new Set([{ write: (text) => controlEvents.push(JSON.parse(text.slice(6).trim())) }]);
+    const notificationClients = new Set([{ write: (text) => notificationEvents.push(JSON.parse(text.slice(6).trim())) }]);
+    const wsClients = new Set([{ readyState: 1, send: (text) => wsFrames.push(JSON.parse(text)) }]);
+    const evaluation = deferred();
+    const { runtime } = createRuntime({
+      stored,
+      now: () => 100,
+      evaluatePermission: () => evaluation.promise,
+      broadcastGlobalUiEvent: createGlobalUiEventBroadcaster({ sseClients: notificationClients, wsClients, writeSseEvent }),
+      broadcastPermissionReviewEvent: createGlobalUiEventBroadcaster({ sseClients: controlClients, wsClients, writeSseEvent }),
+    });
+    const task = runtime.processPermission(permission);
+    const admitting = { type: 'openchamber:permission-review.updated', properties: reviewState(1, [lease('p', 'admitting', 25000)]) };
+    await flush();
+    const started = {
+      type: 'openchamber:permission-review.updated',
+      properties: reviewState(2, [lease('p', 'reviewing', 25000)]),
+    };
+    expect(controlEvents).toEqual([admitting, started]);
+    expect(notificationEvents).toEqual([]);
+
+    const policy = await runtime.setSessionPolicy('other', 'ask');
+    const updated = { type: 'openchamber:permission-auto-accept.updated', properties: policy };
+    expect(notificationEvents).toEqual([updated]);
+    expect(policy).toMatchObject({ modes: { root: 'safety', other: 'ask' }, revision: 1 });
+    expect(controlEvents).toEqual([admitting, started]);
+
+    evaluation.resolve({ action });
+    await expect(task).resolves.toBe(true);
+    const ended = { type: 'openchamber:permission-review.updated', properties: reviewState(3, action === 'accept' ? [lease('p', 'answered', 25000)] : [manual()]) };
+    expect(controlEvents).toEqual([admitting, started, ended]);
+    expect(notificationEvents).toEqual([updated]);
+    expect(wsFrames).toEqual([admitting, started, updated, ended].map((payload) => ({ type: 'event', directory: 'global', payload })));
+    await expect(runtime.isPermissionAutoAnswered('root', undefined, 'p')).resolves.toBe(action === 'accept');
+  });
+
+  it.each([
+    ['hold', { action: 'hold' }],
+    ['unavailable', { action: 'hold', unavailable: true }],
+    ['classifier timeout', { action: 'hold', skipped: 'timed out' }],
+    ['no verdict', null],
+  ])('admits before evaluating, then exposes on %s', async (_scenario, verdict) => {
+    const evaluation = deferred();
+    const { runtime, reviewEvents } = createRuntime({ stored, evaluatePermission: () => evaluation.promise, now: () => 100 });
+    const task = runtime.processPermission(permission);
+    await flush();
+    expect((await runtime.load()).review).toEqual(reviewState(2, [lease('p', 'reviewing', 25000)]));
+    evaluation.resolve(verdict);
+    await expect(task).resolves.toBe(true);
+    expect(reviewEvents()).toEqual([
+      reviewState(1, [lease('p', 'admitting', 25000)]),
+      reviewState(2, [lease('p', 'reviewing', 25000)]),
+      reviewState(3, [manual()]),
+    ]);
+    await expect(runtime.isPermissionAutoAnswered('root', undefined, 'p')).resolves.toBe(false);
+  });
+
+  it('exposes classifier errors, including 404, without retrying or claiming a reply', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const evaluation = deferred();
+    const evaluatePermission = vi.fn(() => evaluation.promise);
+    const { runtime, reviewEvents } = createRuntime({ stored, evaluatePermission, retryDelaysMs: [0, 0, 0] });
+    const task = runtime.processPermission(permission);
+    await flush();
+    evaluation.reject(Object.assign(new Error('provider missing'), { status: 404 }));
+    await expect(task).resolves.toBe(false);
+    expect(evaluatePermission).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[permission-auto-accept] permission processing failed', {
+      permissionId: 'p', sessionId: 'root', status: 404, message: 'Upstream returned HTTP 404',
+    });
+    expect(reviewEvents().at(-1)).toEqual(reviewState(3, [manual()]));
+    await expect(runtime.isPermissionAutoAnswered('root', undefined, 'p')).resolves.toBe(false);
+  });
+
+  it('keeps one lease through reply retries and answered settlement', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reply = deferred();
+    let attempts = 0;
+    const evaluatePermission = vi.fn(async () => ({ action: 'accept' }));
+    const fetchImpl = vi.fn(async (_url, init) => {
+      if (init.method !== 'POST') return Response.json([]);
+      attempts += 1;
+      return attempts === 1 ? new Response('', { status: 503 }) : reply.promise;
+    });
+    const { runtime, reviewEvents } = createRuntime({ stored, evaluatePermission, fetchImpl, retryDelaysMs: [0, 0] });
+    const task = runtime.processPermission(permission);
+    await vi.waitFor(() => expect(attempts).toBe(2));
+    expect(reviewEvents()).toHaveLength(2);
+    expect(runtime.snapshot().review.permissions.map((entry) => entry.permissionId)).toEqual(['p']);
+    reply.resolve(Response.json({}));
+    await expect(task).resolves.toBe(true);
+    expect(evaluatePermission).toHaveBeenCalledTimes(1);
+    expect(reviewEvents().at(-1)).toEqual(reviewState(3, [lease('p', 'answered')]));
+  });
+
+  it('clears review when automatic reply retries are exhausted', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async (_url, init) => init.method === 'POST' ? new Response('', { status: 503 }) : Response.json([]));
+    const { runtime, reviewEvents } = createRuntime({ stored, evaluatePermission: async () => ({ action: 'accept' }), fetchImpl, retryDelaysMs: [0, 0, 0] });
+    await expect(runtime.processPermission(permission)).resolves.toBe(false);
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(3);
+    expect(reviewEvents()).toHaveLength(3);
+    expect(runtime.snapshot().review).toEqual(reviewState(3, [manual()]));
+  });
+
+  it('deduplicates one request while complete snapshots retain concurrent reviews', async () => {
+    const first = deferred();
+    const second = deferred();
+    const evaluatePermission = vi.fn((request) => request.id === 'p' ? first.promise : second.promise);
+    const { runtime, reviewEvents } = createRuntime({ stored, evaluatePermission, now: () => 100 });
+    const task = runtime.processPermission(permission);
+    expect(runtime.processPermission(permission)).toBe(task);
+    const other = runtime.processPermission({ id: 'q', sessionID: 'root' });
+    await flush();
+    expect(evaluatePermission).toHaveBeenCalledTimes(2);
+    expect(reviewEvents().at(-1)).toEqual(reviewState(4, [lease('p', 'reviewing', 25000), lease('q', 'reviewing', 25000)]));
+    first.resolve({ action: 'hold' });
+    await task;
+    expect(reviewEvents().at(-1)).toEqual(reviewState(5, [lease('q', 'reviewing', 25000), manual()]));
+    second.resolve({ action: 'hold' });
+    await other;
+    expect(runtime.snapshot().review).toEqual(reviewState(6, [manual(), manual('q')]));
+  });
+
+  it.each(['manual reply', 'stop', 'lease expiry'])('clears %s and ignores a late accept verdict', async (ending) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const evaluation = deferred();
+    const fetchImpl = vi.fn(async () => Response.json([]));
+    const { runtime, emit, stop, reviewEvents } = createRuntime({ stored, fetchImpl, evaluatePermission: () => evaluation.promise, reviewTimeoutMs: 100 });
+    const task = runtime.processPermission(permission);
+    await flush();
+    if (ending === 'manual reply') emit({ type: 'permission.replied', properties: { requestID: 'p' } });
+    if (ending === 'stop') stop();
+    if (ending === 'lease expiry') await vi.advanceTimersByTimeAsync(100);
+    await task;
+    expect(runtime.snapshot().review).toEqual(reviewState(3, ending === 'manual reply' ? [lease('p', 'answered')] : [manual()]));
+    evaluation.resolve({ action: 'accept' });
+    await flush();
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
+    expect(reviewEvents()).toHaveLength(3);
+    if (ending === 'manual reply') await vi.advanceTimersByTimeAsync(100);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('decreases the remaining lease on reads without renewing it', async () => {
+    const evaluation = deferred();
+    let at = 100;
+    const { runtime } = createRuntime({ stored, evaluatePermission: () => evaluation.promise, now: () => at });
+    const task = runtime.processPermission(permission);
+    await flush();
+    at += 4000;
+    expect((await runtime.load()).review).toEqual(reviewState(2, [lease('p', 'reviewing', 21000)]));
+    at += 4000;
+    expect(runtime.snapshot().review.permissions[0].remainingMs).toBe(17000);
+    evaluation.resolve({ action: 'hold' });
+    await task;
+  });
+
+  it('clears a manual reply during an automatic reply attempt without retrying its late failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reply = deferred();
+    const fetchImpl = vi.fn(async (_url, init) => init.method === 'POST' ? reply.promise : Response.json([]));
+    const { runtime, emit, reviewEvents } = createRuntime({ stored, fetchImpl, evaluatePermission: async () => ({ action: 'accept' }), retryDelaysMs: [0, 0] });
+    const task = runtime.processPermission(permission);
+    await flush();
+    expect(runtime.snapshot().review.permissions).toHaveLength(1);
+    emit({ type: 'permission.replied', properties: { requestID: 'p' } });
+    await task;
+    reply.resolve(new Response('', { status: 503 }));
+    await flush();
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    expect(reviewEvents().at(-1)).toEqual(reviewState(3, [lease('p', 'answered')]));
+  });
+
+  it('suppresses notifications when its reply event beats the deferred POST response', async () => {
+    const reply = deferred();
+    const evaluatePermission = vi.fn(async () => ({ action: 'accept' }));
+    const fetchImpl = vi.fn(async (_url, init) => init.method === 'POST' ? reply.promise : Response.json([]));
+    const { runtime, emit, reviewEvents } = createRuntime({ stored, fetchImpl, evaluatePermission, retryDelaysMs: [0, 0, 0] });
+    const task = runtime.processPermission(permission);
+    await flush();
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    const notification = runtime.isPermissionAutoAnswered('root', undefined, 'p');
+    emit({ type: 'permission.replied', properties: { requestID: 'p', sessionID: 'root' } });
+    await expect(task).resolves.toBe(true);
+    await expect(notification).resolves.toBe(true);
+    expect(runtime.snapshot().review).toEqual(reviewState(3, [lease('p', 'answered')]));
+    reply.resolve(Response.json({}));
+    await flush();
+    await expect(runtime.isPermissionAutoAnswered('root', undefined, 'p')).resolves.toBe(true);
+    expect(evaluatePermission).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    expect(reviewEvents()).toHaveLength(3);
+  });
+
+  it('cancels retry backoff timers when stopped', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async (_url, init) => init.method === 'POST' ? new Response('', { status: 503 }) : Response.json([]));
+    const { runtime, stop } = createRuntime({ stored, fetchImpl, evaluatePermission: async () => ({ action: 'accept' }), retryDelaysMs: [0, 1000] });
+    const task = runtime.processPermission(permission);
+    await flush();
+    expect(vi.getTimerCount()).toBe(2);
+    stop();
+    await task;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(runtime.snapshot().review).toEqual(reviewState(3, [manual()]));
+    await expect(runtime.processPermission({ id: 'after-stop', sessionID: 'root' })).resolves.toBe(false);
+  });
+
+  it('settles admission when manually answered during policy resolution', async () => {
+    const evaluatePermission = vi.fn(async () => ({ action: 'accept' }));
+    const { runtime, emit, reviewEvents } = createRuntime({ stored, evaluatePermission });
+    const task = runtime.processPermission(permission);
+    emit({ type: 'permission.replied', properties: { requestID: 'p' } });
+    await task;
+    await flush();
+    expect(evaluatePermission).not.toHaveBeenCalled();
+    expect(reviewEvents()).toEqual([reviewState(1, [lease('p', 'admitting')]), reviewState(2, [lease('p', 'answered')])]);
+  });
+
+  it('releases admission for ask and missing evaluator, and retains an automatic answer', async () => {
+    for (const mode of ['ask', 'auto', 'safety']) {
+      const { runtime, reviewEvents } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: mode } } } });
+      await runtime.processPermission(permission);
+      expect(reviewEvents()).toHaveLength(2);
+      expect(runtime.snapshot().review).toEqual(reviewState(2, mode === 'auto' ? [lease('p', 'answered')] : [manual()]));
+    }
+  });
+
+  it('rejects an accept past its deadline before the expiry timer runs', async () => {
+    const evaluation = deferred();
+    let at = 100;
+    const fetchImpl = vi.fn(async () => Response.json([]));
+    const { runtime, reviewEvents } = createRuntime({ stored, fetchImpl, evaluatePermission: () => evaluation.promise, now: () => at });
+    const task = runtime.processPermission(permission);
+    await flush();
+    at += 25000;
+    expect(runtime.snapshot().review.permissions).toEqual([]);
+    // Only the injected monotonic clock advanced, not the timer scheduler.
+    evaluation.resolve({ action: 'accept' });
+    await task;
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
+    expect(reviewEvents().at(-1)).toEqual(reviewState(3, [manual()]));
+    await expect(runtime.isPermissionAutoAnswered('root', undefined, 'p')).resolves.toBe(false);
+  });
+
+  it('leaves an auto request pending when its final policy read becomes safety without a verdict', async () => {
+    const evaluatePermission = vi.fn(async () => ({ action: 'accept' }));
+    const fetchImpl = vi.fn(async () => Response.json([]));
+    const { runtime } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: 'auto' } } }, fetchImpl, evaluatePermission });
+    await runtime.load();
+    const task = runtime.processPermission(permission);
+    // Finish the initial mode lookup's load/write awaits. The policy write
+    // then commits while the final pre-POST lookup waits for pending writes.
+    await Promise.resolve();
+    await Promise.resolve();
+    await runtime.setSessionPolicy('root', 'safety');
+    await task;
+    expect(evaluatePermission).not.toHaveBeenCalled();
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
+    await expect(runtime.isPermissionAutoAnswered('root', undefined, 'p')).resolves.toBe(false);
+  });
+
+  it.each(['root', 'child'])('cancels %s review after parent policy becomes ask while preserving an explicitly safe sibling', async (sessionID) => {
+    const evaluation = deferred();
+    const siblingEvaluation = deferred();
+    const fetchImpl = vi.fn(async () => Response.json([]));
+    const evaluatePermission = vi.fn((request) => request.id === 'p' ? evaluation.promise : siblingEvaluation.promise);
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety', sibling: 'safety' } } },
+      evaluatePermission,
+      fetchImpl,
+    });
+    emit({ type: 'session.created', properties: { info: { id: 'child', parentID: 'root' } } });
+    emit({ type: 'session.created', properties: { info: { id: 'sibling', parentID: 'root' } } });
+    const task = runtime.processPermission({ id: 'p', sessionID }, '/project');
+    const sibling = runtime.processPermission({ id: 'q', sessionID: 'sibling' }, '/project');
+    await flush();
+    expect(runtime.snapshot().review.permissions).toHaveLength(2);
+    const updated = await runtime.setSessionPolicy('root', 'ask', '/project');
+    expect(updated.review.permissions).toEqual([lease('q'), manual()]);
+    // Policy update settles the affected operation before its evaluator returns.
+    await task;
+    evaluation.resolve({ action: 'accept' });
+    await flush();
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
+    expect(runtime.snapshot().review.permissions).toEqual([lease('q'), manual()]);
+    siblingEvaluation.resolve({ action: 'accept' });
+    await sibling;
+    expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST').map(([url]) => new URL(url).pathname)).toEqual(['/api/session/sibling/permission/q/reply']);
+    expect(evaluatePermission).toHaveBeenCalledTimes(2);
+    expect(runtime.snapshot().review.permissions).toEqual([lease('q', 'answered'), manual()]);
   });
 });

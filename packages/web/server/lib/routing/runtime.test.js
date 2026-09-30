@@ -4,6 +4,8 @@ import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
 import { createJevClient, decidePermission, decideRouting } from './jev.js';
 import { classifierEndpoint, normalizeCustomEndpointUrl, resolveClassifier } from './classifier.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
+import { createPermissionAutoAcceptRuntime } from '../permission-auto-accept/runtime.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
 const FALLBACK = { model: { providerID: 'anthropic', modelID: 'claude-sonnet-5' }, variant: 'medium' };
@@ -283,7 +285,18 @@ describe('auto sessions', () => {
 });
 
 describe('evaluatePermission', () => {
-  const permission = { id: 'p1', sessionID: 's1', permission: 'bash', patterns: ['git push --force'], metadata: { command: 'git push --force origin main' } };
+  const permission = { id: 'p1', sessionID: 's1', action: 'shell', resources: ['git push --force'], metadata: { command: 'git push --force origin main' } };
+
+  it('sends the action and resources from a translated v2 request without relying on metadata', async () => {
+    const [event] = translateWireEvent({
+      type: 'permission.asked',
+      data: { id: 'p1', sessionID: 's1', action: 'shell', resources: ['git push --force origin main'] },
+    });
+    const { runtime, jev } = makeRuntime({ answers: { ask: { noul: 0.9 } } });
+    await runtime.evaluatePermission(event.properties, '/repo');
+    const request = JSON.parse(JSON.stringify(jev.ask.mock.calls[0][0]));
+    expect(request.state.permission).toEqual({ type: 'shell', patterns: ['git push --force origin main'] });
+  });
 
   it('holds a risky permission and remembers the decision', async () => {
     const { runtime, jev, events } = makeRuntime({ answers: { ask: { noul: 0.9 }, kind: { choice: 'git_history' } } });
@@ -331,6 +344,131 @@ describe('evaluatePermission', () => {
     const off = readyConfig();
     off.safetyNet.enabled = false;
     expect(await makeRuntime({ config: off, answers: {} }).runtime.legacySafetyNetEnabled()).toBe(false);
+  });
+
+  it.each(['hold', 'error'])('discards a late classifier %s after an authoritative manual reply', async (completion) => {
+    const { runtime, jev, events } = makeRuntime({ answers: { ask: { noul: 0.1 } } });
+    let resolveAnswer;
+    let rejectAnswer;
+    const answer = new Promise((resolve, reject) => { resolveAnswer = resolve; rejectAnswer = reject; });
+    jev.ask.mockImplementationOnce(() => answer);
+    let emit;
+    let evaluation;
+    const fetchImpl = vi.fn(async () => Response.json([]));
+    const permissions = createPermissionAutoAcceptRuntime({
+      globalEventHub: {
+        subscribeEvent(handler) { emit = (payload) => handler({ translated: () => [payload] }); return () => {}; },
+        subscribeStatus() { return () => {}; },
+      },
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSettingsFromDiskMigrated: async () => ({ permissionAutoAccept: { sessions: { s1: 'safety' } } }),
+      persistSettings: async () => {},
+      broadcastPermissionReviewEvent: vi.fn(),
+      evaluatePermission: (...args) => { evaluation = runtime.evaluatePermission(...args); return evaluation; },
+      onPermissionReplied: runtime.forgetPermission,
+      fetchImpl,
+    });
+    const stop = permissions.start();
+    try {
+      const task = permissions.processPermission(permission, '/repo');
+      await vi.waitFor(() => expect(jev.ask).toHaveBeenCalledTimes(1));
+      const signal = jev.ask.mock.calls[0][2];
+      emit({ type: 'permission.replied', properties: { requestID: 'p1' } });
+      await task;
+      expect(signal.aborted).toBe(true);
+      if (completion === 'hold') resolveAnswer({ answers: { ask: { noul: 0.9 } } });
+      else rejectAnswer(new Error('late classifier failure'));
+      await evaluation;
+      expect(events).toEqual([]);
+      expect(runtime.heldPermissions()).toEqual([]);
+      expect(fetchImpl.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
+      // A fresh call must ask again, proving cancellation did not refill cache.
+      expect(await runtime.evaluatePermission(permission, '/repo')).toMatchObject({ action: 'accept' });
+      expect(jev.ask).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+
+  it('does not start classification if cancelled while access is resolving', async () => {
+    const { runtime, store, jev, events } = makeRuntime({ answers: { ask: { noul: 0.9 } } });
+    let resolveConfig;
+    store.readConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveConfig = resolve; }));
+    const controller = new AbortController();
+    const task = runtime.evaluatePermission(permission, '/repo', controller.signal);
+    controller.abort();
+    resolveConfig(readyConfig());
+    await expect(task).resolves.toEqual({ action: 'hold' });
+    expect(jev.ask).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+    expect(runtime.heldPermissions()).toEqual([]);
+  });
+});
+
+describe('Jev cancellation', () => {
+  const endpoint = { url: 'https://classifier.test/systemone', headers: {}, model: 'jev-test' };
+
+  it('aborts outbound HTTP and clears its timeout on caller cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      let requestSignal;
+      const fetchImpl = vi.fn((_url, { signal }) => {
+        requestSignal = signal;
+        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      });
+      const controller = new AbortController();
+      const task = createJevClient({ fetchImpl }).ask({}, endpoint, controller.signal);
+      const rejected = expect(task).rejects.toMatchObject({ name: 'AbortError' });
+      controller.abort();
+      await rejected;
+      expect(requestSignal.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps its own timeout distinct from caller cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })));
+      const controller = new AbortController();
+      const task = createJevClient({ fetchImpl, timeoutMs: 100 }).ask({}, endpoint, controller.signal);
+      const rejected = expect(task).rejects.toMatchObject({ code: 'timeout', message: 'Jev timed out after 100ms' });
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      expect(controller.signal.aborted).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still publishes the safety-skipped warning for a real classifier timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let markStarted;
+      const started = new Promise((resolve) => { markStarted = resolve; });
+      const fetchImpl = (_url, { signal }) => {
+        markStarted();
+        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      };
+      const { runtime, jev, events } = makeRuntime();
+      jev.ask = createJevClient({ fetchImpl, timeoutMs: 100 }).ask;
+      const task = runtime.evaluatePermission({ id: 'timeout', sessionID: 's1' }, '/repo', new AbortController().signal);
+      await started;
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(task).resolves.toEqual({ action: 'hold', skipped: 'Jev timed out after 100ms' });
+      expect(events).toEqual([{
+        type: 'openchamber:routing.safety-skipped',
+        properties: { permissionId: 'timeout', sessionId: 's1', directory: '/repo', error: 'Jev timed out after 100ms' },
+      }]);
+      expect(runtime.heldPermissions()).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
