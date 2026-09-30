@@ -523,6 +523,7 @@ export const ContextPanel: React.FC = () => {
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
+  const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
@@ -1076,6 +1077,7 @@ export const ContextPanel: React.FC = () => {
       icon: getTabIcon(tab, faviconByOrigin),
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
+      preview: tab.preview,
     };
   }), [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t]);
 
@@ -1229,6 +1231,9 @@ export const ContextPanel: React.FC = () => {
               return;
             }
             reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
+          }}
+          onDoubleClickTab={(tabID) => {
+            if (directoryKey) pinContextPanelTab(directoryKey, tabID);
           }}
           layoutMode="scrollable"
           variant="default"

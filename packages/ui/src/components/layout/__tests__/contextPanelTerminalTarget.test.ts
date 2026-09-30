@@ -29,7 +29,9 @@ describe('context panel terminal target wiring', () => {
     const renderBlock = contextPanelSource.slice(renderStart, renderEnd);
 
     expect(renderBlock).toContain("activeTab?.mode === 'terminal' ? 'block' : 'hidden'");
-    expect(renderBlock).toContain("<TerminalView visible={isOpen && activeTab?.mode === 'terminal'} directory={terminalTab.targetDirectory} />");
+    expect(renderBlock).toContain('<TerminalView');
+    expect(renderBlock).toContain("visible={isOpen && activeTab?.mode === 'terminal'}");
+    expect(renderBlock).toContain('directory={terminalTab.targetDirectory}');
     expect(renderBlock).not.toContain('directory={activeTab?.targetDirectory}');
     expect(renderBlock).not.toContain('directory={effectiveDirectory}');
   });

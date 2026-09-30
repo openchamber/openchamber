@@ -31,6 +31,8 @@ export type SortableTabsStripItem = {
   title?: string;
   closable?: boolean;
   closeLabel?: string;
+  /** A replaceable preview tab; its label is italic, as in VS Code. */
+  preview?: boolean;
 };
 
 type SortableTabsStripProps = {
@@ -39,6 +41,7 @@ type SortableTabsStripProps = {
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
   onReorder?: (activeId: string, overId: string) => void;
+  onDoubleClickTab?: (id: string) => void;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
   activePillInsetClassName?: string;
@@ -111,6 +114,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   onSelect,
   onClose,
   onReorder,
+  onDoubleClickTab,
   layoutMode = 'scrollable',
   variant = 'default',
   activePillInsetClassName,
@@ -531,6 +535,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   aria-selected={isActive}
                   aria-label={showInactiveIconOnly ? (item.title ?? item.label) : undefined}
                   onClick={() => onSelect(item.id)}
+                  onDoubleClick={onDoubleClickTab ? () => onDoubleClickTab(item.id) : undefined}
                   onPointerDown={usesIndicator ? () => {
                     setPillTransitionEnabled(true);
                     setPressedId(item.id);
@@ -596,7 +601,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                           ) : null}
                         </span>
                       ) : null}
-                      {shouldShowLabel ? <span className="animated-tabs__label truncate">{item.label}</span> : null}
+                      {shouldShowLabel ? <span className={cn('animated-tabs__label truncate', item.preview && 'italic')}>{item.label}</span> : null}
                     </>
                   ) : (
                     <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
@@ -628,7 +633,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                           ) : null}
                         </span>
                       ) : null}
-                      <span className="truncate leading-[1.2]">{item.label}</span>
+                      <span className={cn('truncate leading-[1.2]', item.preview && 'italic')}>{item.label}</span>
                     </span>
                   )}
                 </button>

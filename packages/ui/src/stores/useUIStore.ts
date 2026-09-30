@@ -139,6 +139,10 @@ type ContextPanelTab = {
   readOnly: boolean;
   stagedDiff: boolean;
   diffScope: PendingDiffScope | null;
+  /** A file tab opened by a single click in the files tree. The next such
+      click replaces it; opening the file any other way, editing it, or
+      double-clicking keeps it. */
+  preview: boolean;
   touchedAt: number;
 };
 
@@ -154,6 +158,7 @@ type ContextPanelTabDescriptor = {
   readOnly?: boolean;
   stagedDiff?: boolean;
   diffScope?: PendingDiffScope | null;
+  preview?: boolean;
 };
 
 type ContextPanelDirectoryState = {
@@ -377,6 +382,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
     diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
+    preview: descriptor.mode === 'file' && descriptor.preview === true,
     touchedAt: Date.now(),
   };
 };
@@ -439,6 +445,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       readOnly?: unknown;
       stagedDiff?: unknown;
       diffScope?: unknown;
+      preview?: unknown;
       touchedAt?: unknown;
     };
 
@@ -496,6 +503,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
       diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
+      preview: candidate.mode === 'file' && candidate.preview === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -573,7 +581,13 @@ const upsertContextPanelTab = (
     ? current.tabs.filter((tab) => !(tab.mode === 'file' && !tab.targetPath))
     : current.tabs;
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
-  const tabs = existingIndex === -1
+  // A new preview takes the slot of the current preview tab, if any.
+  const replacedPreviewIndex = existingIndex === -1 && nextTab.preview
+    ? baseTabs.findIndex((tab) => tab.preview)
+    : -1;
+  const tabs = replacedPreviewIndex !== -1
+    ? baseTabs.map((tab, index) => (index === replacedPreviewIndex ? nextTab : tab))
+    : existingIndex === -1
     ? [...baseTabs, nextTab]
     : baseTabs.map((tab, index) => (index === existingIndex
       ? {
@@ -589,6 +603,8 @@ const upsertContextPanelTab = (
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,
           readOnly: nextTab.readOnly,
+          // Reopening a preview as a preview keeps it one; any other open pins it.
+          preview: tab.preview && nextTab.preview,
           touchedAt: Date.now(),
         }
       : tab));
@@ -1089,7 +1105,10 @@ interface UIStore {
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
-  openContextFile: (directory: string, filePath: string) => void;
+  /** `preview` opens it as the replaceable preview tab (a files-tree click). */
+  openContextFile: (directory: string, filePath: string, options?: { preview?: boolean }) => void;
+  /** Turns a preview file tab into a regular one. */
+  pinContextPanelTab: (directory: string, tabID: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
@@ -1639,14 +1658,26 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        openContextFile: (directory, filePath) => {
+        openContextFile: (directory, filePath, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          const preview = options?.preview === true;
+          // The preview this open replaces leaves the editor's open files too,
+          // like any closed tab.
+          const replacedPreviewPath = preview
+            ? get().contextPanelByDirectory[normalizedDirectory]?.tabs
+              .find((tab) => tab.preview && tab.targetPath !== normalizedFilePath)?.targetPath ?? null
+            : null;
+          const alreadyOpen = get().contextPanelByDirectory[normalizedDirectory]?.tabs
+            .some((tab) => tab.mode === 'file' && tab.targetPath === normalizedFilePath) ?? false;
+          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath, preview });
+          if (replacedPreviewPath && !alreadyOpen) {
+            useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, replacedPreviewPath);
+          }
           get().setPendingFileFocusPath(normalizedFilePath);
           get().setPendingFileNavigation(null);
         },
@@ -1822,6 +1853,24 @@ export const useUIStore = create<UIStore>()(
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        pinContextPanelTab: (directory, tabID) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) return;
+          set((state) => {
+            const current = state.contextPanelByDirectory[normalizedDirectory];
+            if (!current?.tabs.some((tab) => tab.id === tabID && tab.preview)) return state;
+            return {
+              contextPanelByDirectory: {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: {
+                  ...current,
+                  tabs: current.tabs.map((tab) => (tab.id === tabID ? { ...tab, preview: false } : tab)),
+                },
+              },
+            };
           });
         },
 

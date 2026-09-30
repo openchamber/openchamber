@@ -18,6 +18,41 @@ beforeEach(() => {
   useTerminalStore.getState().clearAll();
 });
 
+describe('useUIStore preview file tabs', () => {
+  const fileTabs = () => getContextPanelTabs('/repo').filter((tab) => tab.mode === 'file');
+
+  test('a preview replaces the previous preview in its slot instead of adding a tab', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/kept.ts');
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/b.ts', { preview: true });
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/kept.ts', false],
+      ['/repo/b.ts', true],
+    ]);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(fileTabs()[1].id);
+  });
+
+  test('a regular open, an explicit pin, or a preview of an open file keeps the tab', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/a.ts');
+    expect(fileTabs().map((tab) => tab.preview)).toEqual([false]);
+
+    store.openContextFile('/repo', '/repo/b.ts', { preview: true });
+    store.pinContextPanelTab('/repo', fileTabs()[1].id);
+    store.openContextFile('/repo', '/repo/c.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/a.ts', false],
+      ['/repo/b.ts', false],
+      ['/repo/c.ts', true],
+    ]);
+  });
+});
+
 describe('useUIStore context panel tabs', () => {
   test('opens a plugin surface tab', () => {
     useUIStore.getState().openContextPanelTab('/repo', {

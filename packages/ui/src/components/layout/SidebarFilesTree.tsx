@@ -235,7 +235,8 @@ interface FileRowProps {
     canReveal: boolean;
   };
   downloadFile?: (path: string) => Promise<void>;
-  onSelect: (node: FileNode) => void;
+  /** A plain click opens a preview tab; `pin` (double-click) keeps it. */
+  onSelect: (node: FileNode, options?: { pin?: boolean }) => void;
   onToggle: (path: string) => void;
   onRevealPath: (path: string) => void;
   onOpenDialog: (type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => void;
@@ -292,6 +293,10 @@ const FileRow: React.FC<FileRowProps> = ({
       onSelect(node);
     }
   }, [isDir, node, onSelect, onToggle]);
+
+  const handleDoubleClick = React.useCallback(() => {
+    if (!isDir) onSelect(node, { pin: true });
+  }, [isDir, node, onSelect]);
 
   const handleMenuButtonClick = React.useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
@@ -432,6 +437,7 @@ const FileRow: React.FC<FileRowProps> = ({
       <button
         type="button"
         onClick={handleInteraction}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         draggable
         onDragStart={handleDragStart}
@@ -985,7 +991,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
 
   // --- File operations ---
 
-  const handleOpenFile = React.useCallback(async (node: FileNode) => {
+  const handleOpenFile = React.useCallback(async (node: FileNode, options?: { pin?: boolean }) => {
     if (!root) return;
 
     const openValidation = await validateContextFileOpen(files, node.path, { directory: root });
@@ -996,7 +1002,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
 
     setSelectedPath(root, node.path);
     addOpenPath(root, node.path);
-    openContextFile(root, node.path);
+    // Touch has no double-click to keep a preview, so it opens tabs outright.
+    openContextFile(root, node.path, { preview: !options?.pin && !useUIStore.getState().isMobile });
   }, [addOpenPath, files, openContextFile, root, setSelectedPath]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
@@ -1390,6 +1397,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                   <button
                     type="button"
                     onClick={() => handleOpenFile(node)}
+                    onDoubleClick={() => handleOpenFile(node, { pin: true })}
                     draggable
                     onDragStart={(e) => {
                       recordFileTreeDragStart(e);
