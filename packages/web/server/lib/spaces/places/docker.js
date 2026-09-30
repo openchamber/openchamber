@@ -31,6 +31,7 @@ import { SPACE_CONNECT_COMMAND, SPACE_IDLE_EXIT_CODE, SPACE_USER, TOOLS_MOUNT_PA
 import { openCommandStream as openCommandStreamProcess } from '../run-command.js';
 import { createSpaceServerChannel, createSpaceToken } from '../space-server.js';
 import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, createDockerEngine, entryLabels, entryName, isInterrupted, pause } from './docker-engine.js';
+import { createDockerDisk } from './docker-disk.js';
 import { createDockerTools } from './docker-tools.js';
 
 const DOCKER_PLACE_ID = 'docker';
@@ -60,12 +61,13 @@ function execRole(target) {
   throw new SpaceError('invalid_exec_target', `A command runs in the space or in its gatekeeper, not in '${target}'`);
 }
 
-export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, owner, toolsSource, wait = pause, now = () => new Date() }) {
+export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, colimaPath = null, owner, toolsSource, wait = pause, now = () => new Date() }) {
   requireOwner(owner);
 
   const engine = createDockerEngine({ runCommand, dockerPath });
   const { run, docker, inspect, removeOne, removeStoppedContainer } = engine;
   const tools = createDockerTools({ engine, owner, toolsSource, image: SPACE_BASE_IMAGE, now, wait });
+  const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, tools });
 
   /** Every resource that carries our marker and this owner, optionally for one space. Found by label only. */
   const findResources = async (spaceId) => {
@@ -622,5 +624,5 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return starting.get(spaceId);
   };
 
-  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, connect, stop, start, remove, verify };
+  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, connect, stop, start, remove, verify, readDisk: disk.read, cleanUpDisk: disk.cleanUp };
 }

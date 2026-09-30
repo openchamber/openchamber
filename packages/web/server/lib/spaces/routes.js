@@ -198,6 +198,14 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
     res.json({ places });
   }));
 
+  // The disk a place's spaces take, and the clean-up of what OpenChamber can make again.
+  app.get(`${SPACES_ROUTE}/places/:placeId/disk`, withJourney(async (journey, req, res) => {
+    res.json(await journey.readDisk(String(req.params.placeId ?? '')));
+  }));
+  app.post(`${SPACES_ROUTE}/places/:placeId/clean-up`, withJourney(async (journey, req, res) => {
+    res.json(await journey.cleanUpDisk(String(req.params.placeId ?? '')));
+  }));
+
   app.get(SPACES_ROUTE, withJourney(async (journey, _req, res) => {
     res.json({ spaces: await journey.listSpaces({ access: true }) });
   }));

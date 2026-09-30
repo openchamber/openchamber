@@ -3,6 +3,7 @@
 
 import { SpaceError } from '../errors.js';
 import { GATEKEEPER_PROGRAM_PATH, IMAGE_CAT, IMAGE_CURL, IMAGE_SH, SPACE_HOME, SPACE_TOKEN_PATH, TOOLS_MOUNT_PATH } from '../layout.js';
+import { SPACE_BASE_IMAGE } from './docker.js';
 
 const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
 const failed = (stderr, stdout = '') => ({ code: 1, stdout, stderr });
@@ -15,6 +16,9 @@ const NOT_FOUND_TEXT = {
 };
 
 const ISOLATED_GATEWAY_OPTION = 'com.docker.network.bridge.gateway_mode_ipv4';
+
+// Every container the place makes comes from its one image; a seeded stranger's may name another.
+const FAKE_BASE_IMAGE = SPACE_BASE_IMAGE;
 
 const readPairs = (args, flag) => {
   const pairs = {};
@@ -59,6 +63,7 @@ export function hardenedContainerEntry({
   memoryBytes = 4294967296,
   tmpfs = '/tmp:rw,exec,nosuid,size=256m',
   aliases = [],
+  image = FAKE_BASE_IMAGE,
 }) {
   const mountList = mounts ?? [
     ...volumes.map((volume) => ({ volume, destination: `/mnt/${volume}` })),
@@ -69,7 +74,7 @@ export function hardenedContainerEntry({
     Id: newContainerId(),
     Name: `/${name}`,
     State: { Running: running, Status: running ? 'running' : 'created' },
-    Config: { User: '1000:1000', Labels: labels, Env: env },
+    Config: { User: '1000:1000', Labels: labels, Env: env, Image: image },
     HostConfig: {
       ReadonlyRootfs: true,
       Privileged: false,
@@ -154,6 +159,9 @@ const readMounts = (args) => args
  * `gatekeeperReady: false` does the same for every gatekeeper's control channel.
  * `start` is where the clock of `now()` begins. `wait(ms)` moves that clock, so nothing here sleeps.
  * `beforeFill()` runs before a tools fill ends, so a test can hold it open.
+ * For the disk: `volumeSizes` maps a volume name to its size as `docker system df` prints it,
+ * `imageBytes` is the size of the space image, `engineName` what `docker info` calls the machine,
+ * and `colima(args)` answers a call of the colima CLI, any file whose name ends in `colima`.
  */
 export function createFakeDocker({
   failAt = () => false,
@@ -161,6 +169,10 @@ export function createFakeDocker({
   interruptionCode = 'command_timeout',
   resources = [],
   imagePresent = true,
+  imageBytes = 1_632_000_000,
+  volumeSizes = {},
+  engineName = 'docker-desktop',
+  colima = () => ok(),
   alterContainer = (entry) => entry,
   serverReady = true,
   gatekeeperReady = true,
@@ -168,6 +180,7 @@ export function createFakeDocker({
   start = new Date('2026-09-20T08:00:00.000Z'),
 } = {}) {
   let clock = start.getTime();
+  let image = imagePresent;
   const calls = [];
   const late = [];
   const state = new Map(resources.map((resource) => [`${resource.kind}:${resource.name}`, resource]));
@@ -190,6 +203,7 @@ export function createFakeDocker({
     const labels = (resource.kind === 'container' ? resource.entry.Config?.Labels : resource.entry.Labels) ?? {};
     return args.every((arg, index) => {
       if (args[index - 1] !== '--filter') return true;
+      if (arg.startsWith('ancestor=')) return resource.entry.Config?.Image === arg.slice('ancestor='.length);
       const pair = arg.slice('label='.length);
       return labels[pair.slice(0, pair.indexOf('='))] === pair.slice(pair.indexOf('=') + 1);
     });
@@ -283,7 +297,25 @@ export function createFakeDocker({
     if (first === 'create') return fails ? (addContainer(args, { running: false }), failed('Error response from daemon: simulated failure')) : addContainer(args, { running: false });
     if (fails) return failed('Error response from daemon: simulated failure');
     if (first === 'inspect') return inspect('container', args.slice(3));
-    if (first === 'image' && second === 'inspect') return imagePresent ? ok('[{}]') : failed(NOT_FOUND_TEXT.image(args[2]), '[]');
+    // The size here is the compressed download, as the containerd image store reports it; the place must not use it.
+    if (first === 'image' && second === 'inspect') return image ? ok(JSON.stringify([{ Id: 'sha256:0123', Size: Math.round(imageBytes / 4) }])) : failed(NOT_FOUND_TEXT.image(args[2]), '[]');
+    if (first === 'image' && second === 'rm') {
+      if (!image || args[args.length - 1] !== FAKE_BASE_IMAGE) return failed(NOT_FOUND_TEXT.image(args[args.length - 1]));
+      // Like the real engine: without --force an image that any container was made from stays.
+      const user = ofKind('container').find((resource) => resource.entry.Config?.Image === FAKE_BASE_IMAGE);
+      if (user && !args.includes('--force')) return failed(`Error response from daemon: conflict: unable to delete 0123 (must be forced) - image is being used by stopped container ${user.entry.Id}`);
+      image = false;
+      return ok(`Deleted: sha256:0123`);
+    }
+    if (first === 'system' && second === 'df') {
+      const mountedBy = (name) => ofKind('container').filter((resource) => resource.entry.Mounts.some((mount) => mount.Name === name)).length;
+      return ok(JSON.stringify({
+        // Like the containerd image store: the id is the digest, and the size is what the image alone takes unpacked.
+        Images: image ? [{ ID: 'sha256:0123', Size: `${imageBytes / 1e9}GB`, UniqueSize: `${imageBytes / 1e9}GB` }] : [],
+        Volumes: ofKind('volume').map((resource) => ({ Name: resource.name, Size: volumeSizes[resource.name] ?? '0B', Links: String(mountedBy(resource.name)) })),
+      }));
+    }
+    if (first === 'info') return ok(`${JSON.stringify(engineName)}\n`);
     if (first === 'pull') return ok();
     if (first === 'ps') return ok(ofKind('container').filter((resource) => matchesFilters(resource, args)).map((resource) => resource.name).join('\n'));
     if (first === 'rm') {
@@ -349,6 +381,7 @@ export function createFakeDocker({
 
   const runCommand = async (file, args, options) => {
     calls.push({ file, args, options });
+    if (String(file).endsWith('colima')) return colima(args);
     if (timeoutAt(args)) {
       late.push(args);
       throw new SpaceError(interruptionCode, `docker ${args[0]} was stopped before it finished`);
@@ -372,6 +405,7 @@ export function createFakeDocker({
     now: () => new Date(clock),
     calls,
     names: () => Array.from(state.keys()),
+    imagePresent: () => image,
     token: (container) => tokens.get(homeOf(container)),
   };
 }

@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, dataDir = null, archiveChats = null } = {}) => {
+const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -102,7 +102,7 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
     saveIdleStop: async (setting) => { if (holdIdleSave) await idleSaveHeld; fail('saveIdleStop'); idle.saved = setting; },
     announce: (spaceId, payload) => { events.push({ spaceId, ...payload.properties }); },
     onSpacesChanged: () => { changes.count += 1; },
-    logger: quiet,
+    logger,
     now: () => new Date('2026-09-26T10:00:00.000Z'),
   });
   return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, gatekeeper, dataDir, idle };
@@ -193,6 +193,49 @@ describe('the journey: create', () => {
     await expect(journey.createSpace({ ...REQUEST, name: 7 })).rejects.toMatchObject({ code: 'invalid_space_name' });
     expect(events).toEqual([]);
     expect(await place.list()).toEqual([]);
+  });
+});
+
+describe('the journey: disk and clean-up', () => {
+  const DISK = { imageBytes: 1_632_000_000, toolsBytes: 438_000_000, spacesBytes: 0, freeBytes: 1_632_000_000, freesImage: true };
+  const placeWithDisk = (cleaned) => ({
+    ...createMemoryPlace(),
+    readDisk: async () => DISK,
+    cleanUpDisk: async () => { cleaned.count += 1; return cleaned.outcome; },
+  });
+
+  it('answers what was freed and the disk after, keeps Docker\'s words out of the answer and logs them', async () => {
+    const warnings = [];
+    const cleaned = {
+      count: 0,
+      outcome: {
+        freedBytes: 440_000_000,
+        kept: [{ kind: 'image', name: 'node@sha256:0', reason: 'in_use', message: 'image is being used' }, { kind: 'tools', name: 'openchamber-tools-x', reason: 'failed', message: 'disk on fire' }],
+        machine: { state: 'failed', message: 'sudo: a password is required' },
+      },
+    };
+    const { journey } = journeyWith({ place: placeWithDisk(cleaned), logger: { warn: (line) => warnings.push(line) } });
+    expect(await journey.readDisk('memory')).toEqual(DISK);
+    expect(await journey.cleanUpDisk('memory')).toEqual({ freedBytes: 440_000_000, kept: [{ kind: 'image', reason: 'in_use' }, { kind: 'tools', reason: 'failed' }], disk: DISK });
+    expect(warnings).toEqual([
+      '[spaces] clean-up could not remove tools openchamber-tools-x: disk on fire',
+      '[spaces] the Colima machine did not trim its disk: sudo: a password is required',
+    ]);
+  });
+
+  it('refuses an unknown place, and a clean-up while a space is being made', async () => {
+    const cleaned = { count: 0, outcome: { freedBytes: 0, kept: [], machine: { state: 'skipped' } } };
+    const { journey, events, releaseCodeIn } = journeyWith({ place: placeWithDisk(cleaned), holdCodeIn: true });
+    await expect(journey.readDisk('kubernetes')).rejects.toMatchObject({ code: 'place_not_found' });
+    await expect(journey.cleanUpDisk('kubernetes')).rejects.toMatchObject({ code: 'place_not_found' });
+    const { id } = await journey.createSpace(REQUEST);
+    expect(await until(() => steps(events, id).includes('bringing_code'))).toBe(true);
+    await expect(journey.cleanUpDisk('memory')).rejects.toMatchObject({ code: 'space_preparing' });
+    expect(cleaned.count).toBe(0);
+    releaseCodeIn();
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    await journey.cleanUpDisk('memory');
+    expect(cleaned.count).toBe(1);
   });
 });
 

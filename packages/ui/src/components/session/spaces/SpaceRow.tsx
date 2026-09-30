@@ -12,19 +12,29 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { SpaceEntry } from '@/lib/spaces/spaces-api';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
-import { formatPathForDisplay } from '@/lib/utils';
+import { cn, formatPathForDisplay } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { SpaceActionsMenu } from './SpaceActions';
 import { SpaceGroupStatus } from './SpaceGroupStatus';
 
 const ACTION_BUTTON_CLASS = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-const NetworkLine: React.FC<{ network: SpaceEntry['network'] }> = ({ network }) => {
+const BADGE_CLASS = 'shrink-0 typography-micro px-1 rounded leading-none pb-px';
+
+/**
+ * The space's network as a badge beside its name: allowed addresses only in the success tone,
+ * open internet in the warning tone the create dialog uses for it, and a network the host could
+ * not read in a neutral one, never as either.
+ */
+const NetworkBadge: React.FC<{ network: SpaceEntry['network'] }> = ({ network }) => {
   const { t } = useI18n();
-  const text = network === null
-    ? t('spaces.row.network.unknown')
-    : network.mode === 'open' ? t('spaces.create.network.open') : t('spaces.row.network.allowlist');
-  return <p className="typography-micro truncate text-muted-foreground">{text}</p>;
+  if (network === null) {
+    return <span className={cn(BADGE_CLASS, 'text-muted-foreground bg-[var(--surface-subtle)]')}>{t('spaces.row.network.unknown')}</span>;
+  }
+  if (network.mode === 'open') {
+    return <span className={cn(BADGE_CLASS, 'text-[var(--status-warning)] bg-[var(--status-warning)]/10')}>{t('spaces.create.network.open')}</span>;
+  }
+  return <span className={cn(BADGE_CLASS, 'text-[var(--status-success)] bg-[var(--status-success)]/10')}>{t('spaces.row.network.allowlist')}</span>;
 };
 
 /** The folder a space was made for, and that it is gone when it is. */
@@ -53,10 +63,13 @@ export const SpaceRow: React.FC<{
     <div className="flex w-full items-start gap-2 py-1.5" data-space-row={entry.id}>
       <Icon name="box-3" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 space-y-0.5">
-        {/* A name from the label: text to show. */}
-        <p className="typography-ui-label truncate text-foreground">{entry.name}</p>
+        {/* The badge wraps under a long name rather than cutting it: the name is what the user knows the space by. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          {/* A name from the label: text to show. */}
+          <p className="typography-ui-label min-w-0 max-w-full truncate text-foreground">{entry.name}</p>
+          <NetworkBadge network={entry.network} />
+        </div>
         {showFolder ? <FolderLine folder={entry.projectFolder} /> : null}
-        <NetworkLine network={entry.network} />
         <SpaceGroupStatus spaceId={entry.id} className="pt-1" />
       </div>
       <div className="flex shrink-0 items-center gap-0.5">

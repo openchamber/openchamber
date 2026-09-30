@@ -110,7 +110,8 @@ export function readOrCreateOwner(dataDir) {
 }
 
 /**
- * `dataDir` is the host's data directory, `dockerPath` the docker CLI to run and `gitPath` the
+ * `dataDir` is the host's data directory, `dockerPath` the docker CLI to run, `colimaPath` the
+ * colima CLI or null, used only after a disk clean-up on a Colima machine, and `gitPath` the
  * host git that moves code in and out, with `hostEnvironment` as its environment: git starts
  * `docker exec` itself, so the PATH in it must find docker. `place` replaces the Docker place,
  * for the tests; `runCommand` and `openCommandStream` are the two ways this module starts a
@@ -123,6 +124,7 @@ export function readOrCreateOwner(dataDir) {
 export function createSpacesHost({
   dataDir,
   dockerPath = 'docker',
+  colimaPath = null,
   gitPath = 'git',
   hostEnvironment = process.env,
   listProjectDirectories = async () => [],
@@ -141,6 +143,7 @@ export function createSpacesHost({
     runCommand,
     openCommandStream,
     dockerPath,
+    colimaPath,
     owner: readOrCreateOwner(dataDir),
     toolsSource: createRegistryToolsSource(readHostToolVersions()),
   });

@@ -809,6 +809,35 @@ export function createSpaceJourney({
     return change;
   };
 
+  const requirePlace = (placeId) => {
+    if (placeId !== place.id) throw new SpaceError('place_not_found', `There is no place ${placeId}`);
+  };
+
+  /** The disk the spaces take on a place, and what a clean-up would free now (journey step 9). */
+  const readDisk = async (placeId) => {
+    requirePlace(placeId);
+    return place.readDisk();
+  };
+
+  /**
+   * Removes what OpenChamber can make again on a place, see `places/docker-disk.js`; Docker keeps
+   * whatever is in use. Refused while a space is being made, which pulls the image and fills the
+   * tools before any container holds them. Answers what was freed, what Docker kept, and the disk after.
+   */
+  const cleanUpDisk = async (placeId) => {
+    requirePlace(placeId);
+    if (Array.from(pending.values()).some((entry) => entry.state === 'preparing')) {
+      throw new SpaceError('space_preparing', 'A space is being made. Clean up when it is ready.');
+    }
+    const { freedBytes, kept, machine } = await place.cleanUpDisk();
+    for (const item of kept.filter((entry) => entry.reason === 'failed')) {
+      logger.warn?.(`[spaces] clean-up could not remove ${item.kind} ${item.name}: ${item.message}`);
+    }
+    if (machine.state === 'failed') logger.warn?.(`[spaces] the Colima machine did not trim its disk: ${machine.message}`);
+    if (machine.state === 'trimmed') logger.info?.('[spaces] the Colima machine trimmed its disk after a clean-up');
+    return { freedBytes, kept: kept.map(({ kind, reason }) => ({ kind, reason })), disk: await place.readDisk() };
+  };
+
   /** For a turn-off that did not go through after the spaces were stopped: creations are taken again. */
   const reopen = () => { closing = false; };
 
@@ -870,5 +899,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk };
 }

@@ -1949,6 +1949,8 @@ async function main(options = {}) {
   const buildSpacesHost = () => createSpacesHost({
     dataDir: OPENCHAMBER_DATA_DIR,
     dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
+    // Only for a clean-up of the spaces' disk on Colima, to give the freed space back; null without it.
+    colimaPath: searchPathFor('colima', buildAugmentedPath()),
     gitPath: searchPathFor('git', buildAugmentedPath()) ?? 'git',
     // git starts `docker exec` itself when code moves in or out, so its PATH must find docker.
     hostEnvironment: { ...process.env, PATH: buildAugmentedPath() },
