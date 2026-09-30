@@ -1423,7 +1423,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                       className="min-w-0 flex-1 truncate typography-meta"
                       style={{ direction: 'rtl', textAlign: 'left' }}
                     >
-                      {node.relativePath ?? node.path}
+                      {/* Left-to-right marks keep a leading "." in place inside the rtl box. */}
+                      {`\u200E${node.relativePath ?? node.path}\u200E`}
                     </span>
                   </button>
                 </li>
