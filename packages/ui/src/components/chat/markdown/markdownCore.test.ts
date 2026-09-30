@@ -60,10 +60,13 @@ import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from '
 
 const {
   __markdownImageCandidateCacheForTests,
+  __scanStatsForTests,
   extractMarkdownImageCandidates,
   getCachedMarkdownBlocks,
+  LINKIFY_SOURCE_LIMIT,
   renderMarkdownBlocks,
   renderMarkdownSync,
+  resetScanStatsForTests,
   resetMarkdownHtmlCacheForTests,
 } = await import('./markdownCore');
 const { resolveMarkdownImageSource } = await import('./markdownImageAssets');
@@ -411,6 +414,117 @@ describe('CJK-aware link parsing', () => {
     );
     expect(hrefOf(renderMarkdownSync('[a](url(1))'))).toBe('url(1)');
     expect(hrefOf(renderMarkdownSync('[a](url "title")'))).toBe('url');
+  });
+});
+
+describe('Long paragraphs', () => {
+  const hrefOf = (html: string): string | null => /<a\b[^>]*href="([^"]*)"/.exec(html)?.[1] ?? null;
+  const LIMIT = LINKIFY_SOURCE_LIMIT;
+  const cjkLink = 'https://example.com。 ';
+  // The link opens the paragraph, so linkify sees the whole paragraph as the
+  // text that remains.
+  const paragraphOf = (length: number): string => `${cjkLink}${'x'.repeat(length - cjkLink.length)}`;
+
+  // The reporter's data dump from openchamber/openchamber#4204: pretty-printed
+  // JSON with no blank line, about 250 KB in one paragraph.
+  const dataDump = (): string => {
+    let seed = 7;
+    const pick = (values: readonly string[]): string | undefined => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return values[Math.floor((seed / 0x100000000) * values.length)];
+    };
+    const rows = Array.from({ length: 1800 }, (_, i) => ({
+      id: `item_${i}`,
+      label: pick(['alpha_beta', 'gamma_delta', 'epsilon_zeta', 'eta_theta', 'iota_kappa']),
+      link: pick(['/Main', '/List', '/Detail', '/data/nested']),
+      count_a: 1000 + i,
+      ratio_b: 30 + (i % 20),
+      state: pick(['ok', 'warning', 'unread']),
+    }));
+    return `Review the following data dump. Docs: https://example.com/docs\n\n${JSON.stringify(rows, null, 2)}\nwith \\(x^2\\) at the end`;
+  };
+
+  test('a paragraph up to the limit keeps the CJK-aware link boundary', () => {
+    expect(paragraphOf(LIMIT)).toHaveLength(LIMIT);
+    expect(hrefOf(renderMarkdownSync(paragraphOf(LIMIT)))).toBe('https://example.com');
+    expect(hrefOf(renderMarkdownSync(paragraphOf(LIMIT - 1)))).toBe('https://example.com');
+  });
+
+  test('a longer paragraph still links bare URLs, through the GFM autolink', () => {
+    expect(hrefOf(renderMarkdownSync(paragraphOf(LIMIT + 1)))).toBe('https://example.com。');
+  });
+
+  test('long messages of short paragraphs and large code blocks keep linkify', () => {
+    const log = Array.from({ length: 400 }, (_, i) => `line ${i}: status ok`).join('\n');
+    const withCode = `See ${cjkLink}\n\n\`\`\`\n${log}\n\`\`\``;
+    expect(log.length).toBeGreaterThan(LIMIT);
+    expect(hrefOf(renderMarkdownSync(withCode))).toBe('https://example.com');
+
+    const crlf = Array.from({ length: 200 }, () => `See ${cjkLink}`).join('\r\n\r\n');
+    expect(crlf.length).toBeGreaterThan(LIMIT);
+    const html = renderMarkdownSync(crlf);
+    expect(html.match(/href="https:\/\/example\.com"/g)).toHaveLength(200);
+  });
+
+  test('the data dump from the report opens without the quadratic rescan', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const text = dataDump();
+    expect(text.length).toBeGreaterThan(250_000);
+    // Opening a message paints it synchronously, then renders its blocks.
+    // Before the fix linkify searched the rest of the paragraph at every inline
+    // token, billions of characters for this dump. Now it only searches while
+    // at most LIMIT characters remain, which bounds each paragraph by LIMIT².
+    resetScanStatsForTests();
+    const html = renderMarkdownSync(text);
+    const settled = await renderMarkdownBlocks(text, false);
+    expect(__scanStatsForTests().linkify).toBeLessThan(2 * LIMIT * LIMIT);
+    expect(html).toContain('item_1799');
+    expect(hrefOf(html)).toBe('https://example.com/docs');
+    expect(html).toContain('class="katex"');
+    expect(settled.map((block) => block.html).join('')).toContain('item_1799');
+  });
+});
+
+describe('Many short paragraphs', () => {
+  const paragraphs = Array.from({ length: 16_000 }, (_, i) => `Paragraph ${i} is short.`).join('\n\n');
+  const text = `${paragraphs}\n\n\\[\nx^2\n\\]\n\n<details><summary>More</summary>\n\nHidden text\n\n</details>`;
+
+  // Before, each block searched the rest of the message for `\\[` and
+  // `<details>`: about 3 billion characters here. Now each search stops at the
+  // end of the paragraph. User messages reach the renderer with every newline
+  // turned into "  \n", so their empty lines hold two spaces.
+  for (const [label, source] of [
+    ['assistant text', text],
+    ['user text', text.replace(/ *\n/g, '  \n')],
+  ] as const) test(`block math and disclosures after thousands of paragraphs render in linear work (${label})`, () => {
+    expect(source.length).toBeGreaterThan(400_000);
+    resetScanStatsForTests();
+    const html = renderMarkdownSync(source);
+    expect(__scanStatsForTests().blockStart).toBeLessThan(4 * source.length);
+    expect(html).toContain('Paragraph 15999 is short.');
+    expect(html.match(/<p>/g)?.length).toBeGreaterThan(16_000);
+    expect(html).toContain('class="katex-display"');
+    expect(html).toContain('<summary>More</summary>');
+    expect(html).toContain('Hidden text');
+  });
+
+  // A line that interrupts a paragraph but is not a block of its own (an empty
+  // list marker, a table header with a broken delimiter row) used to be glued
+  // back onto the paragraph only when `\\[` or `<details>` appeared further down.
+  for (const [label, source, expected] of [
+    ['an empty list marker', 'text\n1. ', '<p>text</p>\n<p>1. </p>'],
+    ['a broken table', 'Intro text\n| a |\n|---|---|\nrow', '<p>Intro text</p>\n<p>| a |'],
+  ] as const) test(`${label} renders the same whether or not math follows`, () => {
+    const withoutMath = renderMarkdownSync(`${source}\n\nmore`);
+    const withMath = renderMarkdownSync(`${source}\n\n\\[x\\]`);
+    expect(withoutMath.startsWith(expected)).toBe(true);
+    expect(withMath.startsWith(expected)).toBe(true);
+  });
+
+  test('a disclosure or display math right after a paragraph line still ends it', () => {
+    expect(renderMarkdownSync('Intro line\n\\[\nx\n\\]')).toContain('<p>Intro line</p>');
+    const disclosure = renderMarkdownSync('Intro line\n<details><summary>S</summary>\n\nBody\n\n</details>');
+    expect(/<p>Intro line<\/p>\s*<details data-md-details>/.test(disclosure)).toBe(true);
   });
 });
 

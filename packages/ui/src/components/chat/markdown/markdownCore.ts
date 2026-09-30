@@ -1,4 +1,4 @@
-import { Marked, marked, type Tokens, type TokenizerAndRendererExtension } from 'marked';
+import { Marked, marked, type MarkedExtension, type Tokens, type TokenizerAndRendererExtension } from 'marked';
 import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
@@ -445,13 +445,13 @@ const renderMathPlaceholders = (html: string): string => html.replace(
   },
 );
 
+// No `start` hint: marked's inline text rule already stops before every
+// backslash, so a hint could not end a text run any earlier, and searching the
+// rest of the paragraph for `\(` at every inline token costs the square of its
+// length (openchamber/openchamber#4204).
 const createInlineMathExtension = (render: MathRender) => ({
   name: 'inlineMath',
   level: 'inline' as const,
-  start(src: string) {
-    const index = src.indexOf('\\(');
-    return index < 0 ? undefined : index;
-  },
   tokenizer(src: string): MathToken | undefined {
     const match = /^\\\(([\s\S]+?)\\\)/.exec(src);
     if (!match) return undefined;
@@ -472,11 +472,40 @@ const createInlineMathExtension = (render: MathRender) => ({
 const BLOCK_MATH_RE = /^[ \t]*\\\[([\s\S]+?)\\\][ \t]*(?:\n|$)/;
 const BLOCK_MATH_LINE_START_RE = /(?:^|\n)[ \t]*\\\[/;
 
+// Characters the `start` searches below have read, so tests can show that a
+// large message costs work in proportion to its length.
+const scanStats = { linkify: 0, blockStart: 0 };
+
+/** Test-only: reset and read the `start` search counters. */
+export const resetScanStatsForTests = (): void => {
+  scanStats.linkify = 0;
+  scanStats.blockStart = 0;
+};
+export const __scanStatsForTests = () => ({ ...scanStats });
+
+// A block extension's `start` only tells marked where to end the paragraph it
+// is lexing. marked's paragraph never continues past a line that is empty or
+// holds only spaces (a tab-only line does not end it), so the search stops
+// there. Searching the whole rest made every block rescan the message, which
+// cost seconds on messages of thousands of short paragraphs
+// (openchamber/openchamber#4204). A hint beyond that line only flagged the
+// paragraph as cut, which let marked glue a following stray line such as an
+// empty `1. ` onto it; that no longer depends on text further down. User
+// messages turn every newline into "  \n", so their empty lines hold two
+// spaces. The newline before the ending line stays in, so patterns that end at
+// a line break still match.
+const untilParagraphEnd = (src: string): string => {
+  const end = /\n *\n/.exec(src);
+  const window = end ? src.slice(0, end.index + 1) : src;
+  scanStats.blockStart += window.length;
+  return window;
+};
+
 const createBlockMathExtension = (render: MathRender) => ({
   name: 'blockMath',
   level: 'block' as const,
   start(src: string) {
-    const match = BLOCK_MATH_LINE_START_RE.exec(src);
+    const match = BLOCK_MATH_LINE_START_RE.exec(untilParagraphEnd(src));
     // Point marked at the `\[` itself, never at the newline before it.
     return match ? match.index + match[0].length - 2 : undefined;
   },
@@ -497,7 +526,7 @@ const detailsExtension: TokenizerAndRendererExtension = {
   name: 'disclosure',
   level: 'block',
   start(src) {
-    const match = /(?:^|\n) {0,3}<details(?:\s|>)/i.exec(src);
+    const match = /(?:^|\n) {0,3}<details(?:\s|>)/i.exec(untilParagraphEnd(src));
     return match ? match.index + (match[0].startsWith('\n') ? 1 : 0) : undefined;
   },
   tokenizer(src) {
@@ -562,10 +591,39 @@ const detailsExtension: TokenizerAndRendererExtension = {
 // marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
 // to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
 // Plain CJK characters right after a URL are still consumed, matching GitHub.
+//
+// marked-linkify-it searches all the remaining inline text at every inline
+// token, so one long paragraph costs the square of its length: a 250 KB data
+// dump without blank lines froze the window for most of a minute
+// (openchamber/openchamber#4204). While more than LINKIFY_SOURCE_LIMIT
+// characters of inline text remain, it steps aside and marked's own GFM
+// autolink, which is linear, links bare URLs without the CJK boundary.
+export const LINKIFY_SOURCE_LIMIT = 5_000;
+
+const boundedLinkify = (): MarkedExtension => ({
+  extensions: (markedLinkifyIt({ fuzzyLink: false }).extensions ?? []).map((extension) => {
+    if (!('tokenizer' in extension)) return extension;
+    const { start, tokenizer } = extension;
+    return {
+      ...extension,
+      start(src) {
+        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        scanStats.linkify += src.length;
+        return start?.call(this, src);
+      },
+      tokenizer(src, tokens) {
+        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        scanStats.linkify += src.length;
+        return tokenizer.call(this, src, tokens);
+      },
+    };
+  }),
+});
+
 const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
   const renderMath = rawHtml === 'sanitize' ? renderMathPlaceholder : renderKatex;
   return new Marked().use(
-    markedLinkifyIt({ fuzzyLink: false }),
+    boundedLinkify(),
     {
       gfm: true,
       breaks: false,
