@@ -163,6 +163,108 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(typeof result.usage!.windows.daily!.resetAt === 'number');
   });
 
+  const withStubbedConfigFile = async (configJson: string, run: () => Promise<void>): Promise<void> => {
+    // SAFETY: the reassignment widens the bound readFileSync to the text-only
+    // signature the config/auth readers actually call.
+    const configurableFs = fs as { readFileSync: (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding) => string };
+    const authOnlyRead = configurableFs.readFileSync;
+    configurableFs.readFileSync = (filePath: fs.PathOrFileDescriptor): string => (
+      String(filePath).includes('opencode.json') ? configJson : AUTH
+    );
+    try {
+      await run();
+    } finally {
+      configurableFs.readFileSync = authOnlyRead;
+    }
+  };
+
+  const stubFetchCapturingUrl = (payload: Response, requested: { url: string }): void => {
+    // SAFETY: per-test fetch stub; the cast only fits the capturing closure
+    // into the global fetch slot for the duration of one test.
+    globalThis.fetch = (async (url: string) => {
+      requested.url = url;
+      return payload;
+    }) as typeof fetch;
+  };
+
+  test('reads the key endpoint from the configured v2 provider baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        providers: {
+          openrouter: { settings: { baseURL: 'https://gateway.example.com/v1' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://gateway.example.com/v1/key');
+  });
+
+  test('reads the key endpoint from the legacy provider options baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        provider: {
+          openrouter: { options: { baseURL: 'https://legacy.example.com/v1' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://legacy.example.com/v1/key');
+  });
+
+  test('reads the key endpoint from the legacy provider api field', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        provider: {
+          openrouter: { api: 'https://legacy-api.example.com/v1' },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://legacy-api.example.com/v1/key');
+  });
+
+  test('strips trailing slashes from the configured baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        providers: {
+          openrouter: { settings: { baseURL: 'https://gateway.example.com/v1/' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://gateway.example.com/v1/key');
+  });
+
+  test('keeps the default key endpoint when the config cannot be parsed', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile('{ not json', async () => {
+      stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+      await fetchQuotaForProvider('openrouter');
+    });
+
+    assert.equal(requested.url, 'https://openrouter.ai/api/v1/key');
+  });
+
   test('maps an unlimited null-limit key to a monthly spent window', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, is_management_key: false },
