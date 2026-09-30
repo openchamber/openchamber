@@ -618,6 +618,43 @@ const StreamingPlainTextOutput: React.FC<{ output: string }> = ({ output }) => {
     );
 };
 
+/** Copies a tool's whole output as plain text; shown on JSON and shell output. */
+const CopyToolOutputButton: React.FC<{ output: string }> = ({ output }) => {
+    const { t } = useI18n();
+    const [copied, setCopied] = React.useState(false);
+
+    React.useEffect(() => {
+        setCopied(false);
+    }, [output]);
+
+    const handleCopy = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const result = await copyTextToClipboard(output);
+        if (!result.ok) {
+            toast.error(t('chat.toolPart.copyOutputFailed'));
+            return;
+        }
+        setCopied(true);
+        if (typeof window !== 'undefined') {
+            window.setTimeout(() => setCopied(false), 1200);
+        }
+    }, [output, t]);
+
+    return (
+        <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+            onClick={handleCopy}
+            onPointerDown={(event) => event.stopPropagation()}
+            aria-label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+            title={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+        >
+            <Icon name={copied ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+        </Button>
+    );
+};
+
 type JsonOutputResult = ReturnType<typeof tryParseJsonOutput>;
 
 const JsonToolOutput: React.FC<{
@@ -626,29 +663,11 @@ const JsonToolOutput: React.FC<{
 }> = ({ jsonResult, renderedOutput }) => {
     const { t } = useI18n();
     const jsonViewMode = useUIStore((state) => state.toolJsonViewMode);
-    const [copiedJson, setCopiedJson] = React.useState(false);
-
-    React.useEffect(() => {
-        setCopiedJson(false);
-    }, [renderedOutput]);
 
     const handleJsonViewChange = React.useCallback((view: ToolJsonViewMode, event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
         useUIStore.getState().setToolJsonViewMode(view);
     }, []);
-
-    const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
-        event.stopPropagation();
-        const result = await copyTextToClipboard(renderedOutput);
-        if (!result.ok) {
-            toast.error(t('chat.toolPart.copyOutputFailed'));
-            return;
-        }
-        setCopiedJson(true);
-        if (typeof window !== 'undefined') {
-            window.setTimeout(() => setCopiedJson(false), 1200);
-        }
-    }, [renderedOutput, t]);
 
     return (
         <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
@@ -686,17 +705,7 @@ const JsonToolOutput: React.FC<{
                 >
                     <Icon name="code-box" className="h-3.5 w-3.5" />
                 </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-                    onClick={handleCopyOutput}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-                    title={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-                >
-                    <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
-                </Button>
+                <CopyToolOutputButton output={renderedOutput} />
             </div>
             {jsonViewMode === 'summary' ? (
                 <JsonSummaryView data={jsonResult.data} />
@@ -779,8 +788,27 @@ const ToolScrollableTextOutput: React.FC<{
         return <JsonToolOutput jsonResult={jsonResult} renderedOutput={renderedOutput} />;
     }
 
+    if (isShellTool(part.tool)) {
+        return (
+            <div className="relative typography-code text-muted-foreground/90">
+                <div className="absolute right-1 top-1 z-10">
+                    <CopyToolOutputButton output={renderedOutput} />
+                </div>
+                <div className="pr-8">
+                    <WorkerHighlightedCode
+                        language={outputLanguage}
+                        code={renderedOutput}
+                        style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                        codeStyle={CODE_TAG_PROPS.style}
+                        wrap
+                    />
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className={isShellTool(part.tool) ? 'typography-code text-muted-foreground/90' : undefined}>
+        <div>
             <WorkerHighlightedCode
                 language={outputLanguage}
                 code={renderedOutput}
