@@ -43,6 +43,7 @@ import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingS
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
+import { forgetObservedTurn, mayJudgeTurn, recordObservedTurn, releaseJudgedTurn } from "./observed-turns"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
@@ -702,6 +703,7 @@ export function applySessionStatusSnapshot(
 
     for (const sessionId of candidateSessionIds) {
       const incoming = toSessionStatus(snapshot[sessionId])
+      recordObservedTurn(store, sessionId, incoming)
       if (mode === "authoritative" && state.sessionStatusInvalidated?.[sessionId]) {
         // The successful snapshot supersedes the archive's discarded status.
         nextInvalidated ??= { ...state.sessionStatusInvalidated }
@@ -2099,6 +2101,10 @@ export function handleEvent(
     }
   }
 
+  if (payload.type === "session.status") {
+    recordObservedTurn(store, payload.properties.sessionID, payload.properties.status)
+  }
+
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const sessionID = syncEventSessionID(payload)
     const state = getDirectoryEventState(store, batch)
@@ -2112,6 +2118,7 @@ export function handleEvent(
     // The reducer already wrote the idle/error status into `draft`; finalize
     // the interrupted message and orphaned tools through the same batch.
     if (sessionID) {
+      forgetObservedTurn(store, sessionID)
       const interrupted = interruptedTurnToolParts(state, sessionID)
       if (interrupted) {
         cloneField("message", (value) => ({ ...value }))
@@ -2246,8 +2253,15 @@ function hasUnfinishedAssistantTurn(state: DirectoryStore, sessionID: string): b
   return false
 }
 
+// Snapshots and message loads reach this path. Neither can tell a turn that
+// died here from one still running in another OpenCode process (#4156), so
+// only a run this page watched is judged, or one silent long enough that no
+// process can still be running it.
 function applyInterruptedTurnReconciliation(store: StoreApi<DirectoryStore>, sessionID: string): void {
-  const interrupted = interruptedTurnToolParts(store.getState(), sessionID)
+  const state = store.getState()
+  if (!mayJudgeTurn(store, state, sessionID)) return
+  releaseJudgedTurn(store, state, sessionID)
+  const interrupted = interruptedTurnToolParts(state, sessionID)
   if (!interrupted) return
 
   const interruptedParts = interrupted.parts
@@ -2270,6 +2284,9 @@ function applyInterruptedTurnReconciliation(store: StoreApi<DirectoryStore>, ses
  * settle decision must be repeated after the message records are available.
  * If no per-session status exists yet, fetch one authoritative snapshot first;
  * a successful snapshot that omits the session establishes it as idle.
+ * Only a run this page watched, or one silent long enough, is judged; the
+ * snapshot is still read first because a busy answer is what makes the run
+ * watched (#4156).
  */
 export async function recoverInterruptedTurnAfterMessageLoad(
   directory: string,
@@ -2297,6 +2314,7 @@ export async function recoverInterruptedTurnAfterMessageLoad(
       applyGlobalSessionStatusSnapshot(directory, snapshot, [sessionID])
     }
   }
+  if (!mayJudgeTurn(store, store.getState(), sessionID)) return
 
   // The messages were read before the status. A turn that finished between
   // the two reads leaves an open assistant message beside an idle status,
@@ -2474,9 +2492,20 @@ export function SyncProvider(props: {
             store,
             set: (patch) => {
               if (!isCurrent()) return
+              const statusBefore = store.getState().session_status
               store.setState(patch)
               if (patch.session_status) {
+                for (const [sessionId, status] of Object.entries(patch.session_status)) {
+                  recordObservedTurn(store, sessionId, status)
+                }
                 applyGlobalSessionStatusSnapshot(directory, patch.session_status, getDirectoryOwnedSessionIds(directory, store.getState().session))
+                // The snapshot settled sessions this store believed running
+                // (#2577): judge their unfinished turns now.
+                for (const [sessionId, status] of Object.entries(statusBefore ?? {})) {
+                  if (status.type !== "idle" && patch.session_status[sessionId]?.type === "idle") {
+                    applyInterruptedTurnReconciliation(store, sessionId)
+                  }
+                }
               }
               if (patch.session || patch.message) {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())

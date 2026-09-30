@@ -63,6 +63,14 @@ export function readDirectoryStatusSnapshot(
       if (status) snapshot[id] = status
       else delete snapshot[id]
     }
+    // A session this store believed running that the successful snapshot no
+    // longer lists has stopped, for example when a managed restart lost its
+    // run (#2577). Record it idle: left out, its status would become unknown,
+    // interrupted-turn recovery would never judge it, and the turn would show
+    // as running forever.
+    for (const [id, status] of Object.entries(current)) {
+      if (status.type !== "idle" && !snapshot[id] && !changes.has(id)) snapshot[id] = { type: "idle" }
+    }
     return snapshot
   })
 }
