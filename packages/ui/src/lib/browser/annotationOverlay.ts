@@ -205,7 +205,17 @@ export const buildAnnotationOverlayScript = (
 
   var host = document.createElement('div');
   host.setAttribute(OVERLAY_ATTR, '');
-  host.style.cssText = 'position:fixed;inset:0;z-index:' + Z_OVERLAY + ';pointer-events:none';
+  // A manual popover: shown, it joins the browser's top layer without making
+  // the rest of the page inert. See "top layer" below.
+  host.setAttribute('popover', 'manual');
+  // Every declaration is !important: as a popover, and later inside a page
+  // dialog, the host matches page rules such as [popover]{background:...},
+  // which would otherwise paint a sheet over the whole page.
+  host.style.cssText = [
+    'all:initial', 'display:block', 'position:fixed', 'inset:0', 'width:auto', 'height:auto',
+    'max-width:none', 'max-height:none', 'margin:0', 'padding:0', 'border:0', 'background:transparent',
+    'overflow:visible', 'opacity:1', 'transform:none', 'z-index:' + Z_OVERLAY, 'pointer-events:none'
+  ].join(' !important;') + ' !important';
   var shadow = host.attachShadow({ mode: 'closed' });
 
   var style = document.createElement('style');
@@ -565,6 +575,110 @@ export const buildAnnotationOverlayScript = (
   window.addEventListener('keydown', onKeyDown, true);
   comment.addEventListener('keydown', onCommentKeyDown);
 
+  // --------------------------------------------------------------- top layer
+
+  /**
+   * Keeps the chrome above a modal dialog or popover the page opens.
+   *
+   * Those render in the browser's top layer, which no z-index reaches, and a
+   * modal dialog also makes everything outside itself inert: the outlines drew
+   * under the dialog and the comment box took no typing. So the host is shown
+   * as a popover, which puts it in the top layer too, and it lives inside the
+   * page's topmost modal dialog, where that inertness does not reach. Showing it
+   * again whenever the page puts something new on top keeps it last, so above.
+   *
+   * Opening our own modal dialog instead would make the page's dialog inert,
+   * which is the thing being annotated.
+   */
+  var modals = [];
+
+  var isModalDialog = function (element) {
+    if (element.tagName !== 'DIALOG') return false;
+    try { return element.matches(':modal'); } catch (error) { return false; }
+  };
+
+  var trackDialog = function (dialog) {
+    var index = modals.indexOf(dialog);
+    if (index !== -1) modals.splice(index, 1);
+    // Opened last, so on top. Dialogs already open when annotation starts are
+    // taken in document order, which is the usual order of nesting.
+    if (isModalDialog(dialog)) modals.push(dialog);
+  };
+
+  var topModal = function () {
+    for (var i = modals.length - 1; i >= 0; i -= 1) {
+      if (modals[i].isConnected && isModalDialog(modals[i])) return modals[i];
+    }
+    return null;
+  };
+
+  var placeHost = function () {
+    var parent = topModal() || document.body || document.documentElement;
+    var hadFocus = shadow.activeElement === comment;
+    if (host.parentNode !== parent) parent.appendChild(host);
+    try {
+      if (host.matches(':popover-open')) host.hidePopover();
+      host.showPopover();
+    } catch (error) { /* no popover support: the z-index still covers ordinary pages */ }
+    // Moving the host blurs the comment box mid-sentence.
+    if (hadFocus) comment.focus({ preventScroll: true });
+  };
+
+  var topLayerObserver = new window.MutationObserver(function (records) {
+    var changed = false;
+    for (var i = 0; i < records.length; i += 1) {
+      if (records[i].type === 'attributes' && records[i].target.tagName === 'DIALOG') {
+        trackDialog(records[i].target);
+        changed = true;
+      }
+    }
+    if (!host.isConnected) {
+      // Removed on purpose, not along with a dialog: the session was cancelled
+      // from the app or replaced by a new one. End it, so its listeners stop
+      // swallowing the page's clicks and nothing brings the host back.
+      for (var j = 0; j < records.length; j += 1) {
+        if (Array.prototype.indexOf.call(records[j].removedNodes, host) !== -1) {
+          finish(null);
+          return;
+        }
+      }
+      changed = true;
+    }
+    if (!changed) return;
+    placeHost();
+    // Our own move is not a page change.
+    topLayerObserver.takeRecords();
+  });
+
+  var onToggle = function (event) {
+    if (event.target === host || event.newState !== 'open') return;
+    placeHost();
+    topLayerObserver.takeRecords();
+  };
+
+  // With the host inside the page's dialog, clicks on our chrome would reach
+  // the dialog's own handlers, and a click outside its box commonly closes it.
+  // Typing in the comment box would reach its key handlers the same way.
+  var CHROME_EVENTS = BLOCKED_EVENTS.concat([
+    'pointerdown', 'pointerup', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input'
+  ]);
+  var keepChromeEvent = function (event) { event.stopPropagation(); };
+  CHROME_EVENTS.forEach(function (name) {
+    host.addEventListener(name, keepChromeEvent);
+  });
+
+  var startTopLayer = function () {
+    Array.prototype.forEach.call(document.querySelectorAll('dialog'), trackDialog);
+    placeHost();
+    topLayerObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['open']
+    });
+    document.addEventListener('toggle', onToggle, true);
+  };
+
   // ------------------------------------------------------------------ finish
 
   var teardown = function () {
@@ -578,6 +692,8 @@ export const buildAnnotationOverlayScript = (
     window.removeEventListener('resize', onScrollOrResize, true);
     window.removeEventListener('keydown', onKeyDown, true);
     comment.removeEventListener('keydown', onCommentKeyDown);
+    topLayerObserver.disconnect();
+    document.removeEventListener('toggle', onToggle, true);
     setCursor('');
     if (cursorStyle.parentNode) cursorStyle.parentNode.removeChild(cursorStyle);
     if (host.parentNode) host.parentNode.removeChild(host);
@@ -617,7 +733,7 @@ export const buildAnnotationOverlayScript = (
 
   submit.addEventListener('click', attach);
 
-  (document.body || document.documentElement).appendChild(host);
+  startTopLayer();
   setTool('select');
   syncChrome();
 });`;
