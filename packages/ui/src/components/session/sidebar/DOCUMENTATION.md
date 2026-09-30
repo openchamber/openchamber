@@ -313,6 +313,9 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   recursively mount descendants in the shared scroller. One preorder ID pool
   plus index ranges supplies hidden descendants to subtree selection without
   copying a descendant array for every ancestor.
+- A row's `depth` is its visual indent, not its tree depth: a folder's sessions
+  and run rows start at 1 so they sit under the folder header, and children add
+  one level from there. Do not read `depth > 0` as "this is a subagent".
 - The existing `ScrollableOverlay` is the sole scroll owner. The shared row
   renderer measures variable-height rows, uses stable occurrence keys, keeps a
   bounded pre-initialization window, and pins editing, focused, and open-menu

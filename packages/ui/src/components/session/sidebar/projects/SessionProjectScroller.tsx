@@ -385,7 +385,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     }
     if (row.kind === 'run') {
       return <RunSidebarRow
-        run={row.run} laneNodes={row.laneNodes} renderContext={row.renderContext}
+        run={row.run} depth={row.depth} laneNodes={row.laneNodes} renderContext={row.renderContext}
         projectId={row.projectId} projectLabel={row.projectLabel}
         expansionKey={row.expansionKey} expanded={row.expanded} forceExpanded={row.forceExpanded}
         notifyOnSubtasks={model.groupProps.notifyOnSubtasks} toggleParent={model.groupProps.toggleParent}

@@ -57,7 +57,7 @@ export type SessionSidebarRow =
   // A multi-run: one derived parent row over its member sessions. It is not a
   // session, so it never enters selection, and its lanes render as session
   // rows one level deeper when it is expanded.
-  | (RowBase & { kind: 'run'; run: MultiRunSummary; laneNodes: readonly SessionNode[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'group' | 'archived'; group?: SessionGroup; projectId?: string | null })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string })
   | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number });
@@ -319,6 +319,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     getSecondaryMeta?: SessionSidebarActivityItem['getSecondaryMeta'];
     indexedNodes?: IndexedSessionNodes;
     selectionPoolOffset?: number;
+    // Nesting level of the container's top rows: 1 inside a folder, so its
+    // sessions indent under the folder header like subagent children do.
+    baseDepth?: number;
   };
   const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
   const appendRun = (entry: RunEntry, options: AppendOptions): void => {
@@ -332,6 +335,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       key: keyFor(`${options.containerKey}:run:${entry.run.key}`),
       estimateSize: options.renderContext === 'timeline' ? TIMELINE_SESSION_ESTIMATE : SESSION_ESTIMATE,
       run: entry.run,
+      depth: options.baseDepth ?? 0,
       laneNodes: Object.freeze([...entry.lanes]),
       projectId: options.projectId,
       projectLabel: meta?.projectLabel ?? null,
@@ -342,12 +346,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       forceExpanded: search,
     });
     if (!expanded) return;
-    appendTrees(entry.lanes, 1, options);
+    appendTrees(entry.lanes, (options.baseDepth ?? 0) + 1, options);
   };
   const appendSessions = (options: AppendOptions): void => {
     for (const entry of collapseRunEntries(options.nodes, runIndex, options.archived)) {
       if (isRunEntry(entry)) appendRun(entry, options);
-      else appendTrees([entry], 0, options);
+      else appendTrees([entry], options.baseDepth ?? 0, options);
     }
   };
   const appendTrees = (nodes: readonly SessionNode[], baseDepth: number, options: AppendOptions): void => {
@@ -519,7 +523,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       });
       if (ownerKey) folderDropTargets.push(Object.freeze({ rowKey: folderKey, scopeKey: entry.scopeKey, folderId: entry.folder.id, ownerKey, enabled: dropEnabled }));
       if (folderCollapsed) return;
-      appendSessions({ nodes: entry.nodes, containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, ownerKey, selectionScopeKey: ownerKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset });
+      appendSessions({ nodes: entry.nodes, containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, ownerKey, selectionScopeKey: ownerKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset, baseDepth: 1 });
       for (const child of childFolders.get(identity) ?? []) appendFolder(child, displayName);
     };
     for (const folder of roots) appendFolder(folder, '');
