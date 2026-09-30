@@ -861,8 +861,27 @@ through `Suspense`: a suspended boundary shows its fallback for a tick and
 React then throttles later-resolving boundaries by ~300ms, which staggered
 user and assistant text on a cold open.
 
-An opened session is shown already at its end. The scroll hook holds the gate
-until the viewport is pinned; the recap note holds it until the session record
+An opened session is shown already in place: at its end, or where the reader
+left it. When a list detaches (session switch, chat unmount) and its reader is
+away from the live end, `useChatTimelineScroll` records the topmost visible
+message and its offset (`lib/scroll/messageViewportAnchor.ts`) in an in-memory,
+100-session memory keyed by runtime, directory and session
+(`lib/scroll/sessionScrollMemory.ts`); a reader on the end clears the record.
+Nothing is persisted across reloads. Re-entering the session aligns that
+message frame by frame until it holds still, with follow off and the
+scroll-to-bottom pill shown; any wheel, touch, pointer or key input ends the
+alignment. Turn group expansion is cached by turn ID in `MessageList` so the
+restored rows have the shape they were left with. When the message lies before
+the loaded window (the history was evicted meanwhile),
+`useChatTimelineController.loadHistoryUntilMessage` loads at most three older
+batches while the timeline stays hidden; that hold raises the gate's cap to
+800ms, so a fast load shows the session already in place. A slower one reveals
+the end first, and the reader is moved only if the message arrives and they
+have neither scrolled nor sent in the meantime. Mobile skips that search because it
+loads history only on an explicit tap.
+
+The scroll hook holds the gate
+until the viewport is in place; the recap note holds it until the session record
 is in memory, because it cannot decide whether it renders before that and would
 otherwise grow the footer under a pinned viewport. The reveal itself runs on
 the next frame after the last hold releases, with one exact pin against the

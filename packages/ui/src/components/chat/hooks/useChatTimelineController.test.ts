@@ -90,6 +90,85 @@ const installMinimalDom = () => {
     };
 };
 
+describe('loadHistoryUntilMessage', () => {
+    const userMessage = (id: string, created: number): ChatMessageEntry => {
+        const info: Message = { id, sessionID: 'session', role: 'user', time: { created } };
+        return { info, parts: [] };
+    };
+
+    // Real scheduling instead of act: the loader waits for the render that
+    // publishes each page, which act would hold back until its scope ends.
+    const renderHarness = (options: {
+        pages: ChatMessageEntry[][];
+        complete?: boolean;
+    }) => {
+        const dom = installMinimalDom();
+        Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: false });
+        const root = createRoot(dom.container);
+        let messages: ChatMessageEntry[] = [userMessage('msg_9', 9)];
+        let calls = 0;
+        let controller!: UseChatTimelineControllerResult;
+        const Harness = () => {
+            controller = useChatTimelineController({
+                sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
+                historyMeta: { limit: messages.length, complete: options.complete === true, loading: false },
+                scrollRef: { current: null }, messageListRef: { current: null }, isPinned: true, showScrollButton: false,
+                loadMoreMessages: async () => {
+                    const page = options.pages[calls] ?? [];
+                    calls += 1;
+                    messages = [...page, ...messages];
+                    root.render(React.createElement(Harness));
+                },
+                goToBottom: () => undefined, releaseAutoFollow: () => undefined,
+            });
+            return null;
+        };
+        root.render(React.createElement(Harness));
+        return {
+            get controller() { return controller; },
+            get calls() { return calls; },
+            ready: () => new Promise((resolve) => setTimeout(resolve, 20)),
+            dispose: () => {
+                root.unmount();
+                dom.restore();
+            },
+        };
+    };
+
+    test('loads older batches until the message arrives', async () => {
+        const harness = renderHarness({ pages: [[userMessage('msg_5', 5)], [userMessage('msg_1', 1)]] });
+        try {
+            await harness.ready();
+            expect(await harness.controller.loadHistoryUntilMessage('msg_1', { maxBatches: 3 })).toBe(true);
+            expect(harness.calls).toBe(2);
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    test('gives up after the batch limit when the message never arrives', async () => {
+        const harness = renderHarness({ pages: [[userMessage('msg_5', 5)], [userMessage('msg_4', 4)], [userMessage('msg_3', 3)], [userMessage('msg_2', 2)]] });
+        try {
+            await harness.ready();
+            expect(await harness.controller.loadHistoryUntilMessage('reverted', { maxBatches: 3 })).toBe(false);
+            expect(harness.calls).toBe(3);
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    test('loads nothing when the history is already complete', async () => {
+        const harness = renderHarness({ pages: [], complete: true });
+        try {
+            await harness.ready();
+            expect(await harness.controller.loadHistoryUntilMessage('msg_1', { maxBatches: 3 })).toBe(false);
+            expect(harness.calls).toBe(0);
+        } finally {
+            harness.dispose();
+        }
+    });
+});
+
 describe('useChatTimelineController identity lifecycle', () => {
     test('one history action delegates one batch even when rendering has no new user turn', async () => {
         const dom = installMinimalDom();

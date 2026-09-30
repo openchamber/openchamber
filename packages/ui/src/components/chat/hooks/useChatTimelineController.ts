@@ -48,6 +48,7 @@ export interface UseChatTimelineControllerResult {
     showScrollToBottom: boolean;
     turnWindowModel: TurnWindowModel;
     loadEarlier: (options?: { userInitiated?: boolean }) => Promise<void>;
+    loadHistoryUntilMessage: (messageId: string, options: { maxBatches: number }) => Promise<boolean>;
     revealBufferedTurns: () => Promise<boolean>;
     resumeToBottom: () => void;
     resumeToBottomInstant: () => Promise<void>;
@@ -71,6 +72,8 @@ const resolveHistoryScrollThreshold = (clientHeight: number): number => Math.max
     clientHeight * HISTORY_SCROLL_VIEWPORT_FACTOR,
 )
 const HISTORY_RENDER_WAIT_TIMEOUT_MS = 250
+// Render commits (or 250ms timeouts) to wait for a concurrent history load.
+const HISTORY_LOAD_WAIT_LIMIT = 40
 const HISTORY_INTERACTION_GUARD_MS = 2000
 // Long smooth scrolls across a big session can take a couple of seconds;
 // the pin releases early as soon as the spy reports the target turn.
@@ -668,6 +671,36 @@ export const useChatTimelineController = ({
         }
     }, [beginHistoryInteraction, fetchOlderHistory, releaseAutoFollow, settleHistoryInteraction]);
 
+    // Loads older history batch by batch until the message is in the
+    // timeline, for targets that lie before the loaded window. Bounded by
+    // `maxBatches` because a message that was reverted or deleted never
+    // arrives. Resolves false on failure, exhaustion, or a session switch.
+    const loadHistoryUntilMessage = React.useCallback(async (
+        messageId: string,
+        options: { maxBatches: number },
+    ): Promise<boolean> => {
+        const targetIdentity = timelineIdentityRef.current;
+        const isLoaded = () => messagesRef.current.some((message) => message.info.id === messageId);
+        let batches = 0;
+        // Another history load (the underfilled-viewport fill) can hold the
+        // single loading slot; wait it out rather than give up.
+        let waits = 0;
+        while (timelineIdentityRef.current === targetIdentity) {
+            if (isLoaded()) return true;
+            if (batches >= options.maxBatches || !historySignalsRef.current.hasMoreAboveTurns) return false;
+            if (isLoadingOlderRef.current) {
+                waits += 1;
+                if (waits > HISTORY_LOAD_WAIT_LIMIT) return false;
+                await waitForNextRenderCommitOrTimeout();
+                continue;
+            }
+            batches += 1;
+            const grew = await fetchOlderHistory({ preserveViewport: true }).catch(() => false);
+            if (!grew) return timelineIdentityRef.current === targetIdentity && isLoaded();
+        }
+        return false;
+    }, [fetchOlderHistory, waitForNextRenderCommitOrTimeout]);
+
     const handleHistoryScroll = React.useCallback(() => {
         // Mobile never loads history from scroll position: any prepend racing
         // an active touch gesture can be hijacked by the native scroll
@@ -836,6 +869,7 @@ export const useChatTimelineController = ({
         showScrollToBottom: showScrollButton && !pendingRevealWork,
         turnWindowModel,
         loadEarlier,
+        loadHistoryUntilMessage,
         revealBufferedTurns,
         resumeToBottom,
         resumeToBottomInstant,

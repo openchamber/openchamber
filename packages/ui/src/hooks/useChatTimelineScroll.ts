@@ -4,7 +4,15 @@ import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
 import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
 import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
-import { useViewportStore } from '@/sync/viewport-store';
+import {
+    ANCHOR_HOLD_MAX_FRAMES,
+    ANCHOR_HOLD_STABLE_FRAMES,
+    captureMessageViewportAnchor,
+    type MessageViewportAnchor,
+    type ViewportAnchorAlignment,
+} from '@/components/chat/lib/scroll/messageViewportAnchor';
+import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useUIStore } from '@/stores/useUIStore';
 import type { TimelineRevealGate } from '@/components/chat/timelineRevealGate';
 import {
@@ -64,11 +72,20 @@ export interface TimelineListHandle {
     }) => unknown;
 }
 
+// The part of the message list that resolves a reading position.
+interface TimelineAnchorHandle {
+    alignViewportAnchor: (anchor: MessageViewportAnchor) => ViewportAnchorAlignment;
+}
+
 interface UseChatTimelineScrollOptions {
     currentSessionId: string | null;
     currentSessionKey: string | null;
-    sessionMessageCount: number;
     composerOverlayHeight: number;
+    messageListRef: React.RefObject<TimelineAnchorHandle | null>;
+    // Loads older history until the message is in the timeline; resolves
+    // whether it is. Used when the remembered reading position lies before
+    // the loaded window (the session's history was evicted meanwhile).
+    loadHistoryUntilMessage?: (messageId: string) => Promise<boolean>;
     // True while the session is producing output. Follow corrections glide
     // only then. Outside a live stream — entering a session, a tab becoming
     // active, rows re-measuring after a switch — the viewport must land on
@@ -107,7 +124,6 @@ export interface UseChatTimelineScrollResult {
     isFollowingProgrammatically: boolean;
     goToBottom: (mode?: 'instant' | 'smooth') => void;
     scrollToBottomOnSend: () => void;
-    saveSnapshotNow: () => void;
     restoreSnapshot: () => Promise<boolean>;
 }
 
@@ -115,13 +131,16 @@ export interface UseChatTimelineScrollResult {
 // settles (the list reports isAtEnd=false until its initial end-scroll lands).
 // Hiding is always immediate.
 const SHOW_SCROLL_BUTTON_DELAY_MS = 150;
-const SAVE_DEBOUNCE_MS = 150;
+// How long an opening session stays hidden while older history loads toward a
+// remembered reading position. Longer, a blank chat reads worse than a jump.
+const REMEMBERED_POSITION_REVEAL_WAIT_MS = 800;
 
 export const useChatTimelineScroll = ({
     currentSessionId,
     currentSessionKey,
-    sessionMessageCount,
     composerOverlayHeight,
+    messageListRef,
+    loadHistoryUntilMessage,
     sessionIsWorking,
     revealGate = null,
     onActiveTurnChange,
@@ -165,14 +184,10 @@ export const useChatTimelineScroll = ({
     const onListMetricsChange = React.useCallback((metrics: { readonly footerSize: number }) => {
         listFooterSizeRef.current = Number.isFinite(metrics.footerSize) ? metrics.footerSize : 0;
     }, []);
-    const sessionMessageCountRef = React.useRef(sessionMessageCount);
-    sessionMessageCountRef.current = sessionMessageCount;
-    const currentSessionIdRef = React.useRef(currentSessionId);
-    currentSessionIdRef.current = currentSessionId;
     const currentSessionKeyRef = React.useRef(currentSessionKey);
     currentSessionKeyRef.current = currentSessionKey;
-
-    const updateViewportAnchor = useViewportStore((state) => state.updateViewportAnchor);
+    const loadHistoryUntilMessageRef = React.useRef(loadHistoryUntilMessage);
+    loadHistoryUntilMessageRef.current = loadHistoryUntilMessage;
 
     const cancelShowButtonTimer = React.useCallback(() => {
         if (showButtonTimerRef.current !== null) {
@@ -219,53 +234,41 @@ export const useChatTimelineScroll = ({
         liveFollowGenerationRef.current === userGenerationRef.current
     ), []);
 
-    // ── snapshot persistence ────────────────────────────────────────────────
-    const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
-    const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    // ── reading position memory ─────────────────────────────────────────────
+    // Where the reader left a session is recorded when its list goes away and
+    // restored when the session is entered again. A reader on the live end
+    // leaves no record, so a session left following its output reopens on
+    // the end exactly as before.
+    //
+    // The session the mounted list belongs to. By the time the outgoing list
+    // detaches, the current key already names the incoming session.
+    const listSessionKeyRef = React.useRef<string | null>(null);
+    // A restore in flight (frame alignment or an older-history search). While
+    // one runs, the remembered position still stands and is not overwritten.
+    const restoreRef = React.useRef<{ cancel: () => void } | null>(null);
+    // The session whose entry restored a reading position; the entry's own
+    // return-to-end command leaves that session alone.
+    const restoredEntryKeyRef = React.useRef<string | null>(null);
+    const handledEntryKeyRef = React.useRef<string | null>(null);
 
-    const flushSave = React.useCallback(() => {
-        if (saveTimerRef.current !== null) {
-            clearTimeout(saveTimerRef.current);
-            saveTimerRef.current = null;
-        }
-        const pending = pendingSaveRef.current;
-        if (!pending) return;
-        const container = scrollRef.current;
-        if (!container) {
-            pendingSaveRef.current = null;
-            return;
-        }
-        updateViewportAnchor(pending.sessionId, pending.anchor, {
-            scrollTop: container.scrollTop,
-            scrollHeight: container.scrollHeight,
-            clientHeight: container.clientHeight,
-        });
-        pendingSaveRef.current = null;
-    }, [updateViewportAnchor]);
-
-    const queueSave = React.useCallback(() => {
-        const sessionId = currentSessionIdRef.current;
-        if (!sessionId) return;
-        const container = scrollRef.current;
-        if (!container) return;
-
-        const { scrollTop, scrollHeight, clientHeight } = container;
-        const anchorRatio = scrollHeight > 0
-            ? (scrollTop + clientHeight / 2) / scrollHeight
-            : 0;
-        const anchor = Math.floor(anchorRatio * sessionMessageCountRef.current);
-
-        pendingSaveRef.current = { sessionId, anchor };
-        if (saveTimerRef.current !== null) return;
-        saveTimerRef.current = setTimeout(() => {
-            saveTimerRef.current = null;
-            flushSave();
-        }, SAVE_DEBOUNCE_MS);
-    }, [flushSave]);
-
-    const saveSnapshotNow = React.useCallback(() => {
-        flushSave();
-    }, [flushSave]);
+    // Called while the outgoing list is still in the document: React detaches
+    // a list's ref before removing its nodes. This runs inside the commit, so
+    // the end check reads the list's own measurements; only a reader who left
+    // away from the end costs a DOM read.
+    const rememberOutgoingPosition = React.useCallback((node: HTMLElement, list: TimelineListHandle | null) => {
+        const sessionKey = listSessionKeyRef.current;
+        listSessionKeyRef.current = null;
+        // A list detached before its entry was decided was never read; this
+        // is also Strict Mode's detach/reattach right after mount, which must
+        // not erase the position the entry is about to restore.
+        if (!sessionKey || handledEntryKeyRef.current !== sessionKey || restoreRef.current) return;
+        const state = list?.getState();
+        // A hidden container measures nothing; keep what was recorded before.
+        if (!state || state.scrollLength <= 0) return;
+        const atEnd = (modeRef.current === 'following-end' && isAtEndRef.current)
+            || resolveTimelineIsAtEnd(state) !== false;
+        rememberSessionScrollPosition(sessionKey, atEnd ? null : captureMessageViewportAnchor(node));
+    }, []);
 
     // ── scroll commands ─────────────────────────────────────────────────────
     const goToBottomReassertTimersRef = React.useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -314,15 +317,140 @@ export const useChatTimelineScroll = ({
         // exactly where they are; the scroll-to-bottom pill (already showing)
         // leads to the sent message.
         if (!streamingAutoFollowEnabledRef.current && !isAtEndRef.current) return;
+        // A reply the reader just asked for outranks a position still being
+        // looked up in older history.
+        restoreRef.current?.cancel();
         goToBottom('instant');
     }, [goToBottom]);
+
+    // The reader is back where they left: nothing follows the end until they
+    // return to it, and the pill offers the way back.
+    const holdRememberedPosition = React.useCallback(() => {
+        clearGoToBottomReasserts();
+        modeRef.current = 'free-scrolling';
+        liveFollowGenerationRef.current = null;
+        isAtEndRef.current = false;
+        userOwnsScrollRef.current = true;
+        setIsPinned(false);
+        setUserOwnsScroll(true);
+        setViewportAtEnd(false);
+        cancelShowButtonTimer();
+        setShowScrollButton(true);
+    }, [cancelShowButtonTimer, clearGoToBottomReasserts]);
+
+    // Brings the remembered message back to its offset. Rows arrive from
+    // estimates and re-measure over several frames, so the alignment repeats
+    // until the message holds still. The first step runs synchronously so a
+    // message outside the loaded timeline is known before anything moves.
+    // Real input ends it at once: the viewport is the reader's from there.
+    const startPositionRestore = React.useCallback((
+        anchor: MessageViewportAnchor,
+        node: HTMLElement,
+        releaseReveal: (() => void) | null,
+    ): boolean => {
+        const first = messageListRef.current?.alignViewportAnchor(anchor) ?? 'missing';
+        if (first === 'missing') return false;
+        holdRememberedPosition();
+
+        let frame: number | null = null;
+        let frames = 0;
+        let stable = first === 'aligned' ? 1 : 0;
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            node.removeEventListener('wheel', finish);
+            node.removeEventListener('touchstart', finish);
+            node.removeEventListener('pointerdown', finish);
+            node.removeEventListener('keydown', finish);
+            if (restoreRef.current === restore) restoreRef.current = null;
+            releaseReveal?.();
+        };
+        const restore = { cancel: finish };
+        restoreRef.current?.cancel();
+        restoreRef.current = restore;
+        node.addEventListener('wheel', finish, { passive: true });
+        node.addEventListener('touchstart', finish, { passive: true });
+        node.addEventListener('pointerdown', finish, { passive: true });
+        node.addEventListener('keydown', finish);
+
+        const step = () => {
+            frame = null;
+            if (scrollRef.current !== node) {
+                finish();
+                return;
+            }
+            const result = messageListRef.current?.alignViewportAnchor(anchor) ?? 'missing';
+            frames += 1;
+            stable = result === 'aligned' ? stable + 1 : 0;
+            // Two still frames: shown where it belongs. The hold continues
+            // for late measurements (images, highlighted code) above it.
+            if (stable >= 2) releaseReveal?.();
+            if (result === 'missing' || stable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
+                finish();
+                return;
+            }
+            frame = window.requestAnimationFrame(step);
+        };
+        frame = window.requestAnimationFrame(step);
+        return true;
+    }, [holdRememberedPosition, messageListRef]);
+
+    // The remembered message lies before the loaded window: the session's
+    // history was evicted while the reader was away and reopened with only
+    // its latest turns. Older history loads in bounded batches while the
+    // timeline stays hidden, up to REMEMBERED_POSITION_REVEAL_WAIT_MS; a fast
+    // load shows the session already in place. A slower one reveals the end
+    // first and moves the reader once the message is there, unless they
+    // acted in the meantime. Mobile loads history only on an explicit tap
+    // (see useChatTimelineController), so it stays on the end.
+    const restoreFromOlderHistory = React.useCallback((
+        anchor: MessageViewportAnchor,
+        sessionKey: string,
+        gate: TimelineRevealGate | null,
+    ) => {
+        const loadHistoryUntil = loadHistoryUntilMessageRef.current;
+        if (!loadHistoryUntil || isMobileSurfaceRuntime()) return;
+        const releaseReveal = gate?.hold() ?? null;
+        gate?.extendCap(REMEMBERED_POSITION_REVEAL_WAIT_MS);
+        const generation = userGenerationRef.current;
+        let cancelled = false;
+        const search = {
+            cancel: () => {
+                cancelled = true;
+                releaseReveal?.();
+            },
+        };
+        restoreRef.current?.cancel();
+        restoreRef.current = search;
+        void loadHistoryUntil(anchor.messageId)
+            .catch(() => false)
+            .then((found) => {
+                if (restoreRef.current === search) restoreRef.current = null;
+                const node = scrollRef.current;
+                if (
+                    cancelled
+                    || !found
+                    || currentSessionKeyRef.current !== sessionKey
+                    || listSessionKeyRef.current !== sessionKey
+                    || userGenerationRef.current !== generation
+                    || !node
+                    || !startPositionRestore(anchor, node, releaseReveal)
+                ) {
+                    releaseReveal?.();
+                }
+            });
+    }, [startPositionRestore]);
 
     const restoreSnapshot = React.useCallback(async (): Promise<boolean> => {
         const sessionKey = currentSessionKeyRef.current;
         if (!sessionKey) return false;
+        if (restoredEntryKeyRef.current === sessionKey) return true;
 
-        // Entering a session always returns to the live edge. Late async growth
-        // is handled by the list staying at the end, not by a timed hold.
+        // Entering a session without a remembered position returns to the
+        // live edge. Late async growth is handled by the list staying at the
+        // end, not by a timed hold.
         isAtEndRef.current = true;
         setUserOwnsScroll(false);
         modeRef.current = 'following-end';
@@ -335,14 +463,21 @@ export const useChatTimelineScroll = ({
     // ── list callbacks ──────────────────────────────────────────────────────
     const registerList = React.useCallback((list: TimelineListHandle | null) => {
         const previousNode = scrollRef.current;
-        listRef.current = list;
+        // SAFETY: LegendList's web renderer mounts its scroll container as a div.
         const node = (list?.getScrollableNode() as HTMLDivElement | null) ?? null;
+        if (previousNode && previousNode !== node) {
+            rememberOutgoingPosition(previousNode, listRef.current);
+        }
+        listRef.current = list;
         scrollRef.current = node;
         setScrollNode(node);
+        if (node) {
+            listSessionKeyRef.current = currentSessionKeyRef.current;
+        }
         if (previousNode && previousNode !== node) {
             retireScrollContent(previousNode, () => scrollRef.current === previousNode);
         }
-    }, []);
+    }, [rememberOutgoingPosition]);
 
     const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {
         // While an automatic movement owns the viewport, leaving the end is our
@@ -369,8 +504,7 @@ export const useChatTimelineScroll = ({
             liveFollowGenerationRef.current = null;
             scheduleShowScrollButton();
         }
-        queueSave();
-    }, [hideScrollButton, isLiveFollowActive, queueSave, scheduleShowScrollButton]);
+    }, [hideScrollButton, isLiveFollowActive, scheduleShowScrollButton]);
 
     // Whether the real rows are tall enough to scroll at all.
     const realContentOverflowsViewport = React.useCallback((list: TimelineListHandle): boolean => {
@@ -634,7 +768,6 @@ export const useChatTimelineScroll = ({
             if (isFollowReleaseKey(event) && canScrollUp()) gesture();
         };
         const handleScroll = () => {
-            queueSave();
             // Mid-glide the viewport is legitimately short of the end.
             if (followGlideHeld()) return;
             const distance = scrollNode.scrollHeight - scrollNode.clientHeight - scrollNode.scrollTop;
@@ -660,16 +793,51 @@ export const useChatTimelineScroll = ({
             scrollNode.removeEventListener('keydown', handleKeyDown);
             scrollNode.removeEventListener('scroll', handleScroll);
         };
-    }, [queueSave, realContentOverflowsViewport, scrollNode]);
+    }, [realContentOverflowsViewport, scrollNode]);
+
+    // ── session lifecycle ───────────────────────────────────────────────────
+    // A layout effect declared before the entry pin: a session entered with a
+    // remembered position overrides this reset within the same commit.
+    const lastSessionKeyRef = React.useRef<string | null>(null);
+    React.useLayoutEffect(() => {
+        if (!currentSessionId || !currentSessionKey || currentSessionKey === lastSessionKeyRef.current) {
+            return;
+        }
+        lastSessionKeyRef.current = currentSessionKey;
+        MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
+        restoreRef.current?.cancel();
+        restoredEntryKeyRef.current = null;
+        isAtEndRef.current = true;
+        setUserOwnsScroll(false);
+        setViewportAtEnd(true);
+        modeRef.current = 'following-end';
+        liveFollowGenerationRef.current = userGenerationRef.current;
+        hideScrollButton();
+    }, [currentSessionId, currentSessionKey, hideScrollButton]);
 
     // ── entry pin ───────────────────────────────────────────────────────────
-    // An opened session is shown once, already at its end: the reveal gate is
-    // held until the viewport sits on the end, and the pin is one instant
-    // write. The list lays its rows out before the first frame, so this
-    // resolves within a frame; the gate's own cap bounds the wait.
+    // An opened session is shown once, already in place: the reveal gate is
+    // held until the viewport sits where it belongs. That is the remembered
+    // reading position when the session was left away from its end, and the
+    // end otherwise, pinned with one instant write. The list lays its rows out
+    // before the first frame, so this resolves within a few frames; the gate's
+    // own cap bounds the wait.
     React.useLayoutEffect(() => {
         if (!currentSessionKey || !scrollNode) return;
         const releaseReveal = revealGate?.hold() ?? null;
+        // For one commit the state can still name the list being replaced;
+        // only the list registered for this session decides the entry.
+        if (scrollRef.current === scrollNode && handledEntryKeyRef.current !== currentSessionKey) {
+            handledEntryKeyRef.current = currentSessionKey;
+            const remembered = readSessionScrollPosition(currentSessionKey);
+            if (remembered) {
+                if (startPositionRestore(remembered, scrollNode, releaseReveal)) {
+                    restoredEntryKeyRef.current = currentSessionKey;
+                    return () => releaseReveal?.();
+                }
+                restoreFromOlderHistory(remembered, currentSessionKey, revealGate);
+            }
+        }
         let frame: number | null = null;
         const settle = () => {
             frame = null;
@@ -684,7 +852,7 @@ export const useChatTimelineScroll = ({
             if (frame !== null) cancelAnimationFrame(frame);
             releaseReveal?.();
         };
-    }, [currentSessionKey, revealGate, scrollNode]);
+    }, [currentSessionKey, restoreFromOlderHistory, revealGate, scrollNode, startPositionRestore]);
 
     // ── keyboard follow glide ───────────────────────────────────────────────
     // On mobile the keyboard and the composer morph change the transcript's
@@ -758,24 +926,6 @@ export const useChatTimelineScroll = ({
         };
     }, [scrollNode]);
 
-    // ── session lifecycle ───────────────────────────────────────────────────
-    const lastSessionKeyRef = React.useRef<string | null>(null);
-    React.useEffect(() => {
-        if (!currentSessionId || !currentSessionKey || currentSessionKey === lastSessionKeyRef.current) {
-            return;
-        }
-        lastSessionKeyRef.current = currentSessionKey;
-        MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
-        // Persist the outgoing session's position before the new one takes over.
-        flushSave();
-        isAtEndRef.current = true;
-        setUserOwnsScroll(false);
-        setViewportAtEnd(true);
-        modeRef.current = 'following-end';
-        liveFollowGenerationRef.current = userGenerationRef.current;
-        hideScrollButton();
-    }, [currentSessionId, currentSessionKey, flushSave, hideScrollButton]);
-
     // Suppress the overlay scrollbar thumb while automatic movement owns the
     // scroll position, so it does not jump on each correction.
     React.useEffect(() => {
@@ -784,7 +934,7 @@ export const useChatTimelineScroll = ({
 
     React.useEffect(() => () => {
         cancelShowButtonTimer();
-        if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+        restoreRef.current?.cancel();
     }, [cancelShowButtonTimer]);
 
     // ── active-turn spy ─────────────────────────────────────────────────────
@@ -876,7 +1026,6 @@ export const useChatTimelineScroll = ({
         isFollowingProgrammatically,
         goToBottom,
         scrollToBottomOnSend,
-        saveSnapshotNow,
         restoreSnapshot,
     };
 };

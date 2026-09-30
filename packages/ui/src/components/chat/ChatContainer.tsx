@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
-import { createTimelineRevealGate, TIMELINE_REVEAL_CAP_MS, TimelineRevealGateContext, type TimelineRevealGate } from './timelineRevealGate';
+import { createTimelineRevealGate, TimelineRevealGateContext, type TimelineRevealGate } from './timelineRevealGate';
 
 // How long the previous timeline stays on screen while a session that is not
 // in memory loads, before the skeleton takes over.
@@ -37,6 +37,9 @@ const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
 // Mirrors the oc-chat-hydration-reveal duration in index.css.
 const TIMELINE_REVEAL_FADE_MS = 100;
+// History batches loaded to reach a remembered reading position that lies
+// before the loaded window; past that the session stays on its end.
+const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
 import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
@@ -63,7 +66,6 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useStreamingStore } from '@/sync/streaming';
 import {
-    useSessionMessageCount,
     useSessionMessageRecords,
     useSessionMessageLoadState,
     useSessionMessageLoader,
@@ -461,7 +463,7 @@ const ChatViewport = React.memo(({
                 return;
             }
             revealGate.onEmpty = () => reveal(true);
-            timer = window.setTimeout(() => reveal(true), TIMELINE_REVEAL_CAP_MS);
+            timer = window.setTimeout(() => reveal(true), revealGate.capMs);
         });
         return () => {
             finished = true;
@@ -804,7 +806,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             [streamingMessageId],
         ),
     );
-    const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', effectiveSessionDirectory);
     const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
     // Messages from sync system. Keep this gated by `messagesEnabled`, not
     // `active`, so embedded panels can show history while the composer stays
@@ -1121,6 +1122,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         statusOverlayObserverRef.current?.disconnect();
         statusOverlayObserverRef.current = null;
     }, []);
+    // The timeline controller owns history loading and needs this hook's
+    // scroll commands, so the hook reaches the loader through a ref.
+    const loadHistoryUntilMessageRef = React.useRef<(messageId: string) => Promise<boolean>>(async () => false);
+    const loadHistoryUntilMessage = React.useCallback(
+        (messageId: string) => loadHistoryUntilMessageRef.current(messageId),
+        [],
+    );
     const {
         scrollRef,
         scrollNode,
@@ -1140,8 +1148,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     } = useChatTimelineScroll({
         currentSessionId,
         currentSessionKey,
-        sessionMessageCount,
         composerOverlayHeight,
+        messageListRef,
+        loadHistoryUntilMessage,
         sessionIsWorking,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
@@ -1201,6 +1210,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
     }, [timelineController.handleActiveTurnChange]);
+    // Assigned during render: the entry restore runs in a layout effect of
+    // this same commit, before passive effects could update the ref.
+    const controllerLoadHistoryUntilMessage = timelineController.loadHistoryUntilMessage;
+    loadHistoryUntilMessageRef.current = (messageId) => controllerLoadHistoryUntilMessage(messageId, {
+        maxBatches: REMEMBERED_POSITION_HISTORY_BATCHES,
+    });
     const chatQuoteHighlights = useChatQuoteHighlightStore();
 
     const navigation = useChatTurnNavigation({
