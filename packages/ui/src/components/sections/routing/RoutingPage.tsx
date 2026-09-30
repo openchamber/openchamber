@@ -39,6 +39,19 @@ const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
 
 
+/**
+ * Whether the server's copy is the draft as the server stores it. The server
+ * trims names and descriptions, so a mid-typing "- " or trailing newline comes
+ * back without it; adopting that copy would eat what the user just typed.
+ */
+const isStoredFormOf = (server: RoutingConfig, draft: RoutingConfig): boolean => {
+  const trimmed = (config: RoutingConfig) => JSON.stringify({
+    ...config,
+    categories: config.categories.map((category) => ({ ...category, name: category.name.trim(), description: category.description.trim() })),
+  });
+  return trimmed(server) === trimmed(draft);
+};
+
 const slugify = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 
 /** The thinking levels OpenCode reports for one model; empty when the model has none. */
@@ -220,9 +233,11 @@ export const RoutingPage: React.FC = () => {
     void load();
   }, [load]);
 
-  // The server is authoritative; adopt its config whenever nothing is mid-edit.
+  // The server is authoritative; adopt its config whenever nothing is mid-edit,
+  // unless it is only the trimmed form of what is already on screen.
   React.useEffect(() => {
-    if (!pendingRef.current && savesInFlightRef.current === 0) setDraft(serverConfig);
+    if (pendingRef.current || savesInFlightRef.current > 0) return;
+    setDraft((current) => (current && serverConfig && isStoredFormOf(serverConfig, current) ? current : serverConfig));
   }, [serverConfig]);
 
   const flush = React.useCallback(() => {
