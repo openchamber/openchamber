@@ -1644,8 +1644,8 @@ const recordTurnOutcomeNotification = (
   const { sessionID } = payload.properties
   if (!sessionID) return
   const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(payload.properties.error) : null
-  if (errorSummary) {
   const responseBody = payload.type === "session.error" ? responseBodyOf(payload.properties.error) : null
+  if (errorSummary) {
     recordSessionError({ sessionId: sessionID, directory, ...errorSummary })
   }
   if (isSubtaskSession(sessionID, directory, childStores, batch)) return
