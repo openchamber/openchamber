@@ -28,3 +28,5 @@ export const NETWORK_ACCESS_BLOCKED_ERROR: string;
 export function publicEnterprisePolicy(options?: EnterprisePolicyOptions): PublicEnterprisePolicy;
 export function isProviderConnectRequest(method: string, requestPath: string): boolean;
 export const ENTERPRISE_MODE_ERROR: string;
+export function isCredentialListRequest(method: string, requestPath: string): boolean;
+export const CREDENTIAL_LIST_ERROR: string;

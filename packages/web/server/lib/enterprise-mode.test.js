@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isCredentialListRequest,
   isEnterpriseMode,
   isNetworkAccessBlocked,
   isProviderConnectRequest,
@@ -232,6 +233,9 @@ describe('enterprise policy', () => {
       '/api/experimental/integration/wellknown',
       '/api/integration/openai/connect',
       '/api/integration/openai/connect/key/',
+      '/api/credential',
+      '/api/credential/',
+      '/API//credential;x',
     ])('refuses POST %s', (requestPath) => {
       expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
     });
@@ -293,8 +297,66 @@ describe('enterprise policy', () => {
       ['POST', '/api/integration/openai/connectors'],
       ['POST', '/health'],
       ['DELETE', '/api/credential/cred_1'],
+      ['POST', '/api/credential/cred_1/activate'],
+      ['PATCH', '/api/credential/cred_1'],
+      ['GET', '/api/credential'],
     ])('leaves %s %s alone', (method, requestPath) => {
       expect(isProviderConnectRequest(method, requestPath)).toBe(false);
+    });
+  });
+
+  describe('credential list requests', () => {
+    // OpenCode routes all of these to the handler that returns every key.
+    it.each([
+      ['GET', '/api/credential'],
+      ['GET', '/api/credential/'],
+      ['GET', '/api/credential?directory=%2Fp'],
+      ['HEAD', '/api/credential'],
+      ['get', '/API/Credential'],
+      ['GET', '//api//credential'],
+      ['GET', '/api\\credential'],
+      ['GET', '/api/%63redential'],
+      ['GET', '/api/credential;x'],
+    ])('refuses %s %s', (method, requestPath) => {
+      expect(isCredentialListRequest(method, requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/api/x/../credential',
+      '/api/%E0%A4%A',
+      '/API/%zz',
+    ])('refuses GET %s, which cannot be read safely', (requestPath) => {
+      expect(isCredentialListRequest('GET', requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/assets/a%zz.js',
+      '/docs/../index.html',
+      '/apikeys/%zz',
+    ])('leaves GET %s alone, which never reaches OpenCode', (requestPath) => {
+      expect(isCredentialListRequest('GET', requestPath)).toBe(false);
+    });
+
+    // OpenCode 2.0.20 matches before decoding a separator: these reach its web
+    // app page (200 HTML), 404 or 405, never the credential handler.
+    it.each([
+      '/api%2fcredential',
+      '/api%2Fcredential',
+      '/api%5ccredential',
+    ])('leaves GET %s alone, which OpenCode does not route to the list', (requestPath) => {
+      expect(isCredentialListRequest('GET', requestPath)).toBe(false);
+    });
+
+    it.each([
+      ['POST', '/api/credential'],
+      ['PATCH', '/api/credential/cred_1'],
+      ['DELETE', '/api/credential/cred_1'],
+      ['POST', '/api/credential/cred_1/activate'],
+      ['GET', '/api/credentials'],
+      ['GET', '/api/integration'],
+      ['GET', '/credential'],
+    ])('leaves %s %s alone', (method, requestPath) => {
+      expect(isCredentialListRequest(method, requestPath)).toBe(false);
     });
   });
 });

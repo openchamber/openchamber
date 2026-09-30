@@ -28,6 +28,8 @@ describe('provider writes in enterprise mode', () => {
     agent.post('/api/integration/openai/%63onnect/key').send({ key: 'sk-test' }),
     agent.post('/api/integration\\openai\\connect\\key').send({ key: 'sk-test' }),
     agent.post('/api/experimental/integration/wellknown;x').send({ url: 'https://example.test' }),
+    agent.post('/api/credential').send({ integrationID: 'openai', value: { type: 'key', key: 'sk-test' } }),
+    agent.post('/API//credential').send({ integrationID: 'openai', value: { type: 'key', key: 'sk-test' } }),
   ];
 
   it('refuses connecting a provider, adding a key, or creating a custom provider', async () => {
@@ -38,8 +40,9 @@ describe('provider writes in enterprise mode', () => {
         expect(response.status).toBe(403);
         expect(response.body.code).toBe('enterprise_mode');
       }
-      // Removing an account only narrows access and still reaches OpenCode.
+      // Removing or switching an account only narrows access and still reaches OpenCode.
       expect((await agent.delete('/api/credential/cred_1')).status).toBe(404);
+      expect((await agent.post('/api/credential/cred_1/activate')).status).toBe(404);
       // Signing in to a remote MCP server reaches a tool server, not a model provider.
       const mcpSignIn = [
         agent.post('/api/integration/mcp_0123456789abcdef/connect/oauth').send({ methodID: 'mcp_0123456789abcdef' }),
@@ -57,6 +60,37 @@ describe('provider writes in enterprise mode', () => {
     const connect = await request(createApp(vi.fn())).post('/api/integration/openai/connect/key').send({ key: 'sk-test' });
     // No proxy in this app: falling through reads as Express's 404.
     expect(connect.status).toBe(404);
+  });
+});
+
+describe('the stored credential list', () => {
+  const reads = (agent) => [
+    agent.get('/api/credential'),
+    agent.get('/API//credential/'),
+    agent.get('/api/%63redential'),
+    agent.head('/api/credential'),
+  ];
+
+  it('never reaches a client, with or without enterprise mode', async () => {
+    const agent = request(createApp(vi.fn()));
+    for (const response of await Promise.all(reads(agent))) {
+      expect(response.status).toBe(403);
+    }
+    expect((await agent.get('/api/credential')).body.code).toBe('credential_list_refused');
+
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      for (const response of await Promise.all(reads(agent))) {
+        expect(response.status).toBe(403);
+      }
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+  });
+
+  it('does not refuse renaming an account', async () => {
+    // No proxy in this app: falling through reads as Express's 404.
+    expect((await request(createApp(vi.fn())).patch('/api/credential/cred_1').send({ label: 'work' })).status).toBe(404);
   });
 });
 

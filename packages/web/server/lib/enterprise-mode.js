@@ -248,10 +248,10 @@ const MCP_INTEGRATION_ID = /^mcp_[0-9a-f]{16}$/;
 const ATTEMPT_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
- * The path segments as OpenCode 2.0.18 routes them. Bun's URL parsing turns
- * `\` into `/`; its router (find-my-way-ts, case-insensitive, duplicate
- * slashes ignored) ends the path at `?`, `#` or `;` and decodes percent
- * escapes. So `/API//integration\%6Fpenai/connect/key;x` reaches the same
+ * The path segments as OpenCode 2.0.18 to 2.0.20 route them. Bun's URL parsing turns
+ * `\` into `/`; OpenCode's router (`effect/unstable/http` FindMyWay:
+ * case-insensitive, duplicate and trailing slashes ignored, `safeDecodeURI`)
+ * ends the path at `?`, `#` or `;` and decodes percent escapes. So `/API//integration\%6Fpenai/connect/key;x` reaches the same
  * handler as `/api/integration/openai/connect/key`. Null when a segment cannot
  * be decoded or is a dot segment: such a path is refused. Recheck this list
  * when OpenCode changes its router.
@@ -284,7 +284,8 @@ const isMcpSignIn = (integrationId, rest) => (
 /**
  * Whether a request to OpenCode would add a way to reach a model provider:
  * every POST under `/api/integration/:id/connect` (key, oauth start and
- * complete, command) and adding a well-known integration. Signing in to a
+ * complete, command), storing a key with `POST /api/credential`, and adding a
+ * well-known integration. Signing in to a
  * remote MCP server goes through the same routes and stays allowed. Reads,
  * cancelling an attempt and removing or switching an existing account stay
  * allowed too: they only narrow access. A path that cannot be read safely
@@ -296,9 +297,32 @@ export const isProviderConnectRequest = (method, requestPath) => {
   if (segments === null) return true;
   const [api, group, ...tail] = segments.map((segment) => segment.toLowerCase());
   if (api !== 'api') return false;
+  // `POST /api/credential` stores a new key (OpenCode 2.0.20);
+  // `/api/credential/:id/activate` only switches between existing ones.
+  if (group === 'credential') return tail.length === 0;
   if (group === 'experimental') return tail[0] === 'integration' && tail[1] === 'wellknown';
   if (group !== 'integration' || tail[1] !== 'connect') return false;
   return !isMcpSignIn(segments[2], segments.slice(4));
 };
 
 export const ENTERPRISE_MODE_ERROR = 'Not available in enterprise mode: this server keeps conversations with the model providers configured in OpenCode.';
+
+/**
+ * Whether a request asks OpenCode for every stored credential. Since 2.0.20
+ * `GET /api/credential` answers with the secrets themselves. This server and
+ * the VS Code extension host read it for themselves (`opencode/auth.js`); no
+ * client gets it, in or out of enterprise mode, because anyone signed in to
+ * the UI (over a tunnel or a paired phone too) would otherwise read every key.
+ * It lives here because it needs the same reading of an OpenCode path as the
+ * provider-connect check. A path under `/api` that cannot be read safely
+ * counts as a read; anything else never reaches OpenCode and is left alone.
+ */
+export const isCredentialListRequest = (method, requestPath) => {
+  const upper = String(method).toUpperCase();
+  if (upper !== 'GET' && upper !== 'HEAD') return false;
+  const segments = routeSegments(requestPath);
+  if (segments === null) return /^[\\/]*api(?:[\\/?#;]|$)/i.test(String(requestPath));
+  return segments.length === 2 && segments[0].toLowerCase() === 'api' && segments[1].toLowerCase() === 'credential';
+};
+
+export const CREDENTIAL_LIST_ERROR = 'OpenChamber does not hand stored provider keys to clients.';
