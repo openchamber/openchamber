@@ -62,7 +62,7 @@ mock.module('./quotaCredentials', () => ({
   deleteCredential: mock(),
   importCursorCredential: mock(),
   normalizeCredential: mock(),
-  readCredential: mock(),
+  readCredential: mock(() => null),
   validateCredential: mock(),
   writeCredential: mock(),
 }));

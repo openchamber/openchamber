@@ -36,7 +36,6 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go kullanım takibi',
   'settings.providers.page.openCodeGo.description': 'Kayan, haftalık ve aylık kotayı göstermek için OpenCode Go kontrol panelini bağlayın.',
   'settings.providers.page.openCodeGo.workspaceId': 'Çalışma alanı ID\'si',
-  'settings.providers.page.openCodeGo.authCookie': 'Kimlik doğrulama çerezi',
   'settings.providers.page.openCodeGo.apiKey': 'API anahtarı',
   'settings.providers.page.openCodeGo.help': 'Çalışma alanı ID\'sini kontrol paneli URL\'sinden, kimlik doğrulama çerezini de tarayıcınızın geliştirici araçlarından kopyalayın. OpenChamber tarayıcı çerez deposunu asla taramaz.',
   'settings.providers.page.openCodeGo.save': 'Kaydet ve doğrula',

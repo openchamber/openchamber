@@ -5,12 +5,11 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-type QuotaCredentialProviderId = 'exe-dev' | 'ollama-cloud' | 'cursor' | 'zenmux';
+type QuotaCredentialProviderId = 'exe-dev' | 'cursor' | 'zenmux';
 
 type Status = { configured: boolean; secretMasked?: string };
 type CredentialPayload = {
   usageToken?: string;
-  cookie?: string;
   accessToken?: string;
   refreshToken?: string;
   platformApiKey?: string;
@@ -51,7 +50,6 @@ export const QuotaCredentials: React.FC<{ providerId: QuotaCredentialProviderId;
       {providerId === 'zenmux' && (
         <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.zenmuxInstructions')}</p>
       )}
-      {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'aid=...; __Secure-session=...')}
       {providerId === 'exe-dev' && field('usageToken', t('settings.providers.page.quotaCredentials.usageToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'zenmux' && field('platformApiKey', t('settings.providers.page.quotaCredentials.platformApiKey'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}

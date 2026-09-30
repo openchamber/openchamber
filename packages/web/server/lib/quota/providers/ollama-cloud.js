@@ -1,116 +1,116 @@
-import { buildResult, toUsageWindow, toNumber } from '../utils/index.js';
-import { readManagedCredential } from '../credentials/providers.js';
+/**
+ * Ollama Cloud subscription quota.
+ *
+ * Reads the account usage from `GET https://ollama.com/api/usage` using the
+ * same Ollama Cloud API key as the chat requests, so the tracker follows the
+ * account OpenCode has active with no extra credential to paste. This used to
+ * scrape `ollama.com/settings` with a browser session cookie, which broke
+ * whenever the user signed out and had to be re-copied by hand.
+ *
+ * @module quota/providers/ollama-cloud
+ */
+
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { deleteLegacyOllamaCloudCredential } from '../credentials/store.js';
+import { asNonEmptyString, asObject, buildResult, getAuthEntry, normalizeAuthEntry, toNumber, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
-const aliases = ['ollama-cloud', 'ollamacloud'];
+export const aliases = ['ollama-cloud', 'ollamacloud'];
 
-export const parseOllamaSettingsHtml = (html) => {
+const USAGE_URL = 'https://ollama.com/api/usage';
+
+/**
+ * The API key from one auth entry, or null.
+ *
+ * `normalizeAuthEntry` hands back whatever the credential entry happened to
+ * hold, so the key is read as a trimmed non-empty string and nothing else. A
+ * number, an object or a blank string is not a usable key.
+ */
+const apiKeyFromAuth = (auth) => {
+  const entry = asObject(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+  if (!entry) return null;
+  return asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
+};
+
+/**
+ * One bucket's `usage`, as a fraction of the allowance. Read through the shared
+ * `toNumber`, like every other quota provider, so a value that is not a number
+ * is neither guessed at nor coerced.
+ */
+const toUsageFraction = (bucket) => toNumber(asObject(bucket)?.usage);
+
+/**
+ * Map every usable bucket onto a window, under the name the API used, so a plan
+ * is never relabelled into a window the plan does not have. `usage` is a
+ * fraction of the allowance (0..1), clamped because a plan at or over its cap
+ * must read as 100 and never above.
+ *
+ * Each bucket is checked on its own, because the endpoint has changed shape
+ * repeatedly: separate `session` and `weekly` buckets, then a single `monthly`
+ * one, then back again. A bucket we do not recognise must cost the user only
+ * that bucket, never the whole tracker.
+ *
+ * Takes an already-parsed payload; a body that is not a usage response is
+ * rejected by the caller rather than quietly read as "no usage".
+ */
+export const toUsageWindows = (payload) => {
   const windows = {};
-  const sessionMatch = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
-  if (sessionMatch) {
-    windows.session = toUsageWindow({
-      usedPercent: toNumber(sessionMatch[1]),
-      windowSeconds: null,
-      resetAt: null
-    });
-  }
-  const weeklyMatch = html.match(/Weekly\s+usage[^0-9]*([0-9.]+)%/i);
-  if (weeklyMatch) {
-    windows.weekly = toUsageWindow({
-      usedPercent: toNumber(weeklyMatch[1]),
-      windowSeconds: null,
-      resetAt: null
-    });
-  }
-  const premiumMatch = html.match(/Premium[^0-9]*([0-9]+)\s*\/\s*([0-9]+)/i);
-  if (premiumMatch) {
-    const used = toNumber(premiumMatch[1]);
-    const total = toNumber(premiumMatch[2]);
-    const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
-    windows.premium = toUsageWindow({
-      usedPercent,
+  const limits = asObject(asObject(payload)?.limits);
+  // `asObject` accepts an array, whose entries are indices, so an array-shaped
+  // `limits` would render as windows named `0`, `1`. The VS Code twin rejects
+  // anything that is not a plain object, and the two must agree.
+  if (!limits || Array.isArray(limits)) return windows;
+  for (const [name, raw] of Object.entries(limits)) {
+    const usage = toUsageFraction(raw);
+    if (!name || usage === null) continue;
+    windows[name] = toUsageWindow({
+      usedPercent: Math.min(100, Math.max(0, usage * 100)),
       windowSeconds: null,
       resetAt: null,
-      valueLabel: `${used ?? 0} / ${total ?? 0}`
     });
-  }
-  // Cost-based plans render "Monthly usage" with a dollar amount instead of
-  // session/weekly/premium windows; support both page shapes.
-  const monthlyMatch = html.match(/Monthly\s+usage[\s\S]{0,200}?\$([0-9][0-9,.]*)\s+of\s+\$([0-9][0-9,.]*)/i);
-  if (monthlyMatch) {
-    const used = toNumber(monthlyMatch[1].replace(/,/g, ''));
-    const total = toNumber(monthlyMatch[2].replace(/,/g, ''));
-    const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
-    windows.monthly = toUsageWindow({
-      usedPercent,
-      windowSeconds: null,
-      resetAt: null,
-      valueLabel: `$${monthlyMatch[1]} / $${monthlyMatch[2]}`
-    });
-  }
-  // "Extra usage" credits block (visible when credits/auto-reload is enabled):
-  // a balance, not a percent. Anchor on "Balance remaining" — nearby "Add $5"
-  // and auto-reload copy also contain dollar amounts. Surfaced with the
-  // credits_balance key and DeepSeek-style plain money label (the UI renders
-  // it as "Credits Balance"); a $0 balance is omitted rather than shown.
-  const balanceMatch = html.match(/Balance\s+remaining[\s\S]{0,200}?\$([0-9][0-9,.]*)/i);
-  if (balanceMatch) {
-    const balance = toNumber(balanceMatch[1].replace(/,/g, ''));
-    if (balance !== 0) {
-      windows.credits_balance = toUsageWindow({
-        usedPercent: null,
-        windowSeconds: null,
-        resetAt: null,
-        valueLabel: `$${balanceMatch[1]}`
-      });
-    }
   }
   return windows;
 };
 
-export const isConfigured = () => {
-  return Boolean(readManagedCredential(providerId));
-};
+export const isConfigured = (auth) => Boolean(apiKeyFromAuth(auth));
 
-export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
-  const response = await fetchImpl('https://ollama.com/settings', {
+export const fetchOllamaCloudUsage = async (apiKey, fetchImpl = fetch) => {
+  const response = await fetchImpl(USAGE_URL, {
     method: 'GET',
-    headers: { Cookie: credential.cookie, 'User-Agent': 'OpenChamber quota provider' },
-    redirect: 'manual',
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(15_000),
   });
-  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
+  if (response.status === 401 || response.status === 403) {
     throw new Error('Ollama Cloud authentication failed');
   }
   if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
-  const windows = parseOllamaSettingsHtml(await response.text());
+
+  // Three distinct failures, kept distinct: an unreadable body throws from
+  // `json()` (transport), a body that is not a usage response is a shape we do
+  // not understand, and a valid body with no buckets carries no usage data.
+  const windows = toUsageWindows(await response.json());
   if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
   return windows;
 };
 
 export const fetchQuota = async () => {
-  const credential = readManagedCredential(providerId);
-
-  if (!credential) {
-    return buildResult({
-      providerId,
-      providerName,
-      ok: false,
-      configured: false,
-      error: 'Not configured'
-    });
+  const apiKey = apiKeyFromAuth(await readOpenCodeCredentials());
+  if (!apiKey) {
+    return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
   }
 
-  try {
-    const windows = await fetchOllamaCloudUsage(credential);
+  // The cookie this provider used to store is obsolete the first time we reach
+  // for the key instead, mirroring the OpenCode Go cleanup.
+  deleteLegacyOllamaCloudCredential();
 
+  try {
     return buildResult({
       providerId,
       providerName,
       ok: true,
       configured: true,
-      usage: { windows }
+      usage: { windows: await fetchOllamaCloudUsage(apiKey) },
     });
   } catch (error) {
     return buildResult({
@@ -118,7 +118,7 @@ export const fetchQuota = async () => {
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: error instanceof Error ? error.message : 'Request failed',
     });
   }
 };
