@@ -29,7 +29,7 @@ import { cn } from '@/lib/utils';
 /** The shared frame every notice row sits in, so they line up with messages. */
 const NoticeRow: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <div className="w-full pb-2">
-        <div className="chat-column">{children}</div>
+        <div className="chat-message-column">{children}</div>
     </div>
 );
 

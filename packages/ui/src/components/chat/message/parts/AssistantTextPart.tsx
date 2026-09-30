@@ -89,9 +89,6 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         <div
             className={`group/assistant-text relative break-words ${chatRenderMode === 'live' ? 'my-1' : ''}`}
             key={part.id || `${messageId}-text`}
-            // Marks the response text whose wide tables and code may grow past
-            // the column in the wide layout (typography.css); reasoning is indented.
-            data-assistant-response-text={part.type === 'reasoning' ? undefined : ''}
         >
             <MarkdownRenderer
                 content={displayTextContent}
