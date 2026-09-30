@@ -1128,6 +1128,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': 'Capturez d\'abord un raccourci.',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': 'Ce raccourci peut entrer en conflit avec les paramètres par défaut du navigateur. Vous pouvez tout de même l’enregistrer.',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Aller à la ligne (éditeur de fichiers)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': 'Aller au symbole dans le fichier (éditeur de fichiers)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Ouvrir la palette de commandes',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Entrée de mise au point',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Ouvrir les paramètres',

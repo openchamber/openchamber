@@ -1210,6 +1210,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.error.captureFirst": "Captura um atalho primeiro.",
     "settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut": "Este atalho pode entrar em conflito com os padrões do navegador. Ainda assim, você pode salvá-lo.",
   "settings.openchamber.keyboardShortcuts.action.open_go_to_line.label": "Ir para linha (editor de arquivos)",
+  "settings.openchamber.keyboardShortcuts.action.open_document_symbols.label": "Ir para símbolo no arquivo (editor de arquivos)",
   "settings.openchamber.keyboardShortcuts.action.open_command_palette.label": "Abrir paleta de comandos",
   "settings.openchamber.keyboardShortcuts.action.focus_input.label": "Focar entrada",
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Abrir configurações",

@@ -257,6 +257,12 @@ const SHORTCUT_GROUPS = {
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label',
     },
+    {
+      id: 'open_document_symbols',
+      defaultBinding: 'mod+shift+o',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label',
+    },
   ],
   application: [
     {

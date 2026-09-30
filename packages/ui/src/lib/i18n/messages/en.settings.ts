@@ -1242,6 +1242,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': 'Capture a shortcut first.',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': 'This shortcut can conflict with browser defaults. You can still save it.',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Go to line (files editor)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': 'Go to symbol in file (files editor)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Open command palette',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Focus input',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Open settings',

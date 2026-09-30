@@ -860,6 +860,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': 'Nowe okno Mini Chat',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Otwórz paletę poleceń',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Przejdź do linii (edytor plików)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': 'Przejdź do symbolu w pliku (edytor plików)',
   'settings.openchamber.keyboardShortcuts.action.open_help.label': 'Otwórz skróty klawiszowe',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'Przełącz kartę sesji',
   'settings.openchamber.keyboardShortcuts.action.switch_session_tab.suffix': ' + 1…9',

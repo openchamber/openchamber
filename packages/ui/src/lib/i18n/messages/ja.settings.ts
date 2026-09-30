@@ -1243,6 +1243,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': '最初にショートカットを設定してください。',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': 'このショートカットはブラウザのデフォルトと競合する可能性がありますが、そのまま保存できます。',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '指定行に移動（ファイルエディター）',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': 'ファイル内のシンボルに移動（ファイルエディター）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'コマンドパレットを開く',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '入力をフォーカス',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '設定を開く',

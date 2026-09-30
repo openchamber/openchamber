@@ -1243,6 +1243,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': 'Leg eerst een sneltoets vast.',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': 'Deze sneltoets kan botsen met de standaardinstellingen van de browser. U kunt die toch opslaan.',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Ga naar regel (bestandseditor)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': 'Naar symbool in bestand (bestandseditor)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Opdrachtpalet openen',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Focus op invoer',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Instellingen openen',

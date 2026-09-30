@@ -1210,6 +1210,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': '请先录入一个快捷键。',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': '该快捷键可能与浏览器默认快捷键冲突，但仍可保存。',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '跳转到行（文件编辑器）',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': '转到文件中的符号（文件编辑器）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '打开命令面板',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦输入框',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '打开设置',

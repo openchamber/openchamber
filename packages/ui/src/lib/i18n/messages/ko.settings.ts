@@ -1210,6 +1210,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': '먼저 단축키를 입력하세요.',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': '이 단축키는 브라우저 기본값과 충돌할 수 있지만 그래도 저장할 수 있습니다.',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '줄로 이동(파일 편집기)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': '파일의 심볼로 이동(파일 편집기)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '명령 팔레트 열기',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '입력에 포커스',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '설정 열기',

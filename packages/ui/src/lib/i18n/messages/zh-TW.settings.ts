@@ -1115,6 +1115,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': '請先錄入一個快速鍵。',
     'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': '該快速鍵可能與瀏覽器預設快速鍵衝突，但仍可儲存。',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '跳轉到行（檔案編輯器）',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': '前往檔案中的符號（檔案編輯器）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '開啟命令面板',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦輸入方塊',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '開啟設定',

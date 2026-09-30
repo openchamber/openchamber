@@ -1238,6 +1238,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.error.captureFirst': 'Önce bir kısayol yakalayın.',
   'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': 'Bu kısayol tarayıcı varsayılanlarıyla çakışabilir. Yine de kaydedilir.',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Satıra git (dosya düzenleyici)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': 'Dosyadaki sembole git (dosya düzenleyici)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Komut paletini aç',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Girdi alanına odaklan',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Ayarları aç',

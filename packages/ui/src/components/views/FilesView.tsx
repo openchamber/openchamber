@@ -25,6 +25,8 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
+import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
+import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
@@ -69,6 +71,7 @@ import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import { highlightSelectionMatches } from '@codemirror/search';
 import { codeFolding } from '@/lib/codemirror/codeFolding';
+import { bracketAids, multipleCursors } from '@/lib/codemirror/editingAids';
 import { gitChangeGutter, setGitChangeBaseline } from '@/lib/codemirror/gitChangeGutter';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -1086,6 +1089,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
+  const [isSymbolsOpen, setIsSymbolsOpen] = React.useState(false);
   // In-preview find for the rendered Markdown preview (Ctrl/Cmd+F).
   const [mdPreviewFindOpen, setMdPreviewFindOpen] = React.useState(false);
   const [mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce] = React.useState(0);
@@ -3342,6 +3346,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setIsGoToLineOpen(true);
   });
 
+  useKeybind('open_document_symbols', (event) => {
+    if (!canEdit || textViewMode !== 'edit' || isMobile) {
+      return false;
+    }
+    const target = event.target as Element | null;
+    if (target?.closest('[role="dialog"]')) return false;
+    if (!(target instanceof Node) || !editorWrapperRef.current?.contains(target)) return false;
+    setIsSymbolsOpen(true);
+  });
+
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
   // Git change markers compare the open file with its HEAD version. The
@@ -3452,9 +3466,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       }),
       highlightSelectionMatches({ highlightWordAroundCursor: true, minSelectionLength: 2 }),
       pinPreviewOnEditExtension,
+      bracketAids(),
     );
     if (!isMobile) {
-      extensions.push(codeFolding());
+      extensions.push(codeFolding(), multipleCursors({ vimMode: fileEditorKeymap === 'vim' }));
     }
     if (isMobile) {
       extensions.push(EditorView.updateListener.of((update) => {
@@ -3471,7 +3486,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
@@ -3966,6 +3981,20 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     title={t('filesView.editor.goToLine')}
                   >
                     <Icon name="menu-fold-2" className="size-4" />
+                  </Button>
+                )}
+                {!isMobile && withTooltip(t('filesView.editor.symbols'),
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      setIsSymbolsOpen((open) => !open);
+                      event.currentTarget.blur();
+                    }}
+                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    aria-label={t('filesView.editor.symbols')}
+                  >
+                    <Icon name="list-unordered" className="size-4" />
                   </Button>
                 )}
                 <GoToLineDialog
@@ -4704,6 +4733,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}
               ref={editorWrapperRef}
             >
+              {!isFullscreen && (
+                <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} view={editorViewRef.current} />
+              )}
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
                 <FilePositionEditor
                   key={filePositionKey}
@@ -4920,6 +4952,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.uploadFilesTitle')}</TooltipContent>
             </Tooltip>
           )}
+          <GitignoredToggleButton className="size-8" />
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="inline-flex flex-shrink-0">
@@ -5061,6 +5094,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             renderShikiFileView(selectedFile, draftContent, fullscreenViewVirtualizer, restoreFullscreenCodeScroll)
           ) : (
             <div className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}>
+              <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} view={editorViewRef.current} />
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
               <FilePositionEditor
                 key={`${filePositionKey}:fullscreen`}
