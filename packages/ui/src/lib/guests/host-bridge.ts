@@ -14,6 +14,7 @@ import {
   type PromptRequest,
   type PromptResult,
   type SessionLifecycleEvent,
+  type ComposerStatusSnapshot,
   type SessionLifecyclePhase,
   type StartSessionRequest,
   type GenerateRequest,
@@ -141,6 +142,16 @@ export const buildSessionLifecycleMessage = (event: SessionLifecycleEvent): Host
   v: OPENCHAMBER_SDK_API_VERSION,
   type: 'session-lifecycle',
   payload: event,
+});
+
+export const buildComposerStatusMessage = (
+  contributionId: string,
+  snapshot: ComposerStatusSnapshot,
+): HostMessage => ({
+  channel: OPENCHAMBER_SDK_CHANNEL,
+  v: OPENCHAMBER_SDK_API_VERSION,
+  type: 'composer-status',
+  payload: { contributionId, snapshot },
 });
 
 export const guestSessionLifecyclePhase = (

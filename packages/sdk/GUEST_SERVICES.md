@@ -251,3 +251,37 @@ Declare `panel.entry` as well and the host docks that page to one edge of the su
 While a viewer is open in the same window, every `serviceRequest` from your pages (the docked one included) reaches the service with three headers the host sets itself: `x-surface-viewer`, `x-surface-viewer-controls` (`1` while that viewer holds control, else `0`), and `x-surface-frame-seq` (the frame it last drew). Compare the viewer with the one from `/surface/control` to let the person in control use the dock while others only watch, and compare the frame with the view it belongs to so a toolbar command made on an old picture cannot change a view selected since. Without a viewer in that window the headers are absent.
 
 The types and paths are exported from `@openchamber/sdk` (`SURFACE_*`, `SurfaceInputEvent`, …). `examples/browser-provider-stub` also declares `surface: true` and paints its fake page with rectangles, so the viewer, the hand-off, and the input path can be seen working without a browser; its `panel/` is a one-line address bar docked above the picture.
+
+## Composer status (host-computed, guest-painted)
+
+A package that wants a live chip in the composer footer declares
+`contributes.composerStatus` in its UI-plugin manifest:
+
+```json
+{ "contributes": { "composerStatus": [{
+  "id": "session-status",
+  "placement": "footer",
+  "support": { "web": "supported", "desktop": "supported", "vscode": "unsupported", "hostedMobile": "supported", "capacitorMobile": "supported" }
+}] } }
+```
+
+The host mounts your page in the footer and pushes you a snapshot:
+
+```ts
+type ComposerStatusSnapshot = {
+  sessionId: string;          // the active session
+  engine: string;             // which engine owns it
+  providerId: string | null;  // provider of the last completed assistant turn
+  lastAssistantAt: number | null; // epoch ms of that turn, null if none
+};
+```
+
+- The **host** computes it from its own sync: engine, provider, and the
+  instant of the last completed assistant turn. The guest never reads sync
+  context and never fetches messages itself.
+- Subscribe with `host.onComposerStatus((snapshot, contributionId) => …)`.
+  It replays the last snapshot when you subscribe late, like `onSession`.
+- The host re-sends on every session change and when an assistant turn
+  completes; a frame that mounts later catches up at its handshake.
+- The snapshot is always a snapshot: with no completed turn,
+  `providerId` and `lastAssistantAt` are `null`, not an absent message.

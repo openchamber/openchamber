@@ -339,6 +339,40 @@ describe('parseHostMessage', () => {
     });
   });
 
+  test('composer-status pushes round-trip and reject malformed snapshots', () => {
+    const message = {
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'composer-status',
+      payload: {
+        contributionId: 'session-status',
+        snapshot: { sessionId: 'ses-1', engine: 'claude', providerId: 'anthropic', lastAssistantAt: 1_700_000_000_000 },
+      },
+    };
+    expect(hostMessageSchema.parse(message)).toEqual(message);
+    expect(readHostMessage(message)).toEqual(message);
+    expect(parseHostMessage(message)).toEqual(message);
+    expect(hostMessageSchema.safeParse({
+      ...message,
+      payload: { ...message.payload, snapshot: { ...message.payload.snapshot, lastAssistantAt: '1700000000000' } },
+    }).success).toBe(false);
+    const { sessionId: _ignored, ...snapshotWithoutSessionId } = message.payload.snapshot;
+    expect(hostMessageSchema.safeParse({
+      ...message,
+      payload: { ...message.payload, snapshot: snapshotWithoutSessionId },
+    }).success).toBe(false);
+    expect(hostMessageSchema.safeParse({
+      ...message,
+      payload: { ...message.payload, contributionId: '' },
+    }).success).toBe(false);
+    const nullish = {
+      ...message,
+      payload: { ...message.payload, snapshot: { ...message.payload.snapshot, providerId: null, lastAssistantAt: null } },
+    };
+    expect(hostMessageSchema.parse(nullish)).toEqual(nullish);
+    expect(readHostMessage(nullish)).toEqual(nullish);
+  });
+
   test('accepts a start-session result payload', () => {
     const message = parseHostMessage({
       channel: OPENCHAMBER_SDK_CHANNEL,

@@ -17,6 +17,7 @@
 - `disabledGuests` persists the user's decision independently of code paths and versions. Provider credentials and extension storage stay in the instance data directory. Disable stops services and API access while retaining data and credentials.
 - Settings puts enabled built-in token/OAuth cards inside Built-in integrations. Other extension accounts stay in their existing section.
 - Current renderer support remains web and Electron, direct or relay. VS Code and mobile keep the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
+- A package may declare `contributes.composerStatus` in its UI-plugin manifest; the host then mounts that package's page in the composer footer and pushes it the session snapshot (`sessionId`, `engine`, `providerId`, `lastAssistantAt`). The host computes the snapshot from its own sync; the guest paints only what the host sends and never reads session data itself. See "Composer status" in `packages/sdk/GUEST_SERVICES.md`.
 
 ## Adding a package
 

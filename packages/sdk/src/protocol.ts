@@ -220,7 +220,7 @@ const readyPayloadSchema = z.object({
   locale: z.string().min(1),
   directory: z.string().nullable(),
   session: sessionSnapshotSchema,
-  surface: z.enum(['panel', 'dialog', 'page', 'background', 'status', 'file']),
+  surface: z.enum(['panel', 'dialog', 'page', 'background', 'status', 'file', 'composer']),
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
   item: guestItemSchema,
@@ -317,6 +317,19 @@ export const hostMessageSchema = z.union([
     type: z.literal('item'),
     payload: z.object({
       item: guestItemSchema,
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('composer-status'),
+    payload: z.object({
+      contributionId: z.string().min(1).max(128),
+      snapshot: z.object({
+        sessionId: z.string().min(1),
+        engine: z.string().min(1),
+        providerId: z.string().nullable(),
+        lastAssistantAt: z.number().nullable(),
+      }),
     }),
   }),
   z.object({

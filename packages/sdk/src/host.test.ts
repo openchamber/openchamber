@@ -266,6 +266,43 @@ describe('connectHost', () => {
     host.dispose();
   });
 
+  test('delivers composer-status pushes and replays them to a late listener', () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const snapshot = { sessionId: 'ses-1', engine: 'claude', providerId: 'anthropic', lastAssistantAt: 1_700_000_000_000 };
+    const push = (next: typeof snapshot) => guest.dispatch(new MessageEvent('message', {
+      data: {
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'composer-status',
+        payload: { contributionId: 'session-status', snapshot: next },
+      },
+    }));
+
+    const seen: Array<[typeof snapshot, string]> = [];
+    const unsubscribe = host.onComposerStatus((received, contributionId) => {
+      seen.push([received as typeof snapshot, contributionId]);
+    });
+    push(snapshot);
+    expect(seen).toEqual([[snapshot, 'session-status']]);
+
+    const late: Array<[typeof snapshot, string]> = [];
+    host.onComposerStatus((received, contributionId) => {
+      late.push([received as typeof snapshot, contributionId]);
+    });
+    expect(late).toEqual([[snapshot, 'session-status']]);
+
+    unsubscribe();
+    push({ ...snapshot, sessionId: 'ses-2' });
+    expect(seen).toHaveLength(1);
+    expect(late).toHaveLength(2);
+    expect(late[1]?.[0].sessionId).toBe('ses-2');
+    host.dispose();
+  });
+
   test('delivers the ready item and replays it to a late listener', () => {
     const parent = createFrame();
     const guest = createFrame();

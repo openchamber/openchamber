@@ -25,6 +25,7 @@ import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 import { FocusModeButton } from './FocusModeButton';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
 import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { ComposerStatusSurface } from './ComposerStatusSurface';
 import type { BtwSelection } from '@/stores/useBtwStore';
 
 const MemoModelControls = React.memo(ModelControls);
@@ -180,6 +181,13 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
+                            <ComposerStatusSurface
+                                isMobile
+                                sessionId={currentSessionId}
+                                directory={directory ?? undefined}
+                                placement="footer"
+                                className="max-w-[9rem] flex-1 justify-end"
+                            />
                             <div className="flex items-center gap-x-1 flex-shrink-0">
                                 {!isBtw ? <button
                                     type="button"
@@ -259,6 +267,13 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             withTooltip
                         /> : null}
                         {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
+                        <ComposerStatusSurface
+                            isMobile={false}
+                            sessionId={currentSessionId}
+                            directory={directory ?? undefined}
+                            placement="footer"
+                            className="max-w-[22rem] flex-[1_1_12rem] justify-end"
+                        />
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                         {parallelRun ? <div className="flex-1" /> : isBtw ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={modelSessionId ?? null} selection={btwSelection} /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}

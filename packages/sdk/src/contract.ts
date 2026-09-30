@@ -63,7 +63,7 @@ export type SessionSnapshot = {
  * Which host chrome mounted this iframe. Not `openSurface`. `status` is the
  * extension's section in the chat's Work Status panel.
  */
-export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file';
+export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file' | 'composer';
 
 export type GuestConnection = {
   connected: boolean;
@@ -574,6 +574,23 @@ export type HostConnectionMessage = Envelope & { type: 'connection'; payload: { 
 export type HostSettingsMessage = Envelope & { type: 'settings'; payload: { settings: GuestSettings } };
 export type HostSessionLifecycleMessage = Envelope & { type: 'session-lifecycle'; payload: SessionLifecycleEvent };
 export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestItem | null } };
+/**
+ * Per-session composer status the host computes from its sync (engine,
+ * provider, instant of the last completed assistant turn) and pushes to the
+ * guest mounted in the composer footer. The guest paints it; it never reads
+ * session data itself. `lastAssistantAt` is epoch ms, `null` when the session
+ * has no completed assistant turn.
+ */
+export type ComposerStatusSnapshot = {
+  sessionId: string;
+  engine: string;
+  providerId: string | null;
+  lastAssistantAt: number | null;
+};
+export type HostComposerStatusMessage = Envelope & {
+  type: 'composer-status';
+  payload: { contributionId: string; snapshot: ComposerStatusSnapshot };
+};
 /** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
 export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
 export type HostActionMessage = Envelope & { type: 'action'; id: string; payload: GuestActionItem };
@@ -597,6 +614,7 @@ export type HostMessage =
   | HostSettingsMessage
   | HostSessionLifecycleMessage
   | HostItemMessage
+  | HostComposerStatusMessage
   | HostResolveMessage
   | HostActionMessage
   | HostFileOpenMessage
@@ -718,7 +736,7 @@ export const isGenerateResult = (
 
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
-  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
+  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'composer-status', 'resolve', 'action',
   'file-open', 'file-snapshot', 'file-saved',
 ]);
 

@@ -606,6 +606,23 @@ The comment editor reuses `ComposerEditor` with `dataChatInput="comment"` so
 the `data-chat-input="true"` helpers (`focusChatInput`, shortcut guards) keep
 meaning "the prompt editor".
 
+## Composer status (declarative UI plugins)
+
+`ui/ComposerStatusSurface.tsx` is the footer slot for `composerStatus`
+contributions. A UI-plugin manifest (`lib/uiPlugins.ts`, schema version 1,
+served by `GET /api/ui-plugins/catalog` and held in `stores/useUIPluginsStore.ts`)
+declares `contributes.composerStatus: [{ id, placement: 'footer', support }]`;
+`id` is the guest package that fills the slot and `support` names each runtime
+(`web`, `desktop`, `vscode`, `hostedMobile`, `capacitorMobile`) as
+`supported` or `unsupported`. The host computes the snapshot
+`{ sessionId, engine, providerId, lastAssistantAt }` from its own sync
+(`ui/composer-status-snapshot.ts`, pure: latest completed assistant message of
+the session's bucket) and pushes it into the guest's frame (`PluginPane` with
+`surface="composer"`) on every session change and completed assistant turn;
+the guest only paints. With no supported contribution the surface returns
+`null` — no layout gap. Contract for guests: `packages/sdk/GUEST_SERVICES.md`,
+"Composer status".
+
 ## Testing
 
 Tests cover the language, submit assembly, path and drop handling, text splicing,
