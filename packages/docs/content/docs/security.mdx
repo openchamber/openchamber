@@ -135,7 +135,7 @@ To check it worked, open Settings → Providers: an Enterprise mode notice with 
 
 ### What changes
 
-- Model providers come only from your OpenCode config. Connecting a provider, signing in to one, adding a key or creating a custom provider is turned off in OpenChamber; removing or switching accounts that already exist still works. This only closes the way in through the app; the lock itself is the OpenCode policy described below.
+- Model providers come only from your OpenCode config. Connecting a provider, signing in to one, adding a key or creating a custom provider is turned off in OpenChamber; removing or switching accounts that already exist still works. This only closes the way in through the app; the lock itself is the OpenCode policy described below. Signing in to an MCP server from your OpenCode config still works, since it reaches that server and not a model provider.
 - [Classification providers (Jev)](/classification-providers/) stay off, including a custom endpoint someone types in Settings. The safety net and Auto aren't offered, and sessions move into work only by hand. To use Jev through your own infrastructure, pin an endpoint with `jev` in the policy file, or with `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` and, if it needs one, `OPENCHAMBER_JEV_API_KEY`). It becomes the default, people can still turn it off, and nothing else can be picked.
 - Read-aloud through OpenAI is off. A custom speech or transcription server has to run on the same machine. Local voices and local dictation models keep working.
 - Push notifications to phones and browsers carry only a generic title like "Agent response is ready", with no message text or session name. Desktop notifications stay on your machine and keep the full text.

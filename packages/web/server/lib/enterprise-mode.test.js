@@ -230,7 +230,58 @@ describe('enterprise policy', () => {
       '/api/integration/anthropic/connect/oauth/att_1/complete',
       '/api/integration/github-copilot/connect/command',
       '/api/experimental/integration/wellknown',
+      '/api/integration/openai/connect',
+      '/api/integration/openai/connect/key/',
     ])('refuses POST %s', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
+    });
+
+    // OpenCode routes all of these to the provider connect handlers.
+    it.each([
+      '/API/integration/openai/connect/key',
+      '/api/Integration/openai/Connect/Key',
+      '/api//integration/openai/connect/key',
+      '/api/integration//openai/connect/key',
+      '/api/integration/openai/%63onnect/key',
+      '/api/%65xperimental/integration/wellknown',
+      '/api/integration/%6Dcp_0123456789abcdef/connect/key',
+      '/api/integration\\openai\\connect\\key',
+      '/api/integration/openai\\connect/key',
+      '/api/Experimental/integration\\wellknown',
+      '/api/experimental/integration/wellknown;x',
+      '/api/integration/openai/connect/key;x',
+    ])('refuses POST %s written another way', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/api/integration/openai/connect/../connect/key',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/../../../openai/connect/key',
+      '/api/integration/openai/connect/%E0%A4%A',
+    ])('refuses POST %s, which cannot be read safely', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/api/integration/mcp_0123456789abcdef/connect/oauth',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth?location=%2Fp',
+      '/api/integration/mcp_0123456789abcdef/connect/OAuth/',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/att_1/complete',
+      '/api/integration\\mcp_0123456789abcdef\\connect\\oauth',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth;/../../../openai/connect/key',
+    ])('lets POST %s sign in to an MCP server', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(false);
+    });
+
+    it.each([
+      '/api/integration/mcp_0123456789abcdef/connect/key',
+      '/api/integration/mcp_0123456789abcdef/connect/command',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/att_1/complete/extra',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/att%2F1/complete',
+      '/api/integration/MCP_0123456789ABCDEF/connect/oauth',
+      '/api/integration/mcp_evil/connect/oauth',
+      '/api/integration/mcp_0123456789abcdef%2F..%2Fopenai/connect/oauth',
+    ])('refuses POST %s, which is not an MCP sign-in', (requestPath) => {
       expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
     });
 
@@ -239,6 +290,8 @@ describe('enterprise policy', () => {
       ['DELETE', '/api/integration/anthropic/connect/oauth/att_1'],
       ['GET', '/api/integration'],
       ['POST', '/api/session'],
+      ['POST', '/api/integration/openai/connectors'],
+      ['POST', '/health'],
       ['DELETE', '/api/credential/cred_1'],
     ])('leaves %s %s alone', (method, requestPath) => {
       expect(isProviderConnectRequest(method, requestPath)).toBe(false);

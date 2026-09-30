@@ -21,6 +21,12 @@ describe('provider writes in enterprise mode', () => {
     agent.post('/api/integration/github-copilot/connect/command').send({ methodID: 'cli' }),
     agent.post('/api/experimental/integration/wellknown').send({ url: 'https://example.test' }),
     agent.put('/api/provider').send({ providerID: 'company-ai', config: {}, scope: 'user' }),
+    // OpenCode routes these to the key handler too.
+    agent.post('/API/integration/openai/connect/key').send({ key: 'sk-test' }),
+    agent.post('/api//integration/openai/connect/key').send({ key: 'sk-test' }),
+    agent.post('/api/integration/openai/%63onnect/key').send({ key: 'sk-test' }),
+    agent.post('/api/integration\\openai\\connect\\key').send({ key: 'sk-test' }),
+    agent.post('/api/experimental/integration/wellknown;x').send({ url: 'https://example.test' }),
   ];
 
   it('refuses connecting a provider, adding a key, or creating a custom provider', async () => {
@@ -33,6 +39,14 @@ describe('provider writes in enterprise mode', () => {
       }
       // Removing an account only narrows access and still reaches OpenCode.
       expect((await agent.delete('/api/credential/cred_1')).status).toBe(404);
+      // Signing in to a remote MCP server reaches a tool server, not a model provider.
+      const mcpSignIn = [
+        agent.post('/api/integration/mcp_0123456789abcdef/connect/oauth').send({ methodID: 'mcp_0123456789abcdef' }),
+        agent.post('/api/integration/mcp_0123456789abcdef/connect/oauth/att_1/complete').send({ code: 'x' }),
+      ];
+      for (const response of await Promise.all(mcpSignIn)) {
+        expect(response.status).toBe(404);
+      }
     } finally {
       delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
     }

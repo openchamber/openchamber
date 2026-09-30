@@ -32,6 +32,8 @@ import { z } from 'zod';
  *   signing in, adding a key or creating a custom provider through this
  *   server is refused (`opencode/routes.js`). OpenCode's `provider.use`
  *   policy is the real lock; this closes the way in through the app.
+ *   Signing in to a remote MCP server from the OpenCode config uses the same
+ *   routes and stays allowed.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: their provider sees plain text (`tunnels`).
@@ -238,16 +240,65 @@ export const publicEnterprisePolicy = (options) => {
   return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess };
 };
 
-// OpenCode routes that connect a provider, sign in or add a key: every POST
-// under `/api/integration/:id/connect` (key, oauth start and complete,
-// command) and adding a well-known integration. Reads, cancelling an attempt
-// and removing or switching an existing account stay allowed: they only
-// narrow access.
-const PROVIDER_CONNECT_PATH = /^\/api\/(?:integration\/[^/?]+\/connect(?:\/[^?]*)?|experimental\/integration\/wellknown)\/?(?:\?|$)/;
+// OpenCode registers every remote MCP server with OAuth as an integration
+// whose id is `mcp_` plus 16 hex digits of a hash of its name and URL
+// (`packages/core/src/mcp/index.ts` upstream). Signing in to one reaches a
+// tool server from the OpenCode config, not a model provider.
+const MCP_INTEGRATION_ID = /^mcp_[0-9a-f]{16}$/;
+const ATTEMPT_ID = /^[A-Za-z0-9_-]+$/;
 
-/** Whether a request to OpenCode would add a way to reach a model provider. */
-export const isProviderConnectRequest = (method, requestPath) => (
-  String(method).toUpperCase() === 'POST' && PROVIDER_CONNECT_PATH.test(requestPath)
+/**
+ * The path segments as OpenCode 2.0.18 routes them. Bun's URL parsing turns
+ * `\` into `/`; its router (find-my-way-ts, case-insensitive, duplicate
+ * slashes ignored) ends the path at `?`, `#` or `;` and decodes percent
+ * escapes. So `/API//integration\%6Fpenai/connect/key;x` reaches the same
+ * handler as `/api/integration/openai/connect/key`. Null when a segment cannot
+ * be decoded or is a dot segment: such a path is refused. Recheck this list
+ * when OpenCode changes its router.
+ */
+const routeSegments = (requestPath) => {
+  const pathOnly = String(requestPath).split(/[?#;]/, 1)[0];
+  const segments = [];
+  for (const raw of pathOnly.split(/[\\/]/)) {
+    if (!raw) continue;
+    let segment;
+    try {
+      segment = decodeURIComponent(raw);
+    } catch {
+      return null;
+    }
+    if (segment === '.' || segment === '..') return null;
+    segments.push(segment);
+  }
+  return segments;
+};
+
+// POST `connect/oauth` starts an MCP sign-in, `connect/oauth/:attempt/complete`
+// finishes it with a pasted code.
+const isMcpSignIn = (integrationId, rest) => (
+  MCP_INTEGRATION_ID.test(integrationId)
+  && rest[0]?.toLowerCase() === 'oauth'
+  && (rest.length === 1 || (rest.length === 3 && ATTEMPT_ID.test(rest[1]) && rest[2].toLowerCase() === 'complete'))
 );
+
+/**
+ * Whether a request to OpenCode would add a way to reach a model provider:
+ * every POST under `/api/integration/:id/connect` (key, oauth start and
+ * complete, command) and adding a well-known integration. Signing in to a
+ * remote MCP server goes through the same routes and stays allowed. Reads,
+ * cancelling an attempt and removing or switching an existing account stay
+ * allowed too: they only narrow access. A path that cannot be read safely
+ * counts as a connect.
+ */
+export const isProviderConnectRequest = (method, requestPath) => {
+  if (String(method).toUpperCase() !== 'POST') return false;
+  const segments = routeSegments(requestPath);
+  if (segments === null) return true;
+  const [api, group, ...tail] = segments.map((segment) => segment.toLowerCase());
+  if (api !== 'api') return false;
+  if (group === 'experimental') return tail[0] === 'integration' && tail[1] === 'wellknown';
+  if (group !== 'integration' || tail[1] !== 'connect') return false;
+  return !isMcpSignIn(segments[2], segments.slice(4));
+};
 
 export const ENTERPRISE_MODE_ERROR = 'Not available in enterprise mode: this server keeps conversations with the model providers configured in OpenCode.';
