@@ -156,21 +156,25 @@ describe('POST /api/github/pr/summaries', () => {
   it('answers with the live state of each resolved PR', async () => {
     serveGraphql({
       data: {
-        p0: { pullRequest: { number: 7, title: 'Fix', state: 'MERGED', isDraft: false, mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN', headRefOid: 'abc', commits: { nodes: [] } } },
-        p1: null,
+        a0: { pullRequest: { number: 7, title: 'Fix', state: 'MERGED', isDraft: false, mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN', headRefOid: 'abc', commits: { nodes: [] } } },
+        a1: null,
+        a2: { issue: { number: 3, title: 'Bug', state: 'CLOSED', stateReason: 'COMPLETED' } },
       },
-      errors: [{ type: 'NOT_FOUND', path: ['p1'], message: 'Could not resolve to a Repository' }],
+      errors: [{ type: 'NOT_FOUND', path: ['a1'], message: 'Could not resolve to a Repository' }],
     });
 
-    const res = await summaries([
-      { owner: 'example', repo: 'project', number: 7 },
-      { owner: 'example', repo: 'gone', number: 8 },
-    ]);
+    const res = await request(app).post('/api/github/pr/summaries').send({
+      refs: [{ owner: 'example', repo: 'project', number: 7 }, { owner: 'example', repo: 'gone', number: 8 }],
+      issueRefs: [{ owner: 'example', repo: 'project', number: 3 }],
+    });
 
     expect(res.status).toBe(200);
     expect(res.body.connected).toBe(true);
     expect(res.body.summaries).toEqual([
       expect.objectContaining({ owner: 'example', repo: 'project', number: 7, state: 'merged', checks: null }),
+    ]);
+    expect(res.body.issueSummaries).toEqual([
+      { owner: 'example', repo: 'project', number: 3, title: 'Bug', state: 'completed' },
     ]);
   });
 

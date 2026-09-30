@@ -47,9 +47,10 @@ import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openExternalUrl } from '@/lib/url';
-import { useLinkedPrVisualSummaries, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { getLinkedGitHubPullRequests, type LinkedGitHubPullRequest } from '@/lib/linkedIssues';
-import { combineSessionPrSummaries } from './sessionPrSummaries';
+import { useLinkedIssueStates, useLinkedPrVisualSummaries, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getLinkedGitHubPullRequests, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarIssue } from '@/lib/linkedIssues';
+import { buildSessionIssueItems, combineSessionPrSummaries } from './sessionPrSummaries';
+import type { IconName } from '@/components/icon/icons';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -174,6 +175,19 @@ const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNod
 // text starts exactly where the zone-header label starts. Nested children
 // shift by one gutter step per depth level.
 const EMPTY_LINKED_PULL_REQUESTS: readonly LinkedGitHubPullRequest[] = [];
+const EMPTY_LINKED_SIDEBAR_ISSUES: readonly LinkedSidebarIssue[] = [];
+
+/** One PR or issue a session row lists in its badge and tooltips. */
+type SessionRefLine = {
+  key: string;
+  icon: IconName;
+  label: string;
+  /** Theme PR colour; undefined shows it muted (state unknown). */
+  color: string | undefined;
+  url: string | null;
+  title: string | null;
+  text: string;
+};
 const ROW_GUTTER_LEFT_PX = 6;
 const ROW_DEPTH_STEP_PX = 14;
 const ROW_TEXT_LEFT_PX = ROW_GUTTER_LEFT_PX + 14 + 6;
@@ -433,25 +447,51 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     () => combineSessionPrSummaries(branchPrSummary, linkedPrSummaries),
     [branchPrSummary, linkedPrSummaries],
   );
-  const prSummary = prSummaries[0] ?? null;
-  const morePrCount = Math.max(0, prSummaries.length - 1);
-  const prIconColor = prSummary ? `var(--pr-${prSummary.visualState})` : undefined;
   // The branch icon speaks for the branch, not for PRs linked from elsewhere.
   const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
   // The project tree already shows the branch on the worktree sub-header, so
   // the per-row marker only appears in the mixed-context recent list.
   const showInlineBranchMarker = Boolean(tooltipBranchLabel) && renderContext === 'recent';
-  const prStatusLines = React.useMemo(() => prSummaries.map((summary) => {
-    const label = getPrStatusLabel(summary, t);
-    return {
-      key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
-      color: `var(--pr-${summary.visualState})`,
-      url: summary.url,
-      title: summary.title,
-      text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
-    };
-  }), [prSummaries, t]);
-  const prBadgeLabel = prStatusLines.map((line) => line.text).join(', ');
+  // Linked issues show only while the session has no PR: once a PR exists it
+  // is the thing to follow, and it usually closes the issue anyway.
+  const linkedIssues = React.useMemo(
+    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_ISSUES : getLinkedSidebarIssues(session)),
+    [isVSCode, session],
+  );
+  const linkedGitHubIssueRefs = React.useMemo(
+    () => linkedIssues.flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
+    [linkedIssues],
+  );
+  const linkedIssueStates = useLinkedIssueStates(linkedGitHubIssueRefs);
+  // What the row's badge and tooltips list: its PRs, or else its issues.
+  const refLines = React.useMemo((): SessionRefLine[] => {
+    if (prSummaries.length > 0) {
+      return prSummaries.map((summary) => {
+        const label = getPrStatusLabel(summary, t);
+        return {
+          key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
+          icon: 'git-pull-request',
+          label: `#${summary.number}`,
+          color: `var(--pr-${summary.visualState})`,
+          url: summary.url,
+          title: summary.title,
+          text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
+        };
+      });
+    }
+    return buildSessionIssueItems(linkedIssues, linkedIssueStates).map((item) => ({
+      key: item.key,
+      icon: item.icon,
+      label: item.label,
+      color: item.color ?? undefined,
+      url: item.url,
+      title: item.title,
+      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.label,
+    }));
+  }, [linkedIssueStates, linkedIssues, prSummaries, t]);
+  const primaryRef = refLines[0] ?? null;
+  const moreRefCount = Math.max(0, refLines.length - 1);
+  const refBadgeLabel = refLines.map((line) => line.text).join(', ');
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
@@ -818,11 +858,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             pinnedMarker={null}
             timeSlot={sessionCompactUpdatedLabel}
             directoryIndicator={null}
-            prBadge={prSummary ? (
-              <span className="inline-flex flex-shrink-0 items-center gap-1 typography-micro" style={prIconColor ? { color: prIconColor } : undefined}>
-                <Icon name="git-pull-request" className="h-3 w-3" style={prIconColor ? { color: prIconColor } : undefined} />
-                <span className="leading-none tabular-nums">#{prSummary.number}</span>
-                {morePrCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{morePrCount}</span> : null}
+            prBadge={primaryRef ? (
+              <span
+                className={cn('inline-flex flex-shrink-0 items-center gap-1 typography-micro', !primaryRef.color && 'text-muted-foreground')}
+                style={primaryRef.color ? { color: primaryRef.color } : undefined}
+              >
+                <Icon name={primaryRef.icon} className="h-3 w-3" />
+                <span className="leading-none tabular-nums">{primaryRef.label}</span>
+                {moreRefCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
               </span>
             ) : null}
             zombieIndicator={null}
@@ -1445,34 +1488,37 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </>
   ) : null;
 
-  // The PR badge carries its own tooltip (status text) and opens the PR:
-  // timeline rows have no whole-row tooltip, so this is where that lives.
-  const timelinePrBadge = isTimelineRow && prSummary ? (
+  // The PR (or issue) badge carries its own tooltip (status text) and opens
+  // it: timeline rows have no whole-row tooltip, so this is where that lives.
+  const timelinePrBadge = isTimelineRow && primaryRef ? (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="inline-flex flex-shrink-0 items-center gap-1 rounded typography-micro hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
-          style={prIconColor ? { color: prIconColor } : undefined}
-          disabled={!prSummary.url}
-          aria-label={prBadgeLabel}
+          className={cn(
+            'inline-flex flex-shrink-0 items-center gap-1 rounded typography-micro hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline',
+            !primaryRef.color && 'text-muted-foreground',
+          )}
+          style={primaryRef.color ? { color: primaryRef.color } : undefined}
+          disabled={!primaryRef.url}
+          aria-label={refBadgeLabel}
           onPointerDown={handleRowActionPointerDown}
           onMouseDown={handleRowActionMouseDown}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (prSummary.url) void openExternalUrl(prSummary.url);
+            if (primaryRef.url) void openExternalUrl(primaryRef.url);
           }}
           onKeyDown={(event) => event.stopPropagation()}
         >
-          <Icon name="git-pull-request" className="h-3 w-3" style={prIconColor ? { color: prIconColor } : undefined} />
-          <span className="leading-none tabular-nums">#{prSummary.number}</span>
-          {morePrCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{morePrCount}</span> : null}
+          <Icon name={primaryRef.icon} className="h-3 w-3" />
+          <span className="leading-none tabular-nums">{primaryRef.label}</span>
+          {moreRefCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={6}>
         <div className="flex max-w-xs flex-col gap-1">
-          {prStatusLines.map((line) => (
+          {refLines.map((line) => (
             <div key={line.key} className="min-w-0">
               <p>{line.text}</p>
               {line.title ? <p className="truncate text-muted-foreground">{line.title}</p> : null}
@@ -1771,12 +1817,15 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                         <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
                       </div>
                     ) : null}
-                    {prStatusLines.map((line) => (
+                    {refLines.map((line) => (
                       <button
                         key={line.key}
                         type="button"
-                        className="group/pr flex min-w-0 flex-col rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
-                        style={{ color: line.color }}
+                        className={cn(
+                          'group/pr flex min-w-0 flex-col rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline',
+                          !line.color && 'text-muted-foreground',
+                        )}
+                        style={line.color ? { color: line.color } : undefined}
                         disabled={!line.url}
                         // React events from the portaled tooltip still bubble
                         // through the row: keep them from selecting or
@@ -1788,7 +1837,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                         }}
                       >
                         <span className="flex min-w-0 items-center gap-1.5 group-hover/pr:underline group-disabled/pr:no-underline">
-                          <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" />
+                          <Icon name={line.icon} className="h-3 w-3 flex-shrink-0" />
                           <span className="min-w-0 truncate">{line.text}</span>
                         </span>
                         {line.title ? (

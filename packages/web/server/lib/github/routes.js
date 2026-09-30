@@ -636,13 +636,14 @@ export function registerGitHubRoutes(app) {
     }
   });
 
-  // Batched live status for PRs the client already knows by number. The
-  // sidebar polls this instead of re-resolving every branch.
+  // Batched live status for PRs and issues the client already knows by
+  // number. The sidebar polls this instead of re-resolving every branch.
   app.post('/api/github/pr/summaries', async (req, res) => {
-    const { parseSummaryRefs, fetchPrSummaries, isGraphqlRateLimitError } = await import('./pr-summaries.js');
+    const { parseSummaryRefs, fetchPrSummaries, isGraphqlRateLimitError, MAX_SUMMARY_REFS } = await import('./pr-summaries.js');
     const refs = parseSummaryRefs(req.body?.refs);
-    if (!refs) {
-      return res.status(400).json({ error: 'refs must be a list of { owner, repo, number }' });
+    const issueRefs = parseSummaryRefs(req.body?.issueRefs ?? []);
+    if (!refs || !issueRefs || refs.length + issueRefs.length > MAX_SUMMARY_REFS) {
+      return res.status(400).json({ error: 'refs and issueRefs must be lists of { owner, repo, number }, at most 100 in total' });
     }
     try {
       const { getOctokitOrNull } = await getGitHubLibraries();
@@ -655,8 +656,10 @@ export function registerGitHubRoutes(app) {
         return res.status(503).json({ error: 'GitHub rate limited' });
       }
       const fetchedAt = Date.now();
-      const summaries = refs.length > 0 ? await fetchPrSummaries({ octokit, refs }) : [];
-      return res.json({ connected: true, fetchedAt, summaries });
+      const { summaries, issueSummaries } = refs.length + issueRefs.length > 0
+        ? await fetchPrSummaries({ octokit, refs, issueRefs })
+        : { summaries: [], issueSummaries: [] };
+      return res.json({ connected: true, fetchedAt, summaries, issueSummaries });
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();

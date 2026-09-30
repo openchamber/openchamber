@@ -53,6 +53,13 @@ const prSummariesResultSchema = z.discriminatedUnion('connected', [
       mergeableState: z.string().nullable(),
       checks: checksSummarySchema.nullable(),
     })),
+    issueSummaries: z.array(z.object({
+      owner: z.string(),
+      repo: z.string(),
+      number: z.number(),
+      title: z.string(),
+      state: z.enum(['open', 'completed', 'not_planned']),
+    })),
   }),
 ]);
 
@@ -162,11 +169,11 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return payload;
   },
 
-  async prSummaries(refs: GitHubPullRequestRef[]): Promise<GitHubPullRequestSummariesResult> {
+  async prSummaries(refs: GitHubPullRequestRef[], issueRefs: GitHubPullRequestRef[] = []): Promise<GitHubPullRequestSummariesResult> {
     const response = await runtimeFetch('/api/github/pr/summaries', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ refs }),
+      body: JSON.stringify({ refs, issueRefs }),
     });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {

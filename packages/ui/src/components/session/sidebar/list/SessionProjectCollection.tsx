@@ -6,7 +6,7 @@ import { usePrefetchSessionMessages } from '@/sync/use-sync';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
-import { getLinkedGitHubPullRequests } from '@/lib/linkedIssues';
+import { getLinkedGitHubPullRequests, getLinkedSidebarIssues } from '@/lib/linkedIssues';
 import type { GitHubPullRequestRef } from '@/lib/api/types';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
@@ -455,8 +455,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   // view must not decide what a Timeline badge shows.
   const shownPrs = React.useMemo(() => {
     const targets = new Map<string, { directory: string; branch: string }>();
-    // PRs linked to the sessions on screen, whatever their branch.
+    // PRs and GitHub issues linked to the sessions on screen, whatever their
+    // branch.
     const linkedRefs = new Map<string, GitHubPullRequestRef>();
+    const linkedIssueRefs = new Map<string, GitHubPullRequestRef>();
     const addTarget = (directory: string | null, branch: string | null | undefined) => {
       const trimmed = branch?.trim();
       if (directory && trimmed) targets.set(getGitHubPrStatusKey(directory, trimmed), { directory, branch: trimmed });
@@ -468,13 +470,18 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         for (const link of getLinkedGitHubPullRequests(node.session)) {
           linkedRefs.set(`${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`, { owner: link.owner, repo: link.repo, number: link.number });
         }
+        for (const issue of getLinkedSidebarIssues(node.session)) {
+          if (issue.source === 'github') {
+            linkedIssueRefs.set(`${issue.owner.toLowerCase()}/${issue.repo.toLowerCase()}#${issue.number}`, { owner: issue.owner, repo: issue.repo, number: issue.number });
+          }
+        }
       }
       node.children.forEach(addNode);
     };
     workItems.forEach((item) => addNode(item.node));
     if (timelineMode) {
       timelineItems.forEach((item) => addNode(item.node));
-      return { targets, linkedRefs: [...linkedRefs.values()] };
+      return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()] };
     }
     recentActivitySections.forEach((section) => section.items.forEach((item) => addNode(item.node)));
     projectSections.forEach((section) => {
@@ -489,7 +496,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         addTarget(directory, group.branch?.trim() || topology.gitBranches.get(directory || ''));
       });
     });
-    return { targets, linkedRefs: [...linkedRefs.values()] };
+    return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()] };
   }, [projectSections, projectView.collapsedProjects, recentActivitySections, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, workItems]);
   const shownPrTargets = shownPrs.targets;
   const shownPrKeys = React.useMemo(() => [...shownPrTargets.keys()], [shownPrTargets]);
@@ -518,7 +525,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     });
     if (targets.size) void refreshTargets([...targets.values()], { silent: true, markInitialResolved: true });
   }, [ensureEntry, github, githubAuthChecked, githubConnected, refreshTargets, setParams, shownPrTargets]);
-  useOpenPrSummarySync(shownPrKeys, shownPrs.linkedRefs, github, githubConnected);
+  useOpenPrSummarySync(shownPrKeys, shownPrs.linkedRefs, shownPrs.linkedIssueRefs, github, githubConnected);
 
   const { groupStatusByKey, bootstrapSnapshot } = useSidebarGroupStatus({
     childStores,

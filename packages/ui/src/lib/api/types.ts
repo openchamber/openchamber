@@ -1054,14 +1054,21 @@ export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
   checks: GitHubChecksSummary | null;
 };
 
+/** Live state of a known issue; a closed one says whether it was done or dropped. */
+export type GitHubIssueLiveSummary = GitHubPullRequestRef & {
+  title: string;
+  state: 'open' | 'completed' | 'not_planned';
+};
+
 export type GitHubPullRequestSummariesResult =
   | { connected: false }
   | {
       connected: true;
       /** Server-side stamp of when GitHub was asked (ms epoch). */
       fetchedAt: number;
-      /** PRs GitHub could not resolve are absent: unknown, not closed. */
+      /** PRs and issues GitHub could not resolve are absent: unknown, not closed. */
       summaries: GitHubPullRequestLiveSummary[];
+      issueSummaries: GitHubIssueLiveSummary[];
     };
 
 export type GitHubPullRequestCreateInput = {
@@ -1406,7 +1413,7 @@ export interface GitHubAPI {
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
-  prSummaries(refs: GitHubPullRequestRef[]): Promise<GitHubPullRequestSummariesResult>;
+  prSummaries(refs: GitHubPullRequestRef[], issueRefs?: GitHubPullRequestRef[]): Promise<GitHubPullRequestSummariesResult>;
   prCreate(payload: GitHubPullRequestCreateInput): Promise<GitHubPullRequest>;
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;

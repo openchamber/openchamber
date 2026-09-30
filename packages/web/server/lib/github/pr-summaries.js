@@ -1,10 +1,11 @@
-// Live status for PRs the client already knows by number.
+// Live status for PRs and issues the client already knows by number.
 //
 // The sidebar shows many worktrees at once. Asking the full per-branch
 // resolver for each of them costs several REST calls per PR; here one GraphQL
-// document carries up to SUMMARY_ALIASES_PER_QUERY PRs (state, draft,
-// mergeability and their check contexts), and GitHub prices such a document
-// at a single point of the GraphQL budget.
+// document carries up to SUMMARY_ALIASES_PER_QUERY PRs or issues (a PR's
+// state, draft, mergeability and check contexts; an issue's state and close
+// reason), and GitHub prices such a document at a single point of the GraphQL
+// budget.
 
 import { z } from 'zod';
 
@@ -52,6 +53,13 @@ const SUMMARY_FIELDS = `
       }
     }
   }
+`;
+
+const ISSUE_FIELDS = `
+  number
+  title
+  state
+  stateReason
 `;
 
 const githubName = z.string().trim().regex(GITHUB_NAME_PATTERN);
@@ -140,6 +148,34 @@ export function summarizeCheckContexts(contexts) {
     : summarizeCombinedStatuses(statuses);
 }
 
+const issueNodeSchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  state: z.enum(['OPEN', 'CLOSED']),
+  stateReason: z.string().nullable(),
+});
+
+// GitHub's own split of a closed issue: done, or dropped (not planned or a
+// duplicate). A reopened issue reports OPEN.
+const toIssueState = (node) => {
+  if (node.state === 'OPEN') return 'open';
+  return node.stateReason === 'NOT_PLANNED' || node.stateReason === 'DUPLICATE' ? 'not_planned' : 'completed';
+};
+
+function toIssueSummary(ref, value) {
+  const parsed = issueNodeSchema.safeParse(value);
+  if (!parsed.success || parsed.data.number !== ref.number) {
+    return null;
+  }
+  return {
+    owner: ref.owner,
+    repo: ref.repo,
+    number: ref.number,
+    title: parsed.data.title,
+    state: toIssueState(parsed.data),
+  };
+}
+
 const PR_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
 const toMergeable = (mergeable) => {
@@ -173,18 +209,25 @@ function toSummary(ref, value) {
   };
 }
 
-function buildSummaryQuery(refs) {
+function buildSummaryQuery(entries) {
   const variables = {};
   const declarations = [];
   const selections = [];
-  refs.forEach((ref, index) => {
+  entries.forEach(({ kind, ref }, index) => {
     variables[`o${index}`] = ref.owner;
     variables[`n${index}`] = ref.repo;
     variables[`p${index}`] = ref.number;
     declarations.push(`$o${index}: String!, $n${index}: String!, $p${index}: Int!`);
-    selections.push(`p${index}: repository(owner: $o${index}, name: $n${index}) { pullRequest(number: $p${index}) { ...PrSummary } }`);
+    const field = kind === 'issue'
+      ? `issue(number: $p${index}) { ...IssueSummary }`
+      : `pullRequest(number: $p${index}) { ...PrSummary }`;
+    selections.push(`a${index}: repository(owner: $o${index}, name: $n${index}) { ${field} }`);
   });
-  const query = `query(${declarations.join(', ')}) {\n${selections.join('\n')}\n}\nfragment PrSummary on PullRequest {${SUMMARY_FIELDS}}`;
+  const fragments = [
+    entries.some((entry) => entry.kind === 'pull') ? `fragment PrSummary on PullRequest {${SUMMARY_FIELDS}}` : '',
+    entries.some((entry) => entry.kind === 'issue') ? `fragment IssueSummary on Issue {${ISSUE_FIELDS}}` : '',
+  ].filter(Boolean);
+  const query = `query(${declarations.join(', ')}) {\n${selections.join('\n')}\n}\n${fragments.join('\n')}`;
   return { query, variables };
 }
 
@@ -196,8 +239,8 @@ export const isGraphqlRateLimitError = (error) => Array.isArray(error?.errors)
 // GitHub answers a PR it cannot resolve (deleted, no access) with a per-alias
 // error next to the data for every other alias. Octokit throws on any error,
 // so keep the partial data and only rethrow when there is none.
-async function runSummaryQuery(octokit, refs) {
-  const { query, variables } = buildSummaryQuery(refs);
+async function runSummaryQuery(octokit, entries) {
+  const { query, variables } = buildSummaryQuery(entries);
   try {
     return await octokit.graphql(query, variables);
   } catch (error) {
@@ -209,22 +252,31 @@ async function runSummaryQuery(octokit, refs) {
 }
 
 /**
- * Fetch live summaries for known PRs. A PR GitHub could not resolve is left
- * out of the result: absence means "unknown", never "closed".
+ * Fetch live summaries for known PRs and issues. One GitHub could not resolve
+ * is left out of the result: absence means "unknown", never "closed".
  */
-export async function fetchPrSummaries({ octokit, refs }) {
+export async function fetchPrSummaries({ octokit, refs, issueRefs = [] }) {
+  const entries = [
+    ...refs.map((ref) => ({ kind: 'pull', ref })),
+    ...issueRefs.map((ref) => ({ kind: 'issue', ref })),
+  ];
   const summaries = [];
+  const issueSummaries = [];
   // Chunks run one after another: GitHub's secondary limits punish bursts of
   // concurrent GraphQL documents more than a short sequence.
-  for (let start = 0; start < refs.length; start += SUMMARY_ALIASES_PER_QUERY) {
-    const chunk = refs.slice(start, start + SUMMARY_ALIASES_PER_QUERY);
+  for (let start = 0; start < entries.length; start += SUMMARY_ALIASES_PER_QUERY) {
+    const chunk = entries.slice(start, start + SUMMARY_ALIASES_PER_QUERY);
     const data = await runSummaryQuery(octokit, chunk);
-    chunk.forEach((ref, index) => {
-      const summary = toSummary(ref, data?.[`p${index}`]?.pullRequest);
-      if (summary) {
-        summaries.push(summary);
+    chunk.forEach(({ kind, ref }, index) => {
+      const repository = data?.[`a${index}`];
+      if (kind === 'issue') {
+        const summary = toIssueSummary(ref, repository?.issue);
+        if (summary) issueSummaries.push(summary);
+        return;
       }
+      const summary = toSummary(ref, repository?.pullRequest);
+      if (summary) summaries.push(summary);
     });
   }
-  return summaries;
+  return { summaries, issueSummaries };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { combineSessionPrSummaries, getPrStatusLabelKey } from './sessionPrSummaries';
+import type { LinkedSidebarIssue } from '@/lib/linkedIssues';
+import { buildSessionIssueItems, combineSessionPrSummaries, getPrStatusLabelKey } from './sessionPrSummaries';
 
 const summary = (number: number, visualState: string, overrides: Partial<PrVisualSummary> = {}): PrVisualSummary => ({
   number,
@@ -46,5 +47,35 @@ describe('getPrStatusLabelKey', () => {
     expect(getPrStatusLabelKey(summary(1, 'blocked', { mergeableState: 'dirty' }))).toBe('sessions.sidebar.group.pr.status.mergeConflicts');
     expect(getPrStatusLabelKey(summary(1, 'blocked', { checks: { state: 'failure', total: 2, success: 1, failure: 1, pending: 0 } })))
       .toBe('sessions.sidebar.group.pr.status.checksFailing');
+  });
+});
+
+describe('buildSessionIssueItems', () => {
+  const github = (number: number): LinkedSidebarIssue => ({
+    source: 'github', key: `acme/app#${number}`, owner: 'acme', repo: 'app', number, url: `https://github.com/acme/app/issues/${number}`, title: `Issue ${number}`,
+  });
+  const state = (number: number, value: 'open' | 'completed' | 'not_planned') => ({ owner: 'acme', repo: 'app', number, title: `Live ${number}`, state: value });
+  const linear: LinkedSidebarIssue = { source: 'linear', key: 'linear:ENG-1', identifier: 'ENG-1', url: 'https://linear.app/x', title: 'Linear task' };
+
+  test('open issues lead, unknown states follow, closed ones trail', () => {
+    const items = buildSessionIssueItems(
+      [github(1), linear, github(2), github(3), github(4)],
+      [state(1, 'completed'), state(2, 'open'), state(3, 'not_planned'), null],
+    );
+    expect(items.map((item) => item.label)).toEqual(['#2', 'ENG-1', '#4', '#1', '#3']);
+  });
+
+  test('borrows PR colours and never turns orange', () => {
+    const [open, done, dropped] = buildSessionIssueItems(
+      [github(1), github(2), github(3)],
+      [state(1, 'open'), state(2, 'completed'), state(3, 'not_planned')],
+    );
+    expect([open.color, done.color, dropped.color]).toEqual(['var(--pr-open)', 'var(--pr-merged)', 'var(--pr-closed)']);
+    expect(open.title).toBe('Live 1');
+  });
+
+  test('a tracker issue has no state: muted, labelled by its identifier', () => {
+    const [item] = buildSessionIssueItems([linear], []);
+    expect(item).toMatchObject({ label: 'ENG-1', icon: 'linear', color: null, statusKey: null });
   });
 });

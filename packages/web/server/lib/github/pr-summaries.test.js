@@ -44,18 +44,23 @@ const prNode = (number, overrides = {}) => ({
   ...overrides,
 });
 
-// Answers every alias of a document from `nodes` (by PR number) and records
-// how many refs each document carried.
-const fakeOctokit = (nodes, { fail } = {}) => {
+// Answers every alias of a document from `nodes` (PRs) and `issues` (by
+// number) and records how many refs each document carried.
+const fakeOctokit = (nodes, { fail, issues = new Map() } = {}) => {
   const documents = [];
   return {
     documents,
-    graphql: async (_query, variables) => {
-      const aliases = Object.keys(variables).filter((name) => name.startsWith('p'));
-      documents.push(aliases.length);
-      const data = Object.fromEntries(aliases.map((alias) => {
-        const node = nodes.get(variables[alias]) ?? null;
-        return [alias, node ? { pullRequest: node } : null];
+    graphql: async (query, variables) => {
+      const indexes = Object.keys(variables).filter((name) => name.startsWith('p')).map((name) => name.slice(1));
+      documents.push(indexes.length);
+      const data = Object.fromEntries(indexes.map((index) => {
+        const number = variables[`p${index}`];
+        if (query.includes(`issue(number: $p${index})`)) {
+          const issue = issues.get(number) ?? null;
+          return [`a${index}`, issue ? { issue } : null];
+        }
+        const node = nodes.get(number) ?? null;
+        return [`a${index}`, node ? { pullRequest: node } : null];
       }));
       if (fail) {
         throw fail(data);
@@ -128,7 +133,7 @@ describe('fetchPrSummaries', () => {
     const refs = Array.from({ length: 26 }, (_, index) => ({ owner: 'acme', repo: 'app', number: index + 1 }));
     const octokit = fakeOctokit(new Map(refs.map((ref) => [ref.number, prNode(ref.number)])));
 
-    const summaries = await fetchPrSummaries({ octokit, refs });
+    const { summaries } = await fetchPrSummaries({ octokit, refs });
 
     expect(octokit.documents).toEqual([25, 1]);
     expect(summaries).toHaveLength(26);
@@ -137,7 +142,7 @@ describe('fetchPrSummaries', () => {
   test('maps a merged PR without checks or mergeability', async () => {
     const octokit = fakeOctokit(new Map([[7, prNode(7, { state: 'MERGED', mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' })]]));
 
-    const [summary] = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }] });
+    const { summaries: [summary] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }] });
 
     expect(summary).toEqual({
       owner: 'acme',
@@ -157,16 +162,38 @@ describe('fetchPrSummaries', () => {
     const octokit = fakeOctokit(new Map([[7, prNode(7)]]), {
       fail: (data) => Object.assign(new Error('Could not resolve to a PullRequest'), {
         data,
-        errors: [{ type: 'NOT_FOUND', path: ['p1', 'pullRequest'] }],
+        errors: [{ type: 'NOT_FOUND', path: ['a1', 'pullRequest'] }],
       }),
     });
 
-    const summaries = await fetchPrSummaries({
+    const { summaries } = await fetchPrSummaries({
       octokit,
       refs: [{ owner: 'acme', repo: 'app', number: 7 }, { owner: 'acme', repo: 'app', number: 8 }],
     });
 
     expect(summaries.map((summary) => summary.number)).toEqual([7]);
+  });
+
+  test('reads issues in the same documents as PRs', async () => {
+    const issue = (number, state, stateReason) => ({ number, title: `Issue ${number}`, state, stateReason });
+    const octokit = fakeOctokit(new Map([[7, prNode(7)]]), {
+      issues: new Map([
+        [11, issue(11, 'OPEN', null)],
+        [12, issue(12, 'CLOSED', 'COMPLETED')],
+        [13, issue(13, 'CLOSED', 'NOT_PLANNED')],
+        [14, issue(14, 'CLOSED', 'DUPLICATE')],
+      ]),
+    });
+    const ref = (number) => ({ owner: 'acme', repo: 'app', number });
+
+    const { summaries, issueSummaries } = await fetchPrSummaries({ octokit, refs: [ref(7)], issueRefs: [11, 12, 13, 14, 15].map(ref) });
+
+    expect(octokit.documents).toEqual([6]);
+    expect(summaries.map((summary) => summary.number)).toEqual([7]);
+    expect(issueSummaries.map((summary) => [summary.number, summary.state])).toEqual([
+      [11, 'open'], [12, 'completed'], [13, 'not_planned'], [14, 'not_planned'],
+    ]);
+    expect(issueSummaries[0].title).toBe('Issue 11');
   });
 
   test('a rate-limited document fails the call instead of reading as empty', async () => {

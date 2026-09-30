@@ -32,7 +32,9 @@ import {
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 
 type FolderScope = { scopeKey: string; directory: string | null };
-import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getGitHubPrStatusKey, useLinkedIssueStates, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getLinkedSidebarIssues, type LinkedSidebarIssue } from '@/lib/linkedIssues';
+import { buildSessionIssueItems } from '../sessions/sessionPrSummaries';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
@@ -303,6 +305,8 @@ const WorktreeDeleteAction = React.memo(function WorktreeDeleteAction({
     </Tooltip>
   );
 });
+
+const EMPTY_GROUP_ISSUES: readonly LinkedSidebarIssue[] = [];
 
 function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNode {
   const { t } = useI18n();
@@ -639,6 +643,33 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     () => collectGroupSessions(sourceGroupNodes),
     [collectGroupSessions, sourceGroupNodes],
   );
+
+  // A worktree without a branch PR shows the issues its sessions work on: a
+  // worktree started from an issue links it to its session, not to itself.
+  // A branch PR, once there, is what the header follows.
+  const groupIssues = React.useMemo(() => {
+    if (groupPrSummary || group.isMain || group.isArchivedBucket || hideGroupLabel) return EMPTY_GROUP_ISSUES;
+    const byKey = new Map<string, LinkedSidebarIssue>();
+    for (const session of allGroupSessions) {
+      for (const issue of getLinkedSidebarIssues(session)) {
+        if (!byKey.has(issue.key)) byKey.set(issue.key, issue);
+      }
+    }
+    return byKey.size > 0 ? [...byKey.values()] : EMPTY_GROUP_ISSUES;
+  }, [allGroupSessions, group.isArchivedBucket, group.isMain, groupPrSummary, hideGroupLabel]);
+  const groupIssueRefs = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
+    [groupIssues],
+  );
+  const groupIssueStates = useLinkedIssueStates(groupIssueRefs);
+  const groupIssueItems = React.useMemo(
+    () => buildSessionIssueItems(groupIssues, groupIssueStates).map((item) => ({
+      ...item,
+      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.label,
+    })),
+    [groupIssueStates, groupIssues, t],
+  );
+  const primaryGroupIssue = groupIssueItems[0] ?? null;
 
   // Precompute the per-folder "delete all sessions in folder" list once
   // per render. The previous design ran a recursive `collectFolderSessions`
@@ -1028,7 +1059,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   return (
     <><div className="oc-group">
       <div className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
-      <Tooltip disabled={!groupPrSummary || !groupPrStatusLabel}>
+      <Tooltip disabled={groupPrSummary ? !groupPrStatusLabel : !primaryGroupIssue}>
       <TooltipTrigger asChild>
       <div
         className="min-w-0 flex-1"
@@ -1114,6 +1145,28 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     >
                       #{groupPrSummary.number}
                     </button>
+                  ) : primaryGroupIssue ? (
+                    // Same contract as the PR number: opens the issue, keeps
+                    // its pointer and keys from the toggle and drag handle.
+                    <button
+                      type="button"
+                      className={cn(
+                        'ml-auto inline-flex flex-shrink-0 items-center gap-1 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        !primaryGroupIssue.color && 'text-muted-foreground',
+                      )}
+                      style={primaryGroupIssue.color ? { color: primaryGroupIssue.color } : undefined}
+                      aria-label={groupIssueItems.map((item) => item.text).join(', ')}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void openExternalUrl(primaryGroupIssue.url);
+                      }}
+                    >
+                      <Icon name={primaryGroupIssue.icon} className="h-3 w-3" />
+                      {primaryGroupIssue.label}
+                      {groupIssueItems.length > 1 ? <span className="text-muted-foreground">+{groupIssueItems.length - 1}</span> : null}
+                    </button>
                   ) : null}
                 </span>
               ) : (
@@ -1144,6 +1197,17 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         <TooltipContent side="right" sideOffset={8} className="max-w-xs">
           <p>#{groupPrSummary.number} · {groupPrStatusLabel}</p>
           {groupPrSummary.title ? <p className="truncate text-muted-foreground">{groupPrSummary.title}</p> : null}
+        </TooltipContent>
+      ) : !groupPrSummary && primaryGroupIssue ? (
+        <TooltipContent side="right" sideOffset={8} className="max-w-xs">
+          <div className="flex flex-col gap-1">
+            {groupIssueItems.map((item) => (
+              <div key={item.key} className="min-w-0">
+                <p>{item.text}</p>
+                {item.title ? <p className="truncate text-muted-foreground">{item.title}</p> : null}
+              </div>
+            ))}
+          </div>
         </TooltipContent>
       ) : null}
       </Tooltip>

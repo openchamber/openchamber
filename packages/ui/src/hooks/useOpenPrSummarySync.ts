@@ -14,8 +14,8 @@ const OPEN_PR_SUMMARY_RETURN_MIN_AGE_MS = 15_000;
 const isDocumentVisible = () => document.visibilityState === 'visible';
 
 /**
- * Keeps the open PRs behind `keys`, and the PRs linked to the sessions on
- * screen, current through batched live summaries: on a fixed cadence while the
+ * Keeps the open PRs behind `keys`, and the PRs and GitHub issues linked to
+ * the sessions on screen, current through batched live summaries: on a fixed cadence while the
  * window is visible, and again when the user returns to it. Entries without an
  * open PR, watched ones and merged links are skipped by the store, so callers
  * pass everything they show.
@@ -23,18 +23,24 @@ const isDocumentVisible = () => document.visibilityState === 'visible';
 export function useOpenPrSummarySync(
   keys: string[],
   linkedRefs: GitHubPullRequestRef[],
+  linkedIssueRefs: GitHubPullRequestRef[],
   github: GitHubAPI | undefined,
   enabled: boolean,
 ) {
   const syncOpenPrSummaries = useGitHubPrStatusStore((state) => state.syncOpenPrSummaries);
   const keysRef = React.useRef(keys);
   const linkedRefsRef = React.useRef(linkedRefs);
+  const linkedIssueRefsRef = React.useRef(linkedIssueRefs);
 
   const sync = React.useCallback((minAgeMs: number) => {
     if (!enabled || !github || !isDocumentVisible()) {
       return;
     }
-    void syncOpenPrSummaries(keysRef.current, github, { minAgeMs, linkedRefs: linkedRefsRef.current });
+    void syncOpenPrSummaries(keysRef.current, github, {
+      minAgeMs,
+      linkedRefs: linkedRefsRef.current,
+      linkedIssueRefs: linkedIssueRefsRef.current,
+    });
   }, [enabled, github, syncOpenPrSummaries]);
 
   // New keys and links (a project expanded, a PR just linked, a reload
@@ -43,8 +49,9 @@ export function useOpenPrSummarySync(
   React.useEffect(() => {
     keysRef.current = keys;
     linkedRefsRef.current = linkedRefs;
+    linkedIssueRefsRef.current = linkedIssueRefs;
     sync(OPEN_PR_SUMMARY_DUE_AGE_MS);
-  }, [keys, linkedRefs, sync]);
+  }, [keys, linkedIssueRefs, linkedRefs, sync]);
 
   React.useEffect(() => {
     if (!enabled || !github) {

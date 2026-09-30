@@ -1,3 +1,5 @@
+import type { GitHubIssueLiveSummary } from '@/lib/api/types';
+import type { LinkedSidebarIssue } from '@/lib/linkedIssues';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 
 // Which PR a row leads with when a session has several: the one that needs
@@ -68,4 +70,75 @@ export const getPrStatusLabelKey = (summary: PrVisualSummary): PrStatusLabelKey 
     default:
       return null;
   }
+};
+
+type IssueStatusLabelKey =
+  | 'sessions.sidebar.group.issue.status.open'
+  | 'sessions.sidebar.group.issue.status.completed'
+  | 'sessions.sidebar.group.issue.status.notPlanned';
+
+/** A linked issue the way a session row shows it. */
+export type SessionIssueItem = {
+  key: string;
+  /** `#12` for GitHub, the tracker's identifier otherwise. */
+  label: string;
+  icon: 'record-circle' | 'linear';
+  /** Theme PR colour for a known state; null when the state is unknown. */
+  color: string | null;
+  statusKey: IssueStatusLabelKey | null;
+  url: string;
+  title: string;
+};
+
+// Issues borrow the PR colours: open like an open PR, done like a merged
+// one, dropped like a closed one. An issue has nothing to fix, so it never
+// turns orange.
+const ISSUE_STATE_LOOK = {
+  open: { color: 'var(--pr-open)', statusKey: 'sessions.sidebar.group.issue.status.open', priority: 0 },
+  completed: { color: 'var(--pr-merged)', statusKey: 'sessions.sidebar.group.issue.status.completed', priority: 2 },
+  not_planned: { color: 'var(--pr-closed)', statusKey: 'sessions.sidebar.group.issue.status.notPlanned', priority: 3 },
+} satisfies Record<GitHubIssueLiveSummary['state'], { color: string; statusKey: IssueStatusLabelKey; priority: number }>;
+// Unknown state (Linear, extensions, a GitHub issue not asked yet) sits
+// between open and closed ones.
+const UNKNOWN_ISSUE_PRIORITY = 1;
+
+/**
+ * The issues a session row shows, most relevant first: open issues, then
+ * ones whose state is unknown, then closed ones. `states` lines up with the
+ * GitHub issues among `issues`, in order.
+ */
+export const buildSessionIssueItems = (
+  issues: readonly LinkedSidebarIssue[],
+  states: ReadonlyArray<GitHubIssueLiveSummary | null>,
+): SessionIssueItem[] => {
+  let githubIndex = 0;
+  const ranked = issues.map((issue) => {
+    if (issue.source !== 'github') {
+      const item: SessionIssueItem = {
+        key: issue.key,
+        label: issue.identifier,
+        icon: issue.source === 'linear' ? 'linear' : 'record-circle',
+        color: null,
+        statusKey: null,
+        url: issue.url,
+        title: issue.title,
+      };
+      return { item, priority: UNKNOWN_ISSUE_PRIORITY };
+    }
+    const state = states[githubIndex] ?? null;
+    githubIndex += 1;
+    const look = state ? ISSUE_STATE_LOOK[state.state] : null;
+    const item: SessionIssueItem = {
+      key: issue.key,
+      label: `#${issue.number}`,
+      icon: 'record-circle',
+      color: look?.color ?? null,
+      statusKey: look?.statusKey ?? null,
+      url: issue.url,
+      title: state?.title || issue.title,
+    };
+    return { item, priority: look?.priority ?? UNKNOWN_ISSUE_PRIORITY };
+  });
+  // Array sort is stable: equal priorities keep link order.
+  return ranked.sort((left, right) => left.priority - right.priority).map((entry) => entry.item);
 };

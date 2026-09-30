@@ -609,12 +609,14 @@ describe("open PR live summaries", () => {
 
   const summariesApi = (answer: (refs: GitHubPullRequestRef[]) => Promise<GitHubPullRequestSummariesResult>) => {
     const calls: GitHubPullRequestRef[][] = []
-    const prSummaries = async (refs: GitHubPullRequestRef[]) => {
+    const issueCalls: GitHubPullRequestRef[][] = []
+    const prSummaries = async (refs: GitHubPullRequestRef[], issueRefs: GitHubPullRequestRef[] = []) => {
       calls.push(refs)
+      issueCalls.push(issueRefs)
       return answer(refs)
     }
     // SAFETY: the sync only calls prSummaries; the rest of the API is unused here.
-    return { github: { prSummaries } as unknown as GitHubAPI, calls }
+    return { github: { prSummaries } as unknown as GitHubAPI, calls, issueCalls }
   }
 
   const seed = (key: string, status: GitHubPullRequestStatus, lastRefreshAt = 0) => {
@@ -627,7 +629,7 @@ describe("open PR live summaries", () => {
 
   beforeEach(() => {
     runtimeKey = "runtime-a"
-    useGitHubPrStatusStore.setState({ entries: {}, linkedSummaries: {}, activeRequestCount: 0, totalRequestCount: 0 })
+    useGitHubPrStatusStore.setState({ entries: {}, linkedSummaries: {}, linkedIssueSummaries: {}, activeRequestCount: 0, totalRequestCount: 0 })
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
   })
 
@@ -637,6 +639,7 @@ describe("open PR live summaries", () => {
     const { github } = summariesApi(async () => ({
       connected: true,
       fetchedAt: Date.now(),
+      issueSummaries: [],
       summaries: [liveSummary({ state: "merged", mergeable: null, mergeableState: "unknown", checks: null })],
     }))
 
@@ -652,7 +655,7 @@ describe("open PR live summaries", () => {
     const key = getGitHubPrStatusKey("/repo", "feature")
     seed(key, openStatus())
     const failing = { state: "failure" as const, total: 2, success: 1, failure: 1, pending: 0, inProgress: 0, queued: 0 }
-    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ checks: failing })] }))
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ checks: failing })] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
 
@@ -664,7 +667,7 @@ describe("open PR live summaries", () => {
     const key = getGitHubPrStatusKey("/repo", "feature")
     seed(key, openStatus())
     const before = useGitHubPrStatusStore.getState().entries
-    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary()] }))
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary()] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
 
@@ -676,7 +679,7 @@ describe("open PR live summaries", () => {
     const origin = getGitHubPrStatusKey("/repo", "feature", "origin")
     seed(automatic, openStatus())
     seed(origin, openStatus())
-    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ state: "closed", checks: null })] }))
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ state: "closed", checks: null })] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([automatic, origin], github, { minAgeMs: 0 })
 
@@ -697,7 +700,7 @@ describe("open PR live summaries", () => {
       entries: { ...state.entries, [watched]: { ...state.entries[watched]!, watchers: 1 } },
     }))
     seed(fresh, openStatus(), Date.now())
-    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [] }))
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([closed, none, watched, fresh], github, { minAgeMs: 60_000 })
 
@@ -707,7 +710,7 @@ describe("open PR live summaries", () => {
   test("a PR asked about recently waits for its cadence", async () => {
     const key = getGitHubPrStatusKey("/repo", "feature")
     seed(key, openStatus())
-    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary()] }))
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary()] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 60_000 })
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 60_000 })
@@ -728,7 +731,7 @@ describe("open PR live summaries", () => {
   test("a PR GitHub did not resolve keeps its status", async () => {
     const key = getGitHubPrStatusKey("/repo", "feature")
     seed(key, openStatus())
-    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [] }))
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
 
@@ -738,7 +741,7 @@ describe("open PR live summaries", () => {
   test("a full refresh newer than the batch wins", async () => {
     const key = getGitHubPrStatusKey("/repo", "feature")
     seed(key, openStatus({ fetchedAt: Date.now() + 60_000 }))
-    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ state: "merged", checks: null })] }))
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ state: "merged", checks: null })] }))
 
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
 
@@ -751,6 +754,7 @@ describe("open PR live summaries", () => {
     const { github, calls } = summariesApi(async () => ({
       connected: true,
       fetchedAt: Date.now(),
+      issueSummaries: [],
       summaries: [liveSummary({ state: "merged", checks: null }), liveSummary({ number: 9, title: "Linked", checks: null })],
     }))
 
@@ -769,6 +773,7 @@ describe("open PR live summaries", () => {
     const { github, calls } = summariesApi(async () => ({
       connected: true,
       fetchedAt: Date.now(),
+      issueSummaries: [],
       summaries: [liveSummary({ number: 9, state: "merged", checks: null })],
     }))
     const linkedRefs = [{ owner: "acme", repo: "app", number: 9 }]
@@ -780,12 +785,29 @@ describe("open PR live summaries", () => {
   })
 
   test("a runtime switch forgets linked PR status", async () => {
-    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ number: 9 })] }))
+    const { github } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ number: 9 })] }))
     await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], github, { minAgeMs: 0, linkedRefs: [{ owner: "acme", repo: "app", number: 9 }] })
 
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
 
     expect(useGitHubPrStatusStore.getState().linkedSummaries).toEqual({})
+  })
+
+  test("linked issues ride the same batch and keep asking after they close", async () => {
+    const issueRef = { owner: "acme", repo: "app", number: 11 }
+    const { github, calls, issueCalls } = summariesApi(async () => ({
+      connected: true,
+      fetchedAt: Date.now(),
+      summaries: [],
+      issueSummaries: [{ ...issueRef, title: "Bug", state: "completed" }],
+    }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], github, { minAgeMs: 0, linkedIssueRefs: [issueRef, issueRef] })
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], github, { minAgeMs: 0, linkedIssueRefs: [issueRef] })
+
+    expect(calls).toEqual([[], []])
+    expect(issueCalls).toEqual([[issueRef], [issueRef]])
+    expect(Object.values(useGitHubPrStatusStore.getState().linkedIssueSummaries).map((issue) => issue.state)).toEqual(["completed"])
   })
 
   test("a batch from before a runtime switch is dropped", async () => {
@@ -796,7 +818,7 @@ describe("open PR live summaries", () => {
 
     const syncing = useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
-    request.resolve({ connected: true, fetchedAt: Date.now(), summaries: [liveSummary({ state: "merged", checks: null })] })
+    request.resolve({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ state: "merged", checks: null })] })
     await syncing
 
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
