@@ -979,8 +979,23 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  // The control service's session reads resolve projectId through the same
+  // lookup as create/send/fork, so an unknown project or a missing project
+  // folder fails the same way everywhere.
+  const resolveDirectory = async (payload) => {
+    const resolved = await resolveRequestedDirectory({
+      payload,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolved.ok) throw new OpenChamberControlError(resolved.error, resolved.status || 400);
+    return resolved.directory;
+  };
+
   return {
     create,
+    resolveDirectory,
     archive,
     unarchive,
     archiveStore,

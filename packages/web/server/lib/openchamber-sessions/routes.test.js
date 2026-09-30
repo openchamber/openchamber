@@ -1068,3 +1068,34 @@ describe('openchamber session routes', () => {
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 });
+
+describe('openchamber session service directory resolution', () => {
+  const createService = async (overrides = {}) => {
+    const { createOpenChamberSessionService } = await import('./routes.js');
+    return createOpenChamberSessionService({
+      archiveStore: createMemoryArchiveStore(),
+      sessionMetadataStore: createMemorySessionMetadataStore(),
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      ...overrides,
+    });
+  };
+
+  it('resolves a registered project to its directory', async () => {
+    const service = await createService();
+    await expect(service.resolveDirectory({ projectId: 'proj_1' })).resolves.toBe('/repo/app');
+  });
+
+  it('fails for an unknown project, a missing project folder, or unreadable settings', async () => {
+    await expect((await createService()).resolveDirectory({ projectId: 'missing' }))
+      .rejects.toMatchObject({ statusCode: 404, message: 'Project not found' });
+    const goneFolder = await createService({ validateDirectoryPath: async () => ({ ok: false, error: 'Directory not found' }) });
+    await expect(goneFolder.resolveDirectory({ projectId: 'proj_1' }))
+      .rejects.toMatchObject({ statusCode: 400, message: 'Directory not found' });
+    const unreadable = await createService({ readSettingsFromDiskMigrated: async () => { throw new Error('settings unreadable'); } });
+    await expect(unreadable.resolveDirectory({ projectId: 'proj_1' })).rejects.toThrow('settings unreadable');
+  });
+});
