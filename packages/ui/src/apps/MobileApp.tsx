@@ -39,10 +39,10 @@ import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
-import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAuthoritativeSessionCleanup } from '@/components/session/sidebar/list/useAuthoritativeSessionCleanup';
-import { clearLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
+import { restoreLastActiveSession } from '@/sync/last-session-restore';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -1084,47 +1084,16 @@ function MobileAppContent({ apis }: MobileAppProps) {
   const [lastSessionRestorePending, setLastSessionRestorePending] = React.useState(isNativeMobileApp);
   React.useEffect(() => {
     if (!isNativeMobileApp || !isConnected || lastSessionRestoreDoneRef.current) return;
-    if (useSessionUIStore.getState().currentSessionId) {
-      lastSessionRestoreDoneRef.current = true;
-      setLastSessionRestorePending(false);
-      return;
-    }
-    const runtimeKey = getRuntimeKey();
-    const persisted = readLastActiveSession(runtimeKey);
-    if (!persisted) {
-      lastSessionRestoreDoneRef.current = true;
-      setLastSessionRestorePending(false);
-      return;
-    }
     let cancelled = false;
     // Safety valve: the overlay must never strand the user on the splash if
     // the snapshot hangs — fall through to the draft after a bounded wait.
     const overlayTimeoutId = window.setTimeout(() => setLastSessionRestorePending(false), 6000);
     void (async () => {
-      // `null` = fetch failure — keep the ref unset so the next connect (a
-      // stale persisted isConnected can fire this early) retries the restore.
-      const snapshot = await refreshGlobalSessions().catch(() => null);
+      const result = await restoreLastActiveSession({ refresh: true });
       if (cancelled) return;
-      if (!snapshot) {
-        setLastSessionRestorePending(false);
-        return;
-      }
-      lastSessionRestoreDoneRef.current = true;
-      const session = snapshot.activeSessions.find((entry) => entry.id === persisted.sessionId);
-      if (!session) {
-        // Authoritative snapshot says the session is gone (deleted/archived) —
-        // drop the stale pointer instead of retrying it on every launch.
-        clearLastActiveSession(runtimeKey);
-        setLastSessionRestorePending(false);
-        return;
-      }
-      const latest = useSessionUIStore.getState();
-      if (!latest.currentSessionId) {
-        void latest.setCurrentSession(
-          session.id,
-          resolveGlobalSessionDirectory(session) ?? persisted.directory ?? undefined,
-        );
-      }
+      // A failed list read keeps the ref unset so the next connect (a stale
+      // persisted isConnected can fire this early) retries the restore.
+      if (result !== 'failed') lastSessionRestoreDoneRef.current = true;
       setLastSessionRestorePending(false);
     })();
     return () => {

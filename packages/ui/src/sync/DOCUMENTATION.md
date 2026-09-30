@@ -880,6 +880,16 @@ the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
 loads history only on an explicit tap.
 
+On launch the app reopens the session that was open when it closed
+(`sync/last-session-restore.ts`, used by `App` for web and desktop and by the
+Capacitor shell). `setCurrentSession` persists the pointer per runtime and a
+user-opened draft clears it, so the pointer names exactly what was on screen;
+without one the launch stays on the automatic draft. A route, link, or click
+that selected a session first wins. The sidebar's project session selection
+(`useProjectSessionSelection`) ignores the project active when the list
+mounts and reacts only to later project switches; it used to pick that
+project's remembered or first session on launch.
+
 The scroll hook holds the gate
 until the viewport is in place; the recap note holds it until the session record
 is in memory, because it cannot decide whether it renders before that and would

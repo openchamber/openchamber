@@ -40,6 +40,7 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { restoreLastActiveSession } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -689,6 +690,16 @@ function App({ apis }: AppProps) {
     window.addEventListener('openchamber:open-session', handler as EventListener);
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
+
+  // Launch continuity: reopen the session that was open when the app last
+  // closed, once per page load. A link or route that already opened
+  // something wins; see restoreLastActiveSession.
+  const lastSessionRestoreStartedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isInitialized || embeddedSessionChat || lastSessionRestoreStartedRef.current) return;
+    lastSessionRestoreStartedRef.current = true;
+    void restoreLastActiveSession({ refresh: false });
+  }, [embeddedSessionChat, isInitialized]);
 
   // Open a draft Mini Chat window from the native File menu / tray. Uses a
   // dedicated single-fire event (not the menu-action channel) because draft
