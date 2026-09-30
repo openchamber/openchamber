@@ -5,7 +5,8 @@
  * carries is the only account of what went wrong, and it may arrive without
  * an assistant message to attach itself to, so a turn can end with nothing
  * on screen. This buffer keeps the last errors until someone asks for them,
- * via the status report (Ctrl/Cmd+Shift+L) or `__opencodeDebug`. In-memory
+ * via `__opencodeDebug`; the diagnostic timeline exports only the event type,
+ * not the raw error message. In-memory
  * only: never persisted, never sent anywhere, dropped on reload.
  */
 

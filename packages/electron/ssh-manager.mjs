@@ -668,6 +668,22 @@ export class ElectronSshManager {
     return limit > 0 && lines.length > limit ? lines.slice(-limit) : lines;
   }
 
+  /** Raw data stays in main; callers must classify before crossing IPC. */
+  diagnosticLogSnapshots() {
+    const ids = [...new Set([...this.logs.keys(), ...this.statuses.keys()])];
+    const entries = ids.slice(-20).map((id) => {
+      const status = this.statuses.get(id);
+      return {
+        lines: this.logsForInstance(id),
+        phase: status?.phase,
+        updatedAtMs: status?.updatedAtMs,
+        retryAttempt: status?.retryAttempt,
+        requiresUserAction: status?.requiresUserAction,
+      };
+    });
+    return { entries, omittedSources: Math.max(0, ids.length - entries.length) };
+  }
+
   clearLogsForInstance(id) {
     this.logs.delete(id);
   }

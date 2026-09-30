@@ -2,9 +2,61 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from './tunnel-auth.js';
-import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
+import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes } from './core-routes.js';
+import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 
 describe('core-routes', () => {
+  it('captures the final response status, including missing routes and parser errors, without request data', async () => {
+    const journal = createServerDiagnosticJournal();
+    const app = express();
+    registerHttpResponseDiagnostics(app, journal);
+    app.use(express.json({ limit: '16b' }));
+    app.get('/api/session/:sessionID', (_req, res) => res.sendStatus(404));
+    await request(app).get('/api/session/ses_private?token=secret').expect(404);
+    await request(app).post('/api/other').send({ prompt: 'private prompt private prompt' }).expect(413);
+    const details = journal.snapshot().events.map((event) => event.detail);
+    expect(details).toEqual([
+      'method=GET route=/api/session/:sessionID stage=downstream_response http=404',
+      'method=POST route=/api/other stage=downstream_response http=413',
+    ]);
+    expect(JSON.stringify(journal.snapshot())).not.toMatch(/ses_private|token|secret|prompt/);
+  });
+
+  it('does not report an aborted response as a completed HTTP status', async () => {
+    const journal = createServerDiagnosticJournal();
+    const app = express();
+    registerHttpResponseDiagnostics(app, journal);
+    app.get('/api/aborted', (_req, res) => res.destroy());
+    await expect(request(app).get('/api/aborted')).rejects.toThrow();
+    expect(journal.snapshot().events).toEqual([]);
+  });
+
+  it('requires authentication for local file diagnostics', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      uiAuthController: { requireAuth },
+    });
+    await request(app).get('/api/diagnostics/local-files').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects tunneled diagnostics even when the proxy connects through loopback', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, _res, next) => next());
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      tunnelAuthController: { classifyRequestScope: () => 'tunnel' },
+      uiAuthController: { requireAuth },
+    });
+    await request(app).get('/api/diagnostics/local-files').expect(403);
+    expect(requireAuth).not.toHaveBeenCalled();
+  });
   afterEach(() => {
     vi.useRealTimers();
   });

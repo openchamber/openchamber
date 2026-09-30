@@ -19,6 +19,7 @@ vi.mock('./startup-performance.js', () => ({
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
@@ -117,6 +118,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     buildManagedOpenCodePath: vi.fn(() => '/home/user/.bun/bin:/usr/local/bin:/usr/bin'),
     // Never let a test touch the real `~/.local/share/opencode/opencode.db`.
     topUpV1SessionMigration: vi.fn(() => ({ status: 'skipped', missing: 0, revisited: 0, reason: 'no-database' })),
+    diagnosticJournal: createServerDiagnosticJournal(),
     getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({
       PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
       SHELL_ONLY: 'yes',
@@ -130,6 +132,53 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
 };
 
 describe('OpenCode lifecycle', () => {
+  it('captures managed stderr from spawn through readiness without exposing raw log text', async () => {
+    const journal = createServerDiagnosticJournal();
+    let child;
+    spawnMock.mockImplementation(() => {
+      child = createMockChild();
+      queueMicrotask(() => {
+        child.stderr.emit('data', `timestamp=${new Date().toISOString()} level=Info run=abcdef01 message="cli starting" token=secret-123 /private/file\n`);
+        child.stderr.emit('data', `timestamp=${new Date().toISOString()} level=Info run=abcdef01 message="Bearer secret-789"\n`);
+        child.stdout.emit('data', 'server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const runtime = createRuntime({ diagnosticJournal: journal });
+    const server = await runtime.startOpenCode();
+    try {
+      expect(spawnMock.mock.calls[0][2].env.OPENCODE_PRINT_LOGS).toBe('1');
+      expect(server.stderrTail).toBe('');
+      child.stderr.emit('data', `timestamp=${new Date().toISOString()} level=Warn run=abcdef01 message="password=secret-456"\n`);
+      expect(journal.snapshot().events.map((event) => event.action)).toEqual([
+        'managed launch', 'info: cli starting', 'managed ready',
+      ]);
+      expect(journal.snapshot().coverage[1].filtered).toBe(2);
+      expect(JSON.stringify(journal.snapshot())).not.toMatch(/secret|private|abcdef01/);
+    } finally {
+      await server.close();
+    }
+    expect(journal.snapshot().events.at(-1)?.action).toBe('managed process exited');
+  });
+
+  it('does not copy startup stderr into errors or the health snapshot', async () => {
+    const journal = createServerDiagnosticJournal();
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => {
+        child.stderr.emit('data', `timestamp=${new Date().toISOString()} level=Error run=abcdef01 message="Bearer secret-123"\n`);
+        child.exitCode = 1;
+        child.emit('exit', 1, null);
+      });
+      return child;
+    });
+    const runtime = createRuntime({ diagnosticJournal: journal });
+    await expect(runtime.startOpenCode()).rejects.toThrow('exited before serving');
+    expect(runtime.testState.lastOpenCodeError).not.toMatch(/secret|Bearer/);
+    expect(JSON.stringify(runtime.testState.lastManagedOpenCodeProcess)).not.toMatch(/secret|Bearer/);
+    expect(JSON.stringify(journal.snapshot())).not.toMatch(/secret|Bearer/);
+  });
+
   it('uses the resolved binary directly on startup and managed restart without an env override', async () => {
     delete process.env.OPENCODE_BINARY;
     const binaries = ['/bundle one/opencode-cli/opencode', '/bundle two/opencode-cli/opencode'];
@@ -150,6 +199,7 @@ describe('OpenCode lifecycle', () => {
       expect(firstServer.signalCode).toBe('SIGTERM');
       expect(spawnMock.mock.calls.map(([binary]) => binary)).toEqual(binaries);
       expect(runtime.testState.lastOpenCodeLaunchDiagnostics.sourceBinary).toBe(binaries[1]);
+      expect(runtime.testState.openCodeProcess.stderrTail).toBe('');
       expect(process.env.OPENCODE_BINARY).toBeUndefined();
       for (const [, , options] of spawnMock.mock.calls) {
         expect(options.env).not.toHaveProperty('OPENCODE_BINARY');
@@ -192,12 +242,13 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('recovers an external OPENCODE_HOST connection using its configured endpoint', async () => {
+    const journal = createServerDiagnosticJournal();
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ version: '2.0.15', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     globalThis.fetch = fetchMock;
-    const runtime = createRuntime({}, {
+    const runtime = createRuntime({ diagnosticJournal: journal }, {
       openCodePort: null,
       openCodeBaseUrl: null,
       isExternalOpenCode: true,
@@ -216,6 +267,8 @@ describe('OpenCode lifecycle', () => {
     expect(runtime.testState.openCodePort).toBe(4095);
     expect(runtime.testState.openCodeBaseUrl).toBe('http://seamus:4095');
     expect(runtime.testState.lastOpenCodeError).toBeNull();
+    expect(journal.snapshot().coverage[1].status).toBe('skipped');
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('retains the OPENCODE_HOST port after an external re-probe fails', async () => {
@@ -497,7 +550,7 @@ describe('OpenCode lifecycle', () => {
     expect(onOpenCodeRestarted).toHaveBeenCalledTimes(1);
   });
 
-  it('retains post-listen stderr and exited process diagnostics across restart', async () => {
+  it('retains exited process diagnostics across restart without raw stderr', async () => {
     const firstChild = createMockChild();
     const replacement = createMockChild();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -532,7 +585,7 @@ describe('OpenCode lifecycle', () => {
     expect(server.exitCode).toBe(7);
     expect(Buffer.byteLength(server.stderrTail)).toBeLessThanOrEqual(32 * 1024);
     expect(server.stderrTail).not.toContain('runtime-secret');
-    expect(server.stderrTail).toContain('runtime worker failed after startup');
+    expect(server.stderrTail).toBe('');
 
     await runtime.triggerHealthCheck();
 
@@ -543,7 +596,7 @@ describe('OpenCode lifecycle', () => {
         pid: 12345,
         exitCode: 7,
         signalCode: null,
-        stderrTail: expect.stringContaining('runtime worker failed after startup'),
+        stderrTail: '',
         alive: false,
       },
       busySessionCount: 0,
@@ -553,14 +606,14 @@ describe('OpenCode lifecycle', () => {
       pid: 12345,
       exitCode: 7,
       signalCode: null,
-      stderrTail: expect.stringContaining('runtime worker failed after startup'),
+      stderrTail: '',
     });
 
     await runtime.testState.openCodeProcess.close();
     warn.mockRestore();
   });
 
-  it('redacts Authorization scheme credentials from stderr diagnostics', async () => {
+  it('never includes Authorization credentials or arbitrary stderr in process diagnostics', async () => {
     const firstChild = createMockChild();
     const replacement = createMockChild();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -599,8 +652,7 @@ describe('OpenCode lifecycle', () => {
     expect(server.stderrTail).not.toContain('dXNlcjpwYXNz');
     expect(server.stderrTail).not.toContain('bG93ZXI6Y2FzZQ');
     expect(server.stderrTail).not.toContain('fake-bearer-token-value');
-    expect(server.stderrTail).toContain('falling back to basic health monitor');
-    expect(server.stderrTail).toContain('runtime worker failed after startup');
+    expect(server.stderrTail).toBe('');
 
     await runtime.triggerHealthCheck();
 
@@ -608,8 +660,7 @@ describe('OpenCode lifecycle', () => {
     expect(diagnosticsTail).not.toContain('dXNlcjpwYXNz');
     expect(diagnosticsTail).not.toContain('bG93ZXI6Y2FzZQ');
     expect(diagnosticsTail).not.toContain('fake-bearer-token-value');
-    expect(diagnosticsTail).toContain('falling back to basic health monitor');
-    expect(diagnosticsTail).toContain('runtime worker failed after startup');
+    expect(diagnosticsTail).toBe('');
 
     await runtime.testState.openCodeProcess.close();
     warn.mockRestore();
@@ -848,7 +899,7 @@ describe('OpenCode lifecycle', () => {
     await server.close();
   });
 
-  it('reports the binary when managed OpenCode exits before becoming ready', async () => {
+  it('reports a pre-ready exit without copying child output into the error', async () => {
     delete process.env.OPENCODE_BINARY;
     const firstChild = createMockChild();
     const secondChild = createMockChild();
@@ -867,7 +918,7 @@ describe('OpenCode lifecycle', () => {
 
     const runtime = createRuntime();
 
-    await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving with signal SIGTERM. Binary used: opencode. No stdout/stderr captured');
+    await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving with signal SIGTERM. Check the local diagnostic timeline for stderr coverage.');
     expect(spawnMock).toHaveBeenCalledTimes(2);
   });
 

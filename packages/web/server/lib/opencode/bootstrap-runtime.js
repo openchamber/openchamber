@@ -1,4 +1,5 @@
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+import { registerHttpResponseDiagnostics } from './core-routes.js';
 
 export const createBootstrapRuntime = (dependencies) => {
   const {
@@ -69,6 +70,8 @@ export const createBootstrapRuntime = (dependencies) => {
       desktopUpdater,
       skipBodyParsing,
     } = options;
+
+    registerHttpResponseDiagnostics(app);
 
     const uiAuthController = createUiAuth({
       password: uiPassword,

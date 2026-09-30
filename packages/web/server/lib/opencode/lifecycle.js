@@ -6,6 +6,7 @@ import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
+import { createManagedLogCapture, serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -144,6 +145,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     now = Date.now,
     topUpV1SessionMigration = topUpV1Migration,
     checkOpenCodeBinary = requireOpenCodeV2,
+    diagnosticJournal = serverDiagnosticJournal,
   } = deps;
 
   let managedPreflight = null;
@@ -380,18 +382,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  const formatCapturedOutput = ({ stdout, stderr }) => {
-    const parts = [];
-    if (stdout.trim()) {
-      parts.push(`stdout:\n${stdout.trim()}`);
-    }
-    if (stderr.trim()) {
-      parts.push(`stderr:\n${stderr.trim()}`);
-    }
-    return parts.length > 0 ? parts.join('\n\n') : 'No stdout/stderr captured';
-  };
-
-  const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
+  const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0, attempt }) => {
     let binary = (resolvedBinary || process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
     const sourceBinary = binary;
     let args = ['serve', '--hostname', hostname, '--port', String(port)];
@@ -437,34 +428,36 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    let runtimeStderrTail = '';
-    let runtimeStderrAttached = false;
+    diagnosticJournal.beginManagedProcess(attempt, Boolean(child.stderr));
+    const logCapture = createManagedLogCapture(diagnosticJournal);
+    child.stderr?.on('data', (chunk) => logCapture.feed(chunk));
+    child.stderr?.on('end', () => logCapture.flush());
     let observedExitCode = null;
     let observedSignalCode = null;
+    let recordedExit = false;
 
     const getManagedProcessSnapshot = () => ({
       pid: child.pid || null,
       exitCode: observedExitCode ?? child.exitCode ?? null,
       signalCode: observedSignalCode ?? child.signalCode ?? null,
-      stderrTail: getBoundedTextTail(sanitizeDiagnosticText(runtimeStderrTail), MANAGED_STDERR_TAIL_MAX_BYTES),
+      // Printed OpenCode logs may contain prompt text or credentials. The safe
+      // timeline replaces the old raw stderr tail for this managed child.
+      stderrTail: '',
     });
     const recordManagedProcessExit = (code, signal) => {
       if (code !== null && code !== undefined) observedExitCode = code;
       if (signal !== null && signal !== undefined) observedSignalCode = signal;
       state.lastManagedOpenCodeProcess = getManagedProcessSnapshot();
-    };
-    const attachRuntimeStderrCapture = () => {
-      if (runtimeStderrAttached) return;
-      runtimeStderrAttached = true;
-      child.stderr?.on('data', (chunk) => {
-        runtimeStderrTail = getBoundedTextTail(
-          `${runtimeStderrTail}${chunk.toString()}`,
-          MANAGED_STDERR_TAIL_MAX_BYTES,
-        );
-      });
+      if (!recordedExit) {
+        recordedExit = true;
+        diagnosticJournal.record('managed process exited');
+      }
     };
     child.on('exit', recordManagedProcessExit);
-    child.on('close', recordManagedProcessExit);
+    child.on('close', (code, signal) => {
+      logCapture.flush();
+      recordManagedProcessExit(code, signal);
+    });
 
     // Ownership starts at spawn, including processes that never become ready.
     const registration = registerManagedProcess({
@@ -490,35 +483,28 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     const readiness = new Promise((resolve, reject) => {
       let stdout = '';
-      let stderr = '';
       let done = false;
       const finish = (handler, value) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
         child.stdout?.off('data', onStdout);
-        child.stderr?.off('data', onStderr);
         child.off('exit', onExit);
         child.off('error', onError);
         handler(value);
       };
 
       const onStdout = (chunk) => {
-        stdout += chunk.toString();
+        stdout = getBoundedTextTail(`${stdout}${chunk.toString()}`, MANAGED_STDERR_TAIL_MAX_BYTES);
         const lines = stdout.split('\n');
         for (const line of lines) {
           // OpenCode 2.x prints `server listening on http://host:port` with no
           // "opencode" prefix.
           const match = line.match(/server listening on\s+(https?:\/\/\S+)/);
           if (!match) continue;
-          attachRuntimeStderrCapture();
           finish(resolve, match[1]);
           return;
         }
-      };
-
-      const onStderr = (chunk) => {
-        stderr += chunk.toString();
       };
 
       const onExit = (code, signal) => {
@@ -526,7 +512,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         const appBundleHint = process.platform === 'darwin' && /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(binary)
           ? ' The configured binary appears to point at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
           : '';
-        finish(reject, new Error(`OpenCode process exited before serving with ${reason}. Binary used: ${binary}.${appBundleHint} ${formatCapturedOutput({ stdout, stderr })}`));
+        finish(reject, new Error(`OpenCode process exited before serving with ${reason}.${appBundleHint} Check the local diagnostic timeline for stderr coverage.`));
       };
 
       const onError = (error) => {
@@ -538,7 +524,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }, timeout);
 
       child.stdout?.on('data', onStdout);
-      child.stderr?.on('data', onStderr);
       child.on('exit', onExit);
       child.on('error', onError);
     }).catch(async (error) => {
@@ -766,6 +751,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
       serverInstance = await createManagedOpenCodeServerProcess({
         resolvedBinary,
+        attempt,
         hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
         port: spawnPort,
         timeout: managedStartupTimeoutMs,
@@ -781,6 +767,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           // we send with openCodePassword would get 401.
           OPENCODE_PASSWORD: openCodePassword,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
+          // OpenCode 2.x duplicates its own structured logs to this child's
+          // stderr. Do not change the user's or external OpenCode environment.
+          OPENCODE_PRINT_LOGS: '1',
         })),
       });
 
@@ -805,6 +794,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         setDetectedOpenCodeApiPrefix(prefix);
 
         state.isOpenCodeReady = true;
+        diagnosticJournal.record('managed ready', { attempt });
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
 
@@ -820,6 +810,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       throw new Error('Server started but health check failed (timeout)');
     } catch (error) {
+      diagnosticJournal.record('managed startup failed', { attempt });
       await serverInstance?.close();
       if (serverInstance && state.openCodeProcess === serverInstance) state.openCodeProcess = null;
       const message = error instanceof Error ? error.message : String(error);
@@ -874,6 +865,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     state.currentRestartPromise = (async () => {
       managedPreflight = null;
       state.isRestartingOpenCode = true;
+      if (!state.isExternalOpenCode) diagnosticJournal.record('managed restart started');
       state.isOpenCodeReady = false;
       state.openCodeNotReadySince = Date.now();
       console.log('Restarting OpenCode process...');
@@ -888,10 +880,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           state.openCodeBaseUrl = probeOrigin ?? null;
           setOpenCodePort(probePort);
           state.isOpenCodeReady = true;
+          diagnosticJournal.markExternal();
           state.lastOpenCodeError = null;
           state.openCodeNotReadySince = 0;
           syncToHmrState();
         } else {
+          diagnosticJournal.markExternalUnavailable();
           state.lastOpenCodeError = `External OpenCode server on port ${probePort} is not responding`;
           console.error(state.lastOpenCodeError);
           throw new Error(state.lastOpenCodeError);
@@ -940,6 +934,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       state.lastOpenCodeError = null;
       state.openCodeProcess = await startOpenCode();
+      diagnosticJournal.record('managed restart ready');
       syncToHmrState();
 
       if (state.expressApp) {
@@ -963,6 +958,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     try {
       await state.currentRestartPromise;
     } catch (error) {
+      if (!state.isExternalOpenCode) diagnosticJournal.record('managed restart failed');
       console.error(`Failed to restart OpenCode: ${error.message}`);
       state.lastOpenCodeError = error.message;
       if (!env.ENV_EFFECTIVE_PORT) {
@@ -1133,6 +1129,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         setOpenCodePort(env.ENV_EFFECTIVE_PORT);
         state.isOpenCodeReady = true;
         state.isExternalOpenCode = true;
+        diagnosticJournal.markExternal();
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
         syncToHmrState();
@@ -1143,6 +1140,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         setOpenCodePort(env.ENV_EFFECTIVE_PORT);
         state.isOpenCodeReady = true;
         state.isExternalOpenCode = true;
+        diagnosticJournal.markExternal();
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
         syncToHmrState();
@@ -1158,6 +1156,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
         setOpenCodePort(env.ENV_EFFECTIVE_PORT);
         state.isExternalOpenCode = true;
+        diagnosticJournal.markExternalUnavailable();
         syncToHmrState();
         throw new UnsupportedOpenCodeVersionError(unsupportedExternalVersion);
       } else {
@@ -1186,6 +1185,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         await waitForOpenCodeReady();
       } catch (error) {
         bootstrapError = error;
+        if (state.isExternalOpenCode) diagnosticJournal.markExternalUnavailable();
         // Skip-start mode assumed readiness up front; a server that never
         // proved itself must not keep reporting ready to startup diagnostics.
         state.isOpenCodeReady = false;
@@ -1197,6 +1197,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.log('Continuing without OpenCode integration...');
       state.lastOpenCodeError = error.message;
     }
+    diagnosticJournal.record(bootstrapError ? 'bootstrap failed' : 'bootstrap ready');
     recordStartupPerformance(
       bootstrapError ? 'opencode.bootstrap.error' : 'opencode.bootstrap.ready',
       {
@@ -1353,6 +1354,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           at: new Date(checkedAt).toISOString(),
           source,
         };
+        diagnosticJournal.record('health failed', { failureClass: healthFailure.class });
         console.warn(
           `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES}) class=${healthFailure.class}`
         );
@@ -1368,6 +1370,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             : `${source}-health-failure`,
         );
       } else {
+        if (consecutiveHealthFailures) diagnosticJournal.record('health recovered');
         resetHealthFailureState();
       }
     })().finally(() => {

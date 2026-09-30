@@ -60,6 +60,10 @@ Same-origin session-chat iframes complete an authenticated parent-frame handshak
 
 The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
 
+Native menu actions dispatch one renderer DOM event per click. Sending the same action over IPC as well would make preload dispatch it again; the diagnostic shortcut previously ran three exports and three health probes for one keypress. Update-check IPC notifications already become DOM events in preload and must not be dispatched a second time by main.
+
+The local diagnostics IPC combines the desktop log with the SSH manager's in-memory history. `main.mjs` classifies SSH messages in the native process before returning them; host names, stderr and other raw SSH output never cross to the renderer. Remote SSH files are not read.
+
 The compatibility gate can reuse the embedded managed OpenCode CLI preflight
 through `desktop_managed_opencode_compatible`. Main matches the requested
 API origin to the local backend and reads the lifecycle-owned preflight promise.
