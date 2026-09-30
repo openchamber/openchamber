@@ -170,7 +170,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 
 ## Sidebar behavior
 
-- Sidebar rows are not watched. For worktree branches of expanded projects the sidebar runs discovery through `refreshTargets` (first resolution, then every `5m` while a branch has no PR or only a closed/merged one).
+- Sidebar rows are not watched. The tracked set is the worktree branches whose badge is on screen in the current mode: Timeline rows in Timeline; expanded project groups and Recent rows in Projects; In work rows in both. Collapse state from the Projects view never limits Timeline. For that set the sidebar runs discovery through `refreshTargets` (first resolution, then every `5m` while a branch has no PR or only a closed/merged one).
 - Open PRs on those rows stay live through batched summaries (`useOpenPrSummarySync`): every `2m` while the window is visible, again when the window regains focus or visibility (at most once per `15s`), when new rows appear, and when cached statuses finish restoring after a reload. A PR merged or closed on GitHub turns so on the next batch, and failing checks show up the same way.
 - The batch skips watched entries (the Git view refreshes those in full) and PRs asked about within the cadence. A failed batch keeps the last known status and waits for the next cadence.
 - Sidebar shows only compact PR state.
