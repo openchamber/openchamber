@@ -111,7 +111,17 @@ export const providerHasCredentials = (input: ProviderCredentialInput): boolean 
   return typeof input.optionsApiKey === 'string' && input.optionsApiKey.trim().length > 0;
 };
 
+/**
+ * A problem OpenCode reported for a live connection (2.0.20+): `needs_auth`
+ * asks the user to sign in again, at `url` when one is given, otherwise by
+ * reconnecting the integration. Runtime-only on OpenCode's side; it clears
+ * itself once the connection works again.
+ */
+export const connectionNeedsAuth = (connection: ConnectionInfo): boolean =>
+  connection.status?.status === 'needs_auth';
+
 export type ProviderCardStatus =
+  | { kind: 'reauthNeeded' }
   | { kind: 'accounts'; count: number }
   | { kind: 'connected' }
   | { kind: 'environment' }
@@ -129,6 +139,7 @@ export const getProviderCardStatus = (input: {
 }): ProviderCardStatus | null => {
   if (input.integrations === null) return null;
   const connections = getProviderConnections(input.integrations, input.providerId);
+  if ((connections ?? []).some(connectionNeedsAuth)) return { kind: 'reauthNeeded' };
   const credentialCount = (connections ?? []).filter((connection) => connection.type === 'credential').length;
   if (credentialCount > 1) return { kind: 'accounts', count: credentialCount };
   if (credentialCount === 1 || (input.optionsApiKey?.trim().length ?? 0) > 0) return { kind: 'connected' };

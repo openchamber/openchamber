@@ -1817,6 +1817,8 @@ export const dict = {
   'chat.sessionError.interrupted': 'OpenCode bu yanıtı kesti.',
   'chat.longError.expand': 'Hatanın tamamını göster',
   'chat.longError.collapse': 'Daha az göster',
+  'chat.errorDetails.show': 'Yanıt ayrıntılarını göster',
+  'chat.errorDetails.hide': 'Yanıt ayrıntılarını gizle',
   'chat.goal.dialog.titleCreate': 'Session hedefi belirle',
   'chat.goal.dialog.titleManage': 'Session hedefi',
   'chat.goal.dialog.objectiveLabel': 'Amaç',

@@ -591,6 +591,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, message.info]);
 
     const assistantErrorText = assistantError?.text;
+    // The provider's raw response behind the error, offered as expandable details.
+    const assistantErrorResponseBody = assistantErrorText && message.info.role === 'assistant'
+        ? message.info.error?.response?.body.trim() || undefined
+        : undefined;
 
     const messageTextContent = React.useMemo(() => {
         if (isUser) {
@@ -815,6 +819,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 contextPinPending={pinPending}
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
+                                                errorResponseBody={assistantErrorResponseBody}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                                 extraActions={guestMessageActions}
@@ -850,6 +855,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 contextPinPending={pinPending}
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
+                                                errorResponseBody={assistantErrorResponseBody}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                                 extraActions={guestMessageActions}
@@ -891,6 +897,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 agentMention={agentMention}
                                 turnGroupingContext={turnGroupingContext}
                                 errorMessage={assistantErrorText}
+                                errorResponseBody={assistantErrorResponseBody}
                                 reviewTransferDirection={reviewTransferDirection}
                                 footerProviderID={headerProviderID}
                                 footerModelName={headerModelName}

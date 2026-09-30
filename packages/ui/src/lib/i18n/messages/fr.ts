@@ -1601,6 +1601,8 @@ export const dict = {
   'chat.sessionError.interrupted': 'OpenCode a interrompu cette réponse.',
   'chat.longError.expand': 'Afficher l’erreur complète',
   'chat.longError.collapse': 'Afficher moins',
+  'chat.errorDetails.show': 'Afficher les détails de la réponse',
+  'chat.errorDetails.hide': 'Masquer les détails de la réponse',
   'chat.goal.dialog.titleCreate': 'Définir un objectif de session',
   'chat.goal.dialog.titleManage': 'Objectif de session',
   'chat.goal.dialog.objectiveLabel': 'Objectif',

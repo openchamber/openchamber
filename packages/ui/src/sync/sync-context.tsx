@@ -78,7 +78,7 @@ import { refreshSpacesJourney, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
-import { recordSessionError, summarizeOpenCodeError } from "./session-error-log"
+import { recordSessionError, responseBodyOf, summarizeOpenCodeError } from "./session-error-log"
 import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
@@ -1641,6 +1641,7 @@ const recordTurnOutcomeNotification = (
   if (!sessionID) return
   const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(payload.properties.error) : null
   if (errorSummary) {
+  const responseBody = payload.type === "session.error" ? responseBodyOf(payload.properties.error) : null
     recordSessionError({ sessionId: sessionID, directory, ...errorSummary })
   }
   if (isSubtaskSession(sessionID, directory, childStores, batch)) return
@@ -1650,7 +1651,7 @@ const recordTurnOutcomeNotification = (
     time: Date.now(),
     viewed: isViewedInCurrentSession(directory, sessionID),
     ...(errorSummary
-      ? { type: "error" as const, error: errorSummary }
+      ? { type: "error" as const, error: { ...errorSummary, responseBody } }
       : { type: "turn-complete" as const }),
   })
 }

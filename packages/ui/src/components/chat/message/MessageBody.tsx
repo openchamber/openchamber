@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
+import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
 import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -260,6 +261,8 @@ interface MessageBodyProps {
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
+    /** Raw provider response behind `errorMessage`, shown as collapsed details. */
+    errorResponseBody?: string;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
     reviewTransferDirection?: ReviewTransferDirection | null;
@@ -1085,6 +1088,7 @@ const AssistantMessageBody = React.memo(({
     showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
+    errorResponseBody,
     reviewTransferDirection = null,
     contextPinned,
     contextPinPending,
@@ -2337,6 +2341,7 @@ const AssistantMessageBody = React.memo(({
                                         </LongErrorText>
                                     </div>
                                 </div>
+                                {errorResponseBody ? <ErrorResponseDetails body={errorResponseBody} className="mt-1 pl-7" /> : null}
                             </div>
                         </FadeInOnReveal>
                     )}

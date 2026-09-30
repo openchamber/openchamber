@@ -1667,6 +1667,8 @@ export const dict = {
   'chat.sessionError.interrupted': 'OpenCode hat diese Antwort unterbrochen.',
   'chat.longError.expand': 'Vollständigen Fehler anzeigen',
   'chat.longError.collapse': 'Weniger anzeigen',
+  'chat.errorDetails.show': 'Antwortdetails anzeigen',
+  'chat.errorDetails.hide': 'Antwortdetails ausblenden',
   'chat.goal.dialog.titleCreate': 'Sitzungsziel festlegen',
   'chat.goal.dialog.titleManage': 'Sitzungsziel',
   'chat.goal.dialog.objectiveLabel': 'Ziel',

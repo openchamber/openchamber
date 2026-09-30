@@ -2508,6 +2508,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.status.evaluating': 'Ocenianie…',
   'chat.goal.status.paused': 'Wstrzymany',
   'chat.goal.status.blocked': 'Zablokowany',
+  'chat.errorDetails.show': 'Pokaż szczegóły odpowiedzi',
+  'chat.errorDetails.hide': 'Ukryj szczegóły odpowiedzi',
   'chat.goal.status.budgetLimited': 'Budżet wyczerpany',
   'chat.goal.status.complete': 'Ukończony',
   'chat.goal.usage.tokens': '{used} tokenów',

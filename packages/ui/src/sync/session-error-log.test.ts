@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getRecentSessionErrors, recordSessionError, summarizeOpenCodeError } from './session-error-log';
+import { getRecentSessionErrors, recordSessionError, responseBodyOf, summarizeOpenCodeError } from './session-error-log';
 
 describe('summarizeOpenCodeError', () => {
   test('reads the structured error: type plus message', () => {
@@ -16,6 +16,19 @@ describe('summarizeOpenCodeError', () => {
   test('bounds the message length', () => {
     const summary = summarizeOpenCodeError({ type: 'UnknownError', message: 'x'.repeat(1000) });
     expect(summary.message?.length).toBe(400);
+  });
+});
+
+describe('responseBodyOf', () => {
+  test('returns the provider body OpenCode attached, trimmed and bounded', () => {
+    expect(responseBodyOf({ type: 'provider.api', message: 'Bad request', response: { body: ' {"error":"x"} ' } })).toBe('{"error":"x"}');
+    expect(responseBodyOf({ type: 'provider.api', message: 'Bad request', response: { body: 'y'.repeat(20_000) } })?.length).toBe(16_000);
+  });
+
+  test('is null without a body', () => {
+    expect(responseBodyOf({ type: 'provider.api', message: 'Bad request' })).toBeNull();
+    expect(responseBodyOf({ type: 'provider.api', message: 'Bad request', response: { body: '  ' } })).toBeNull();
+    expect(responseBodyOf(null)).toBeNull();
   });
 });
 

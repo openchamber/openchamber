@@ -1852,6 +1852,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.interrupted': 'OpenCode がこの応答を中断しました。',
   'chat.longError.expand': 'エラー全文を表示',
   'chat.longError.collapse': '折りたたむ',
+  'chat.errorDetails.show': 'レスポンスの詳細を表示',
+  'chat.errorDetails.hide': 'レスポンスの詳細を隠す',
   'chat.goal.dialog.titleCreate': 'セッションゴールを設定',
   'chat.goal.dialog.titleManage': 'セッションゴール',
   'chat.goal.dialog.objectiveLabel': '目標',

@@ -1858,6 +1858,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.interrupted': 'OpenCode가 이 응답을 중단했습니다.',
   'chat.longError.expand': '전체 오류 보기',
   'chat.longError.collapse': '간략히 보기',
+  'chat.errorDetails.show': '응답 세부 정보 표시',
+  'chat.errorDetails.hide': '응답 세부 정보 숨기기',
   'chat.goal.dialog.titleCreate': '세션 목표 설정',
   'chat.goal.dialog.titleManage': '세션 목표',
   'chat.goal.dialog.objectiveLabel': '목표',

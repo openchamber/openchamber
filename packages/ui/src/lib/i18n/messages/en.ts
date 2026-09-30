@@ -1856,6 +1856,8 @@ export const dict = {
   'chat.sessionError.interrupted': 'OpenCode interrupted this reply.',
   'chat.longError.expand': 'Show full error',
   'chat.longError.collapse': 'Show less',
+  'chat.errorDetails.show': 'Show response details',
+  'chat.errorDetails.hide': 'Hide response details',
   'chat.goal.dialog.titleCreate': 'Set Session Goal',
   'chat.goal.dialog.titleManage': 'Session Goal',
   'chat.goal.dialog.objectiveLabel': 'Objective',

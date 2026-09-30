@@ -1856,6 +1856,8 @@ export const dict = {
   'chat.sessionError.interrupted': 'OpenCode heeft dit antwoord onderbroken.',
   'chat.longError.expand': 'Volledige fout tonen',
   'chat.longError.collapse': 'Minder tonen',
+  'chat.errorDetails.show': 'Antwoorddetails tonen',
+  'chat.errorDetails.hide': 'Antwoorddetails verbergen',
   'chat.goal.dialog.titleCreate': 'Goal voor sessie instellen',
   'chat.goal.dialog.titleManage': 'Goal voor sessie',
   'chat.goal.dialog.objectiveLabel': 'Doelstelling',

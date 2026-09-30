@@ -191,14 +191,15 @@ const useProjectProviderIds = (providers: readonly GridProvider[], directory: st
 
 const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
   const { t } = useI18n();
-  const label = status.kind === 'accounts'
-    ? t('settings.providers.card.status.accounts', { count: status.count })
-    : status.kind === 'connected'
-      ? t('settings.providers.card.status.connected')
-      : status.kind === 'environment'
-        ? t('settings.providers.card.status.environment')
-        : t('settings.providers.card.status.signInNeeded');
-  const tone: SettingsCardTone = status.kind === 'signInNeeded'
+  let label: string;
+  switch (status.kind) {
+    case 'reauthNeeded': label = t('settings.providers.card.status.reauthNeeded'); break;
+    case 'accounts': label = t('settings.providers.card.status.accounts', { count: status.count }); break;
+    case 'connected': label = t('settings.providers.card.status.connected'); break;
+    case 'environment': label = t('settings.providers.card.status.environment'); break;
+    case 'signInNeeded': label = t('settings.providers.card.status.signInNeeded'); break;
+  }
+  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded'
     ? 'warning'
     : status.kind === 'environment'
       ? 'neutral'

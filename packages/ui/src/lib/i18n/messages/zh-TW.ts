@@ -1826,6 +1826,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.interrupted': 'OpenCode 中斷了此回覆。',
   'chat.longError.expand': '顯示完整錯誤',
   'chat.longError.collapse': '收合',
+  'chat.errorDetails.show': '顯示回應詳情',
+  'chat.errorDetails.hide': '隱藏回應詳情',
   'chat.goal.dialog.titleCreate': '設定工作階段目標',
   'chat.goal.dialog.titleManage': '工作階段目標',
   'chat.goal.dialog.objectiveLabel': '目標',

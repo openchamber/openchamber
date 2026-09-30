@@ -1834,6 +1834,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.sessionError.interrupted": 'OpenCode перервав цю відповідь.',
   'chat.longError.expand': 'Показати помилку повністю',
   'chat.longError.collapse': 'Згорнути',
+  "chat.errorDetails.show": "Показати деталі відповіді",
+  "chat.errorDetails.hide": "Сховати деталі відповіді",
   "chat.goal.dialog.titleCreate": "Встановити ціль сесії",
   "chat.goal.dialog.titleManage": "Ціль сесії",
   "chat.goal.dialog.objectiveLabel": "Ціль",
