@@ -239,12 +239,13 @@
 }
 
 /* Wide layout keeps prose at the column width, but a top-level table or code
-   block whose content is wider than the column grows past it, centred on the
+   block in a response text (not a user bubble, not reasoning) whose content is
+   wider than the column grows past it, centred on the
    column, up to the visible chat width (`--chat-scroll-width`, published by
    ChatContainer). Anything that fits the column keeps its usual box: the
    minimum width is the column itself. Unlayered so it outranks the table
    wrapper's `w-fit max-w-full` utilities. */
-.wide-chat-layout .chat-message-column :is([data-markdown-content], [data-markdown-content] > [data-md-block]) > :is([data-component="markdown-code"], [data-markdown="table-wrapper"]) {
+.wide-chat-layout .chat-message-column [data-assistant-response-text] :is([data-markdown-content], [data-markdown-content] > [data-md-block]) > :is([data-component="markdown-code"], [data-markdown="table-wrapper"]) {
   position: relative;
   left: 50%;
   transform: translateX(-50%);
