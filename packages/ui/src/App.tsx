@@ -68,7 +68,7 @@ import {
   requestEmbeddedSessionVisibility,
 } from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
-import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
+import { isSameRuntimeEndpoint, resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { ProjectConfigErrorToast } from '@/components/projects/ProjectConfigErrorToast';
@@ -335,8 +335,13 @@ function App({ apis }: AppProps) {
   }, [apis.runtime.isVSCode]);
 
   React.useEffect(() => {
+    // A change of runtime is reset by `installRuntimeEndpointReset`, which runs
+    // even while a gate has this component unmounted. Same-runtime credential
+    // changes reset only here, so a sign-in behind the login gate keeps state.
     return subscribeRuntimeEndpointChanged((detail) => {
-      resetAppForRuntimeEndpointChange(detail);
+      if (isSameRuntimeEndpoint(detail)) {
+        resetAppForRuntimeEndpointChange(detail);
+      }
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);

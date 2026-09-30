@@ -5,7 +5,7 @@ import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
-import type { RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -123,3 +123,28 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };
+
+/**
+ * True when the endpoint event only replaced credentials for the runtime that
+ * was already active, as the login gate does after a successful sign-in.
+ */
+export const isSameRuntimeEndpoint = (detail: RuntimeEndpointChangedDetail): boolean => (
+  detail.runtimeKey === detail.previousRuntimeKey && detail.apiBaseUrl === detail.previousApiBaseUrl
+);
+
+// Web and desktop reset for a change of runtime from the entry point, not from
+// App: the auth and compatibility gates unmount App while they show the login,
+// error, or version screen, and a host switch made from their switcher would
+// otherwise leave the SDK client and stores on the previous runtime. App then
+// mounts against the new runtime with an SDK that still calls the old one, so
+// initialization never completes and the startup overlay never lifts.
+// A same-runtime credential change stays with App, which resets only while
+// mounted: a sign-in on the login screen must keep the terminal tabs and
+// auto-review runs of the host being unlocked. Mobile keeps its own subscriber
+// because it tells transport switches apart from runtime switches.
+export const installRuntimeEndpointReset = (): (() => void) => (
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (isSameRuntimeEndpoint(detail)) return;
+    resetAppForRuntimeEndpointChange(detail);
+  })
+);
