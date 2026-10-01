@@ -24,6 +24,7 @@ type UpdateState = {
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  restarting: boolean;
   info: UpdateInfo | null;
   progress: UpdateProgress | null;
   error: string | null;
@@ -240,6 +241,7 @@ const initialState: UpdateState = {
   available: false,
   downloading: false,
   downloaded: false,
+  restarting: false,
   info: null,
   progress: null,
   error: null,
@@ -361,7 +363,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       return;
     }
 
-    set({ error: null });
+    set({ error: null, restarting: true });
 
     try {
       const ok = await restartToApplyUpdate();
@@ -372,12 +374,15 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       // Keep the real installer failure; the dialog shows it and the button
       // stays clickable for another attempt.
-      set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+      set({
+        restarting: false,
+        error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))),
+      });
     }
   },
 
   dismiss: () => {
-    set({ available: false, downloaded: false, info: null });
+    set({ available: false, downloaded: false, restarting: false, info: null });
   },
 
   reset: () => {

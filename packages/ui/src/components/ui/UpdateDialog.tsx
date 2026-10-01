@@ -23,6 +23,7 @@ interface UpdateDialogProps {
   info: UpdateInfo | null;
   downloading: boolean;
   downloaded: boolean;
+  restarting: boolean;
   progress: UpdateProgress | null;
   error: string | null;
   onDownload: () => void;
@@ -117,6 +118,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   info,
   downloading,
   downloaded,
+  restarting,
   progress,
   error,
   onDownload,
@@ -426,10 +428,14 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             {!isWebRuntime && !isMobileRuntime && downloaded && (
               <button
                 onClick={onRestart}
-                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
+                disabled={restarting}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Icon name="restart" className="h-4 w-4" />
-                {t('updateDialog.actions.restartToUpdate')}
+                <Icon
+                  name={restarting ? 'loader' : 'restart'}
+                  className={cn('h-4 w-4', restarting && 'animate-spin')}
+                />
+                {restarting ? t('updateDialog.status.installingUpdate') : t('updateDialog.actions.restartToUpdate')}
               </button>
             )}
 
