@@ -318,9 +318,12 @@ div[data-chat-input-footer="true"] {
    above it), and the working row sits in the gap the tail spacer leaves. While
    a live reply outruns the follow glide, its newest lines land in that gap;
    fading them out above the composer keeps the composer's top edge from
-   cutting a line in half. In flow (draft, expanded editor) the inset is unset
-   and the fade returns to the scroller's edge. */
-.chat-scroll {
+   cutting a line in half. Only then (`data-live-tail`: a reply streams and the
+   view follows it): at rest and while reading history the rows slide under
+   the composer's glass, which is what makes it read as floating. In flow
+   (draft, expanded editor) the inset is unset and the fade stays at the
+   scroller's edge. */
+[data-live-tail="true"] .chat-scroll {
   --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px));
 }
 

@@ -1711,7 +1711,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			scrollNode={scrollNode}
 			scrollToMessage={timelineController.scrollToMessage}
 		/>
-		<div ref={chatRootRef} data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
+		<div
+			ref={chatRootRef}
+			data-composer-bound
+			// A live reply can outrun the follow glide; while it streams and the
+			// view follows it (no scroll-to-bottom pill, no reader gesture), the
+			// transcript fades out above the composer (index.css). Once the
+			// reader leaves the end, the rows slide under its glass again.
+			data-live-tail={sessionStatusForCurrent.type === 'busy' && isFollowingProgrammatically ? 'true' : undefined}
+			className="relative flex min-w-0 flex-1 flex-col h-full bg-background"
+		>
 			{returnToParentButton}
 			{sessionSurface}
 			{chatSearch.open && currentSessionId && messageSearchEnabled ? (
