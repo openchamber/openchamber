@@ -897,7 +897,10 @@ again whether the first was torn down mid-search or had already shown it. The
 request ends when the message proves missing, when the reader takes the
 viewport (any real gesture), when another session is entered, or after a
 minute. A repeated click on the same link is a new request and is shown
-again. The message lands just below the scroller's top fade
+again. Controls that raise a request can show progress through a separate
+status channel (`subscribeMessageFocusStatus`, `readMessageFocusInFlight`):
+the timeline marks a request shown when it lands, which is progress and does
+not serve the request again. The message lands just below the scroller's top fade
 (`--scroll-shadow-size` plus a small gap), not inside it where it reads as
 cut off, and is tinted briefly (`[data-message-link-target]`). A target
 folded into a collapsed turn (an assistant step before the turn's last one,

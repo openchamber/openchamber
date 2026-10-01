@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+    markMessageFocusShown,
     peekMessageFocus,
+    readMessageFocusInFlight,
     releaseMessageFocusOutside,
     requestMessageFocus,
     settleMessageFocus,
     subscribeMessageFocus,
+    subscribeMessageFocusStatus,
 } from './messageFocus';
 
 describe('message focus requests', () => {
@@ -65,5 +68,32 @@ describe('message focus requests', () => {
     test('ignores identifiers outside the link alphabet', () => {
         requestMessageFocus('ses_a', 'msg"]');
         expect(peekMessageFocus('ses_a')).toBeNull();
+    });
+
+    test('reports a request as in flight until it is shown or settled, without re-serving it', () => {
+        let served = 0;
+        let statusChanges = 0;
+        const unsubscribeServe = subscribeMessageFocus(() => { served += 1; });
+        const unsubscribeStatus = subscribeMessageFocusStatus(() => { statusChanges += 1; });
+
+        requestMessageFocus('ses_a', 'msg_1');
+        expect(readMessageFocusInFlight('ses_a')).toBe('msg_1');
+        expect(readMessageFocusInFlight('ses_b')).toBeNull();
+
+        const request = peekMessageFocus('ses_a');
+        if (request) markMessageFocusShown(request);
+        expect(readMessageFocusInFlight('ses_a')).toBeNull();
+        // Shown is progress, not a new request: the timeline is not asked again.
+        expect(served).toBe(1);
+
+        requestMessageFocus('ses_a', 'msg_2');
+        expect(readMessageFocusInFlight('ses_a')).toBe('msg_2');
+        const second = peekMessageFocus('ses_a');
+        if (second) settleMessageFocus(second);
+        expect(readMessageFocusInFlight('ses_a')).toBeNull();
+
+        unsubscribeServe();
+        unsubscribeStatus();
+        expect(statusChanges).toBe(4);
     });
 });

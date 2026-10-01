@@ -17,6 +17,7 @@ import {
     releaseMessageFocusOutside,
     settleMessageFocus,
     subscribeMessageFocus,
+    markMessageFocusShown,
     type MessageFocusRequest,
 } from '@/lib/router/messageFocus';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -440,7 +441,10 @@ export const useChatTimelineScroll = ({
             if (settled) return;
             settled = true;
             releaseReveal?.();
-            if (target.kind === 'link') highlightLinkedMessage(node, anchor.messageId);
+            if (target.kind === 'link') {
+                highlightLinkedMessage(node, anchor.messageId);
+                markMessageFocusShown(target.request);
+            }
         };
         const finish = () => {
             if (finished) return;

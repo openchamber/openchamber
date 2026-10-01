@@ -107,7 +107,7 @@ which requests only providers enabled for this panel.
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
-| Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
+| Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 
 ### Turn stats
@@ -197,10 +197,11 @@ for it.
 ### Pinned messages load only what they need
 
 Pins are most useful on a long session — which is exactly when the pinned
-message has scrolled far enough back not to be loaded, leaving the row with a
-placeholder. The section materialises the session, but only when a pin actually
-resolves to nothing: having pins is not a reason to fetch a session, and
-neither is something being unloaded in general.
+message sits before the loaded part of the transcript. Session metadata keeps
+only the pin's id, time and role, so a pin that is not loaded reads its one
+message from OpenCode (`opencodeClient.getSessionMessage`) for the row's text.
+No session is materialised for it, a loaded pin costs nothing, and a failed
+read leaves the placeholder until the section mounts again.
 
 ### PR status is deliberately read-only
 
@@ -398,11 +399,13 @@ the goal strip's. The two disagree today — the strip paints `paused` muted and
 `blocked` warning, the button paints them info and error — and the button is
 where this panel's reader last saw the goal. Unifying them is a separate change.
 
-Jumping to a message goes through the `#message-<id>` URL hash, which
-`useChatTurnNavigation` listens for inside `ChatContainer`. It is the only
-cross-component jump the chat exposes; there is no store action or ref
-registry. An unchanged hash fires no event, so the panel clears it first to make
-a repeat press work.
+Jumping to a message is a message-link request (`requestMessageFocus`,
+`lib/router/messageFocus.ts`), the same one links and search use: the timeline
+loads older history until the message is there and opens a collapsed turn
+around it, so a pin far back in a long session is reachable. While older history
+loads, the pin's row shows a spinner: `readMessageFocusInFlight` names the
+message a request is still bringing to the screen, and the timeline marks it
+shown (`markMessageFocusShown`) once it lands; settling or expiry clears it too.
 
 Opening a subagent takes the same branch as the transcript's Task tool: an
 embedded panel, mobile, or VS Code navigates to the session instead of nesting
