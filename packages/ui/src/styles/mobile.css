@@ -741,6 +741,17 @@
     height: 100lvh;
   }
 
+  /* Match the mobile root to the shell above. body and #root inherit its height
+     and clip overflow, so a root left at the keyboard-shrunk 100dvh still cuts
+     off the composer even when the shell has returned to full height. */
+  @media (max-width: 1024px) {
+    @supports (-webkit-touch-callout: none) and (height: 100lvh) {
+      :root.mobile-pointer:not(.desktop-runtime):not(.oc-capacitor-app) {
+        height: 100lvh;
+      }
+    }
+  }
+
   /* Top toasts: same offset the Capacitor shell already applies — without it
      they render under the clock / Dynamic Island. */
   :root:not(.oc-capacitor-app) [data-sonner-toaster][data-y-position='top'] {
