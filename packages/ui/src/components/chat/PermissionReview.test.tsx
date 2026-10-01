@@ -12,6 +12,10 @@ import { usePermissionReviewStore } from '@/stores/usePermissionReviewStore';
 import type { PermissionRequest } from '@/types/permission';
 import { createEventPipeline } from '@/sync/event-pipeline';
 import { applyDirectoryEvent } from '@/sync/event-reducer';
+import type { Session } from '@/lib/opencode/model';
+import { useTraySync } from '@/hooks/useTraySync';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 plugin({
   name: 'permission-review-worker-url',
   setup(build) {
@@ -62,6 +66,7 @@ const observeApprovalControls = () => {
 };
 const originalFetch = globalThis.fetch;
 let resolveLookup: (response: Response) => void = () => {};
+const lookupBodies: Array<BodyInit | null | undefined> = [];
 
 beforeEach(async () => {
   ({ PermissionCard } = await import('./PermissionCard'));
@@ -78,10 +83,13 @@ beforeEach(async () => {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   usePermissionReviewStore.getState().reset();
+  lookupBodies.length = 0;
   const lookup = new Promise<Response>((resolve) => { resolveLookup = resolve; });
-  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = input instanceof Request ? input.url : String(input);
-    return path.includes('/permission-auto-accept/dispositions') ? (await lookup).clone() : new Response(null, { status: 404 });
+    if (!path.includes('/permission-auto-accept/dispositions')) return new Response(null, { status: 404 });
+    lookupBodies.push(init?.body);
+    return (await lookup).clone();
   }, originalFetch);
   root = createRoot(document.body.appendChild(document.createElement('div')));
   await act(async () => root.render(<SyncProvider sdk={sdk} directory="/project"><I18nProvider><Harness /></I18nProvider></SyncProvider>));
@@ -99,6 +107,102 @@ afterEach(async () => {
   }
   originals.clear();
 });
+
+test('dock without a directory prop coordinates pending from its provider directory', async () => {
+  function ProviderScopedDock() {
+    manager = useChildStoreManager();
+    rawPending = useScopedBlockingPermissions('session');
+    return <PermissionDock sessionId="session" hidden={false} />;
+  }
+  await act(async () => root.render(<SyncProvider sdk={sdk} directory="/project"><I18nProvider><ProviderScopedDock /></I18nProvider></SyncProvider>));
+  await act(async () => {
+    const child = manager.ensureChild('/project', { bootstrap: false });
+    const draft = { ...child.getState(), permission: { ...child.getState().permission } };
+    applyDirectoryEvent(draft, { type: 'permission.asked', properties: permission });
+    child.setState(draft);
+  });
+  expect(rawPending).toEqual([permission]);
+  expect(approvalControls()).toHaveLength(0);
+  expect(lookupBodies).toEqual([JSON.stringify({ requests: [{
+    id: permission.id, sessionID: permission.sessionID, directory: '/project',
+  }] })]);
+  // Unknown suppression must own a deadline, otherwise waiting can never expose it.
+  expect(usePermissionReviewStore.getState().deadlines.has(permission.id)).toBe(true);
+  await act(async () => resolveLookup(Response.json({ dispositionVersion: 1, instanceId: 'server', revision: 3,
+    permissions: [{ permissionId: permission.id, phase: 'manual', remainingMs: 0 }] })));
+  expect(rawPending).toEqual([permission]);
+  expect(approvalControls()).toHaveLength(1);
+});
+
+for (const source of ['dock', 'child-dock', 'btw', 'tray', 'global-tray'] as const) {
+  test(`${source} resolves a parent-store request to its worktree session before registration`, async () => {
+    const parent: Session = {
+      id: 'parent', projectID: 'project', directory: '/repo', title: 'Parent', cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    };
+    const child: Session = { ...parent, id: permission.sessionID, parentID: parent.id, directory: '/repo/wt' };
+    const previousGlobal = useGlobalSessionsStore.getState();
+    const previousRequests = useGlobalBlockingRequestsStore.getState();
+    const trayFirst = source === 'tray' || source === 'global-tray';
+    function Tray() { useTraySync(); return null; }
+    function WorktreeHarness({ showControls }: { showControls: boolean }) {
+      manager = useChildStoreManager();
+      rawPending = useScopedBlockingPermissions(parent.id, '/repo');
+      return <>
+        {trayFirst ? <Tray /> : null}
+        {showControls ? source === 'btw'
+          ? <PermissionCard permission={permission} directory="/repo" />
+          : <PermissionDock sessionId={source === 'child-dock' ? child.id : parent.id} directory="/repo" hidden={false} /> : null}
+      </>;
+    }
+    const render = (showControls: boolean) => root.render(<SyncProvider sdk={sdk} directory="/repo">
+      <I18nProvider><WorktreeHarness showControls={showControls} /></I18nProvider>
+    </SyncProvider>);
+    if (trayFirst) Object.assign(dom, {
+      __OPENCHAMBER_PLATFORM__: 'linux',
+      __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
+      __OPENCHAMBER_API_BASE_URL__: 'http://review.test',
+      __OPENCHAMBER_LOCAL_ORIGIN__: 'http://review.test',
+      __OPENCHAMBER_DESKTOP__: { invoke: async () => null, listen: async () => () => {} },
+    });
+    try {
+      // Prepare the parent store before the tray mounts. The worktree has no store.
+      await act(async () => root.render(<SyncProvider sdk={sdk} directory="/repo"><I18nProvider>{null}</I18nProvider></SyncProvider>));
+      manager.ensureChild('/repo', { bootstrap: false }).setState({
+        session: source === 'global-tray' ? [parent] : [parent, child],
+        permission: source === 'global-tray' ? {} : { [permission.sessionID]: [permission] },
+      });
+      if (source === 'global-tray') {
+        useGlobalSessionsStore.getState().upsertSession(child);
+        useGlobalBlockingRequestsStore.setState({ bySession: new Map([[permission.sessionID, {
+          directory: '/repo', permissions: [permission], forms: [],
+        }]]) });
+      }
+      await act(async () => render(!trayFirst));
+      expect(lookupBodies).toEqual([JSON.stringify({ requests: [{
+        id: permission.id, sessionID: permission.sessionID, directory: '/repo/wt',
+      }] })]);
+      expect(approvalControls()).toHaveLength(0);
+      if (trayFirst) await act(async () => {
+        manager.ensureChild('/repo', { bootstrap: false }).setState({ session: [parent, child], permission: { [permission.sessionID]: [permission] } });
+        render(true);
+      });
+      expect(rawPending).toEqual([permission]);
+      expect(lookupBodies).toHaveLength(1);
+      await act(async () => resolveLookup(Response.json({ dispositionVersion: 1, instanceId: 'server', revision: 1,
+        permissions: [{ permissionId: permission.id, phase: 'manual', remainingMs: 0 }] })));
+      expect(approvalControls()).toHaveLength(1);
+      expect(rawPending).toEqual([permission]);
+      expect(usePermissionReviewStore.getState().visible(permission.id)).toBe(true);
+      expect(lookupBodies).toHaveLength(1);
+    } finally {
+      await act(async () => root.render(null));
+      useGlobalSessionsStore.setState(previousGlobal);
+      useGlobalBlockingRequestsStore.setState(previousRequests);
+    }
+  });
+}
 
 for (const directory of ['/cold-btw', '/spaces/abcdef123456/project']) {
   test(`cold BTW card scopes coordination without a dock or tray: ${directory}`, async () => {

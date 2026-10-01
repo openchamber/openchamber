@@ -173,9 +173,11 @@ ownership. Raw pending requests still block sending and are removed only by sync
 VS Code bypasses coordination. See the backend permission-auto-accept documentation
 for endpoint, retention, timeout and mixed-version contracts.
 
-Cards receive the owning session directory explicitly, including cold BTW panels.
-Unscoped consumers do not register request IDs or query the host's default
-directory. Isolated-space cards bypass host lookup. Showing fallback controls
+Before registering an ID, the gate resolves each request's session directory with
+`getDirectoryForSession`. The containing store or card directory is only a fallback,
+including for cold BTW panels. This also applies when the tray registers a request
+before its dock. Requests with neither directory do not register IDs or query the
+host's default directory. Isolated-space cards bypass host lookup. Showing fallback controls
 does not cancel server classification or transfer reply ownership to the client.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.

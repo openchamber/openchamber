@@ -5,6 +5,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export const permissionReviewSchema = z.object({
   dispositionVersion: z.literal(1).optional(),
@@ -138,9 +139,12 @@ export const usePermissionReviewStore = create<PermissionReviewState>()((set, ge
     },
     ensure: async (requests) => {
       if (isVSCodeRuntime()) return;
-      // An unscoped caller must not claim the ID or query the host's default
-      // directory before its owning surface supplies the actual directory.
-      const unknown = requests.filter((request) => request.directory?.trim() && !get().entries.has(request.id));
+      // A project store or parent dock can hold a worktree child's request.
+      // Resolve each session before claiming its ID, whichever consumer arrives first.
+      const unknown = requests.filter((request) => !get().entries.has(request.id)).map((request) => ({
+        ...request,
+        directory: useSessionUIStore.getState().getDirectoryForSession(request.sessionID) ?? request.directory,
+      })).filter((request) => request.directory?.trim());
       if (!unknown.length || get().entries.size >= MAX_ENTRIES) return;
       const entries = new Map(get().entries);
       const missing: Request[] = [];
