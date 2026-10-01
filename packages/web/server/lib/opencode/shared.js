@@ -322,6 +322,48 @@ function readConfig(workingDirectory) {
   return readConfigLayers(workingDirectory).mergedConfig;
 }
 
+const PROJECT_CONFIG_NAMES = [
+  path.join('.opencode', 'opencode.jsonc'),
+  path.join('.opencode', 'opencode.json'),
+  'opencode.jsonc',
+  'opencode.json',
+];
+
+/**
+ * Every existing project config file OpenCode merges along the chain of
+ * directories above `directory`, deepest first. A file that could not be read
+ * comes back with `config: null` and the `error` that stopped it, so callers
+ * that only need to know which file owns a key can ignore it and callers that
+ * must not guess can tell a document OpenCode drops from a failed read.
+ * `root` bounds the walk; `null` goes all the way to the filesystem root, which
+ * is where OpenCode stops.
+ */
+function collectProjectConfigFiles(directory, root) {
+  if (!directory) return [];
+  const files = [];
+  for (const base of getAncestors(directory, root)) {
+    for (const name of PROJECT_CONFIG_NAMES) {
+      const filePath = path.join(base, name);
+      if (!fs.existsSync(filePath)) continue;
+      try {
+        files.push({ path: filePath, config: readConfigFile(filePath), error: null });
+      } catch (error) {
+        files.push({ path: filePath, config: null, error });
+      }
+    }
+  }
+  return files;
+}
+
+/**
+ * The same scan bounded at the project's worktree root, which is as far as a
+ * Settings write can be overridden from inside the project.
+ */
+function readProjectConfigFiles(directory) {
+  if (!directory) return [];
+  return collectProjectConfigFiles(directory, findWorktreeRoot(directory) || path.resolve(directory));
+}
+
 function getConfigForPath(layers, targetPath) {
   if (!targetPath) {
     return layers.userConfig;
@@ -730,9 +772,12 @@ export {
   writeMdFile,
   readConfigFile,
   readConfigLayer,
+  isInvalidJsoncError,
   isPlainObject,
   readConfigLayers,
   readConfig,
+  readProjectConfigFiles,
+  collectProjectConfigFiles,
   getConfigForPath,
   writeConfig,
   lookupSectionEntry,

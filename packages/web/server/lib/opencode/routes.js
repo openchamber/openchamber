@@ -9,7 +9,7 @@ import {
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
-import { parseWebSearchSelection } from './config-v2.js';
+import { parseWebSearchSelection, parseWorktreeDirectory } from './config-v2.js';
 import { getWebSearchSource, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
 import {
   CREDENTIAL_LIST_ERROR,
@@ -18,6 +18,7 @@ import {
   isEnterpriseMode,
   isProviderConnectRequest,
 } from '../enterprise-mode.js';
+import { readWorktreeDirectoryConfig, setWorktreeDirectory } from './worktree-config.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -421,6 +422,35 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to save session warming:', error);
       return res.status(500).json({ error: error.message || 'Failed to save session warming' });
+    }
+  });
+
+  // The folder new worktrees go in (`worktree.directory` in OpenCode config).
+  // The git service reads the same key when it creates one, so Settings edits
+  // the value worktree creation actually uses. `locked` says a config file
+  // Settings cannot write decides it, so a write there would not take effect.
+  app.get('/api/config/worktree', async (req, res) => {
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      return res.json(readWorktreeDirectoryConfig(resolved.directory || null));
+    } catch (error) {
+      console.error('Failed to read the worktree directory config:', error);
+      return res.status(500).json({ error: error.message || 'Failed to read the worktree directory config' });
+    }
+  });
+
+  app.put('/api/config/worktree', async (req, res) => {
+    const directory = parseWorktreeDirectory(req.body?.directory);
+    if (directory === undefined) {
+      return res.status(400).json({ error: 'directory must be a non-empty string, or null to clear it' });
+    }
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      const result = setWorktreeDirectory(directory, resolved.directory || null);
+      return res.json({ success: true, changed: result.changed, path: result.path });
+    } catch (error) {
+      console.error('Failed to save the worktree directory:', error);
+      return res.status(500).json({ error: error.message || 'Failed to save the worktree directory' });
     }
   });
 

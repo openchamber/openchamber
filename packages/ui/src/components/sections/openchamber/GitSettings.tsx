@@ -4,6 +4,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
+import { WorktreeDirectorySetting } from '@/components/sections/openchamber/WorktreeDirectorySetting';
 import {
   SettingsSection,
   SettingsControlGroup,
@@ -78,45 +79,49 @@ export const GitSettings: React.FC = () => {
   }
 
   return (
-    <SettingsSection title={t('settings.openchamber.git.title')}>
-      <div className={SETTINGS_OPTION_STACK_CLASS}>
-        <SettingsControlGroup
-          settingsItem="git.changes-view"
-          title={t('settings.openchamber.git.changesViewTitle')}
-        >
-          <SettingsRadioGroup aria-label={t('settings.openchamber.git.changesViewAria')}>
-            {viewOptions.map((option) => (
-              <SettingsRadioOption
-                key={option.id}
-                selected={gitChangesViewMode === option.id}
-                onSelect={() => {
-                  handleGitChangesViewModeChange(option.id);
-                }}
-                label={option.label}
-                ariaLabel={t('settings.openchamber.git.optionAria', { option: option.label })}
-              />
-            ))}
-          </SettingsRadioGroup>
-        </SettingsControlGroup>
+    <>
+      <SettingsSection title={t('settings.openchamber.git.title')}>
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsControlGroup
+            settingsItem="git.changes-view"
+            title={t('settings.openchamber.git.changesViewTitle')}
+          >
+            <SettingsRadioGroup aria-label={t('settings.openchamber.git.changesViewAria')}>
+              {viewOptions.map((option) => (
+                <SettingsRadioOption
+                  key={option.id}
+                  selected={gitChangesViewMode === option.id}
+                  onSelect={() => {
+                    handleGitChangesViewModeChange(option.id);
+                  }}
+                  label={option.label}
+                  ariaLabel={t('settings.openchamber.git.optionAria', { option: option.label })}
+                />
+              ))}
+            </SettingsRadioGroup>
+          </SettingsControlGroup>
 
-        <SettingsCheckboxRow
-          settingsItem="git.gitmoji"
-          checked={settingsGitmojiEnabled}
-          onChange={(checked) => {
-            void handleGitmojiChange(checked);
-          }}
-          label={t('settings.openchamber.git.enableGitmoji')}
-          ariaLabel={t('settings.openchamber.git.enableGitmojiAria')}
-        />
+          <SettingsCheckboxRow
+            settingsItem="git.gitmoji"
+            checked={settingsGitmojiEnabled}
+            onChange={(checked) => {
+              void handleGitmojiChange(checked);
+            }}
+            label={t('settings.openchamber.git.enableGitmoji')}
+            ariaLabel={t('settings.openchamber.git.enableGitmojiAria')}
+          />
 
-        <SettingsCheckboxRow
-          settingsItem="git.gitignored-files"
-          checked={showGitignored}
-          onChange={setFilesViewShowGitignored}
-          label={t('settings.openchamber.git.showGitignored')}
-          ariaLabel={t('settings.openchamber.git.showGitignoredAria')}
-        />
-      </div>
-    </SettingsSection>
+          <SettingsCheckboxRow
+            settingsItem="git.gitignored-files"
+            checked={showGitignored}
+            onChange={setFilesViewShowGitignored}
+            label={t('settings.openchamber.git.showGitignored')}
+            ariaLabel={t('settings.openchamber.git.showGitignoredAria')}
+          />
+        </div>
+      </SettingsSection>
+
+      <WorktreeDirectorySetting />
+    </>
   );
 };

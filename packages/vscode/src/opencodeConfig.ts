@@ -35,6 +35,10 @@ import {
   writeWebSearchSelection,
   writeWarmingEnabled,
   findWebSearchProjectOverride,
+  isRecord,
+  parseWorktreeDirectory,
+  writeWorktreeDirectory,
+  resolveWorktreeDirectoryPath,
   type AgentEntity,
   type CommandEntity,
   type McpEntity,
@@ -1602,6 +1606,132 @@ export const getWebSearchSource = (workingDirectory?: string) => ({
   projectPath: findWebSearchProjectOverride(readConfigLayers(workingDirectory), readProjectConfigFiles(workingDirectory)),
 });
 
+/** Where a `worktree.directory` value for `workingDirectory` comes from, and where a Settings write would land. */
+export interface WorktreeDirectoryConfig {
+  /** The configured folder as written, or `null` when OpenCode has none. */
+  directory: string | null
+  /** Which layer wins; `null` when nothing sets the key. */
+  source: 'custom' | 'project' | 'global' | null
+  /** The file the value came from, or `null` when nothing sets the key. */
+  path: string | null
+  /** The file a Settings write would land in. */
+  writePath: string | null
+  /** A config file Settings cannot write decides the value, so a write would not take effect. */
+  locked: boolean
+}
+
+/** The outcome of a Settings write: whether the document changed and which file now holds it. */
+export interface WorktreeDirectoryWrite {
+  changed: boolean
+  path: string | null
+}
+
+/**
+ * A config document as read from disk. OpenCode's own schema is far wider than
+ * anything here, so only the keys this module reads are named and each value is
+ * parsed by `parseWorktreeDirectory` before use.
+ */
+type OpenCodeDocument = { readonly worktree?: unknown }
+
+/** The folder one config document decides, or `undefined` when it decides none. */
+const readDirectoryValue = (document: OpenCodeDocument | null | undefined): string | null | undefined => {
+  const worktree = document?.worktree
+  if (!isRecord(worktree)) return undefined
+  return parseWorktreeDirectory(worktree.directory)
+}
+
+/**
+ * Mirror of the web server's `readWorktreeDirectoryConfig`: the effective
+ * `worktree.directory` for a project, in OpenCode's precedence order. Global
+ * config loses to every `opencode.json(c)` / `.opencode/opencode.json(c)`
+ * between `workingDirectory` and the filesystem root, nearest first, and both
+ * lose to `OPENCODE_CONFIG`.
+ */
+export const readWorktreeDirectoryConfig = (workingDirectory?: string): WorktreeDirectoryConfig => {
+  const layers = readConfigLayers(workingDirectory)
+  const describe = (
+    directory: string | null,
+    source: WorktreeDirectoryConfig['source'],
+    filePath: string | null,
+  ): WorktreeDirectoryConfig => {
+    const writePath = worktreeWritePath(layers)
+    return {
+      directory,
+      source,
+      path: filePath,
+      writePath,
+      locked: Boolean(filePath) && filePath !== writePath,
+    }
+  }
+
+  const custom = readDirectoryValue(layers.customConfig)
+  if (custom) return describe(custom, 'custom', layers.paths.customPath)
+
+  for (const file of collectProjectConfigFiles(workingDirectory, null)) {
+    const value = readProjectFileDirectory(file)
+    if (value) return describe(value, 'project', file.path)
+  }
+
+  const global = readDirectoryValue(layers.userConfig)
+  if (global) return describe(global, 'global', layers.paths.userPath)
+
+  return describe(null, null, null)
+}
+
+/**
+ * Mirror of the web server's `resolveWorktreeRoot`: the folder new worktrees go
+ * in, or `null` when OpenCode has none and the caller keeps the managed default.
+ * Throws instead of returning `null` when a config file exists but could not be
+ * read, so a configured destination is never silently swapped for the default.
+ */
+export const resolveWorktreeRoot = (primaryWorktree: string): string | null => {
+  const config = readWorktreeDirectoryConfig(primaryWorktree)
+  if (!config.directory) return null
+  return resolveWorktreeDirectoryPath(config.directory, primaryWorktree, os.homedir())
+}
+
+/** Mirror of the web server's `setWorktreeDirectory`; the value comes from `parseWorktreeDirectory`. */
+export const setWorktreeDirectory = (value: string | null, workingDirectory?: string): WorktreeDirectoryWrite => {
+  const layers = readConfigLayers(workingDirectory)
+  const target = getJsonWriteTarget(layers, worktreeWriteScope(layers))
+  const changed = writeWorktreeDirectory(target.config, value)
+  if (changed) writeConfig(target.config, target.path)
+  return { changed, path: target.path }
+}
+
+/** Settings edits a project config that already exists rather than creating one. */
+const worktreeWriteScope = (layers: ReturnType<typeof readConfigLayers>): AgentScope => {
+  if (layers.paths.projectPath && fs.existsSync(layers.paths.projectPath)) return AGENT_SCOPE.PROJECT
+  return AGENT_SCOPE.USER
+}
+
+/**
+ * The file `setWorktreeDirectory` would write, resolved like
+ * `getJsonWriteTarget` but without its layer-error check. Reading the effective
+ * value has to tolerate a malformed document the way OpenCode does, and a write
+ * is not happening during a read.
+ */
+const worktreeWritePath = (layers: ReturnType<typeof readConfigLayers>): string | null => {
+  if (layers.paths.customPath) return layers.paths.customPath
+  if (worktreeWriteScope(layers) === AGENT_SCOPE.PROJECT && layers.paths.projectPath) {
+    return layers.paths.projectPath
+  }
+  return layers.paths.userPath
+}
+
+/**
+ * A file OpenCode itself drops for malformed JSONC decides nothing, so a typo
+ * elsewhere in the project does not move worktrees. Any other read failure leaves
+ * the destination unknown, and guessing the default there is worse than an error.
+ */
+const readProjectFileDirectory = (file: ProjectConfigFile): string | null => {
+  if (file.error) {
+    if (isInvalidJsoncError(file.error)) return null
+    throw new Error(`Failed to read OpenCode configuration: ${file.path}`)
+  }
+  return readDirectoryValue(file.config) ?? null
+}
+
 const PROJECT_CONFIG_NAMES = [
   path.join('.opencode', 'opencode.jsonc'),
   path.join('.opencode', 'opencode.json'),
@@ -1609,24 +1739,37 @@ const PROJECT_CONFIG_NAMES = [
   'opencode.json',
 ];
 
-/** Mirror of the web server's `readProjectConfigFiles`: existing project configs, deepest first; unreadable ones skipped. */
-const readProjectConfigFiles = (workingDirectory?: string): Array<{ path: string; config: Record<string, unknown> }> => {
-  if (!workingDirectory) return [];
-  const root = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
-  const files: Array<{ path: string; config: Record<string, unknown> }> = [];
-  for (const base of getAncestors(workingDirectory, root)) {
+interface ProjectConfigFile {
+  path: string
+  config: OpenCodeDocument | null
+  /** The failure that stopped the read, so a caller that must not guess can tell. */
+  error: unknown
+}
+
+/** Mirror of the web server's `collectProjectConfigFiles`; `root` null walks to the filesystem root. */
+const collectProjectConfigFiles = (workingDirectory?: string, root?: string | null): ProjectConfigFile[] => {
+  if (!workingDirectory) return []
+  const files: ProjectConfigFile[] = []
+  for (const base of getAncestors(workingDirectory, root ?? undefined)) {
     for (const name of PROJECT_CONFIG_NAMES) {
-      const filePath = path.join(base, name);
-      if (!fs.existsSync(filePath)) continue;
+      const filePath = path.join(base, name)
+      if (!fs.existsSync(filePath)) continue
       try {
-        files.push({ path: filePath, config: readConfigFile(filePath) });
-      } catch {
-        // Skipped: an unreadable file can't be told apart from one without the key.
+        files.push({ path: filePath, config: readConfigFile(filePath), error: null })
+      } catch (error) {
+        files.push({ path: filePath, config: null, error })
       }
     }
   }
-  return files;
-};
+  return files
+}
+
+/** Mirror of the web server's `readProjectConfigFiles`: existing project configs up to the worktree root, deepest first. */
+const readProjectConfigFiles = (workingDirectory?: string): ProjectConfigFile[] => {
+  if (!workingDirectory) return []
+  const root = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory)
+  return collectProjectConfigFiles(workingDirectory, root)
+}
 
 /**
  * The permission rules that apply to an agent, in evaluation order (global

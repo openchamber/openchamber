@@ -12,6 +12,8 @@
  * `packages/core/src/v1/config/migrate.ts`, and `services/www` migrate-v1 docs.
  */
 
+import path from 'path';
+
 // ============== SECTIONS ==============
 
 /**
@@ -785,22 +787,74 @@ function writeWarmingEnabled(config, enabled) {
 const hasWebSearchKey = (config) => config != null && Object.hasOwn(config, 'websearch');
 
 /**
- * The project config path whose `websearch` wins over the file the Settings
- * choice is written to, or `null`. OpenCode merges user < project files (every
+ * The deepest project config file that decides a key over the file Settings
+ * writes to, or `null`. OpenCode merges user < project files (every
  * `opencode.json[c]` and `.opencode/opencode.json[c]` from the directory up to
  * the project root) < `OPENCODE_CONFIG`, so any project file with the key
  * decides unless `OPENCODE_CONFIG` sets it too. `layers` is what
  * `readConfigLayers(directory)` returns; `projectFiles` lists the existing
  * project config files deepest first, as `{ path, config }`.
  */
-function findWebSearchProjectOverride(layers, projectFiles) {
-  if (hasWebSearchKey(layers?.customConfig)) return null;
+function findProjectConfigOverride(layers, projectFiles, ownsKey) {
+  if (ownsKey(layers?.customConfig)) return null;
   const userPath = layers?.paths?.userPath ?? null;
   for (const file of projectFiles ?? []) {
     if (!file?.path || file.path === userPath) continue;
-    if (hasWebSearchKey(file.config)) return file.path;
+    if (ownsKey(file.config)) return file.path;
   }
   return null;
+}
+
+const findWebSearchProjectOverride = (layers, projectFiles) =>
+  findProjectConfigOverride(layers, projectFiles, hasWebSearchKey);
+
+// ============== WORKTREE DIRECTORY ==============
+
+/**
+ * The `worktree.directory` key: the parent folder new worktrees are created in.
+ * OpenChamber takes the folder as written (`null` removes the key so OpenCode's
+ * own default applies). Returns `undefined` for anything that is not a
+ * non-empty string, which the routes reject instead of writing.
+ */
+function parseWorktreeDirectory(value) {
+  if (value === null) return null;
+  return trimmedString(value);
+}
+
+/**
+ * Applies a parsed folder to a config object, keeping any sibling keys a
+ * plugin put under `worktree`; returns whether the config changed.
+ */
+function writeWorktreeDirectory(config, directory) {
+  const before = JSON.stringify(config.worktree);
+  if (directory === null) {
+    if (!isRecord(config.worktree)) {
+      delete config.worktree;
+    } else {
+      delete config.worktree.directory;
+      if (Object.keys(config.worktree).length === 0) delete config.worktree;
+    }
+  } else {
+    const base = isRecord(config.worktree) ? { ...config.worktree } : {};
+    base.directory = directory;
+    config.worktree = base;
+  }
+  return JSON.stringify(config.worktree) !== before;
+}
+
+/**
+ * Turns the configured folder into an absolute path exactly the way OpenCode
+ * does (OpenCode `packages/core/src/config/plugin/worktree.ts`): `~/` against
+ * the user's home, everything else against the project's primary checkout.
+ * Resolving against the primary checkout is what keeps `../worktrees` landing
+ * in one place whether the request came from a nested directory or from a
+ * linked worktree of the same project.
+ */
+function resolveWorktreeDirectoryPath(directory, primaryWorktree, home) {
+  if (directory.startsWith('~/')) {
+    return path.join(home, directory.slice(2));
+  }
+  return path.resolve(primaryWorktree, directory);
 }
 
 export {
@@ -840,4 +894,7 @@ export {
   writeWebSearchSelection,
   findWebSearchProjectOverride,
   writeWarmingEnabled,
+  parseWorktreeDirectory,
+  writeWorktreeDirectory,
+  resolveWorktreeDirectoryPath,
 };

@@ -748,6 +748,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['ignored', 'files', 'gitignore'],
   },
   {
+    id: 'git.worktree-directory',
+    page: 'git',
+    titleKey: 'settings.openchamber.git.worktreeDirectory',
+    descriptionKey: 'settings.openchamber.git.worktreeDirectoryDescription',
+    keywords: ['worktree', 'worktrees', 'directory', 'folder', 'path', 'worktree.directory'],
+  },
+  {
     id: 'usage.work-status-panel',
     page: 'usage',
     titleKey: 'settings.usage.page.options.showInWorkStatus',

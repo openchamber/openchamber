@@ -18,6 +18,26 @@ A worktree session runs in its own checked-out copy of your repo, on its own bra
 
 OpenChamber makes the branch, sets up the folder, and starts a session in it. You can also kick one off straight from a [todo](/notes-todos-plans/) or a [GitHub issue or PR](/github/).
 
+## Where worktrees go
+
+By default a new worktree lands in OpenChamber's data folder, under the project it belongs to. The path runs long enough that you may want it elsewhere, so OpenChamber reads OpenCode's `worktree.directory` setting when there is one.
+
+Set it in `opencode.json` for one project, or in your global config to cover every project:
+
+```json
+{
+  "worktree": {
+    "directory": "../worktrees"
+  }
+}
+```
+
+Relative paths start at the repository's primary checkout, not at the folder you launched OpenChamber from and not at an existing linked worktree. With a repo at `/projects/my-app`, `../worktrees` puts a worktree named `my-feature` in `/projects/worktrees/my-feature`. An absolute path is used as it is, and a path starting with `~/` starts at your home folder. OpenChamber adds only the worktree name to that folder, the same as OpenCode does.
+
+You can also set it from **Settings → Git → Worktree folder**. It writes to your project's `opencode.json` when the project has one, and to your global config otherwise, so setting a folder never drops a new file into the repository. The setting shows which file the current value came from. When the value comes from a config file OpenChamber does not write, the field is locked and names the file to edit.
+
+Two things worth knowing. Changing the setting only affects worktrees you create afterwards, so existing worktrees stay where they are and remain fully usable and removable. And the project checkout a config value comes from is the project's primary checkout, which is why the same key set in two clones of one repo affects both.
+
 ## Bring the work back
 
 When the work is good, use **Integrate** in the Git view to bring the worktree's commits onto another branch (like `main`). If a change conflicts, you can hand the conflict to the agent to resolve.

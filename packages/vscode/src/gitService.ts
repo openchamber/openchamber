@@ -12,6 +12,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
+import { resolveWorktreeRoot } from './opencodeConfig';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
@@ -1116,8 +1117,9 @@ const getFileIdentity = async (filePath: string): Promise<string | null> => {
   }
 };
 
-// OpenChamber places managed worktrees under a deep data-dir path
-// (`<XDG_DATA_HOME>/opencode/worktree/<40-char project id>/<name>/`). On
+// OpenChamber places managed worktrees under a deep path: by default
+// `<XDG_DATA_HOME>/opencode/worktree/<40-char project id>/<name>/`, or the
+// folder `worktree.directory` names. On
 // Windows that prefix plus a deeply nested repo file routinely exceeds
 // MAX_PATH (260). Git can check those paths out when core.longpaths is
 // enabled; without it, `git reset --hard` during bootstrap fails with
@@ -1301,9 +1303,13 @@ const resolveWorktreeProjectContext = async (directory: string) => {
   const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
   const primaryWorktree = path.dirname(commonDir);
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
-  const worktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  // OpenCode's `worktree.directory` is read from the primary checkout even when
+  // the request arrived through a nested directory or a linked worktree.
+  const configuredWorktreeRoot = resolveWorktreeRoot(primaryWorktree);
+  const managedWorktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  const worktreeRoot = configuredWorktreeRoot || managedWorktreeRoot;
 
-  return { projectID, sandbox, primaryWorktree, worktreeRoot };
+  return { projectID, sandbox, primaryWorktree, worktreeRoot, managedWorktreeRoot };
 };
 
 const listWorktreeEntries = async (directory: string): Promise<WorktreeListEntry[]> => {
@@ -2325,12 +2331,21 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     return null;
   })();
 
+  // A leftover only counts as managed while it sits under a root OpenChamber
+  // owns: the configured folder, or the data directory a worktree created
+  // before the setting existed still lives in. Anything else stays untouched.
+  const ownedRoots = [context.worktreeRoot, context.managedWorktreeRoot]
+    .filter((root, index, roots) => root && roots.indexOf(root) === index)
+    .map((root) => canonicalPath(root));
+  const ownedRootCanonicals = await Promise.all(ownedRoots);
+  const isManagedOrphan = ownedRootCanonicals.some(
+    (root) => targetCanonical !== root && isInsideOrSameDirectory(root, targetCanonical),
+  );
+
   const removeManagedOrphan = async () => {
-    // Only a leftover directory inside the managed worktree root may be deleted;
-    // an arbitrary unregistered path is never removed recursively.
-    const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
-    const isManagedOrphan = targetCanonical !== worktreeRootCanonical
-      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+    // Only a leftover directory inside a worktree root OpenChamber creates in may
+    // be deleted: the folder `worktree.directory` names, or the managed data-dir
+    // root. An arbitrary unregistered path is never removed recursively.
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists && isManagedOrphan) {
       await removeBusyDirectory(targetDirectory);

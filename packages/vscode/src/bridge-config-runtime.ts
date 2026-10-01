@@ -56,9 +56,11 @@ import {
   setWebSearchSelection,
   setWarmingEnabled,
   getWebSearchSource,
+  readWorktreeDirectoryConfig,
+  setWorktreeDirectory,
   type SnippetScope,
 } from './opencodeConfig';
-import { parseWebSearchSelection } from './opencode-config-v2';
+import { parseWebSearchSelection, parseWorktreeDirectory } from './opencode-config-v2';
 import {
   getSkillsCatalog,
   scanSkillsRepository as scanSkillsRepositoryFromGit,
@@ -413,6 +415,29 @@ export async function handleConfigBridgeMessage(
       }
       const result = setWebSearchSelection(selection);
       return { id, type, success: true, data: { success: true, changed: result.changed } };
+    }
+
+    // GET/PUT /api/config/worktree — see the web routes in
+    // packages/web/server/lib/opencode/routes.js. `directory` is the project the
+    // value belongs to; `body.directory` is the folder itself, `null` to clear it.
+    case 'api:config/worktree': {
+      // SAFETY: every field is checked before use: `method` against a literal,
+      // `directory` by resolveWorkingDirectory, `body.directory` by parseWorktreeDirectory.
+      const message = (payload || {}) as {
+        method?: string
+        directory?: string
+        body?: { directory?: unknown }
+      }
+      const workingDirectory = resolveWorkingDirectory(ctx, message.directory);
+      if (message.method === 'GET') {
+        return { id, type, success: true, data: readWorktreeDirectoryConfig(workingDirectory) };
+      }
+      const value = parseWorktreeDirectory(message.body?.directory);
+      if (value === undefined) {
+        return { id, type, success: false, error: 'directory must be a non-empty string, or null to clear it' };
+      }
+      const result = setWorktreeDirectory(value, workingDirectory);
+      return { id, type, success: true, data: { success: true, changed: result.changed, path: result.path } };
     }
 
     // PUT /api/config/warming — see the web route in

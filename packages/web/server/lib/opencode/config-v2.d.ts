@@ -183,3 +183,10 @@ export function findWebSearchProjectOverride(
   layers: WebSearchConfigLayers,
   projectFiles: ReadonlyArray<{ path: string; config: object | null }>,
 ): string | null;
+
+/** The `worktree.directory` folder as written, or `null` to remove the key. `undefined` means "not a usable folder". */
+export function parseWorktreeDirectory(value: unknown): string | null | undefined;
+/** Applies a parsed folder to a config object; returns whether the config changed. */
+export function writeWorktreeDirectory(config: Record<string, unknown>, directory: string | null): boolean;
+/** Resolves the configured folder the way OpenCode does: `~/` against `home`, anything else against `primaryWorktree`. */
+export function resolveWorktreeDirectoryPath(directory: string, primaryWorktree: string, home: string): string;

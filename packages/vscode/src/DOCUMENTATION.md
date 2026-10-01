@@ -309,6 +309,14 @@ Bridge surface (`bridge-config-runtime.ts`), matching the web routes:
 - `api:config/warming` — `PUT /api/config/warming`; `{ enabled }` turns session
   warming on (`true`, keeping a hand-tuned object) or off (removes the key),
   written with the shared `writeWarmingEnabled` to the same file.
+- `api:config/worktree` — `PUT /api/config/worktree`; `{ directory }` is OpenCode's
+  `worktree.directory` value, or `null` to remove the key, written with the shared
+  `writeWorktreeDirectory`. `{ method: "GET", directory }` returns the effective
+  value, the file it came from, the file a save would write, and `locked` when that
+  file is one the extension cannot write. The webview shim in `webview/main.tsx`
+  forwards both verbs; the message's `directory` is the project hint and
+  `body.directory` is the value. `gitService.ts` resolves the destination root from
+  the same read, falling back to the managed data-dir root when the key is unset.
 
 ## Session archive and metadata
 
