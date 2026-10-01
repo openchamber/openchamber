@@ -5,6 +5,7 @@ import {
   findFirstVisibleSessionSidebarRowIndex,
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
+  sectionSpacingAfter,
 } from './sessionSidebarVirtualization';
 
 type Props = {
@@ -14,17 +15,6 @@ type Props = {
   renderRow: (row: SessionSidebarRow, index: number) => React.ReactNode;
   onFirstVisibleIndexChange: (index: number) => void;
 };
-
-function sectionSpacingAfter(row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string | undefined {
-  if (row.key.startsWith('activity:active-now:')
-    && (nextRow?.kind === 'project-header' || nextRow?.kind === 'group-header')) {
-    return 'pb-4';
-  }
-  const startsSection = nextRow?.kind === 'activity-header'
-    || nextRow?.kind === 'project-header'
-    || (nextRow?.kind === 'group-header' && row.kind !== 'project-header');
-  return startsSection ? 'pb-2' : undefined;
-}
 
 export function SessionSidebarRows({
   model,
