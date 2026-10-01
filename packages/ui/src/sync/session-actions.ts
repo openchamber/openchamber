@@ -50,7 +50,6 @@ import { deleteChatDirectory } from "@/lib/chatDirectories"
 import { createChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
 import { recordSessionActionFailure } from "./session-action-failures"
-import { recordObservedTurn } from "./observed-turns"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
 import { getSessionGoal } from "@/lib/sessionGoalMetadata"
 import { fetchGoalObjectiveContent, writeGoalObjectiveFile } from "@/lib/goalObjectiveFiles"
@@ -1959,8 +1958,6 @@ export async function optimisticSend(input: {
   try {
     assertRuntimeUnchanged()
     await input.send(messageID, context)
-    // The connected server accepted the prompt, so this page is watching its run.
-    recordObservedTurn(store, input.sessionId, { type: "busy" })
   } catch (error) {
     const status = getErrorStatus(error)
     const ambiguousFailure = isAmbiguousSendFailure(error)

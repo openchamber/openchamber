@@ -28,6 +28,7 @@ import {
   type PermissionRuleset,
   type Session,
   type SessionStatus,
+  type SessionOutcome,
   type StructuredError,
   type TokenUsageInfo,
 } from "./model"
@@ -116,7 +117,11 @@ export type SyncEvent =
    */
   | { type: "session.revert.committed"; properties: { sessionID: string; to: string } }
   | { type: "session.status"; properties: { sessionID: string; status: SessionStatus } }
-  | { type: "session.idle"; properties: { sessionID: string } }
+  /**
+   * `outcome` is set when the event ends a turn (`session.execution.*`) and
+   * absent for a bare status change. Only `interrupted` is an explicit stop.
+   */
+  | { type: "session.idle"; properties: { sessionID: string; outcome?: SessionOutcome } }
   | { type: "session.error"; properties: { sessionID: string; error: StructuredError } }
   | { type: "message.updated"; properties: { info: Message } }
   | { type: "message.patched"; properties: { sessionID: string; messageID: string; patch: MessagePatch } }
@@ -335,7 +340,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "session.execution.succeeded":
       return [
         sessionEvent(event.data.sessionID, { outcome: "succeeded", time: { idle: event.created, updated: event.created } }),
-        { type: "session.idle", properties: { sessionID: event.data.sessionID } },
+        { type: "session.idle", properties: { sessionID: event.data.sessionID, outcome: "succeeded" } },
       ]
     case "session.execution.interrupted":
       // `shutdown` is OpenCode itself going away mid-turn. It keeps the
@@ -347,7 +352,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       if (event.data.reason === "shutdown") return []
       return [
         sessionEvent(event.data.sessionID, { outcome: "interrupted", time: { idle: event.created, updated: event.created } }),
-        { type: "session.idle", properties: { sessionID: event.data.sessionID } },
+        { type: "session.idle", properties: { sessionID: event.data.sessionID, outcome: "interrupted" } },
       ]
     case "session.execution.failed":
       return [

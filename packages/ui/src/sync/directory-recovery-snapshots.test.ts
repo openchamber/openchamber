@@ -50,11 +50,6 @@ describe("directory recovery snapshots", () => {
     }
   })
 
-  test("a session the store believed running settles idle when the snapshot drops it (#2577)", async () => {
-    const store = source({ session_status: { session: { type: "busy" }, done: { type: "idle" } } })
-    expect(await readDirectoryStatusSnapshot(store, async () => ({}))).toEqual({ session: { type: "idle" } })
-  })
-
   test("a newer idle event cannot be overwritten by an old busy snapshot", async () => {
     const store = source()
     const response = deferred<State["session_status"]>()

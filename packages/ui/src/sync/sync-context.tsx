@@ -10,6 +10,7 @@ import type {
   Part,
   PermissionRequest,
   Session,
+  SessionOutcome,
   SessionStatus,
   StructuredError,
 } from "@/lib/opencode/model"
@@ -43,7 +44,6 @@ import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingS
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
-import { forgetObservedTurn, mayJudgeTurn, recordObservedTurn, releaseJudgedTurn } from "./observed-turns"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
@@ -488,7 +488,7 @@ async function materializeSessionFromServer(
     await resyncDirectorySessionStatuses(directory, store, [sessionID], "authoritative", isStale)
   }
   if (!isStale()) {
-    await recoverInterruptedTurnAfterMessageLoad(directory, store, sessionID, isStale)
+    markRecordedInterruptedTurn(store, sessionID)
   }
 }
 
@@ -703,7 +703,6 @@ export function applySessionStatusSnapshot(
 
     for (const sessionId of candidateSessionIds) {
       const incoming = toSessionStatus(snapshot[sessionId])
-      recordObservedTurn(store, sessionId, incoming)
       if (mode === "authoritative" && state.sessionStatusInvalidated?.[sessionId]) {
         // The successful snapshot supersedes the archive's discarded status.
         nextInvalidated ??= { ...state.sessionStatusInvalidated }
@@ -726,8 +725,7 @@ export function applySessionStatusSnapshot(
 
       const existing = current[sessionId]
       // Keep the successful snapshot distinguishable from "status has never
-      // been observed". Interrupted-turn recovery requires this explicit
-      // settle marker after a cold reload.
+      // been observed".
       if (!existing || existing.type !== "idle") {
         draft()[sessionId] = { type: "idle" }
         changed = true
@@ -764,15 +762,6 @@ async function resyncDirectorySessionStatuses(
   if (mode === "authoritative") {
     store.setState({ sessionStatusReady: true })
     applyGlobalSessionStatusSnapshot(directory, nextStatuses, getDirectoryOwnedSessionIds(directory, store.getState().session))
-    // An authoritative snapshot that settles sessions previously observed
-    // busy/retry can leave their trailing assistant message and tool parts
-    // unfinished (managed process died mid-turn, #2577): finalize them now.
-    // The snapshot write above already lowered their status to explicit idle,
-    // which is the gate the helper requires — a session the snapshot reports
-    // busy stays untouched.
-    for (const sessionId of candidateSessionIds) {
-      applyInterruptedTurnReconciliation(store, sessionId)
-    }
   }
   return nextStatuses
 }
@@ -1456,8 +1445,7 @@ async function resyncDirectoryAfterReconnect(
       loader?.refreshTail({ directory, sessionID: sessionId }, RECONNECT_MESSAGE_LIMIT) ?? Promise.resolve(),
     ])
     if (isStale()) return
-    await recoverInterruptedTurnAfterMessageLoad(directory, store, sessionId, isStale)
-    if (isStale()) return
+    markRecordedInterruptedTurn(store, sessionId)
     if (!session) return
 
     const nextSession = stripSessionDiffSnapshots(session)
@@ -2101,10 +2089,6 @@ export function handleEvent(
     }
   }
 
-  if (payload.type === "session.status") {
-    recordObservedTurn(store, payload.properties.sessionID, payload.properties.status)
-  }
-
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const sessionID = syncEventSessionID(payload)
     const state = getDirectoryEventState(store, batch)
@@ -2115,10 +2099,11 @@ export function handleEvent(
         messageID,
       })
     }
-    // The reducer already wrote the idle/error status into `draft`; finalize
-    // the interrupted message and orphaned tools through the same batch.
-    if (sessionID) {
-      forgetObservedTurn(store, sessionID)
+    // OpenCode said the turn stopped or failed: finalize the open message and
+    // orphaned tools through the same batch. A plain idle says nothing about
+    // how the turn ended, so it leaves the message as OpenCode stored it.
+    const stopped = payload.type === "session.error" || payload.properties.outcome === "interrupted"
+    if (sessionID && stopped) {
       const interrupted = interruptedTurnToolParts(state, sessionID)
       if (interrupted) {
         cloneField("message", (value) => ({ ...value }))
@@ -2153,24 +2138,21 @@ export function handleEvent(
 // ---------------------------------------------------------------------------
 // Interrupted-turn reconciliation
 //
-// A managed OpenCode process can die mid-turn (crash, health-check restart).
-// The persisted turn then never settles: the trailing assistant message has
-// no `time.completed`, and any tool parts can stay `pending`/`running`
-// forever — the server never finalizes them (anomalyco/opencode#19023). The
-// settle-triggered tail refresh above refetches the same stale records, so
-// the UI would keep the assistant message unfinished and any tool timers and
-// "working" styling active indefinitely (#2577).
+// When OpenCode stops or fails a turn it says so: the live
+// `session.execution.interrupted`/`failed` event, and the `idle` record it
+// appends to the session's history with the same outcome. That explicit
+// record is the only thing that marks a turn stopped here. The server does
+// not always finalize the trailing assistant message and its tool parts
+// before the record (anomalyco/opencode#19023), so the record's turn is
+// completed locally with an aborted error and its orphaned tools become
+// `error`/`Interrupted` with an end time — the same shape OpenCode itself
+// writes for cancelled tools. A later terminal event can supersede the mark;
+// a stale refresh cannot regress the locally final state.
 //
-// OpenCode keeps a turn's session busy while it is genuinely alive —
-// including while waiting for a form/permission reply — so once a
-// session is AUTHORITATIVELY settled (a `session.idle`/`session.error`
-// event, or an authoritative status snapshot that lowers a previously busy
-// session) and the trailing assistant message is still unfinished with
-// no pending form/permission, the turn is definitively interrupted.
-// Complete the assistant message locally with an aborted error and finalize
-// any orphaned parts as `error`/`Interrupted` with an end time — the same shape
-// OpenCode itself writes for cancelled tools. A later terminal event can
-// supersede the mark; a stale refresh cannot regress the locally final state.
+// An idle status, a status snapshot that no longer lists a session, or an
+// unfinished message alone never marks a turn: a turn run by another
+// OpenCode process on the same database (the TUI, `opencode run`) looks
+// exactly like that while it is still going (#4156).
 export function interruptedTurnToolParts(
   state: DirectoryStore,
   sessionID: string,
@@ -2178,14 +2160,9 @@ export function interruptedTurnToolParts(
 ): { messageID: string; messages: Message[]; parts?: Part[] } | null {
   if ((state.form?.[sessionID] ?? []).length > 0) return null
   if ((state.permission?.[sessionID] ?? []).length > 0) return null
-
+  // A session that is running again belongs to its new turn.
   const status = state.session_status?.[sessionID]
-  if (!status || status.type !== "idle") {
-    // Absent status is "unknown", not settled (the reducer maps both
-    // session.idle and session.error to {type:"idle"}): never judge an
-    // interrupted turn without an authoritative settle signal.
-    return null
-  }
+  if (status && status.type !== "idle") return null
 
   const messages = state.message[sessionID] ?? []
   let messageIndex = -1
@@ -2242,97 +2219,47 @@ export function interruptedTurnToolParts(
   }
 }
 
-function hasUnfinishedAssistantTurn(state: DirectoryStore, sessionID: string): boolean {
+/**
+ * The outcome OpenCode recorded for the trailing assistant turn: the newest
+ * `idle` record after that turn's assistant message, or undefined while no
+ * process has recorded its end.
+ */
+function recordedTurnOutcome(state: DirectoryStore, sessionID: string): SessionOutcome | undefined {
   const messages = state.message[sessionID] ?? []
+  let outcome: SessionOutcome | undefined
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message.role === "user") return false
-    if (message.role !== "assistant") continue
-    return message.time.completed === undefined
+    if (message.role === "user") return undefined
+    if (message.role === "assistant") return outcome
+    if (message.role === "idle") outcome ??= message.outcome
   }
-  return false
+  return undefined
 }
 
-// Snapshots and message loads reach this path. Neither can tell a turn that
-// died here from one still running in another OpenCode process (#4156), so
-// only a run this page watched is judged, or one silent long enough that no
-// process can still be running it.
-function applyInterruptedTurnReconciliation(store: StoreApi<DirectoryStore>, sessionID: string): void {
+/**
+ * Marks the trailing turn of a freshly loaded session stopped when its history
+ * records that OpenCode interrupted or failed it. Any other history, including
+ * an unfinished answer with no record after it, is left as OpenCode stored it.
+ */
+export function markRecordedInterruptedTurn(store: StoreApi<DirectoryStore>, sessionID: string): void {
   const state = store.getState()
-  if (!mayJudgeTurn(store, state, sessionID)) return
-  releaseJudgedTurn(store, state, sessionID)
+  const outcome = recordedTurnOutcome(state, sessionID)
+  if (outcome !== "interrupted" && outcome !== "failed") return
   const interrupted = interruptedTurnToolParts(state, sessionID)
   if (!interrupted) return
 
   const interruptedParts = interrupted.parts
   if (!interruptedParts) {
-    store.setState((state) => ({
-      message: { ...state.message, [sessionID]: interrupted.messages },
+    store.setState((current) => ({
+      message: { ...current.message, [sessionID]: interrupted.messages },
     }))
     return
   }
 
-  store.setState((state) => ({
-    message: { ...state.message, [sessionID]: interrupted.messages },
-    part: { ...state.part, [interrupted.messageID]: interruptedParts },
+  store.setState((current) => ({
+    message: { ...current.message, [sessionID]: interrupted.messages },
+    part: { ...current.part, [interrupted.messageID]: interruptedParts },
   }))
-}
-
-/**
- * Re-checks a hydrated session whose trailing assistant turn is unfinished.
- * A cold reload can hydrate messages after the initial status snapshot, so the
- * settle decision must be repeated after the message records are available.
- * If no per-session status exists yet, fetch one authoritative snapshot first;
- * a successful snapshot that omits the session establishes it as idle.
- * Only a run this page watched, or one silent long enough, is judged; the
- * snapshot is still read first because a busy answer is what makes the run
- * watched (#4156).
- */
-export async function recoverInterruptedTurnAfterMessageLoad(
-  directory: string,
-  store: StoreApi<DirectoryStore>,
-  sessionID: string,
-  isStale?: () => boolean,
-): Promise<void> {
-  if (isStale?.()) return
-  const runtimeKey = getRuntimeKey()
-  const sdk = opencodeClient.getSdkClient()
-  const initial = store.getState()
-  if (!hasUnfinishedAssistantTurn(initial, sessionID)) return
-  if ((initial.form?.[sessionID] ?? []).length > 0) return
-  if ((initial.permission?.[sessionID] ?? []).length > 0) return
-
-  if (!initial.session_status?.[sessionID]) {
-    const snapshot = await opencodeClient.getActiveSessionStatuses(directory)
-    if (snapshot === null || isStale?.()
-      || getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== sdk) return
-
-    // Do not overwrite a live status event that arrived while the snapshot was
-    // in flight. The snapshot only fills the previously unknown state.
-    if (!store.getState().session_status?.[sessionID]) {
-      applySessionStatusSnapshot(store, snapshot, [sessionID], "authoritative")
-      applyGlobalSessionStatusSnapshot(directory, snapshot, [sessionID])
-    }
-  }
-  if (!mayJudgeTurn(store, store.getState(), sessionID)) return
-
-  // The messages were read before the status. A turn that finished between
-  // the two reads leaves an open assistant message beside an idle status,
-  // which is exactly what an interrupted turn looks like, while the completion
-  // event may still sit in the pipeline's flush frame. Re-read the tail once
-  // under the settled status before judging the turn.
-  if (
-    store.getState().session_status?.[sessionID]?.type === "idle"
-    && hasUnfinishedAssistantTurn(store.getState(), sessionID)
-  ) {
-    const loader = getImperativeSessionMessageLoader()
-    if (loader) {
-      await loader.refreshTail({ directory, sessionID }, SESSION_MATERIALIZATION_MESSAGE_LIMIT)
-      if (isStale?.() || getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== sdk) return
-    }
-  }
-
-  applyInterruptedTurnReconciliation(store, sessionID)
 }
 
 // ---------------------------------------------------------------------------
@@ -2492,20 +2419,9 @@ export function SyncProvider(props: {
             store,
             set: (patch) => {
               if (!isCurrent()) return
-              const statusBefore = store.getState().session_status
               store.setState(patch)
               if (patch.session_status) {
-                for (const [sessionId, status] of Object.entries(patch.session_status)) {
-                  recordObservedTurn(store, sessionId, status)
-                }
                 applyGlobalSessionStatusSnapshot(directory, patch.session_status, getDirectoryOwnedSessionIds(directory, store.getState().session))
-                // The snapshot settled sessions this store believed running
-                // (#2577): judge their unfinished turns now.
-                for (const [sessionId, status] of Object.entries(statusBefore ?? {})) {
-                  if (status.type !== "idle" && patch.session_status[sessionId]?.type === "idle") {
-                    applyInterruptedTurnReconciliation(store, sessionId)
-                  }
-                }
               }
               if (patch.session || patch.message) {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
