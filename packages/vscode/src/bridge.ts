@@ -5,6 +5,7 @@ import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
+import { handleNotificationsBridgeMessage } from './bridge-notifications-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
 import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
 import { createProjectSetupStore, handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
@@ -128,6 +129,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     );
     if (configResponse) {
       return configResponse;
+    }
+    const notificationsResponse = await handleNotificationsBridgeMessage({ id, type, payload });
+    if (notificationsResponse) {
+      return notificationsResponse;
     }
     const systemResponse = await handleSystemBridgeMessage(
       { id, type, payload },

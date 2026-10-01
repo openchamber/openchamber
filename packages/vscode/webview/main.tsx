@@ -1755,78 +1755,41 @@ onCommand('reloadOpenCode', () => {
   });
 });
 
-const getNotificationClaimKey = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown } | undefined): string => {
-  const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
-  if (tag) return tag;
-  return [payload?.sessionId, payload?.title, payload?.body]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim())
-    .join('|');
+type VSCodeNotificationRequest = {
+  title?: unknown;
+  body?: unknown;
+  sessionId?: unknown;
+  tag?: unknown;
+  kind?: unknown;
+  requireHidden?: unknown;
 };
 
-const claimOpenChamberNotification = async (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown } | undefined): Promise<boolean> => {
-  const key = getNotificationClaimKey(payload);
-  if (!key) return true;
-  try {
-    const result = await sendBridgeMessage<{ claimed?: boolean }>('api:notifications:claim', { key });
-    return result?.claimed === true;
-  } catch {
-    return true;
-  }
-};
-
-const showOpenChamberNotification = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown; requireHidden?: unknown } | undefined) => {
-  if (typeof Notification === 'undefined') {
-    return false;
-  }
-
-  const show = async () => {
-    const isVSCodeWindowFocused = window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ ?? document.hasFocus();
-    if (payload?.requireHidden === true && isVSCodeWindowFocused) {
-      return false;
-    }
-    if (Notification.permission !== 'granted') {
-      return false;
-    }
-
-    const title = typeof payload?.title === 'string' && payload.title.trim().length > 0
-      ? payload.title.trim()
-      : 'OpenChamber';
-    const body = typeof payload?.body === 'string' ? payload.body : '';
-    const sessionId = typeof payload?.sessionId === 'string' && payload.sessionId.trim().length > 0
-      ? payload.sessionId.trim()
-      : '';
-    if (!await claimOpenChamberNotification({ ...payload, title, body, sessionId })) {
-      return false;
-    }
-
-    const notification = new Notification(title, { body });
-    notification.onclick = () => {
-      if (sessionId) {
-        import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-          useSessionUIStore.getState().setCurrentSession(sessionId);
-        });
-      }
-      window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
-    };
-    return true;
-  };
-
-  if (Notification.permission === 'default') {
-    void Notification.requestPermission().then((permission) => {
-      if (permission === 'granted') {
-        void show();
-      }
-    });
-    return true;
-  }
-
-  void show();
-  return true;
+/**
+ * Forward a notification to the extension host (`api:notifications:show`).
+ * The browser `Notification` API never displays from a webview subframe, so
+ * the old `new Notification()` path is gone entirely. Filtering, templating
+ * and cooldowns stay here; delivery (dedup + `vscode.window.show*Message`)
+ * lives in `packages/vscode/src/notifications.ts`.
+ */
+const showOpenChamberNotification = (payload: VSCodeNotificationRequest | undefined): void => {
+  if (!payload || typeof payload !== 'object') return;
+  const title = typeof payload.title === 'string' && payload.title.trim().length > 0
+    ? payload.title.trim()
+    : 'OpenChamber';
+  const body = typeof payload.body === 'string' ? payload.body : '';
+  const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim().length > 0
+    ? payload.sessionId.trim()
+    : '';
+  const tag = typeof payload.tag === 'string' ? payload.tag : undefined;
+  const kind = typeof payload.kind === 'string' ? payload.kind : 'completion';
+  // `notificationMode: hidden-only` maps to `requireHidden`; the host
+  // re-checks `vscode.window.state.focused` as the authority.
+  const requireHidden = payload.requireHidden === true;
+  void sendBridgeMessage('api:notifications:show', { title, body, sessionId, tag, kind, requireHidden }).catch(() => undefined);
 };
 
 onCommand('showNotification', (payload) => {
-  showOpenChamberNotification(payload as { title?: unknown; body?: unknown; sessionId?: unknown; requireHidden?: unknown } | undefined);
+  showOpenChamberNotification(payload as VSCodeNotificationRequest | undefined);
 });
 
 onCommand('viewerStateChanged', (payload) => {
@@ -2013,6 +1976,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         title,
         body: shouldApplyTemplateMessage(template.message, body, variables) ? body : `${variables.model_name} completed the task`,
         sessionId,
+        kind: isSubtask ? 'subtask' : 'completion',
         requireHidden,
       });
       return;
@@ -2031,6 +1995,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         title,
         body: shouldApplyTemplateMessage(template.message, body, variables) ? body : 'An error occurred',
         sessionId,
+        kind: 'error',
         requireHidden,
       });
       return;
@@ -2048,6 +2013,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         title,
         body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : header || 'Agent is waiting for your response',
         sessionId,
+        kind: 'question',
         requireHidden,
       });
       return;
@@ -2067,6 +2033,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         title,
         body: shouldApplyTemplateMessage(template.message, body, permissionVariables) ? body : fallbackMessage,
         sessionId,
+        kind: 'question',
         requireHidden,
       });
     }

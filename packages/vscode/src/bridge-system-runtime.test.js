@@ -25,6 +25,12 @@ class Range {
 
 mock.module('vscode', () => ({
   commands: { executeCommand },
+  window: {
+    state: { focused: false },
+    showInformationMessage: mock(async () => undefined),
+    showWarningMessage: mock(async () => undefined),
+    showErrorMessage: mock(async () => undefined),
+  },
   workspace: {
     get workspaceFolders() {
       return currentWorkspaceFolders;

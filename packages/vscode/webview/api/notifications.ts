@@ -1,40 +1,34 @@
 import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import { sendBridgeMessage } from './bridge';
 
-const showWebviewNotification = async (payload?: NotificationPayload): Promise<boolean> => {
-  if (typeof Notification === 'undefined') {
-    return false;
-  }
-
-  if (Notification.permission === 'default') {
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      return false;
-    }
-  }
-
-  if (Notification.permission !== 'granted') {
-    return false;
-  }
-
-  const title = typeof payload?.title === 'string' && payload.title.trim().length > 0
-    ? payload.title.trim()
-    : 'OpenChamber';
-  const body = typeof payload?.body === 'string' ? payload.body : '';
-
-  new Notification(title, { body });
-  return true;
-};
-
+/**
+ * VS Code runtime notifications.
+ *
+ * The browser `Notification` API can never display from a VS Code webview
+ * (subframe, not the top-level browsing context), so delivery is delegated to
+ * the extension host over `api:notifications:show`, which uses
+ * `vscode.window.show*Message`. The boolean resolves to the host's real
+ * outcome, so the Settings test button reports honestly instead of always
+ * claiming success.
+ */
 export const createVSCodeNotificationsAPI = (): NotificationsAPI => ({
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
     try {
-      return await showWebviewNotification(payload);
+      const result = await sendBridgeMessage<{ shown?: boolean }>('api:notifications:show', {
+        title: payload?.title,
+        body: payload?.body,
+        tag: payload?.tag,
+        kind: payload?.kind ?? 'completion',
+        sessionId: payload?.sessionId,
+        requireHidden: payload?.requireHidden,
+      });
+      return result?.shown !== false;
     } catch {
       return false;
     }
   },
 
   async canNotify(): Promise<boolean> {
-    return typeof Notification !== 'undefined' && Notification.permission !== 'denied';
+    return true;
   },
 });
