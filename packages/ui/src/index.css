@@ -320,11 +320,19 @@ div[data-chat-input-footer="true"] {
    fading them out above the composer keeps the composer's top edge from
    cutting a line in half. Only then (`data-live-tail`: a reply streams and the
    view follows it): at rest and while reading history the rows slide under
-   the composer's glass, which is what makes it read as floating. In flow
-   (draft, expanded editor) the inset is unset and the fade stays at the
-   scroller's edge. */
+   the composer's glass, which is what makes it read as floating; there the
+   end fade starts just above the composer and runs to the scroller's edge,
+   so rows thin out under the glass and beside a composer narrower than the
+   transcript (wide layout) instead of meeting the window's edge at full
+   strength. In flow (draft, expanded editor) the inset is unset and the
+   fade stays at the scroller's edge. */
+.chat-scroll {
+  --scroll-shadow-end-size: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + var(--scroll-shadow-size));
+}
+
 [data-live-tail="true"] .chat-scroll {
   --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px));
+  --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"] {
@@ -342,7 +350,7 @@ div[data-chat-input-footer="true"] {
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
     transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
@@ -350,7 +358,7 @@ div[data-chat-input-footer="true"] {
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
     transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
@@ -392,13 +400,13 @@ div[data-chat-input-footer="true"] {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
     transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-size)),
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
     transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
