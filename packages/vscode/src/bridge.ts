@@ -130,7 +130,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     if (configResponse) {
       return configResponse;
     }
-    const notificationsResponse = await handleNotificationsBridgeMessage({ id, type, payload });
+    const notificationsResponse = await handleNotificationsBridgeMessage(
+      { id, type, payload },
+      ctx?.context?.extensionUri.fsPath,
+    );
     if (notificationsResponse) {
       return notificationsResponse;
     }

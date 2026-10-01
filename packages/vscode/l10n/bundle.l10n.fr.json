@@ -26,5 +26,6 @@
   "Failed to start OpenCode: {0}": "Impossible de démarrer OpenCode : {0}",
   "New Session": "Nouvelle session",
   "Session": "Session",
-  "Run on several models": "Exécuter sur plusieurs modèles"
+  "Run on several models": "Exécuter sur plusieurs modèles",
+  "Show": "Afficher"
 }

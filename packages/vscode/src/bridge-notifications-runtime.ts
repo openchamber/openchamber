@@ -10,11 +10,15 @@ type BridgeMessageInput = {
 /** Notification delivery bridge. Extensible: kinds route inside `notifications.ts`, not here. */
 export async function handleNotificationsBridgeMessage(
   message: BridgeMessageInput,
+  extensionPath?: string,
 ): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
   if (type === 'api:notifications:show') {
-    const shown = await showVSCodeNotification((payload ?? {}) as Parameters<typeof showVSCodeNotification>[0]);
+    const shown = await showVSCodeNotification(
+      (payload ?? {}) as Parameters<typeof showVSCodeNotification>[0],
+      { extensionPath },
+    );
     return { id, type, success: true, data: { shown } };
   }
 

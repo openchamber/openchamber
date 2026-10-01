@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { tryShowOsToast } from './osToast';
 
 /**
  * Extension-host notification delivery for the VS Code runtime.
@@ -87,11 +88,17 @@ const formatMessage = (title: string, body: string): string => {
 
 /**
  * Show a notification via the VS Code host UI.
+ * On Windows the OS Action Center is tried first (vendored SnoreToast
+ * helper); anything else — or any OS-toast failure — falls back to the
+ * in-window `show*Message` surface so a notification is never silently lost.
  * @returns true when the toast was shown (or intentionally suppressed by
  * `requireHidden`/dedup, which is not a failure); false only when delivery
  * was impossible or threw, so the Settings test button reports honestly.
  */
-export const showVSCodeNotification = async (payload?: VSCodeNotificationPayload): Promise<boolean> => {
+export const showVSCodeNotification = async (
+  payload?: VSCodeNotificationPayload,
+  opts?: { extensionPath?: string },
+): Promise<boolean> => {
   const title = normalizeText(payload?.title) || 'OpenChamber';
   const body = normalizeText(payload?.body);
   const sessionId = normalizeText(payload?.sessionId);
@@ -103,16 +110,23 @@ export const showVSCodeNotification = async (payload?: VSCodeNotificationPayload
     return true;
   }
 
-  if (!claimNotification(getClaimKey(title, body, sessionId, tag))) {
+  // Test notifications are exempt from dedup: the Settings test button must
+  // prove delivery on every press, not just the first per 10s window.
+  if (kind !== 'test' && !claimNotification(getClaimKey(title, body, sessionId, tag))) {
+    return true;
+  }
+
+  if (await tryShowOsToast({ title, body, extensionPath: opts?.extensionPath })) {
     return true;
   }
 
   const show: ShowFn = CHANNELS[kind] ?? CHANNELS.completion;
   try {
     const message = formatMessage(title, body);
+    const showLabel = vscode.l10n.t('Show');
     if (sessionId) {
-      const picked = await show(message, 'Show');
-      if (picked === 'Show') {
+      const picked = await show(message, showLabel);
+      if (picked === showLabel) {
         await vscode.commands.executeCommand('openchamber.openSidebar').then(
           () => undefined,
           () => undefined,

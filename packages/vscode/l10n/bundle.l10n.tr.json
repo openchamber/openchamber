@@ -26,5 +26,6 @@
   "Failed to start OpenCode: {0}": "OpenCode başlatılamadı: {0}",
   "New Session": "Yeni Oturum",
   "Session": "Oturum",
-  "Run on several models": "Birkaç modelde çalıştır"
+  "Run on several models": "Birkaç modelde çalıştır",
+  "Show": "Göster"
 }

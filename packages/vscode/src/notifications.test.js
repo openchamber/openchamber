@@ -16,6 +16,7 @@ mock.module('vscode', () => ({
     showErrorMessage,
   },
   commands: { executeCommand },
+  l10n: { t: (message) => message },
 }));
 
 const { showVSCodeNotification, __testOnly } = await import('./notifications.ts');
@@ -58,6 +59,13 @@ describe('extension-host notifications (replaces webview Notification API)', () 
     const second = await showVSCodeNotification(payload);
     expect(second).toBe(true);
     expect(showInformationMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test('test kind is exempt from dedup so every press proves delivery', async () => {
+    const payload = { title: 'Test', body: 'probe', kind: 'test', tag: 'openchamber-test' };
+    await showVSCodeNotification(payload);
+    await showVSCodeNotification(payload);
+    expect(showInformationMessage).toHaveBeenCalledTimes(2);
   });
 
   test('host failure reports false so the Settings test button is honest', async () => {

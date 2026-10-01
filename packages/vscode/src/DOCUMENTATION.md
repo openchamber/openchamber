@@ -92,7 +92,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - The extension host is always the `vscode` surface kind: per-surface profile keys it changes land under `surfaces.vscode` in `preferences.json` and reads resolve `vscode` first, base otherwise (mirrors the server's header-driven behaviour).
 
 - `bridge-system-runtime.ts`
-  - System/editor/provider/quota/notification/update-check message handlers.
+  - System/editor/provider/quota/update-check message handlers.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories).
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
   - Enterprise mode: the extension runs no OpenChamber server, so it reads the same machine policy through the bundled `packages/web/server/lib/enterprise-mode.js` (policy file, or `OPENCHAMBER_ENTERPRISE_MODE` in the editor's environment). `api:openchamber:enterprise-policy` answers the webview's `/api/openchamber/enterprise-policy`; with the mode on, `api:provider:upsert` is refused, the update check never reports usage, and `bridge-proxy-runtime.ts` answers the provider-connect OpenCode routes (`isProviderConnectRequest`) with 403 `enterprise_mode` instead of forwarding them; MCP server sign-in passes, as on the web server. Jev, relay, tunnels, push and cloud speech do not exist here.
@@ -100,6 +100,12 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Owns managed OpenCode upgrade status handlers and capability reporting.
   - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API). Updates preserve existing provider, option, and retained-model fields that the form does not manage while honoring explicit model, header, and env removal. Legacy `providers` entries migrate to the canonical `provider` key when edited.
   - Quota handlers keep managed exe.dev, Ollama Cloud, and Cursor credentials in the extension data directory with the same private-file contract as the web runtime. exe.dev uses one command-scoped usage token for the aggregate billing shared by every `exe-*` model provider.
+
+- `bridge-notifications-runtime.ts`
+  - Notification delivery bridge (`api:notifications:show`). The webview keeps filtering, templating and cooldowns and only delegates delivery; kinds route to their surface inside `notifications.ts`.
+
+- `notifications.ts` / `osToast.ts`
+  - Extension-host delivery: on Windows the OS Action Center is tried first via the vendored SnoreToast helper (`vendor/snoreToast/`, LGPL-3.0, spawned detached fire-and-forget), and any failure falls back to the in-window `show*Message` surface (error/question/completion channels). Dedup (10s claim window, test kind exempt) and hidden-only suppression live here.
   - `ollamaQuota.ts` owns the Ollama settings request and parser shared by credential validation and quota refresh. Both reject redirects, failed HTTP responses, and pages without parsed windows, with a 15-second request timeout. Validation finishes before the bridge writes a replacement cookie. Monthly dollar quotas and legacy session/weekly/premium quotas remain supported; zero extra-credit balances are omitted.
 
 - OpenCode v1 recovery
