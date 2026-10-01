@@ -18,6 +18,9 @@ const KIND_ICON = {
     heading: 'text',
 } satisfies Record<DocumentSymbolKind, IconName>;
 
+/** Marks the control that opens and closes the panel (the editor toolbar button). */
+const DOCUMENT_SYMBOLS_TOGGLE_ATTRIBUTE = 'data-document-symbols-toggle';
+
 type DocumentSymbolsPanelProps = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -50,7 +53,11 @@ export function DocumentSymbolsPanel({ open, onOpenChange, view }: DocumentSymbo
         if (!open) return;
         const handlePointerDown = (event: PointerEvent) => {
             const target = event.target;
-            if (panelRef.current && target instanceof Node && !panelRef.current.contains(target)) onOpenChange(false);
+            if (!(target instanceof Element) || !panelRef.current || panelRef.current.contains(target)) return;
+            // The button that toggles the panel closes it with its own click;
+            // closing here first would let that click open it again.
+            if (target.closest(`[${DOCUMENT_SYMBOLS_TOGGLE_ATTRIBUTE}]`)) return;
+            onOpenChange(false);
         };
         document.addEventListener('pointerdown', handlePointerDown, true);
         return () => document.removeEventListener('pointerdown', handlePointerDown, true);
@@ -71,7 +78,10 @@ export function DocumentSymbolsPanel({ open, onOpenChange, view }: DocumentSymbo
     return (
         <div
             ref={panelRef}
-            className="absolute left-3 top-3 z-40 h-[min(24rem,calc(100%-1.5rem))] w-[min(28rem,calc(100%-1.5rem))] shadow-lg"
+            data-editor-overlay
+            // `Command` leaves the background to its container (a dialog or a
+            // menu does it elsewhere), so the panel paints it here.
+            className="absolute left-3 top-3 z-40 w-[min(28rem,calc(100%-1.5rem))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] shadow-lg"
             onKeyDown={(event) => {
                 if (event.key !== 'Escape') return;
                 event.preventDefault();
@@ -92,7 +102,8 @@ export function DocumentSymbolsPanel({ open, onOpenChange, view }: DocumentSymbo
                     placeholder={t('filesView.symbols.placeholder')}
                     aria-label={t('filesView.symbols.placeholder')}
                 />
-                <CommandList>
+                {/* The panel fits its content; a long outline scrolls. */}
+                <CommandList className="max-h-[min(20rem,calc(100vh-16rem))]">
                     <CommandEmpty className="px-3 py-4 typography-meta text-muted-foreground">
                         {symbols.length === 0 ? t('filesView.symbols.noneInFile') : t('filesView.symbols.noMatches')}
                     </CommandEmpty>

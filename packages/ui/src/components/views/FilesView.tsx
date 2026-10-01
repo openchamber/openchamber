@@ -3977,6 +3977,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       setIsGoToLineOpen((open) => !open);
                       event.currentTarget.blur();
                     }}
+                    data-go-to-line-toggle
                     className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
                     title={t('filesView.editor.goToLine')}
                   >
@@ -3991,6 +3992,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       setIsSymbolsOpen((open) => !open);
                       event.currentTarget.blur();
                     }}
+                    data-document-symbols-toggle
                     className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
                     aria-label={t('filesView.editor.symbols')}
                   >

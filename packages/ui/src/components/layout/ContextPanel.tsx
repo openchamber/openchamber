@@ -95,7 +95,7 @@ import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { GUEST_SURFACE_DOCK_SIZE_MIN } from '@openchamber/sdk';
 import { isPluginContextPanelMode, pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
-import { isVimEditorEventTarget } from '@/lib/editorFocus';
+import { isEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
@@ -818,9 +818,14 @@ export const ContextPanel: React.FC = () => {
     if (isTerminalEventTarget(event.target)) {
       return;
     }
-    // Same for the file editor on the Vim keymap: Escape leaves INSERT mode
-    // there, and CodeMirror only sees it if this handler stays out of the way.
-    if (isVimEditorEventTarget(event.target)) {
+    // Same for the file editor and what it opens over itself (search, the
+    // symbol list, go to line): Escape closes those, leaves Vim's INSERT mode
+    // or collapses several cursors, and must not close the whole panel.
+    if (isEditorEventTarget(event.target)) {
+      return;
+    }
+    // Something under the panel already handled this Escape.
+    if (event.defaultPrevented) {
       return;
     }
 
