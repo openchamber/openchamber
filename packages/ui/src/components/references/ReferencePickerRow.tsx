@@ -21,6 +21,32 @@ const toLabels = (labels: ReadonlyArray<GitHubIssueLabel | LinearIssueLabel> | u
     (labels ?? []).map((label) => ({ name: label.name, color: labelColor(label.color) }))
 );
 
+// GitHub serves any size; a row needs 32 px (16 px at 2x), not the full image.
+const rowAvatarUrl = (url: string): string => {
+    try {
+        const parsed = new URL(url);
+        if (parsed.hostname !== 'avatars.githubusercontent.com') return url;
+        parsed.searchParams.set('s', '32');
+        return parsed.toString();
+    } catch {
+        return url;
+    }
+};
+
+/** Who an item belongs to: avatar, or the name's initial, then the name. */
+const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => (
+    <span className="inline-flex min-w-0 items-center gap-1">
+        {avatarUrl ? (
+            <img src={rowAvatarUrl(avatarUrl)} alt="" loading="lazy" className="size-4 shrink-0 rounded-full bg-surface-muted" />
+        ) : (
+            <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                {name.slice(0, 1).toUpperCase()}
+            </span>
+        )}
+        <span className="truncate">{name}</span>
+    </span>
+);
+
 export const ReferenceLabelChips: React.FC<{ labels: Label[]; max?: number }> = ({ labels, max }) => {
     if (labels.length === 0) return null;
     const shown = max === undefined ? labels : labels.slice(0, max);
@@ -114,13 +140,13 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                     {item.source === 'github' && item.reference.author ? (
                         <>
                             <Dot />
-                            <span className="truncate">{item.reference.author.login}</span>
+                            <RowPerson name={item.reference.author.login} avatarUrl={item.reference.author.avatarUrl} />
                         </>
                     ) : null}
                     {item.source === 'linear' && item.issue.assignee ? (
                         <>
                             <Dot />
-                            <span className="truncate">{item.issue.assignee.displayName || item.issue.assignee.name}</span>
+                            <RowPerson name={item.issue.assignee.displayName || item.issue.assignee.name || '—'} avatarUrl={item.issue.assignee.avatarUrl} />
                         </>
                     ) : null}
                     {updated ? (
