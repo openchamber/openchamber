@@ -2,6 +2,71 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.1.0] - 2026-10-01
+
+### New
+
+- **Search across your conversations.** Turn it on in Settings → Chat → Message search, then type in Cmd/Ctrl+P to find a message in any session, or press Cmd/Ctrl+F in a chat to search that conversation. Picking a result opens the message, older history included. The index stays on the machine running OpenChamber, and it can include the agent's reasoning too.
+- **Chat: background commands and subagents stay visible while they run.** A command or subagent sent to the background shows as running in its row with a live log, and you can stop it there. Send a running step to the background from the status chip or with Cmd/Ctrl+Shift+B.
+- **Files: a much better editor.** Changed lines are marked next to the line numbers, code folds, brackets and quotes close themselves, Alt+click adds a cursor, and Cmd/Ctrl+Shift+O lists the functions, classes and headings in the file. A file opened from the tree stays in a preview tab until you edit it.
+- Chat: copy a link to a single message from its action row. Opening the link opens the session on that message.
+- Sessions: go back and forward through the sessions you visited with Cmd/Ctrl+[ and Cmd/Ctrl+]. Cycling favourite models moved to Ctrl+Alt+[ and Ctrl+Alt+].
+- Sessions: archive the current session with Cmd/Ctrl+K Backspace, and every archive message offers Undo.
+- Sidebar: a session shows the PRs linked to it next to its branch's PR, and a session without a PR shows its linked issues and whether they are open or closed. PR tooltips show the PR title.
+- Terminal: drag tabs to reorder them and rename them from the tab menu. Closing the last tab closes the terminal.
+- Preview: action URLs can use the worktree name, and portless addresses (`*.localhost`) open in the browser panel.
+- Chat: a failed reply has Show response details with what the provider answered, and Settings/Providers shows Sign in again for a connection that needs a new sign-in.
+- Scheduled tasks: schedule tasks in chats outside a project, and open Scheduled tasks on mobile.
+- Chat: shell steps have a Copy output button.
+- Sidebar: Shift+click on a worktree's delete button removes a clean worktree and its local branch without the dialog (thanks to @yulia-ivashko).
+
+### Improvements
+
+- Command palette: it opens near the top at a fixed height, groups results under headings, matches words from their start, shows file names with their folder, lists open files first and has a Reload UI command.
+- Sessions: a session opens where you left it, and the app reopens the session that was open when you closed it.
+- Chat: in the wide layout the conversation uses the full chat width, while the message box keeps its width.
+- Chat: icons beside a session show whether it is running, has a background subagent or command, or has unread replies.
+- Chat: copying selected text from a reply copies it as markdown.
+- Worktrees: a new worktree based on a pushed branch starts from its latest version on the remote. Your local branch stays where it is.
+- Browser: tabs restored from the last run load only when you open them, and an agent's screenshot no longer brings the browser panel to the front.
+- Chat: more than four changed files under an answer fold into a +N chip (thanks to @yulia-ivashko).
+- Chat: very long error messages are collapsed (thanks to @yulia-ivashko).
+- Sidebar: a tooltip explains what a PR's color means (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Chat: a turn run by the OpenCode terminal app or `opencode run` no longer shows as stopped while it is still going, and its running tool cards stay as they are (thanks to @yulia-ivashko).
+- Work status: pinned messages from far back in a long session show their text, and clicking one opens it.
+- Sidebar: a PR merged or closed on GitHub updates in the sidebar, where it stayed orange for hours. A PR waiting only for a review is no longer orange, and badges in Timeline, Recent and In work keep updating while the project is collapsed.
+- Git: repositories inside symlinked folders show up in the Git tab's repository picker.
+- Chat: very large messages open without freezing the page, and long answers full of code or logs stream without slowing down (thanks to @yulia-ivashko).
+- Providers: switching to a worktree keeps plugin models like Claude Code, the agent and the thinking level you picked.
+- Routing: thinking levels show their names, and replies routed with a level saved by an older version no longer stop with "variant unavailable" (thanks to @jiz4oh and @yulia-ivashko).
+- Routing: typing a new line or "- " in a category description keeps what you typed.
+- Dictation: long local dictations no longer time out, and they are split at real pauses so words at the seams come out right (thanks to @Tobias-Conrad and @yulia-ivashko).
+- Chat: the row with the time and buttons under a message you just sent shows in full (thanks to @yulia-ivashko).
+- Chat: the end of a reply that is still streaming fades out above the message box (thanks to @yulia-ivashko).
+- New session: the uncommitted-changes warning opens only on hover. It covered the greeting.
+- Model picker: the list stays in place when you star a model (thanks to @yulia-ivashko).
+- Mobile (Android): the back button closes the topmost sheet or popup first.
+- Browser: dev servers listening on IPv6 localhost load in the browser panel, which waited for them forever.
+- Browser: a saved tab for a dev server that no longer runs stops retrying at every launch (thanks to @yulia-ivashko).
+- Browser: annotating a page with an open dialog works, with the overlay above the dialog (thanks to @yulia-ivashko).
+- Diff: reopening a diff no longer crashes the viewer.
+- Enterprise mode: signing in to MCP servers that use OAuth works (thanks to @yulia-ivashko).
+- Agents: asking OpenChamber's tool for another project's sessions returns that project's sessions (thanks to @yulia-ivashko).
+- Desktop: switching to Local from a remote's login screen opens Local (thanks to @yulia-ivashko).
+- Desktop: SSH instances stop reconnecting forever when the remote login shell fails (thanks to @yulia-ivashko).
+- Desktop (Linux AppImage): programs started from the terminal or by the agent run normally, without the AppImage's own paths (thanks to @yulia-ivashko).
+- Usage: OpenRouter usage uses your configured base URL (thanks to @DeryFerd), and Kimi China plan usage shows up (thanks to @yulia-ivashko).
+- Sidebar: sessions in a folder are indented under its header (thanks to @yulia-ivashko).
+- Sidebar: the Stats button opens and closes the Stats panel (thanks to @yulia-ivashko).
+- Settings/Agents: the Reset button that always failed is gone, and deleted agents leave the list (thanks to @yulia-ivashko).
+
+### Misc
+
+- Bundled OpenCode updated to 2.0.21.
+
 ## [2.0.4] - 2026-09-28
 
 ### New
