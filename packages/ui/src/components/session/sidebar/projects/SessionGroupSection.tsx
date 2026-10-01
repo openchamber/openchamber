@@ -49,6 +49,7 @@ import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -365,6 +366,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
+  const worktreeRemoving = useWorktreeRemoving(!group.isMain && group.worktree ? group.worktree.path : null);
   // PR state for the worktree sub-header (grouped display mode).
   const groupPrKey = React.useMemo(() => {
     if (group.isMain || group.isArchivedBucket || hideGroupLabel) return null;
@@ -1057,7 +1059,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   }
 
   return (
-    <><div className="oc-group">
+    <><div className={cn('oc-group', worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined}>
       <div className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
       <Tooltip disabled={groupPrSummary ? !groupPrStatusLabel : !primaryGroupIssue}>
       <TooltipTrigger asChild>
@@ -1108,7 +1110,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                 // Worktree sub-header in the flat visual language: slim
                 // folder-style row with a PR-tinted branch icon and PR badge.
                 <span className="flex w-full min-w-0 items-center gap-1.5">
-                  <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  {worktreeRemoving ? (
+                    <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" title={t('sessions.sidebar.group.worktreeRemoving')} role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
+                      <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
+                    </span>
+                  ) : <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <Icon name={group.space ? 'box-3' : 'git-branch'}
                       className={cn('h-3.5 w-3.5 shrink-0', !groupPrColor && 'text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')}
                       style={groupPrColor ? { color: groupPrColor } : undefined}
@@ -1120,7 +1126,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     )}>
                       {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                     </span>
-                  </span>
+                  </span>}
                   <span className="min-w-0 truncate typography-ui-label font-semibold text-muted-foreground">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
@@ -1234,7 +1240,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
             </Tooltip>
           </div>
         ) : null}
-        {group.directory && !group.isMain && group.worktree ? (
+        {group.directory && !group.isMain && group.worktree && !worktreeRemoving ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <WorktreeDeleteAction label={group.label} sessions={allGroupSessions} worktree={group.worktree} />
           </div>

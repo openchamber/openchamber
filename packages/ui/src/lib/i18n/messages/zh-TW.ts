@@ -761,6 +761,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '關聯 worktree 已封存。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'worktree 已封存且遠端分支已移除。',
   'sessions.sidebar.group.worktreeMissing': '工作樹資料夾遺失',
+  'sessions.sidebar.group.worktreeRemoving': '正在移除 worktree…',
   'sessions.sidebar.project.folderMissing': '專案資料夾不存在或無法使用',
   'sessions.sidebar.group.space': '隔離空間',
   'sessions.sidebar.group.spaceStale': '該空間沒有回應。工作階段可能已過時。',

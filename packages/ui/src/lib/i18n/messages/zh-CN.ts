@@ -748,6 +748,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '关联工作树已归档。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': '工作树已归档且远程分支已移除。',
   'sessions.sidebar.group.worktreeMissing': '工作树文件夹缺失',
+  'sessions.sidebar.group.worktreeRemoving': '正在移除工作树…',
   'sessions.sidebar.project.folderMissing': '项目文件夹不存在或不可用',
   'sessions.sidebar.group.space': '隔离空间',
   'sessions.sidebar.group.spaceStale': '该空间没有响应。会话可能已过时。',

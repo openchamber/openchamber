@@ -748,6 +748,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Worktrees adjuntos archivados.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktrees archivados y ramas remotas eliminadas.",
   "sessions.sidebar.group.worktreeMissing": "Falta la carpeta del worktree",
+  "sessions.sidebar.group.worktreeRemoving": "Eliminando el worktree…",
   "sessions.sidebar.project.folderMissing": "La carpeta del proyecto no existe o no está disponible",
   "sessions.sidebar.group.space": "Espacio aislado",
   "sessions.sidebar.group.spaceStale": "El espacio no responde. Puede que las sesiones no estén al día.",

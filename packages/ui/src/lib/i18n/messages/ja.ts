@@ -748,6 +748,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '添付のワークツリーをアーカイブしました。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'ワークツリーをアーカイブし、リモートブランチを削除しました。',
   'sessions.sidebar.group.worktreeMissing': 'ワークツリーのフォルダーがありません',
+  'sessions.sidebar.group.worktreeRemoving': 'ワークツリーを削除しています…',
   'sessions.sidebar.project.folderMissing': 'プロジェクトフォルダーが見つからないか、利用できません',
   'sessions.sidebar.group.space': '隔離スペース',
   'sessions.sidebar.group.spaceStale': 'スペースが応答していません。セッションが古い可能性があります。',

@@ -15,6 +15,7 @@ const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
 const listRejecters: Array<(reason: Error) => void> = [];
 let listImplementation: ((directory: string) => Promise<WorktreeListEntry[]>) | undefined;
+let removeImplementation: (() => Promise<{ success: boolean }>) | undefined;
 const createPayloads: unknown[] = [];
 const validatePayloads: unknown[] = [];
 const createdWorktree = {
@@ -110,7 +111,7 @@ mock.module('@/lib/gitApi', () => ({
         validatePayloads.push(payload);
         return Promise.resolve({ ok: true, errors: [] });
       }),
-      remove: mock(() => Promise.resolve({ success: true })),
+      remove: mock(() => removeImplementation?.() ?? Promise.resolve({ success: true })),
     },
   },
 }));
@@ -132,6 +133,7 @@ const {
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
+const { isWorktreeRemoving } = await import('./worktreeRemovalState');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -500,6 +502,48 @@ describe('worktreeManager list invalidation', () => {
     expect(sessionState.availableWorktrees).toEqual([sibling, ...unrelatedEntries]);
     expect(sessionState.worktreeMetadata.has('removed-session')).toBe(false);
     expect(sessionState.worktreeMetadata.get('sibling-session')).toBe(sibling);
+  });
+
+  describe('removal shown on the row', () => {
+    const target: WorktreeMetadata = {
+      path: '/worktrees/target',
+      projectDirectory: '/repo',
+      branch: 'target',
+      label: 'target',
+    };
+
+    beforeEach(() => {
+      sessionState.availableWorktreesByProject = new Map([['/repo', [target]]]);
+      sessionState.availableWorktrees = [target];
+    });
+
+    test('the row shows the removal until git answers, then leaves with it', async () => {
+      let answerGit: (value: { success: boolean }) => void = () => undefined;
+      removeImplementation = () => new Promise((resolve) => { answerGit = resolve; });
+      try {
+        const removal = removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(isWorktreeRemoving(target.path)).toBe(true);
+        expect(sessionState.availableWorktrees).toEqual([target]);
+
+        answerGit({ success: true });
+        await removal;
+        expect(isWorktreeRemoving(target.path)).toBe(false);
+        expect(sessionState.availableWorktrees).toEqual([]);
+      } finally {
+        removeImplementation = undefined;
+      }
+    });
+
+    test('a failed removal clears the state and keeps the row', async () => {
+      removeImplementation = () => Promise.reject(new Error('folder in use'));
+      try {
+        await expect(removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target)).rejects.toThrow('folder in use');
+        expect(isWorktreeRemoving(target.path)).toBe(false);
+        expect(sessionState.availableWorktrees).toEqual([target]);
+      } finally {
+        removeImplementation = undefined;
+      }
+    });
   });
 });
 

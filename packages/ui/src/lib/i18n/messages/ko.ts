@@ -748,6 +748,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '첨부됨 워크트리 보관됨.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': '워크트리가 보관되고 리모트 브랜치가 제거되었습니다.',
   'sessions.sidebar.group.worktreeMissing': '워크트리 폴더가 없습니다',
+  'sessions.sidebar.group.worktreeRemoving': '워크트리 제거 중…',
   'sessions.sidebar.project.folderMissing': '프로젝트 폴더가 없거나 사용할 수 없습니다',
   'sessions.sidebar.group.space': '격리 공간',
   'sessions.sidebar.group.spaceStale': '공간이 응답하지 않습니다. 세션이 오래된 것일 수 있습니다.',

@@ -14,6 +14,7 @@ import {
   startWorktreeBootstrapWatcher,
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
+import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import type {
   CreateGitWorktreePayload,
   GitWorktreeBootstrapStatus,
@@ -731,12 +732,18 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   const deleteRemote = Boolean(options?.deleteRemoteBranch);
   const deleteLocalBranch = options?.deleteLocalBranch === true;
   const remoteName = options?.remoteName;
-  const raw = await git.worktree.remove(projectDirectory, {
-    directory: worktree.path,
-    deleteLocalBranch,
-  });
-  if (!raw?.success) {
-    throw new Error('Worktree removal failed');
+  markWorktreeRemoving(worktree.path);
+  try {
+    const raw = await git.worktree.remove(projectDirectory, {
+      directory: worktree.path,
+      deleteLocalBranch,
+    });
+    if (!raw?.success) {
+      throw new Error('Worktree removal failed');
+    }
+  } catch (error) {
+    clearWorktreeRemoval(worktree.path);
+    throw error;
   }
 
   clearWorktreeBootstrapState(worktree.path);
@@ -775,6 +782,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     ),
     worktreeMetadata: updatedMetadata,
   });
+  clearWorktreeRemoval(worktree.path);
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {

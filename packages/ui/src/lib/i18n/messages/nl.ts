@@ -747,6 +747,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Gekoppelde worktrees gearchiveerd.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Worktrees gearchiveerd en remote branches verwijderd.',
   'sessions.sidebar.group.worktreeMissing': 'Worktree-map ontbreekt',
+  'sessions.sidebar.group.worktreeRemoving': 'Worktree wordt verwijderd…',
   'sessions.sidebar.project.folderMissing': 'Projectmap ontbreekt of is niet beschikbaar',
   'sessions.sidebar.group.space': 'Geïsoleerde ruimte',
   'sessions.sidebar.group.spaceStale': 'De ruimte reageert niet. Sessies zijn mogelijk verouderd.',

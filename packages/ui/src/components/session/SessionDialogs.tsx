@@ -18,6 +18,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { canDeleteWorktreeWithoutConfirm, getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
+import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -371,6 +372,8 @@ export const SessionDialogs: React.FC = () => {
     ): Promise<void> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
         const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name: getWorktreeDisplayName(worktree) }));
+        // The row shows it from here, through archiving the sessions too.
+        markWorktreeRemoving(worktree.path);
         return (async () => {
             try {
                 if (sessionIds.length > 0) {
@@ -402,6 +405,8 @@ export const SessionDialogs: React.FC = () => {
                     id: toastId,
                     description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
                 });
+            } finally {
+                clearWorktreeRemoval(worktree.path);
             }
         })();
     }, [archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, removeSelectedWorktree, t]);

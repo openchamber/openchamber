@@ -747,6 +747,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Attached worktrees archived.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Archived worktrees and removed remote branches.',
   'sessions.sidebar.group.worktreeMissing': 'Worktree folder is missing',
+  'sessions.sidebar.group.worktreeRemoving': 'Removing worktree…',
   'sessions.sidebar.project.folderMissing': 'Project folder is missing or unavailable',
   'sessions.sidebar.group.space': 'Isolated space',
   'sessions.sidebar.group.spaceStale': 'The space is not answering. Sessions may be stale.',

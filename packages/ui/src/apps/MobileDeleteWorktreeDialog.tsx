@@ -8,6 +8,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -94,6 +95,8 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
     const name = getWorktreeDisplayName(target);
     const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
+    // The row shows it from here, through archiving the sessions too.
+    markWorktreeRemoving(target.path);
     void (async () => {
       try {
         if (sessionIds.length > 0) {
@@ -132,6 +135,8 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           id: toastId,
           description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
         });
+      } finally {
+        clearWorktreeRemoval(target.path);
       }
     })();
   }, [archiveSessions, currentDirectory, deleteLocalBranch, deleteRemoteBranch, hasBranch, onDeleted, project, t, worktreePath]);
