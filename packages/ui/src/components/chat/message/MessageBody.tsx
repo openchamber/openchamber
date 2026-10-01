@@ -816,6 +816,8 @@ interface AssistantMessageActionButtonsProps {
     };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
     ttsText: string;
+    // Shared with the message's other reading controls; see useMessageTTS.
+    ttsReadingKey?: string;
     extraActions?: MessageExtraAction[];
 }
 
@@ -827,11 +829,12 @@ const AssistantMessageActionButtons = React.memo(({
     reviewTransferAction,
     onShareImage,
     ttsText,
+    ttsReadingKey,
     extraActions,
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
-    const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+    const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS(ttsReadingKey);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
@@ -1093,11 +1096,7 @@ const AssistantMessageActionButtons = React.memo(({
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={handleTTSClick}
                         >
-                            {isTTSPlaying ? (
-                                <Icon name="stop" className="h-3 w-3" />
-                            ) : (
-                                <Icon name="volume-up" className="h-3 w-3" />
-                            )}
+                            <Icon name="volume-up" className={cn('h-3 w-3', isTTSPlaying && 'animate-pulse')} />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{readAloudTooltip}</TooltipContent>
@@ -1701,10 +1700,11 @@ const AssistantMessageBody = React.memo(({
             onCopyLink={onCopyLink}
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
+            ttsReadingKey={messageId}
             reviewTransferAction={reviewTransferAction}
             extraActions={extraActions}
         />
-    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
 
     // The turn footer appends its own buttons (fork, multi-run) after this
     // group, so extension actions are rendered there separately, last.
@@ -1716,9 +1716,10 @@ const AssistantMessageBody = React.memo(({
             onCopyLink={onCopyLink}
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
+            ttsReadingKey={messageId}
             reviewTransferAction={reviewTransferAction}
         />
-    ), [assistantPlanText, hasCopyableText, isTouchContext, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
 
     const renderJustificationActions = React.useCallback((activity: NonNullable<TurnGroupingContext['activityParts']>[number]) => {
         if (!showSplitAssistantMessageActions || !isSortedRenderMode) {
@@ -2111,7 +2112,7 @@ const AssistantMessageBody = React.memo(({
     const [actionSheetOpen, setActionSheetOpen] = React.useState(false);
     const footerFactsRef = React.useRef<HTMLDivElement>(null);
     useFactsFit(footerFactsRef);
-    const { isPlaying: isFooterTTSPlaying, play: playFooterTTS, stop: stopFooterTTS } = useMessageTTS();
+    const { isPlaying: isFooterTTSPlaying, play: playFooterTTS, stop: stopFooterTTS } = useMessageTTS(messageId);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
@@ -2163,7 +2164,7 @@ const AssistantMessageBody = React.memo(({
             actions.push({
                 id: 'tts',
                 label: isFooterTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud'),
-                icon: <Icon name={isFooterTTSPlaying ? 'stop' : 'volume-up'} className="h-4 w-4" />,
+                icon: <Icon name="volume-up" className={cn('h-4 w-4', isFooterTTSPlaying && 'animate-pulse text-[var(--primary-text)]')} />,
                 onSelect: () => {
                     if (isFooterTTSPlaying) {
                         stopFooterTTS();
@@ -2349,7 +2350,11 @@ const AssistantMessageBody = React.memo(({
              )}
               style={CONTAIN_LAYOUT_STYLE}
           >
-              <TextSelectionMenu containerRef={messageContentRef} />
+              <TextSelectionMenu
+                  containerRef={messageContentRef}
+                  readingKey={messageId}
+                  canReadAloud={!isMiniChatSurface && showMessageTTSButtons}
+              />
              {canUseProjectPlanActions ? (
                  <SaveProjectPlanDialog
                      open={isPlanDialogOpen}
