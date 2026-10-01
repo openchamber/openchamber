@@ -85,7 +85,7 @@ export function parseSummaryRefs(value) {
   return [...refs.values()];
 }
 
-const checkContextSchema = z.discriminatedUnion('__typename', [
+export const checkContextSchema = z.discriminatedUnion('__typename', [
   z.object({
     __typename: z.literal('CheckRun'),
     databaseId: z.number().int().nullable(),

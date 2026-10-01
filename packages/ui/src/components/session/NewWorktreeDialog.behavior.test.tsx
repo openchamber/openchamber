@@ -16,13 +16,10 @@ for (const [name, descriptor] of previousRendererGlobals) {
 }
 rendererWindow.close();
 
-type GitHubSelection = {
-  type: 'issue';
-  item: { number: number; title: string };
-};
+type ReferenceConfirm = (selections: import('@/components/references/referencePickerItems').ReferencePickerSelection[]) => Promise<unknown>;
 
 const project = { id: 'project-a', path: '/workspace/project-a' };
-let selectGitHubItem: ((selection: GitHubSelection) => void) | null = null;
+let confirmReference: ReferenceConfirm | null = null;
 
 const projectStoreState = { getActiveProject: () => project };
 const githubAuthState = { status: { connected: true }, hasChecked: true };
@@ -172,13 +169,12 @@ mock.module('@/lib/git/branchNameGenerator', () => ({
   generateBranchSlug: () => 'draft-name',
 }));
 
-mock.module('./GitHubIntegrationDialog', () => ({
-  GitHubIntegrationDialog: ({ onSelect }: { onSelect: (selection: GitHubSelection) => void }) => {
-    selectGitHubItem = onSelect;
+mock.module('@/components/references/ReferencePickerDialog', () => ({
+  ReferencePickerDialog: ({ onConfirm }: { onConfirm: ReferenceConfirm }) => {
+    confirmReference = onConfirm;
     return null;
   },
 }));
-mock.module('./LinearIssuePickerDialog', () => ({ LinearIssuePickerDialog: () => null }));
 
 const { NewWorktreeDialog } = await import('./NewWorktreeDialog');
 const { I18nProvider } = await import('@/lib/i18n');
@@ -260,7 +256,7 @@ describe('NewWorktreeDialog behavior', () => {
       } finally {
         await act(async () => root.unmount());
         uiState.isMobile = false;
-        selectGitHubItem = null;
+        confirmReference = null;
         dom.restore();
       }
     });
@@ -306,7 +302,7 @@ describe('NewWorktreeDialog behavior', () => {
           window.removeEventListener('keydown', globalShortcut);
           await act(async () => root.unmount());
           uiState.isMobile = false;
-          selectGitHubItem = null;
+          confirmReference = null;
           dom.restore();
         }
       });
@@ -323,12 +319,32 @@ describe('NewWorktreeDialog behavior', () => {
           <NewWorktreeDialog open onOpenChange={() => undefined} />
         </I18nProvider>,
       ));
-      if (!selectGitHubItem) throw new Error('Expected GitHub selection handler');
+      const startFromGitHub = dom.container.querySelector<HTMLButtonElement>('button[aria-label="Start from GitHub Issue/PR"]');
+      if (!startFromGitHub) throw new Error('Missing start-from-GitHub button');
+      await act(async () => startFromGitHub.click());
+      if (!confirmReference) throw new Error('Expected the reference picker to open');
 
-      await act(async () => selectGitHubItem?.({
-        type: 'issue',
-        item: { number: 42, title: 'Keep the selected issue' },
-      }));
+      await act(async () => {
+        await confirmReference?.([{
+          source: 'github',
+          includeDiff: false,
+          reference: {
+            kind: 'issue',
+            number: 42,
+            title: 'Keep the selected issue',
+            url: 'https://github.com/acme/project/issues/42',
+            body: '',
+            bodyTruncated: false,
+            createdAt: null,
+            updatedAt: null,
+            author: null,
+            labels: [],
+            commentCount: 0,
+            sourceRepo: { owner: 'acme', repo: 'project', source: 'origin' },
+            state: 'open',
+          },
+        }]);
+      });
 
       const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
       const worktreeInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="my-worktree-directory"]');
@@ -350,7 +366,7 @@ describe('NewWorktreeDialog behavior', () => {
     } finally {
       await act(async () => root.unmount());
       actualSessionUIStore.useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
-      selectGitHubItem = null;
+      confirmReference = null;
       dom.restore();
     }
   });

@@ -1801,8 +1801,9 @@ export const PullRequestSection: React.FC<{
                       pr.body?.trim() ? (
                         <SimpleMarkdownRenderer
                           content={pr.body}
-                          className="typography-markdown-body min-w-0 text-muted-foreground break-words"
+                          className="typography-markdown-body min-w-0 text-muted-foreground break-words [&_img]:h-auto [&_img]:max-w-full"
                           enableFileReferences={false}
+                          allowRawHtml
                         />
                       ) : (
                         <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
@@ -2004,6 +2005,7 @@ export const PullRequestSection: React.FC<{
                                       selfMentionHighlightClass,
                                     ].filter(Boolean).join(' ')}
                                     enableFileReferences={false}
+                                    allowRawHtml
                                   />
                                 </div>
                               </div>

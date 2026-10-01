@@ -49,7 +49,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
             className={cn(
               'relative pointer-events-auto',
               'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
-              'rounded-xl border shadow-none overflow-hidden origin-center',
+              'rounded-xl border oc-modal-shadow overflow-hidden origin-center',
               'bg-background',
               'transition-all duration-150 ease-out',
               'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',

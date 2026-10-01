@@ -1162,110 +1162,99 @@ export function registerGitHubRoutes(app) {
 
   // ================= GitHub Issue APIs =================
 
-  app.get('/api/github/issues/list', async (req, res) => {
+  // One page of issues or PRs for the reference picker, or the item a pasted
+  // link or number names. Failures are errors, never an empty page: the
+  // picker keeps what it showed and offers a retry.
+  app.get('/api/github/references', async (req, res) => {
+    const { readReferenceFilter, readReferenceKind, searchGitHubReferences } = await import('./reference-search.js');
+    const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+    const kind = readReferenceKind(req.query?.kind);
+    if (!directory || !kind) {
+      return res.status(400).json({ error: 'directory and kind (issue or pull) are required' });
+    }
     try {
-      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
-      const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
-      if (!directory) {
-        return res.status(400).json({ error: 'directory is required' });
+      const { getOctokitOrNull, resolveGitHubRepoFromDirectory } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
       }
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, items: [], cursor: null, hasMore: false, total: 0 });
+      }
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+      const repos = (await resolveRepoNetwork(octokit, directory)) || [{ ...repo, source: 'origin' }];
+      const page = await searchGitHubReferences({
+        octokit,
+        repos,
+        kind,
+        filter: readReferenceFilter(req.query?.filter),
+        text: typeof req.query?.query === 'string' ? req.query.query : '',
+        cursor: typeof req.query?.cursor === 'string' ? req.query.cursor : null,
+      });
+      return res.json({ connected: true, repo, ...page });
+    } catch (error) {
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
+      const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./rate-limit.js');
+      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) {
+        noteGitHubRateLimit(error);
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      console.error('Failed to search GitHub references:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search GitHub issues and pull requests' });
+    }
+  });
 
+  // Comments of one issue or PR the picker previews, and a PR's size, review
+  // decision and checks.
+  app.get('/api/github/references/detail', async (req, res) => {
+    const { fetchReferenceDetail } = await import('./reference-search.js');
+    const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+    const number = typeof req.query?.number === 'string' ? Number(req.query.number) : NaN;
+    const requestedRepo = getRequestedRepo(req);
+    if (!directory || !requestedRepo || !Number.isInteger(number) || number <= 0) {
+      return res.status(400).json({ error: 'directory, owner, repo and number are required' });
+    }
+    try {
       const { getOctokitOrNull } = await getGitHubLibraries();
       const octokit = getOctokitOrNull();
       if (!octokit) {
         return res.json({ connected: false });
       }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
-
-      const repoNetwork = await resolveRepoNetwork(octokit, directory);
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      // Only the project's own repo network, like every other per-item route.
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
-        return res.json({ connected: true, repo: null, issues: [] });
+        return res.status(400).json({ error: 'Repository is not part of this project' });
       }
-
-      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
-      const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
-
-      const mapIssueSummary = (item, repoRef) => ({
-        number: item.number,
-        title: item.title,
-        url: item.html_url,
-        state: item.state === 'closed' ? 'closed' : 'open',
-        author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
-        labels: Array.isArray(item.labels)
-          ? item.labels
-              .map((label) => {
-                if (typeof label === 'string') return null;
-                const name = typeof label?.name === 'string' ? label.name : '';
-                if (!name) return null;
-                return { name, color: typeof label?.color === 'string' ? label.color : undefined };
-              })
-              .filter(Boolean)
-          : [],
-        sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-      });
-
-      if (searchQuery) {
-        const repoQualifiers = reposToQuery
-          .map((r) => `repo:${r.owner}/${r.repo}`)
-          .join(' ');
-        const q = `${repoQualifiers} ${searchQuery} type:issue state:open`;
-        try {
-          const searchResult = await octokit.rest.search.issuesAndPullRequests({
-            q,
-            per_page: 50,
-            page: effectivePage,
-          });
-          const totalCount = searchResult.data.total_count;
-          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
-          const issues = items
-            .filter((item) => !item?.pull_request)
-            .map((item) => {
-              const repoFullName = (item.repository_url || '').replace('https://api.github.com/repos/', '');
-              const matched = reposToQuery.find((r) => `${r.owner}/${r.repo}` === repoFullName);
-              return mapIssueSummary(item, matched || reposToQuery[0]);
-            });
-          const fetchedCount = (effectivePage - 1) * 50 + items.length;
-          const hasMore = fetchedCount < totalCount;
-          return res.json({ connected: true, repo, issues, page: effectivePage, hasMore });
-        } catch (error) {
-          console.error('Failed to search GitHub issues:', error);
-          return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
-        }
-      }
-
-      const queryRepo = async (repoRef) => {
-        try {
-          const list = await octokit.rest.issues.listForRepo({
-            owner: repoRef.owner,
-            repo: repoRef.repo,
-            state: 'open',
-            per_page: 50,
-            page: effectivePage,
-          });
-          const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
-          const hasMore = /rel="next"/.test(link);
-          const issues = (Array.isArray(list?.data) ? list.data : [])
-            .filter((item) => !item?.pull_request)
-            .map((item) => mapIssueSummary(item, repoRef));
-          return { issues, hasMore };
-        } catch (error) {
-          console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
-          return { issues: [], hasMore: false };
-        }
-      };
-
-      const results = await Promise.all(reposToQuery.map(queryRepo));
-      const allIssues = results.flatMap((r) => r.issues);
-      const anyHasMore = results.some((r) => r.hasMore);
-
-      return res.json({ connected: true, repo, issues: allIssues, page: effectivePage, hasMore: anyHasMore });
+      const detail = await fetchReferenceDetail({ octokit, owner: repo.owner, repo: repo.repo, number });
+      return res.json({ connected: true, detail });
     } catch (error) {
-      console.error('Failed to list GitHub issues:', error);
-      return res.status(500).json({ error: error.message || 'Failed to list GitHub issues' });
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
+      const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./rate-limit.js');
+      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) {
+        noteGitHubRateLimit(error);
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      console.error('Failed to load GitHub issue or pull request detail:', error);
+      return res.status(500).json({ error: error.message || 'Failed to load issue or pull request detail' });
     }
   });
 

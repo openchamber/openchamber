@@ -74,6 +74,7 @@ const ISSUE_SUMMARY_FIELDS = `
   title
   url
   priority
+  updatedAt
   state { id name type }
   assignee { name displayName avatarUrl }
   team { id key name }
@@ -282,6 +283,7 @@ function readIssueSummary(node) {
     team: readTeam(node.team),
     priority: readPriority(node.priority),
     labels: readLabels(node.labels),
+    updatedAt: readTrimmedString(node.updatedAt) || null,
   };
 }
 

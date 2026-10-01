@@ -15,6 +15,7 @@
 - `packages/web/server/lib/github/repo/index.js`: remote URL parsing and directory-to-repo resolution.
 - `packages/web/server/lib/github/pr-status.js`: PR lookup across remotes, forks, and upstreams.
 - `packages/web/server/lib/github/pr-summaries.js`: batched live state for PRs already known by number.
+- `packages/web/server/lib/github/reference-search.js`: issue and PR pages for the reference picker.
 - `packages/web/server/lib/github/checks-summary.js`: the one checks summarizer shared by every PR route.
 - `packages/web/server/index.js`: API route layer that calls this module.
 - `packages/web/src/api/github.ts`: web client wrapper for GitHub endpoints.
@@ -101,6 +102,16 @@ that page, so callers cannot mistake a partial page for a complete one.
 - A GraphQL `RATE_LIMITED` error (HTTP 200) records the shared rate-limit cooldown like a REST 403/429 and returns `503`; while the cooldown runs the route answers `503` without calling GitHub.
 - This route never discovers PRs; branch-to-PR resolution stays with `GET /api/github/pr/status`.
 
+## Reference picker lists
+
+- `GET /api/github/references?directory=&kind=issue|pull&filter=&query=&cursor=` answers one page (30) of the project's issues or PRs across its repo network (origin plus fork parent/source): `{ connected, repo, items, cursor, hasMore, total }`. `repo: null` means the project has no GitHub remote.
+- One GraphQL `search` document per page, open items newest-activity first. `filter` adds `assignee:@me` (`assigned`), `author:@me` (`created`) or `review-requested:@me` (`reviewRequested`); anything else is `open`. User text is appended as is, so GitHub qualifiers work; state and sort are added only when the text sets none.
+- A pasted `#123`, `123` or github.com issue/PR link skips search and reads that number with `issueOrPullRequest` in every network repo (a link: only its own repo), whatever the tab's kind.
+- Each item carries what a row and the preview show: state (issues `open` / `completed` / `not_planned`, PRs `open` / `closed` / `merged`), author, labels, comment count, the body cut at 20 000 characters (`bodyTruncated`), and for a PR draft, head/base and head repo (with `cloneUrl` for fork worktrees).
+- `GET /api/github/references/detail?directory=&owner=&repo=&number=` answers what the preview adds for one item: the newest 50 comments, oldest first, plus for a PR its reviews (a review's text or verdict, and each line comment with `path`/`line`), size, review decision and checks through the shared summarizer. The repo must be in the project's network. These fields stay off the page query: on a 30-PR page size, review decision and checks together ran past GitHub's 10 s search timeout (measured 2026-10-01), while one item answers in about a second.
+- Failures are errors, never an empty page; GraphQL `RATE_LIMITED` records the shared cooldown and answers `503`. The client cache lives in `packages/ui/src/components/references/`.
+- Attaching still reads full context through `issues/get` + `issues/comments` and `pulls/context`.
+
 ## Shared client state model
 
 - Client key is effectively `directory::branch`.
@@ -173,7 +184,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - Sidebar rows are not watched. The tracked set is the worktree branches whose badge is on screen in the current mode: Timeline rows in Timeline; expanded project groups and Recent rows in Projects; In work rows in both. Collapse state from the Projects view never limits Timeline. For that set the sidebar runs discovery through `refreshTargets` (first resolution, then every `5m` while a branch has no PR or only a closed/merged one).
 - Open PRs on those rows stay live through batched summaries (`useOpenPrSummarySync`): every `2m` while the window is visible, again when the window regains focus or visibility (at most once per `15s`), when new rows appear, and when cached statuses finish restoring after a reload. A PR merged or closed on GitHub turns so on the next batch, and failing checks show up the same way.
 - The batch skips watched entries (the Git view refreshes those in full) and PRs asked about within the cadence. A failed batch keeps the last known status and waits for the next cadence.
-- A session row shows its worktree branch's PR and the PRs linked to the session (`openchamber.linked_issues` entries of kind `pull`, see `packages/ui/src/lib/linkedIssues.ts`), each once, most urgent first (`blocked`, `open`, `draft`, `merged`, `closed`); the badge names the first and counts the rest, the tooltip lists all. Links come from a PR attached in the composer, a worktree created from a PR, the issue picker, the chat's Linked section, and a PR created in the Git view (linked to the open session when it works in that directory).
+- A session row shows its worktree branch's PR and the PRs linked to the session (`openchamber.linked_issues` entries of kind `pull`, see `packages/ui/src/lib/linkedIssues.ts`), each once, most urgent first (`blocked`, `open`, `draft`, `merged`, `closed`); the badge names the first and counts the rest, the tooltip lists all. Links come from issues and PRs attached in the composer, a worktree created from a PR, the chat's Linked section, and a PR created in the Git view (linked to the open session when it works in that directory).
 - A session with no PR at all shows its linked issues instead, never both and never counted together (maintainer decision, 2026-10-01): GitHub issues with live state from the same batches (`linkedIssueSummaries`, runtime-only, kept on the cadence even when closed because issues reopen), Linear and extension trackers by identifier only, muted. Issue colours reuse the PR tokens: open `--pr-open`, completed `--pr-merged`, not planned `--pr-closed`; an issue is never orange. A worktree group header follows the same rule at group level: its branch PR, or else the issues linked to the sessions in the group (a worktree started from an issue records the link on its session, not on the worktree).
 - Linked PRs join the same live-summary batches; their state lives in `linkedSummaries` (runtime-only, never persisted). A merged link is not asked about again; a closed one stays on the cadence because it can reopen.
 - Sidebar shows only compact PR state.

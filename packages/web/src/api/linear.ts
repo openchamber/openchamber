@@ -223,6 +223,7 @@ function parseIssueSummary(payload: LinearIssueSummary | null | undefined): Line
     team: parseTeam(payload.team),
     priority: parsePriority(payload.priority),
     labels: parseLabels(payload.labels),
+    updatedAt: readRawString(payload.updatedAt)?.trim() || null,
   };
 }
 

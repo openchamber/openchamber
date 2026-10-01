@@ -40,8 +40,7 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
                 onPrimaryAction={() => { primaryActions += 1; }}
                 onQueueMessage={() => { queued += 1; }}
                 onPickLocalFiles={() => {}}
-                onOpenIssuePicker={() => {}}
-                onOpenPrPicker={() => {}}
+                onOpenGitHubPicker={() => {}}
                 onOpenAttachSheet={() => {}}
                 onStartDictation={() => {}}
                 onAbort={() => {}}

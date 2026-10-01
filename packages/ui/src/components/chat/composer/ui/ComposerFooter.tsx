@@ -56,8 +56,7 @@ export interface ComposerFooterProps {
 
     onOpenSettings?: () => void;
     onPickLocalFiles: () => void;
-    onOpenIssuePicker: () => void;
-    onOpenPrPicker: () => void;
+    onOpenGitHubPicker: () => void;
     showLinearPicker?: boolean;
     onOpenLinearPicker?: () => void;
     attachGuests?: readonly GuestAttachItem[];
@@ -107,8 +106,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         dictationActive,
         onOpenSettings,
         onPickLocalFiles,
-        onOpenIssuePicker,
-        onOpenPrPicker,
+        onOpenGitHubPicker,
         showLinearPicker,
         onOpenLinearPicker,
         attachGuests,
@@ -153,8 +151,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
                                 handlePickLocalFiles={onPickLocalFiles}
-                                openIssuePicker={onOpenIssuePicker}
-                                openPrPicker={onOpenPrPicker}
+                                openGitHubPicker={onOpenGitHubPicker}
                                 showLinearPicker={showLinearPicker}
                                 openLinearPicker={onOpenLinearPicker}
                                 onOpenSettings={isBtw ? undefined : onOpenSettings}
@@ -227,8 +224,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
                             handlePickLocalFiles={onPickLocalFiles}
-                            openIssuePicker={onOpenIssuePicker}
-                            openPrPicker={onOpenPrPicker}
+                            openGitHubPicker={onOpenGitHubPicker}
                             showLinearPicker={showLinearPicker}
                             openLinearPicker={onOpenLinearPicker}
                             onOpenSettings={isBtw ? undefined : onOpenSettings}

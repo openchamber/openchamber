@@ -1277,6 +1277,22 @@ html:not(.dark) .chat-scroll {
   font-size: 0.875rem;
 }
 
+/* GitHub writes `<summary><h3>Findings</h3></summary>`: like GitHub, the
+   heading keeps its size but sits on the chevron's line without margins. */
+.markdown-content details[data-md-details] > summary > span:last-child > :is(h1, h2, h3, h4, h5, h6, p) {
+  display: inline;
+  margin: 0;
+}
+
+.markdown-content details[data-md-details] > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) {
+  align-items: center;
+}
+
+.markdown-content details[data-md-details] > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) > [data-md-disclosure-icon] {
+  align-self: center;
+  margin-top: 0;
+}
+
 /* Code font */
 .markdown-content code,
 .markdown-content pre {

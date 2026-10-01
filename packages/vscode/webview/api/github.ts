@@ -3,7 +3,9 @@ import type {
   GitHubAuthStatus,
   GitHubIssueCommentsResult,
   GitHubIssueGetResult,
-  GitHubIssuesListResult,
+  GitHubReferencesOptions,
+  GitHubReferencesResult,
+  GitHubReferenceDetailResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestsListResult,
   GitHubPullRequest,
@@ -50,8 +52,10 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
   prReady: async (payload: GitHubPullRequestReadyInput) =>
     sendBridgeMessage<GitHubPullRequestReadyResult>('api:github/pr:ready', payload),
 
-  issuesList: async (directory: string, options?: { page?: number; query?: string }) =>
-    sendBridgeMessage<GitHubIssuesListResult>('api:github/issues:list', { directory, page: options?.page ?? 1, query: options?.query ?? '' }),
+  references: async (directory: string, options: GitHubReferencesOptions) =>
+    sendBridgeMessage<GitHubReferencesResult>('api:github/references', { directory, ...options }),
+  referenceDetail: async (directory: string, item: GitHubPullRequestRef) =>
+    sendBridgeMessage<GitHubReferenceDetailResult>('api:github/references:detail', { directory, ...item }),
   issueGet: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubIssueGetResult>('api:github/issues:get', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
   issueComments: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>

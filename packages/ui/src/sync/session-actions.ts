@@ -1073,6 +1073,20 @@ export async function setLinkedIssue(
 }
 
 /**
+ * Link several items in one metadata write. Each write replaces the whole
+ * link list, so separate concurrent `setLinkedIssue` calls would keep only
+ * the last one's item.
+ */
+export async function addLinkedIssues(
+  sessionId: string,
+  directory: string | null | undefined,
+  issues: readonly LinkedIssue[],
+): Promise<Session> {
+  return patchSessionMetadata(sessionId, directory, (metadata) =>
+    issues.reduce((current, issue) => withLinkedIssue(current, issue, true), metadata))
+}
+
+/**
  * The user tracks a session as in work (`open`) or marks its work done.
  * Bound to the server it was clicked on: when the runtime switches while the
  * change is in flight, nothing reaches the new server or its cache, and the

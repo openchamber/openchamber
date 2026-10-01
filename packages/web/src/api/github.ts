@@ -3,7 +3,9 @@ import type {
   GitHubAuthStatus,
   GitHubIssueCommentsResult,
   GitHubIssueGetResult,
-  GitHubIssuesListResult,
+  GitHubReferencesOptions,
+  GitHubReferencesResult,
+  GitHubReferenceDetailResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestsListResult,
   GitHubPullRequest,
@@ -60,6 +62,81 @@ const prSummariesResultSchema = z.discriminatedUnion('connected', [
       title: z.string(),
       state: z.enum(['open', 'completed', 'not_planned']),
     })),
+  }),
+]);
+
+const referenceCommonShape = {
+  number: z.number(),
+  title: z.string(),
+  url: z.string(),
+  body: z.string(),
+  bodyTruncated: z.boolean(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable(),
+  labels: z.array(z.object({ name: z.string(), color: z.string().optional() })),
+  commentCount: z.number(),
+  sourceRepo: z.object({ owner: z.string(), repo: z.string(), source: z.string() }),
+};
+
+const referencesResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    repo: z.object({ owner: z.string(), repo: z.string(), url: z.string() }).nullable(),
+    items: z.array(z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('issue'),
+        ...referenceCommonShape,
+        state: z.enum(['open', 'completed', 'not_planned']),
+      }),
+      z.object({
+        kind: z.literal('pull'),
+        ...referenceCommonShape,
+        state: z.enum(['open', 'closed', 'merged']),
+        draft: z.boolean(),
+        head: z.string(),
+        base: z.string(),
+        headSha: z.string(),
+        headRepo: z.object({
+          owner: z.string(),
+          repo: z.string(),
+          url: z.string(),
+          cloneUrl: z.string().optional(),
+          sshUrl: z.string().optional(),
+        }).nullable(),
+      }),
+    ])),
+    cursor: z.string().nullable(),
+    hasMore: z.boolean(),
+    total: z.number(),
+  }),
+]);
+
+const referenceDetailResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    detail: z.object({
+      number: z.number(),
+      comments: z.array(z.object({
+        author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable(),
+        body: z.string(),
+        createdAt: z.string().nullable(),
+        url: z.string(),
+        path: z.string().nullable(),
+        line: z.number().nullable(),
+        review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
+      })),
+      commentTotal: z.number(),
+      pull: z.object({
+        reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
+        additions: z.number(),
+        deletions: z.number(),
+        changedFiles: z.number(),
+        checks: checksSummarySchema.nullable(),
+      }).nullable(),
+    }).nullable(),
   }),
 ]);
 
@@ -303,24 +380,29 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return body;
   },
 
-  async issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult> {
-    const page = options?.page ?? 1;
-    const params = new URLSearchParams({
-      directory,
-      page: String(page),
-    });
-    if (options?.query) {
-      params.set('query', options.query);
+  async references(directory: string, options: GitHubReferencesOptions): Promise<GitHubReferencesResult> {
+    const params = new URLSearchParams({ directory, kind: options.kind });
+    if (options.filter) params.set('filter', options.filter);
+    if (options.query?.trim()) params.set('query', options.query.trim());
+    if (options.cursor) params.set('cursor', options.cursor);
+    const response = await runtimeFetch(urls.api('/api/github/references', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      const failure = z.object({ error: z.string() }).safeParse(payload);
+      throw new Error((failure.success && failure.data.error) || response.statusText || 'Failed to load issues and pull requests');
     }
-    const response = await runtimeFetch(
-      `/api/github/issues/list?${params.toString()}`,
-      { method: 'GET', headers: { Accept: 'application/json' } }
-    );
-    const payload = await jsonOrNull<GitHubIssuesListResult & { error?: string }>(response);
-    if (!response.ok || !payload) {
-      throw new Error(payload?.error || response.statusText || 'Failed to load issues');
+    return referencesResultSchema.parse(payload);
+  },
+
+  async referenceDetail(directory: string, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult> {
+    const params = new URLSearchParams({ directory, owner: item.owner, repo: item.repo, number: String(item.number) });
+    const response = await runtimeFetch(urls.api('/api/github/references/detail', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      const failure = z.object({ error: z.string() }).safeParse(payload);
+      throw new Error((failure.success && failure.data.error) || response.statusText || 'Failed to load issue or pull request detail');
     }
-    return payload;
+    return referenceDetailResultSchema.parse(payload);
   },
 
   async issueGet(directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }): Promise<GitHubIssueGetResult> {

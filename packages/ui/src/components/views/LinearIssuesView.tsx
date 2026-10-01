@@ -835,6 +835,7 @@ export const LinearIssuesView: React.FC = () => {
                     content={description}
                     className={LINEAR_MARKDOWN_CLASS}
                     enableFileReferences={false}
+                    allowRawHtml
                   />
                 ) : (
                   <p className="typography-meta text-muted-foreground">{t('contextPanel.linear.empty.noDescription')}</p>
@@ -883,6 +884,7 @@ export const LinearIssuesView: React.FC = () => {
                                 content={comment.body}
                                 className={cn('typography-markdown-body text-foreground break-words', LINEAR_MARKDOWN_CLASS)}
                                 enableFileReferences={false}
+                                allowRawHtml
                               />
                             ) : null}
                           </div>

@@ -422,10 +422,13 @@ something other than "tools available".
 
 ### Linked issues and pull requests
 
-Written by the flows that already attach a thread — the composer's issue/PR
-pickers, and session creation from an issue or PR in `NewWorktreeDialog` and
-`GitHubIssuePickerDialog`. There is no manual "link this" control: attaching a
-thread to the work *is* the act of linking it.
+Written by the flows that already attach a thread — sending a message with
+issues, PRs or guest items attached in the composer, and session creation from
+an issue or PR in `NewWorktreeDialog`. There is no manual "link this" control:
+attaching a thread to the work *is* the act of linking it. A message's
+references are written in one metadata patch (`sessionActions.addLinkedIssues`):
+each write replaces the whole list, so one write per item would keep only the
+last.
 
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), riding the same `patchSessionMetadata` channel as

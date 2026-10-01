@@ -59,15 +59,15 @@ import {
 } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
-import { GitHubIntegrationDialog, type GitHubWorktreeSelection } from './GitHubIntegrationDialog';
-import { LinearIssuePickerDialog } from './LinearIssuePickerDialog';
+import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
+import { referencePickerItemKey, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import type {
   GitHubIssue,
   GitHubIssueComment,
-  GitHubIssuesListResult,
+  GitHubIssueGetResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestSummary,
   LinearIssue,
@@ -215,7 +215,7 @@ interface NewWorktreeDialogProps {
 }
 
 const buildIssueContextText = (args: {
-  repo: GitHubIssuesListResult['repo'] | undefined;
+  repo: GitHubIssueGetResult['repo'] | undefined;
   issue: GitHubIssue;
   comments: GitHubIssueComment[];
 }) => {
@@ -332,8 +332,7 @@ export function NewWorktreeDialog({
     return `${generateBranchSlug()}-${Date.now().toString(36).slice(-4)}`;
   }, [existingWorktreeNames]);
   
-  const [githubDialogOpen, setGithubDialogOpen] = React.useState(false);
-  const [linearDialogOpen, setLinearDialogOpen] = React.useState(false);
+  const [referencePickerSource, setReferencePickerSource] = React.useState<'github' | 'linear' | null>(null);
   
   // Desktop branch picker states
   const [existingBranchDropdownOpen, setExistingBranchDropdownOpen] = React.useState(false);
@@ -1159,74 +1158,97 @@ export function NewWorktreeDialog({
     setValidation(prev => ({ ...prev, touched: false, branchError: null, worktreeError: null }));
   };
 
-  // Handle GitHub selection
-  const handleGitHubSelect = (result: GitHubWorktreeSelection | null) => {
-    if (!result) {
+  // A choice from the reference picker names the branch the worktree gets.
+  const handleReferenceConfirm = async (selections: ReferencePickerSelection[]): Promise<ReferencePickerConfirmFailure | null> => {
+    const [choice] = selections;
+    if (!choice) return null;
+
+    if (choice.source === 'linear') {
+      const { issue } = choice;
+      const assignee = issue.assignee?.displayName || issue.assignee?.name;
+      const newBranchName = `issue-${issue.identifier}-${generateBranchSlug()}`;
       setNewBranchState(prev => ({
         ...prev,
+        linkedLinearIssue: {
+          identifier: issue.identifier,
+          title: issue.title,
+          url: issue.url,
+          author: assignee ? { login: assignee, avatarUrl: issue.assignee?.avatarUrl || undefined } : undefined,
+        },
         linkedIssue: null,
         linkedPr: null,
-        linkedLinearIssue: null,
-      linkedGuest: null,
+        linkedGuest: null,
         includePrDiff: false,
-        branchName: '',
+        branchName: newBranchName,
+        worktreeName: slugifyWorktreeName(newBranchName),
+        isSyncingWorktreeName: true,
       }));
-      return;
+      return null;
     }
 
-    if (result.type === 'issue') {
-      const issue = result.item;
+    const { reference } = choice;
+    if (reference.kind === 'issue') {
+      const issue: GitHubIssue = {
+        number: reference.number,
+        title: reference.title,
+        url: reference.url,
+        state: reference.state === 'open' ? 'open' : 'closed',
+        author: reference.author,
+        labels: reference.labels,
+        sourceRepo: reference.sourceRepo,
+      };
       const newBranchName = `issue-${issue.number}-${generateBranchSlug()}`;
       setNewBranchState(prev => ({
         ...prev,
         linkedIssue: issue,
         linkedPr: null,
         linkedLinearIssue: null,
-      linkedGuest: null,
+        linkedGuest: null,
         includePrDiff: false,
         branchName: newBranchName,
         worktreeName: slugifyWorktreeName(newBranchName),
         isSyncingWorktreeName: true,
       }));
-    } else if (result.type === 'pr') {
-      const pr = result.item;
-      setNewBranchState(prev => ({
-        ...prev,
-        linkedPr: pr,
-        linkedIssue: null,
-        linkedLinearIssue: null,
-      linkedGuest: null,
-        includePrDiff: result.includeDiff ?? false,
-        branchName: pr.head,
-        worktreeName: slugifyWorktreeName(pr.head),
-        isSyncingWorktreeName: true,
-      }));
+      return null;
     }
-  };
 
-  const handleLinearSelect = (issue: {
-    identifier: string;
-    title: string;
-    url: string;
-    author?: { login: string; avatarUrl?: string };
-  }) => {
-    const newBranchName = `issue-${issue.identifier}-${generateBranchSlug()}`;
+    // A PR's branch can live in one worktree only.
+    if (projectRef) {
+      const failure = (message: string): ReferencePickerConfirmFailure => ({ failedKeys: [referencePickerItemKey(choice)], message });
+      try {
+        const result = await validateWorktreeCreate(projectRef, { mode: 'new', branchName: reference.head, worktreeName: reference.head });
+        if (result.errors.some((entry) => entry.code === 'branch_in_use')) {
+          return failure(t('session.githubIntegration.validation.branchAlreadyCheckedOut'));
+        }
+      } catch {
+        return failure(t('session.githubIntegration.validation.failed'));
+      }
+    }
+    const pr: GitHubPullRequestSummary = {
+      number: reference.number,
+      title: reference.title,
+      url: reference.url,
+      state: reference.state,
+      draft: reference.draft,
+      base: reference.base,
+      head: reference.head,
+      headSha: reference.headSha,
+      author: reference.author,
+      headRepo: reference.headRepo,
+      sourceRepo: reference.sourceRepo,
+    };
     setNewBranchState(prev => ({
       ...prev,
-      linkedLinearIssue: {
-        identifier: issue.identifier,
-        title: issue.title,
-        url: issue.url,
-        author: issue.author,
-      },
+      linkedPr: pr,
       linkedIssue: null,
-      linkedPr: null,
+      linkedLinearIssue: null,
       linkedGuest: null,
-      includePrDiff: false,
-      branchName: newBranchName,
-      worktreeName: slugifyWorktreeName(newBranchName),
+      includePrDiff: choice.includeDiff,
+      branchName: reference.head,
+      worktreeName: slugifyWorktreeName(reference.head),
       isSyncingWorktreeName: true,
     }));
+    return null;
   };
 
   const handleGuestSelect = (issue: AttachIssueRequest): void => {
@@ -1294,7 +1316,7 @@ export function NewWorktreeDialog({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setGithubDialogOpen(true)}
+          onClick={() => setReferencePickerSource('github')}
           className="h-8 w-8 px-0"
           title={t('session.newWorktree.actions.startFromGitHubIssuePr')}
           aria-label={t('session.newWorktree.actions.startFromGitHubIssuePr')}
@@ -1306,7 +1328,7 @@ export function NewWorktreeDialog({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setLinearDialogOpen(true)}
+          onClick={() => setReferencePickerSource('linear')}
           className="h-8 w-8 px-0"
           title={t('session.newWorktree.actions.startFromLinearIssue')}
           aria-label={t('session.newWorktree.actions.startFromLinearIssue')}
@@ -2452,17 +2474,19 @@ export function NewWorktreeDialog({
         </Dialog>
       )}
 
-      <GitHubIntegrationDialog
-        open={githubDialogOpen}
-        onOpenChange={setGithubDialogOpen}
-        onSelect={handleGitHubSelect}
-      />
-      <LinearIssuePickerDialog
-        open={linearDialogOpen}
-        onOpenChange={setLinearDialogOpen}
-        mode="select"
-        onSelect={handleLinearSelect}
-      />
+      {referencePickerSource ? (
+        <ReferencePickerDialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setReferencePickerSource(null);
+          }}
+          source={referencePickerSource}
+          purpose="worktree"
+          selection="single"
+          directory={projectDirectory}
+          onConfirm={handleReferenceConfirm}
+        />
+      ) : null}
       <GuestAttachDialog
         guestId={guestDialogId}
         onOpenChange={(nextOpen) => {

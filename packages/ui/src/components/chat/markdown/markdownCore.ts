@@ -893,8 +893,16 @@ const getDocumentPurifier = (): DOMPurifyInstance | null => {
     }
     // Tailwind preflight gives images `height: auto`, which beats the height
     // attribute, so `<img height="28">` would render at its natural size.
+    // With a width too (a GitHub screenshot: 1920 x 906) the image is scaled
+    // down to the column, so the pair becomes a ratio rather than a fixed
+    // height that would stretch it.
     const height = node.tagName === 'IMG' ? node.getAttribute('height')?.trim() : undefined;
-    if (height && /^\d+$/.test(height)) node.setAttribute('style', `height:${height}px`);
+    const width = node.tagName === 'IMG' ? node.getAttribute('width')?.trim() : undefined;
+    if (height && /^\d+$/.test(height)) {
+      node.setAttribute('style', width && /^\d+$/.test(width) && Number(height) > 0
+        ? `aspect-ratio:${width}/${height}`
+        : `height:${height}px`);
+    }
   });
   documentPurifier = purifier;
   return purifier;

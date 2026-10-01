@@ -111,6 +111,138 @@ describe('GET /api/github/pulls/list free-text search', () => {
   });
 });
 
+describe('GET /api/github/references', () => {
+  let app;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-references-'));
+  const project = path.join(dataDir, 'project');
+
+  beforeAll(async () => {
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    fs.mkdirSync(project);
+    execFileSync('git', ['init', '-q', project]);
+    execFileSync('git', ['-C', project, 'remote', 'add', 'origin', 'https://github.com/example/project.git']);
+    const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
+    setGhCliDisabled(true);
+    setGitHubAuth({ accessToken: 'fake-test-token', accountId: 'test' });
+    app = express();
+    registerGitHubRoutes(app);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  afterAll(() => {
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const issueNode = (number) => ({
+    __typename: 'Issue',
+    number,
+    title: `Issue ${number}`,
+    url: `https://github.com/example/project/issues/${number}`,
+    createdAt: null,
+    updatedAt: null,
+    body: '',
+    author: null,
+    labels: { nodes: [] },
+    comments: { totalCount: 0 },
+    repository: { name: 'project', owner: { login: 'example' } },
+    state: 'OPEN',
+    stateReason: null,
+  });
+
+  // The repo lookup is REST; everything the picker lists is one GraphQL call.
+  const serveGitHub = (graphql) => {
+    const fetch = vi.fn(async (url, init) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project' });
+      if (endpoint.pathname === '/graphql') return graphql(JSON.parse(init.body));
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  };
+
+  it('requires a directory and a kind', async () => {
+    await request(app).get('/api/github/references').query({ directory: project }).expect(400);
+  });
+
+  it('answers a page with one search document', async () => {
+    const fetch = serveGitHub((body) => {
+      expect(body.variables.q).toBe('repo:example/project is:issue is:open sort:updated-desc author:@me crash');
+      return response({ data: { search: { issueCount: 31, pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [issueNode(4), issueNode(2)] } } });
+    });
+
+    const res = await request(app).get('/api/github/references')
+      .query({ directory: project, kind: 'issue', filter: 'created', query: 'crash' })
+      .expect(200);
+
+    expect(res.body).toMatchObject({ connected: true, cursor: 'c1', hasMore: true, total: 31 });
+    expect(res.body.items.map((item) => item.number)).toEqual([4, 2]);
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql'))).toHaveLength(1);
+  });
+
+  it('reads a pasted number directly', async () => {
+    serveGitHub((body) => {
+      expect(body.query).toContain('issueOrPullRequest');
+      expect(body.variables.number).toBe(4);
+      return response({ data: { a0: { issueOrPullRequest: issueNode(4) } } });
+    });
+
+    const res = await request(app).get('/api/github/references')
+      .query({ directory: project, kind: 'pull', query: '#4' })
+      .expect(200);
+
+    expect(res.body.items).toEqual([expect.objectContaining({ kind: 'issue', number: 4 })]);
+    expect(res.body.hasMore).toBe(false);
+  });
+
+  it('reads one item detail, only from the project repo network', async () => {
+    const fetch = serveGitHub(() => response({ data: { repository: { issueOrPullRequest: {
+      __typename: 'PullRequest',
+      number: 4,
+      state: 'OPEN',
+      reviewDecision: 'APPROVED',
+      additions: 1,
+      deletions: 2,
+      changedFiles: 1,
+      comments: { totalCount: 0, nodes: [] },
+      reviews: { nodes: [] },
+      commits: { nodes: [] },
+    } } } }));
+
+    const detail = await request(app).get('/api/github/references/detail')
+      .query({ directory: project, owner: 'example', repo: 'project', number: '4' })
+      .expect(200);
+    expect(detail.body).toEqual({
+      connected: true,
+      detail: expect.objectContaining({ number: 4, comments: [], pull: expect.objectContaining({ reviewDecision: 'approved', additions: 1 }) }),
+    });
+
+    const graphqlCalls = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql')).length;
+    const before = graphqlCalls();
+    await request(app).get('/api/github/references/detail')
+      .query({ directory: project, owner: 'someone', repo: 'else', number: '4' })
+      .expect(400);
+    expect(graphqlCalls()).toBe(before);
+  });
+
+  it('fails instead of answering an empty page', async () => {
+    serveGitHub(() => response({ message: 'Server Error' }, 502));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await request(app).get('/api/github/references')
+      .query({ directory: project, kind: 'issue' })
+      .expect(500);
+
+    expect(res.body).not.toHaveProperty('items');
+  });
+});
+
 describe('POST /api/github/pr/summaries', () => {
   let app;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-summaries-'));
