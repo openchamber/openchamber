@@ -1733,6 +1733,7 @@ export const Header: React.FC = () => {
         info={remoteUpdateInfo}
         downloading={false}
         downloaded={false}
+        restarting={false}
         progress={null}
         error={remoteUpdateError}
         onDownload={() => {}}
