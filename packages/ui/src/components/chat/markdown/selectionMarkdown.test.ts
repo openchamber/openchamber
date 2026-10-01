@@ -96,11 +96,40 @@ test('a selection across list items stays a list', () => {
   expect(getMarkdownSelectionText(range)).toBe('- one\n- beta');
 });
 
-test('a selection inside bold text stays bold', () => {
+test('part of one list item copies as its text, without the list marker', () => {
+  const root = render('<ol><li><p>first</p></li><li><p><strong>Second</strong> item. This time the model</p></li></ol>');
+  const item = root.querySelector('li:nth-child(2) p')?.lastChild;
+  if (!isText(item)) throw new Error('no item text');
+
+  expect(getMarkdownSelectionText(selectionOf(item, 7, item, 26))).toBe('This time the model');
+});
+
+test('part of one table cell copies as its text, not a table', () => {
+  const root = render('<table><thead><tr><th>H</th></tr></thead><tbody><tr><td>some cell text</td></tr></tbody></table>');
+  const range = selectionOf(textIn(root, 'td'), 5, textIn(root, 'td'), 9);
+
+  expect(getMarkdownSelectionText(range)).toBe('cell');
+});
+
+test('a selection across table cells stays a table', () => {
+  const root = render('<table><tbody><tr><td>left</td><td>right</td></tr></tbody></table>');
+  const range = selectionOf(textIn(root, 'td:nth-child(1)'), 0, textIn(root, 'td:nth-child(2)'), 5);
+
+  expect(getMarkdownSelectionText(range)).toBe('| left | right |\n| --- | --- |');
+});
+
+test('a selection inside bold text drops the emphasis it started in', () => {
   const root = render('<p>This is <strong>very important</strong> text.</p>');
   const range = selectionOf(textIn(root, 'strong'), 5, textIn(root, 'strong'), 14);
 
-  expect(getMarkdownSelectionText(range)).toBe('**important**');
+  expect(getMarkdownSelectionText(range)).toBe('important');
+});
+
+test('formatting inside the selection is kept', () => {
+  const root = render('<p>Run <code>bun test</code> and <strong>stop</strong> there.</p>');
+  const range = selectionOf(textIn(root, 'p'), 0, root.querySelector('p')?.lastChild ?? root, 6);
+
+  expect(getMarkdownSelectionText(range)).toBe('Run `bun test` and **stop** there');
 });
 
 test('a selection from prose into a table produces both blocks', () => {

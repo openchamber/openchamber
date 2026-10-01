@@ -254,13 +254,19 @@ const getMarkdownRoot = (node: Node): Element | null => {
   return element?.closest(MARKDOWN_ROOT_SELECTOR) ?? null;
 };
 
+// Blocks that hold one piece of text. A selection that stays inside one of
+// them is that text, not the list, table or emphasis around it.
+const TEXT_BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, summary, dt, dd';
+
 /**
  * The selected part of one rendered markdown block as Markdown, or null when
  * the range is not inside a single markdown root.
  *
- * `cloneContents` drops the ancestors the range starts and ends in, so the
- * clone is re-nested in shallow copies of them: a selection across two list
- * items stays a list, one inside bold text stays bold.
+ * Formatting inside the selection is kept. `cloneContents` drops the ancestors
+ * the range starts and ends in, so a selection that crosses blocks is
+ * re-nested in shallow copies of them: two list items stay a list, two table
+ * cells stay a table. A selection within one text block (part of a list item,
+ * a table cell, a bold run) is not re-nested and copies as the text itself.
  */
 export const getMarkdownSelectionText = (range: Range): string | null => {
   const root = getMarkdownRoot(range.startContainer);
@@ -269,6 +275,8 @@ export const getMarkdownSelectionText = (range: Range): string | null => {
   let content: Node = range.cloneContents();
   let ancestor: Node | null = range.commonAncestorContainer;
   if (ancestor.nodeType === TEXT_NODE) ancestor = ancestor.parentNode;
+  const textBlock = ancestor && isElement(ancestor) ? ancestor.closest(TEXT_BLOCK_SELECTOR) : null;
+  if (textBlock && root.contains(textBlock) && textBlock !== root) ancestor = null;
   while (ancestor && ancestor !== root && isElement(ancestor)) {
     const shell = ancestor.cloneNode(false);
     shell.appendChild(content);
