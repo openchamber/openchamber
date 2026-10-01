@@ -58,15 +58,8 @@ export interface DraftTargetProps {
     selectedDirectory: string | null;
     selectedBranchLabel: string | null;
     selectedBranchIsKnown: boolean;
+    /** Shows the warning icon; its explanation opens on hover only. */
     hasUncommittedChanges: boolean;
-    /**
-     * Whether the dirty warning may announce itself by opening its tooltip
-     * unprompted. Off for a draft the app opened on its own at boot: that
-     * draft is often only a placeholder until the last session restores, and
-     * a tooltip on an otherwise empty screen reads as a glitch. The warning
-     * icon still shows on desktop and the tooltip stays reachable by hover.
-     */
-    announceDirtyState: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
@@ -120,33 +113,8 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 }
 
 /** Desktop: inline project and branch selects. */
-/** How long the dirty-directory tooltip announces itself before becoming hover-only. */
-const DIRTY_TOOLTIP_FLASH_MS = 5000;
-
-/**
- * Opens the tooltip for a few seconds when the dirty state first appears, so
- * the warning is seen without hovering, then hands control back to hover.
- * Only when the draft may announce itself — see `announceDirtyState`.
- */
-function useDirtyFlashTooltip(hasUncommittedChanges: boolean, announce: boolean) {
-    const [open, setOpen] = React.useState(false);
-
-    React.useEffect(() => {
-        if (!hasUncommittedChanges || !announce) {
-            setOpen(false);
-            return;
-        }
-        setOpen(true);
-        const timer = window.setTimeout(() => setOpen(false), DIRTY_TOOLTIP_FLASH_MS);
-        return () => window.clearTimeout(timer);
-    }, [announce, hasUncommittedChanges]);
-
-    return { open, onOpenChange: setOpen };
-}
-
 export function DraftTargetSelectors(props: DraftTargetProps) {
     const { t } = useI18n();
-    const dirtyTooltip = useDirtyFlashTooltip(props.hasUncommittedChanges, props.announceDirtyState);
     const {
         projects,
         selectedProject,
@@ -421,7 +389,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                     onValueChange={handleDirectoryChange}
                     disableGlobalShortcuts
                 >
-                    <Tooltip open={dirtyTooltip.open} onOpenChange={dirtyTooltip.onOpenChange}>
+                    <Tooltip>
                         <TooltipTrigger asChild>
                             <SelectTrigger
                                 ref={worktreeTriggerRef}
