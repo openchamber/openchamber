@@ -23,6 +23,18 @@ const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
 const LOGIN_SHELL_ENV_MARKER = '__OPENCHAMBER_ENV__';
 const LOGIN_SHELL_ENV_COMMAND = `echo ${LOGIN_SHELL_ENV_MARKER}; env -0`;
 
+// Absolute install locations probed when nothing else resolved an OpenCode
+// CLI. Kept as a named list so tests can inject an empty one and prove the
+// resolution falls through to "not found" on a machine that happens to have
+// one of these installed for real.
+const WELL_KNOWN_OPENCODE_PATHS = [
+  '/opt/homebrew/bin/opencode',
+  '/usr/local/bin/opencode',
+  '/home/linuxbrew/.linuxbrew/bin/opencode',
+  '/usr/bin/opencode',
+  '/bin/opencode',
+];
+
 const stripShellStartupOutput = (text) => {
   const markerLine = `${LOGIN_SHELL_ENV_MARKER}\n`;
   const markerIndex = text.lastIndexOf(markerLine);
@@ -40,6 +52,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
     ? deps.providedLoginShellEnvSnapshot
     : () => undefined;
   const resolveHomeDir = typeof deps.homedir === 'function' ? deps.homedir : () => os.homedir();
+  const wellKnownOpencodePaths = Array.isArray(deps.wellKnownOpencodePaths)
+    ? deps.wellKnownOpencodePaths
+    : WELL_KNOWN_OPENCODE_PATHS;
 
   const parseNullSeparatedEnvSnapshot = (raw) => {
     if (typeof raw !== 'string' || raw.length === 0) {
@@ -423,11 +438,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       path.join(home, '.bun', 'bin', 'opencode'),
       path.join(home, '.local', 'bin', 'opencode'),
       path.join(home, 'bin', 'opencode'),
-      '/opt/homebrew/bin/opencode',
-      '/usr/local/bin/opencode',
-      '/home/linuxbrew/.linuxbrew/bin/opencode',
-      '/usr/bin/opencode',
-      '/bin/opencode',
+      ...wellKnownOpencodePaths,
     ];
 
     const winFallbacks = (() => {

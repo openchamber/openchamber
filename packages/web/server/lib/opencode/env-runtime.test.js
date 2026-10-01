@@ -115,6 +115,7 @@ const createRuntime = (settings, options = {}) => {
     readSettingsFromDiskMigrated: async () => settings,
     spawnSync: options.spawnSync,
     homedir: options.homedir,
+    wellKnownOpencodePaths: options.wellKnownOpencodePaths,
     providedLoginShellEnvSnapshot: options.providedLoginShellEnvSnapshot,
   });
 
@@ -468,6 +469,10 @@ describe('OpenCode env runtime', () => {
     const shellCalls = [];
     const { runtime } = createRuntime({}, {
       homedir: () => createTempDir('openchamber-empty-home-'),
+      // This machine has a brew-installed opencode at one of the well-known
+      // absolute fallbacks; an empty list keeps the fall-through assertion
+      // about the probes themselves, not about what the developer installed.
+      wellKnownOpencodePaths: [],
       spawnSync: (command, args, options) => {
         shellCalls.push({ command, args, options });
         // What spawnSync reports when `timeout` fires: no status, an error.

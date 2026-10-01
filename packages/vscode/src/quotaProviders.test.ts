@@ -165,10 +165,22 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
   });
 
   const withStubbedConfigFile = async (configJson: string, run: () => Promise<void>): Promise<void> => {
-    // SAFETY: the reassignment widens the bound readFileSync to the text-only
-    // signature the config reader actually calls.
-    const configurableFs = fs as { readFileSync: (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding) => string };
+    // SAFETY: the reassignments widen the bound fs functions to the signatures
+    // the config reader actually calls.
+    const configurableFs = fs as {
+      existsSync: (filePath: fs.PathLike) => boolean;
+      readFileSync: (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding) => string;
+    };
+    const realExists = configurableFs.existsSync;
     const realRead = configurableFs.readFileSync;
+    // The config loader gates on existsSync before reading. Without this stub
+    // a machine that has no global opencode.json (a clean CI runner) never
+    // reaches the stubbed read, so the provider falls back to its default
+    // endpoint and the configured-baseURL assertions fail there while passing
+    // on any developer machine that happens to have a config.
+    configurableFs.existsSync = (filePath: fs.PathLike): boolean => (
+      String(filePath).includes('opencode.json') ? true : realExists(filePath)
+    );
     configurableFs.readFileSync = (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding): string => (
       String(filePath).includes('opencode.json') ? configJson : realRead(filePath, options)
     );
@@ -176,6 +188,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
       await run();
     } finally {
       configurableFs.readFileSync = realRead;
+      configurableFs.existsSync = realExists;
     }
   };
 

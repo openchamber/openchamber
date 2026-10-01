@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
@@ -113,6 +113,36 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Tests must not depend on developer-machine git state. A global
+// excludesFile (say `node_modules/` in the developer's ~/.gitignore) makes a
+// fixture directory vanish from status on that machine and nowhere else, so
+// every git invocation in this file — the fixtures' runGit and the service's
+// own spawns, which inherit process.env — reads an empty global config
+// instead. Fixture repos set their identity locally, so nothing else changes.
+// Registered outside tempDirs on purpose: afterEach would delete a registered
+// dir after the first test.
+const emptyGlobalGitConfig = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-git-service-config-')),
+  'git-config',
+);
+fs.writeFileSync(emptyGlobalGitConfig, '');
+
+let savedGitConfigGlobal;
+
+beforeAll(() => {
+  savedGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = emptyGlobalGitConfig;
+});
+
+afterAll(() => {
+  if (savedGitConfigGlobal === undefined) {
+    delete process.env.GIT_CONFIG_GLOBAL;
+  } else {
+    process.env.GIT_CONFIG_GLOBAL = savedGitConfigGlobal;
+  }
+  fs.rmSync(path.dirname(emptyGlobalGitConfig), { recursive: true, force: true });
 });
 
 /**
