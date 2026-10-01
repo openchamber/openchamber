@@ -920,6 +920,13 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       aria-label={t('sessions.sidebar.session.status.pinned')}
     />
   );
+  const sessionActionSpinner = (
+    <Icon
+      name="loader-4"
+      className="h-3 w-3 flex-shrink-0 animate-spin text-primary"
+      aria-label={isAiRenaming ? t('sessions.aiRename.generating') : t('sessions.sidebar.session.status.movingToWorktree')}
+    />
+  );
   const leadingIndicators = isSessionActionPending || showStatusMarker || showPinnedMarker ? (
     <span
       style={{ left: ROW_GUTTER_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
@@ -928,13 +935,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         hideLeadingIndicatorOnHover ? 'opacity-100 group-hover:opacity-0 group-has-[:focus-visible]:opacity-0' : '',
       )}
     >
-      {isSessionActionPending ? (
-        <Icon
-          name="loader-4"
-          className="h-3 w-3 animate-spin text-primary"
-          aria-label={isAiRenaming ? t('sessions.aiRename.generating') : t('sessions.sidebar.session.status.movingToWorktree')}
-        />
-      ) : showStatusMarker ? statusMarkerContent : showPinnedMarker ? pinnedMarkerContent : null}
+      {isSessionActionPending ? sessionActionSpinner : showStatusMarker ? statusMarkerContent : showPinnedMarker ? pinnedMarkerContent : null}
     </span>
   ) : null;
   const hideChevronUntilHover = hasChildren && !alwaysShowActions && (isSessionActionPending || showStatusMarker || isPinnedSession);
@@ -1539,7 +1540,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         ? 'text-interactive-selection-foreground'
         : needsAttention ? 'text-foreground' : 'text-foreground/80'}
       branchLabel={tooltipBranchLabel}
-      statusDot={showStatusMarker ? statusMarkerContent : null}
+      statusDot={isSessionActionPending ? sessionActionSpinner : showStatusMarker ? statusMarkerContent : null}
       pinnedMarker={isPinnedSession && !isSessionActionPending ? pinnedMarkerContent : null}
       timeSlot={showActivityDuration
         ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />
