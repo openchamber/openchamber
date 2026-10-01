@@ -79,8 +79,6 @@ export const ChecksGlyph: React.FC<{ checks: GitHubChecksSummary | null }> = ({ 
     return null;
 };
 
-const Dot = () => <span aria-hidden className="text-muted-foreground/60">·</span>;
-
 type RowProps = {
     item: ReferencePickerItem;
     highlighted: boolean;
@@ -135,25 +133,16 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
             <Icon name={look.icon} className="mt-0.5 size-4 shrink-0" style={{ color: look.color }} />
             <div className="min-w-0 flex-1">
                 <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
-                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 typography-micro text-muted-foreground">
+                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro text-muted-foreground">
                     <span className="font-mono">{id}</span>
                     {item.source === 'github' && item.reference.author ? (
-                        <>
-                            <Dot />
-                            <RowPerson name={item.reference.author.login} avatarUrl={item.reference.author.avatarUrl} />
-                        </>
+                        <RowPerson name={item.reference.author.login} avatarUrl={item.reference.author.avatarUrl} />
                     ) : null}
                     {item.source === 'linear' && item.issue.assignee ? (
-                        <>
-                            <Dot />
-                            <RowPerson name={item.issue.assignee.displayName || item.issue.assignee.name || '—'} avatarUrl={item.issue.assignee.avatarUrl} />
-                        </>
+                        <RowPerson name={item.issue.assignee.displayName || item.issue.assignee.name || '—'} avatarUrl={item.issue.assignee.avatarUrl} />
                     ) : null}
                     {updated ? (
-                        <>
-                            <Dot />
-                            <span>{updated.key === 'common.relative.justNow' ? t(updated.key) : t(updated.key, { count: updated.count })}</span>
-                        </>
+                        <span>{updated.key === 'common.relative.justNow' ? t(updated.key) : t(updated.key, { count: updated.count })}</span>
                     ) : null}
                     {item.source === 'github' && item.reference.commentCount > 0 ? (
                         <span className="inline-flex items-center gap-0.5">
@@ -167,10 +156,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                         </span>
                     ) : null}
                     {item.source === 'linear' && item.issue.priority && item.issue.priority > 0 ? (
-                        <>
-                            <Dot />
-                            <span>{t(LINEAR_PRIORITY_KEYS[item.issue.priority])}</span>
-                        </>
+                        <span>{t(LINEAR_PRIORITY_KEYS[item.issue.priority])}</span>
                     ) : null}
                     {item.source === 'github' && item.reference.sourceRepo.source === 'upstream' ? (
                         <span className="rounded bg-[var(--status-info-background)] px-1 typography-micro text-[var(--status-info-text)]">
@@ -178,9 +164,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                         </span>
                     ) : null}
                     {labels.length > 0 ? (
-                        <span className="ml-1">
-                            <ReferenceLabelChips labels={labels} max={2} />
-                        </span>
+                        <ReferenceLabelChips labels={labels} max={2} />
                     ) : null}
                 </div>
             </div>
