@@ -41,15 +41,11 @@ const TOOL_ROW_TEXT_INSET_CLASS = 'pl-[3.75rem]';
 
 const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, info, ariaLabel, checked, onChange, settingsItem }) => (
   <div data-settings-item={settingsItem} className="flex items-center gap-3 px-4 py-3">
-    <span
-      className={cn(
-        'flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-muted)] text-foreground transition-opacity',
-        !checked && 'opacity-50',
-      )}
-    >
+    {/* The switch alone says "off": dimming the row would read as disabled. */}
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-muted)] text-foreground">
       <Icon name={icon} className="size-4" />
     </span>
-    <div className={cn('min-w-0 flex-1 transition-opacity', !checked && 'opacity-60')}>
+    <div className="min-w-0 flex-1">
       <div className="flex min-w-0 items-center gap-1.5">
         <span className="truncate typography-ui-label font-medium text-foreground">{title}</span>
         <SettingsInfoHint>{info}</SettingsInfoHint>
