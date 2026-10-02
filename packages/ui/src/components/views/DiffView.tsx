@@ -2094,6 +2094,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const treeSelectedFile = isTreeMode
         ? (treeFileOrder.find((file) => file.path === displayFile) ?? treeFileOrder[0] ?? null)
         : null;
+    const treeSelectedPath = treeSelectedFile?.path ?? null;
+
+    // Tree mode renders its file open whether or not it is in the expanded
+    // set, but branch/commit/PR diffs are fetched only for expanded paths:
+    // the default first file would otherwise wait on a diff nobody requests.
+    React.useEffect(() => {
+        if (treeSelectedPath && !expandedFiles.has(treeSelectedPath)) {
+            expandStackedFile(treeSelectedPath);
+        }
+    }, [expandStackedFile, expandedFiles, treeSelectedPath]);
 
     const handleSelectFileAndScroll = React.useCallback((value: string) => {
         cancelPendingScrollAlignment();
