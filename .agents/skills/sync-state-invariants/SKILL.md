@@ -73,6 +73,7 @@ For streaming-frequency work, also load `performance-engineering`.
 
 - Preserve rich fields when lightweight polling omits them.
 - Use cheap change detection before heavy per-directory fetches.
+- Refresh only directories already running: the selected one and those an event names. Every OpenCode read of a directory starts it with its MCP servers (`opencode-v2`), so a refresh over every store is a fan-out.
 - Treat startup 502/503 as transient with bounded retry/recovery.
 - A retry loop requires a real failure signal; swallowed errors disable retries.
 - Preserve previous authoritative state during transient bootstrap/reconnect failures.
