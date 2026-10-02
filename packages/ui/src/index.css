@@ -33,6 +33,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Hover-revealed row actions cross-fade over a row's right end instead of
+   re-laying the row out: the text they cover fades away under them. The
+   masked element sits --oc-actions-inset from its nearest @container's left
+   edge; the actions reach --oc-actions-reserve in from that container's right
+   edge. */
+@utility oc-actions-mask {
+  --oc-actions-edge: calc(100cqw - var(--oc-actions-inset, 0px) - var(--oc-actions-reserve, 0px));
+  mask-image: linear-gradient(to right, #000 calc(var(--oc-actions-edge) - 14px), transparent calc(var(--oc-actions-edge) - 2px));
+}
+
 /* Buttons should never look selectable. */
 button,
 [role="button"] {

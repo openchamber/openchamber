@@ -6,7 +6,7 @@ import type { Session } from '@/lib/opencode/model';
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
 // when we cross this row count so the DOM stays bounded.
 const EMPTY_FOLDERS: readonly never[] = [];
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { getPrStatusLabel } from '../prStatusLabel';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
@@ -36,6 +36,7 @@ import { getGitHubPrStatusKey, useLinkedIssueStates, usePrVisualSummary } from '
 import { getLinkedSidebarIssues, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems } from '../sessions/sessionPrSummaries';
 import { openExternalUrl } from '@/lib/url';
+import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from '../sessions/SidebarRefLinks';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
@@ -867,7 +868,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   };
   // Reserve room for the hover-revealed header actions (new draft + delete
   // worktree) so they never overlap the label / PR badge.
-  const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
+  // The delete action leaves the header while git removes the worktree.
+  const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree && !worktreeRemoving);
   // git still registers this worktree but its directory is gone. The group
   // stays so its sessions remain reachable (opening one relocates it); the
   // icon tells the user why the folder is not there.
@@ -894,13 +896,30 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   // A space's group carries the grant dialog's key and its actions menu beside its new-draft button.
   const hasSecondHeaderAction = hasWorktreeDeleteAction || Boolean(group.space);
   const hasThirdHeaderAction = Boolean(group.space);
+  // Permanent actions take room; hover-revealed ones cross-fade over the
+  // header's right end (`oc-actions-mask`), so nothing moves. The reserve is
+  // how far they reach in past the 8px right padding: one 24px button 2px
+  // from the edge, the next ones 26px apart.
   const groupHeaderRightPadding = alwaysShowActions
     ? (hasThirdHeaderAction ? 'pr-20' : hasSecondHeaderAction ? 'pr-14' : 'pr-7')
-    : (hasThirdHeaderAction
-        ? 'pr-2 group-hover/gh:pr-20 group-focus-within/gh:pr-20'
+    : cn('pr-2', hasThirdHeaderAction
+        ? '[--oc-actions-reserve:68px]'
         : hasSecondHeaderAction
-        ? 'pr-2 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
-        : 'pr-2 group-hover/gh:pr-7 group-focus-within/gh:pr-7');
+        ? '[--oc-actions-reserve:44px]'
+        : '[--oc-actions-reserve:18px]');
+  const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-focus-within/gh:oc-actions-mask';
+  const headerCoveredFadeClass = alwaysShowActions ? undefined : 'transition-opacity group-hover/gh:opacity-0 group-focus-within/gh:opacity-0';
+  // The leading icon cross-fades into the collapse chevron on hover.
+  const headerIconFadeClass = alwaysShowActions ? 'hidden' : 'transition-opacity group-hover/gh:opacity-0';
+  const headerChevronFadeClass = alwaysShowActions ? 'inline-flex' : 'absolute inset-0 inline-flex opacity-0 transition-opacity group-hover/gh:opacity-100';
+  const groupPrLinks: SidebarRefLink[] = groupPrSummary && groupPrStatusLabel ? [{
+    key: `pr:${groupPrSummary.number}`,
+    icon: 'git-pull-request',
+    text: `#${groupPrSummary.number} · ${groupPrStatusLabel}`,
+    title: groupPrSummary.title,
+    color: groupPrColor,
+    url: groupPrSummary.url,
+  }] : [];
 
   const bootstrapFailureNotice = failedBootstrapDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -1062,7 +1081,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     <><div className={cn('oc-group', worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined}>
       <div className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
       <Tooltip disabled={groupPrSummary ? !groupPrStatusLabel : !primaryGroupIssue}>
-      <TooltipTrigger asChild>
+      <TooltipTrigger asChild closeDelay={SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS}>
       <div
         className="min-w-0 flex-1"
         onClick={() => onToggleCollapsedGroup(groupKey)}
@@ -1084,20 +1103,20 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
           className={cn(
             // pl-1.5 lines the branch icon up with the project-zone header
             // icon (container pl-2.5 + 6px = band pl-4 past its -ml-2.5).
-            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-1.5 transition-[padding]',
+            '@container min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-1.5',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
         >
-          <div className="min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden">
+          <div className={cn('min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden', headerActionsMaskClass)}>
             <p className="typography-ui-label font-normal truncate text-foreground/92">
               {group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-                  <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')} />
+                  <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', headerIconFadeClass)} />
                     <span className={cn(
                       'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                      headerChevronFadeClass,
                     )}>
                       {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                     </span>
@@ -1114,15 +1133,15 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" title={t('sessions.sidebar.group.worktreeRemoving')} role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
                       <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
                     </span>
-                  ) : <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  ) : <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <Icon name={group.space ? 'box-3' : 'git-branch'}
-                      className={cn('h-3.5 w-3.5 shrink-0', !groupPrColor && 'text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')}
+                      className={cn('h-3.5 w-3.5 shrink-0', !groupPrColor && 'text-muted-foreground', headerIconFadeClass)}
                       style={groupPrColor ? { color: groupPrColor } : undefined}
                       aria-label={group.space ? t('sessions.sidebar.group.space') : undefined}
                     />
                     <span className={cn(
                       'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                      headerChevronFadeClass,
                     )}>
                       {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                     </span>
@@ -1138,7 +1157,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     // drag handle, so it keeps its pointer and keys to itself.
                     <button
                       type="button"
-                      className="ml-auto flex-shrink-0 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline"
+                      className={cn('ml-auto flex-shrink-0 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline', headerCoveredFadeClass)}
                       style={groupPrColor ? { color: groupPrColor } : undefined}
                       disabled={!groupPrSummary.url}
                       aria-label={groupPrLabel}
@@ -1159,6 +1178,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       className={cn(
                         'ml-auto inline-flex flex-shrink-0 items-center gap-1 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         !primaryGroupIssue.color && 'text-muted-foreground',
+                        headerCoveredFadeClass,
                       )}
                       style={primaryGroupIssue.color ? { color: primaryGroupIssue.color } : undefined}
                       aria-label={groupIssueItems.map((item) => item.text).join(', ')}
@@ -1195,28 +1215,24 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
               </span>
             ) : null}
           </div>
-          {!group.isArchivedBucket && group.directory ? <DirectoryActionIndicator directory={group.directory} className="self-center" /> : null}
+          {!group.isArchivedBucket && group.directory ? <DirectoryActionIndicator directory={group.directory} className={cn('self-center', headerCoveredFadeClass)} /> : null}
         </div>
       </div>
       </TooltipTrigger>
-      {groupPrSummary && groupPrStatusLabel ? (
+      {groupPrLinks.length > 0 ? (
         <TooltipContent side="right" sideOffset={8} className="max-w-xs">
-          <p>#{groupPrSummary.number} · {groupPrStatusLabel}</p>
-          {groupPrSummary.title ? <p className="truncate text-muted-foreground">{groupPrSummary.title}</p> : null}
+          <SidebarRefLinks items={groupPrLinks} />
         </TooltipContent>
       ) : !groupPrSummary && primaryGroupIssue ? (
         <TooltipContent side="right" sideOffset={8} className="max-w-xs">
-          <div className="flex flex-col gap-1">
-            {groupIssueItems.map((item) => (
-              <div key={item.key} className="min-w-0">
-                <p>{item.text}</p>
-                {item.title ? <p className="truncate text-muted-foreground">{item.title}</p> : null}
-              </div>
-            ))}
-          </div>
+          <SidebarRefLinks items={groupIssueItems} />
         </TooltipContent>
       ) : null}
       </Tooltip>
+        {/* Their own tooltip group: the pointer crosses these buttons on its
+            way into the header's tooltip, which a tooltip of the same group
+            would replace on the spot. */}
+        <TooltipProvider delayDuration={400}>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
@@ -1294,6 +1310,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
              </Tooltip>
            </div>
          ) : null}
+        </TooltipProvider>
       </div>
       {/* Outside the header, which is a button of its own: the status line can hold one. */}
       {group.space ? <SpaceGroupStatus spaceId={group.space.id} className="pb-1 pl-5" /> : null}

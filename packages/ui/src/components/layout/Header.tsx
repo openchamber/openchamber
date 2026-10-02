@@ -55,6 +55,7 @@ import { SpaceApplyButton } from '@/components/session/spaces/SpaceApplyButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
+import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, redactSensitiveUrl } from '@/lib/desktopHosts';
@@ -1300,56 +1301,61 @@ export const Header: React.FC = () => {
     const canMoveToWorktree = isActive && !isVSCode && !isChatContext && currentSession && !currentSession.parentId;
     return (
       <>
-        <Item onClick={() => { if (!isActive) select(); pendingHeaderRenameRef.current = session.id; }}>
-          <Icon name="pencil-ai" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.rename')}
-        </Item>
+        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}>
+          <Item onClick={() => { if (!isActive) select(); pendingHeaderRenameRef.current = session.id; }}>
+            <Icon name="pencil-ai" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.rename')}
+          </Item>
+        </SessionMenuItemHint>
         <SessionAiRenameMenuItem sessionID={session.id} directory={session.directory} open={open} Item={Item} />
-        <Item onClick={() => copySessionIdFor(session.id)}>
-          <Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}
-        </Item>
+        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}>
+          <Item onClick={() => copySessionIdFor(session.id)}>
+            <Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}
+          </Item>
+        </SessionMenuItemHint>
         <Separator />
         {isActive ? (
-          <Item onClick={() => void exportCurrentSession()}>
-            <Icon name="download" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
-          </Item>
+          <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}>
+            <Item onClick={() => void exportCurrentSession()}>
+              <Icon name="download" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
+            </Item>
+          </SessionMenuItemHint>
         ) : null}
         {isActive ? renderGuestSessionActionItems(Item) : null}
         {canMoveToWorktree ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="block">
-                <Item
-                  disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
-                  onClick={moveCurrentSessionToWorktree}
-                  className="w-full"
-                >
-                  <Icon name="folder-shared" className="mr-1 size-4" />
-                  {t('sessions.sidebar.session.menu.moveToWorktree')}
-                </Item>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-72">
-              {isCurrentSessionMovingToWorktree
-                ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-                : isCurrentSessionActive
-                  ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-                  : t('sessions.sidebar.session.moveToWorktree.tooltip')}
-            </TooltipContent>
-          </Tooltip>
+          <SessionMenuItemHint hint={isCurrentSessionMovingToWorktree
+            ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
+            : isCurrentSessionActive
+              ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+              : t('sessions.sidebar.session.moveToWorktree.tooltip')}>
+            <span className="block">
+              <Item
+                disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                onClick={moveCurrentSessionToWorktree}
+                className="w-full"
+              >
+                <Icon name="folder-shared" className="mr-1 size-4" />
+                {t('sessions.sidebar.session.menu.moveToWorktree')}
+              </Item>
+            </span>
+          </SessionMenuItemHint>
         ) : null}
         <Separator />
-        <Item onClick={closeOtherTabs}>
-          <Icon name="close-circle" className="mr-1 size-4" />{t('header.sessionTabs.closeOtherTabs')}
-        </Item>
+        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.closeOtherTabs')}>
+          <Item onClick={closeOtherTabs}>
+            <Icon name="close-circle" className="mr-1 size-4" />{t('header.sessionTabs.closeOtherTabs')}
+          </Item>
+        </SessionMenuItemHint>
         <Separator />
         <HeaderSessionArchiveMenuItem
           sessionId={session.id}
           Item={Item}
           onArchive={() => setPendingHeaderRetentionAction({ action: 'archive', sessionId: session.id })}
         />
-        <Item className="text-destructive focus:text-destructive" onClick={() => setPendingHeaderRetentionAction({ action: 'delete', sessionId: session.id })}>
-          <Icon name="delete-bin" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}
-        </Item>
+        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.delete')}>
+          <Item className="text-destructive focus:text-destructive" onClick={() => setPendingHeaderRetentionAction({ action: 'delete', sessionId: session.id })}>
+            <Icon name="delete-bin" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}
+          </Item>
+        </SessionMenuItemHint>
       </>
     );
   }, [copySessionIdFor, currentSession, exportCurrentSession, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, renderGuestSessionActionItems, sessionDirectory, t]);
@@ -1512,34 +1518,29 @@ export const Header: React.FC = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[190px]">
-                    <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}><DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem></SessionMenuItemHint>
                     <SessionAiRenameMenuItem sessionID={currentSessionId} directory={sessionDirectory} open={isHeaderSessionMenuOpen} Item={DropdownMenuItem} />
-                    <DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}><DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem></SessionMenuItemHint>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}><DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem></SessionMenuItemHint>
                     {renderGuestSessionActionItems(DropdownMenuItem)}
                     {!isVSCode && !isChatContext && currentSession && !currentSession.parentId ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="block">
-                            <DropdownMenuItem
-                              disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
-                              onClick={moveCurrentSessionToWorktree}
-                              className="w-full"
-                            >
-                              <Icon name="folder-shared" className="mr-1 size-4" />
-                              {t('sessions.sidebar.session.menu.moveToWorktree')}
-                            </DropdownMenuItem>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-72">
-                          {isCurrentSessionMovingToWorktree
-                            ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-                            : isCurrentSessionActive
-                              ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-                              : t('sessions.sidebar.session.moveToWorktree.tooltip')}
-                        </TooltipContent>
-                      </Tooltip>
+                      <SessionMenuItemHint hint={isCurrentSessionMovingToWorktree
+                        ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
+                        : isCurrentSessionActive
+                          ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                          : t('sessions.sidebar.session.moveToWorktree.tooltip')}>
+                        <span className="block">
+                          <DropdownMenuItem
+                            disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                            onClick={moveCurrentSessionToWorktree}
+                            className="w-full"
+                          >
+                            <Icon name="folder-shared" className="mr-1 size-4" />
+                            {t('sessions.sidebar.session.menu.moveToWorktree')}
+                          </DropdownMenuItem>
+                        </span>
+                      </SessionMenuItemHint>
                     ) : null}
                     <DropdownMenuSeparator />
                     <HeaderSessionArchiveMenuItem
@@ -1547,7 +1548,7 @@ export const Header: React.FC = () => {
                       Item={DropdownMenuItem}
                       onArchive={() => setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId })}
                     />
-                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'delete', sessionId: currentSessionId }); }}><Icon name="delete-bin" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.delete')}><DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'delete', sessionId: currentSessionId }); }}><Icon name="delete-bin" className="mr-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem></SessionMenuItemHint>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : null}
