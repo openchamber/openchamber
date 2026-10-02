@@ -92,6 +92,15 @@ both settings are `false`.
 - Optional behavior switches (`worktree`, `goal`, `agent`, `variant`, `wait`)
   state their default and an explicit "only when the user asks" rule so agents
   do not invent worktrees, goal mode, or waits the user never requested.
+- A rule about when to act belongs where the model reads it before choosing a
+  tool: the head of the tool description and, when it must hold in every
+  session, the session context (`../session-knowledge/`). An action's
+  description is read only after the tool was chosen, so a trigger placed
+  there is missed by an agent that never thought the tool applied. Seen with
+  `session.link`: told only in the action, an agent investigating an issue
+  never linked it; with the rule at the head of the description and in the
+  session context, the next agent linked the issue first thing (2026-10-02).
+  Action descriptions say what the action does and takes.
 - Detailed combination rules are enforced by the shared control service and
   returned as actionable usage errors only after an invalid call. Per-action
   examples and a repeated per-action parameter schema are intentionally omitted.

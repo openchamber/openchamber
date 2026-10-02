@@ -50,8 +50,8 @@ import { openExternalUrl } from '@/lib/url';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
 import { useLinkedIssueStates, useLinkedPrVisualSummaries, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { getLinkedGitHubPullRequests, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarIssue } from '@/lib/linkedIssues';
-import { buildSessionIssueItems, combineSessionPrSummaries } from './sessionPrSummaries';
+import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
+import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -177,6 +177,7 @@ const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNod
 // shift by one gutter step per depth level.
 const EMPTY_LINKED_PULL_REQUESTS: readonly LinkedGitHubPullRequest[] = [];
 const EMPTY_LINKED_SIDEBAR_ISSUES: readonly LinkedSidebarIssue[] = [];
+const EMPTY_LINKED_SIDEBAR_CHANGES: readonly LinkedSidebarChange[] = [];
 
 /** One PR or issue a session row lists in its badge and tooltips. */
 type SessionRefLine = SidebarRefLink & {
@@ -431,6 +432,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     () => combineSessionPrSummaries(branchPrSummary, linkedPrSummaries),
     [branchPrSummary, linkedPrSummaries],
   );
+  // Merge and pull requests on other services have no state here yet: they
+  // follow the GitHub ones, by identifier, uncoloured.
+  const linkedChanges = React.useMemo(
+    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_CHANGES : getLinkedSidebarChanges(session)),
+    [isVSCode, session],
+  );
+  const linkedPrsWithoutState = React.useMemo(
+    () => findLinkedPrsWithoutState(linkedPullRequests, prSummaries),
+    [linkedPullRequests, prSummaries],
+  );
   // The branch icon speaks for the branch, not for PRs linked from elsewhere.
   const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
   // The project tree already shows the branch on the worktree sub-header, so
@@ -449,8 +460,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const linkedIssueStates = useLinkedIssueStates(linkedGitHubIssueRefs);
   // What the row's badge and tooltips list: its PRs, or else its issues.
   const refLines = React.useMemo((): SessionRefLine[] => {
-    if (prSummaries.length > 0) {
-      return prSummaries.map((summary) => {
+    if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || linkedChanges.length > 0) {
+      const githubLines = prSummaries.map((summary): SessionRefLine => {
         const label = getPrStatusLabel(summary, t);
         return {
           key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
@@ -462,6 +473,23 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
         };
       });
+      const pendingLines = linkedPrsWithoutState.map((link): SessionRefLine => ({
+        key: `${link.owner}/${link.repo}#${link.number}`,
+        icon: 'git-pull-request',
+        label: `#${link.number}`,
+        url: link.url,
+        title: link.title,
+        text: `#${link.number}`,
+      }));
+      const otherLines = linkedChanges.map((change): SessionRefLine => ({
+        key: change.key,
+        icon: 'git-pull-request',
+        label: change.identifier,
+        url: change.url,
+        title: change.title,
+        text: change.identifier,
+      }));
+      return [...githubLines, ...pendingLines, ...otherLines];
     }
     return buildSessionIssueItems(linkedIssues, linkedIssueStates).map((item) => ({
       key: item.key,
@@ -472,7 +500,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       title: item.title,
       text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.label,
     }));
-  }, [linkedIssueStates, linkedIssues, prSummaries, t]);
+  }, [linkedChanges, linkedIssueStates, linkedIssues, linkedPrsWithoutState, prSummaries, t]);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');

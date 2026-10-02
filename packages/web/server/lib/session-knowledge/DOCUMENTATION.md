@@ -66,6 +66,16 @@ Delivery is recorded only after the send is accepted. Recording it when the text
 is handed over would leave a failed send believing the agent had context it never
 received.
 
+## When to link
+
+A session whose agent has the managed `openchamber` tool (the setting is on and
+OpenChamber launched OpenCode) is also told when to link an issue or change to
+it with `session.link` (`SESSION_LINK_GUIDANCE`). The same rule leads the tool's
+own description. Stated only in the action's description it went unread: an
+agent handed an issue to investigate saw no reason to open a session-control
+tool, so it never linked anything. It rides the same signature (`l:on`), so it
+is sent once and again after compaction.
+
 ## Entries that read as instructions
 
 Memory is the one place where text from outside can settle permanently. The

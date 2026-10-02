@@ -4,7 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
-import { getLinkedIssues, getLinkedGitHubPullRequests, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, isGuestPull } from '@/lib/linkedIssues';
+import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, getGitHubThreadRef, isLinkedChange } from '@/lib/linkedIssues';
 import { useLinkedIssueStates, useLinkedPrVisualSummaries } from '@/stores/useGitHubPrStatusStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
@@ -160,7 +160,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const memoryCount = visibleKnowledge.memory.global + visibleKnowledge.memory.project;
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
 
-  const linked = React.useMemo(() => getLinkedIssues(session), [session]);
+  const linked = React.useMemo(() => getDistinctLinkedIssues(session), [session]);
   // Live state of the linked GitHub PRs and issues, from the same batched
   // summaries the sidebar uses. This panel asks for its own session too: the
   // session need not be on screen in the sidebar.
@@ -235,14 +235,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // The heading names what is distinctive about this session when there is
   // something — an attached thread — and falls back to the ambient counts
   // when there is not. `1 · 33 · 2` said nothing without opening the section.
-  const issueCount = linked.filter((entry) => (
-    entry.kind === 'issue'
-    || entry.kind === 'linear'
-    || (entry.kind === 'guest' && !isGuestPull(entry))
-  )).length;
-  const prCount = linked.filter((entry) => (
-    entry.kind === 'pull' || (entry.kind === 'guest' && isGuestPull(entry))
-  )).length;
+  const prCount = linked.filter(isLinkedChange).length;
+  const issueCount = linked.length - prCount;
   const summaryParts: string[] = [];
   if (issueCount > 0) {
     summaryParts.push(issueCount === 1
@@ -273,15 +267,25 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     }
   }
 
-  // A GitHub thread with a known state shows it in the sidebar's colours;
-  // anything else keeps the plain muted identifier.
-  const renderLinkedValue = (entry: (typeof linked)[number]) => {
-    const look = entry.kind === 'issue' || entry.kind === 'pull' ? liveLookById.get(entry.id.toLowerCase()) : undefined;
-    if (look) return <span style={{ color: look.color }}>{look.text}</span>;
+  // Identifier and state lead, the title follows and is what truncates: the
+  // number and state are what tell links apart, as in the sidebar. A GitHub
+  // thread with a known state shows it in the sidebar's colours; anything
+  // else keeps the plain muted identifier.
+  // Keyed by the GitHub thread, so an extension's link to a github.com PR
+  // shows the same live state as a direct one.
+  const liveLookOf = (entry: (typeof linked)[number]) => {
+    const ref = getGitHubThreadRef(entry);
+    return ref ? liveLookById.get(ref.key.toLowerCase()) : undefined;
+  };
+  const renderLinkedLabel = (entry: (typeof linked)[number]) => {
+    const ref = getGitHubThreadRef(entry);
+    const look = liveLookOf(entry);
+    const identifier = ref ? `#${ref.number}` : entry.kind === 'linear' || entry.kind === 'guest' || entry.kind === 'external' ? entry.identifier : `#${entry.number}`;
     return (
-      <WorkStatusValue tone="muted">
-        {entry.kind === 'linear' || entry.kind === 'guest' ? entry.identifier : `#${entry.number}`}
-      </WorkStatusValue>
+      <>
+        <span className="tabular-nums" style={look ? { color: look.color } : undefined}>{look ? look.text : identifier}</span>
+        {entry.title ? <> · {entry.title}</> : null}
+      </>
     );
   };
 
@@ -297,31 +301,27 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       {linked.map((entry) => (
         <WorkStatusRow
           key={entry.id}
-          leading={'authorAvatarUrl' in entry && entry.authorAvatarUrl ? (
-            <img src={entry.authorAvatarUrl} alt="" className="size-4 shrink-0 rounded-full" loading="lazy" />
-          ) : (
-            <Icon
-              name={entry.kind === 'pull' || (entry.kind === 'guest' && isGuestPull(entry))
-                ? 'git-pull-request'
-                : entry.kind === 'linear'
-                  ? 'linear'
-                  : entry.kind === 'guest'
-                    ? 'attachment-2'
-                    : 'error-warning'}
-              className="size-4 shrink-0 text-muted-foreground"
-            />
-          )}
-          label={entry.title}
+          // The kind, never the author: an agent's link has no avatar, and a
+          // mix of faces and icons hid which row was a PR.
+          icon={isLinkedChange(entry)
+            ? 'git-pull-request'
+            : entry.kind === 'linear'
+              ? 'linear'
+              : entry.kind === 'guest' || entry.kind === 'external'
+                ? 'attachment-2'
+                : 'record-circle'}
+          // The state's colour on the icon too, as on a sidebar row.
+          iconColor={liveLookOf(entry)?.color}
+          label={renderLinkedLabel(entry)}
           muted
           // GitHub threads still live on github.com. A Linear issue opens in
           // the right-hand panel when that rail exists; otherwise the Linear URL.
           onClick={() => openLinkedIssue(entry)}
           ariaLabel={entry.kind === 'linear'
             ? t('chat.workStatus.linkedIssues.openLinear', { identifier: entry.identifier })
-            : entry.kind === 'guest'
+            : entry.kind === 'guest' || entry.kind === 'external'
               ? t('chat.workStatus.linkedIssues.openGuest', { id: entry.identifier })
               : t('chat.workStatus.linkedIssues.open', { number: entry.number })}
-          value={renderLinkedValue(entry)}
         />
       ))}
 

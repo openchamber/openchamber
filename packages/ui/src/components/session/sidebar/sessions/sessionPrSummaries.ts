@@ -1,5 +1,5 @@
 import type { GitHubIssueLiveSummary } from '@/lib/api/types';
-import type { LinkedSidebarIssue } from '@/lib/linkedIssues';
+import type { LinkedGitHubPullRequest, LinkedSidebarIssue } from '@/lib/linkedIssues';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 
 // Which PR a row leads with when a session has several: the one that needs
@@ -36,6 +36,19 @@ export const combineSessionPrSummaries = (
   }
   // Array sort is stable: equal priorities keep branch-then-link order.
   return combined.sort((left, right) => priorityOf(left) - priorityOf(right));
+};
+
+/**
+ * Linked PRs whose state has not arrived: not fetched yet, GitHub signed out,
+ * or the batch failed. They are still the session's PRs, so the row lists
+ * them, uncoloured, and they keep its issues out as any PR does.
+ */
+export const findLinkedPrsWithoutState = (
+  links: readonly LinkedGitHubPullRequest[],
+  summaries: readonly PrVisualSummary[],
+): LinkedGitHubPullRequest[] => {
+  const known = new Set(summaries.map(identityOf));
+  return links.filter((link) => !known.has(`${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`));
 };
 
 type PrStatusLabelKey =

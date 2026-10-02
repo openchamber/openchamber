@@ -156,6 +156,7 @@ export const createOpenChamberControlService = (dependencies) => {
     fileOpen = null,
     notifyUser = null,
     agentMemoryActions = null,
+    sessionLinks = null,
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
@@ -602,6 +603,21 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
         return executeSessionAction(action, input, contextDirectory, options.signal);
+      }
+      if (action === 'session.link') {
+        if (!sessionLinks) throw new OpenChamberControlError('Linking is not available on this server', 503);
+        assertSingleScope(input);
+        // An explicit session is linked where it lives; the calling session
+        // uses the directory the tool call came from.
+        const explicitSessionID = asNonEmptyString(input.sessionId);
+        const sessionID = explicitSessionID || asNonEmptyString(options.contextSessionId);
+        const directory = asNonEmptyString(input.directory)
+          || (explicitSessionID ? await resolveSessionDirectory(explicitSessionID) : null)
+          || asNonEmptyString(contextDirectory);
+        // Models put the link's fields beside the action as often as inside
+        // `link`; session.link has no other use for them, so both are read.
+        const link = input.link ?? { url: input.url, title: input.title, kind: input.kind, identifier: input.identifier };
+        return sessionLinks.link({ sessionId: sessionID, directory, link });
       }
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
