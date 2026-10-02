@@ -13,6 +13,7 @@ import type { MarkdownVariant } from '../../MarkdownRendererImpl';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { commitStreamedText } from '../../lib/streamTextCommit';
 import type { StreamPhase } from '../types';
+import { isPartStreaming } from './partStreaming';
 import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
@@ -551,6 +552,84 @@ const ReasoningPart = React.memo(({
             isStreaming={isStreaming}
             revealRequest={revealRequest}
             reasoningMessageId={messageId}
+        />
+    );
+});
+
+type MergedReasoningPartProps = {
+    parts: Part[];
+    onContentChange?: (reason?: ContentChangeReason) => void;
+    messageId: string;
+    streamPhase?: StreamPhase;
+};
+
+/**
+ * Renders ALL reasoning parts for a message as a single collapsible block,
+ * merging their text and spanning their combined time range.
+ * This matches the VSCode Copilot pattern of showing one "Thought" block per turn.
+ */
+export const MergedReasoningPart = React.memo(({
+    parts,
+    onContentChange,
+    messageId,
+    streamPhase,
+}: MergedReasoningPartProps) => {
+    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+
+    const mergedText = React.useMemo(() => {
+        return parts
+            .map((part) => {
+                const p = part as PartWithText;
+                return cleanReasoningText(p.text || p.content || '');
+            })
+            .filter((t) => t.length > 0)
+            .join('\n\n');
+    }, [parts]);
+
+    const mergedTime = React.useMemo(() => {
+        let earliestStart: number | undefined;
+        let latestEnd: number | undefined;
+
+        for (const part of parts) {
+            const time = (part as PartWithText).time;
+            if (typeof time?.start === 'number' && Number.isFinite(time.start)) {
+                if (earliestStart === undefined || time.start < earliestStart) {
+                    earliestStart = time.start;
+                }
+            }
+            if (typeof time?.end === 'number' && Number.isFinite(time.end)) {
+                if (latestEnd === undefined || time.end > latestEnd) {
+                    latestEnd = time.end;
+                }
+            }
+        }
+
+        return earliestStart !== undefined ? { start: earliestStart, end: latestEnd } : undefined;
+    }, [parts]);
+
+    const hasEnded = typeof mergedTime?.end === 'number';
+    const isStreaming = isPartStreaming(chatRenderMode, streamPhase, hasEnded);
+
+    const throttledMergedText = useStreamingTextThrottle({
+        text: mergedText,
+        isStreaming,
+        identityKey: `${messageId}:reasoning-merged`,
+    });
+
+    const blockId = parts[0]?.id ?? `${messageId}-reasoning-merged`;
+
+    if (!throttledMergedText.trim()) {
+        return null;
+    }
+
+    return (
+        <ReasoningTimelineBlock
+            text={throttledMergedText}
+            variant="thinking"
+            onContentChange={onContentChange}
+            blockId={blockId}
+            time={mergedTime}
+            isStreaming={isStreaming}
         />
     );
 });

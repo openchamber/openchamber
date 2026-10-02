@@ -2,6 +2,7 @@ import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { SessionScrollBehaviorSettings } from './SessionScrollBehaviorSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
@@ -232,6 +233,7 @@ const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ ru
     return (
         <>
             <DefaultsSettings key={runtimeEndpointEpoch} />
+            <SessionScrollBehaviorSettings />
             <SessionWorkSettings />
             <SessionRetentionSettings />
         </>

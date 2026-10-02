@@ -981,7 +981,9 @@ export const useChatTimelineScroll = ({
         if (scrollRef.current === scrollNode && handledEntryKeyRef.current !== currentSessionKey) {
             handledEntryKeyRef.current = currentSessionKey;
             const linkRequest = peekMessageFocus(currentSessionIdRef.current);
-            const remembered = readSessionScrollPosition(currentSessionKey);
+            const remembered = useUIStore.getState().sessionScrollRestoreMode === 'jump-to-end'
+                ? null
+                : readSessionScrollPosition(currentSessionKey);
             const target: PositionTarget | null = linkRequest
                 ? linkTarget(linkRequest, scrollNode)
                 : remembered ? { kind: 'remembered', anchor: remembered } : null;
