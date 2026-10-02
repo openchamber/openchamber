@@ -12,6 +12,7 @@ import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-re
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
+import { isOpaqueOriginRequest } from '../security/request-security.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -419,6 +420,7 @@ export function createTerminalRuntime({
         }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
       } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
     };
+    if (isOpaqueOriginRequest(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
     if (!uiAuthController?.enabled) { accept(); return; }
     try {
       const result = uiAuthController.ensureSessionToken(req, null);

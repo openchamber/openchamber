@@ -23,6 +23,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { WebSocketServer } from 'ws';
+import { isOpaqueOriginRequest } from '../security/request-security.js';
 
 import {
   SURFACE_AGENT_ACTIVE_HEADER,
@@ -580,6 +581,10 @@ export const createGuestSurfaceRuntime = ({
 
     const handleUpgrade = async () => {
       try {
+        if (isOpaqueOriginRequest(req)) {
+          rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
         if (uiAuthController?.enabled) {
           const sessionToken = await uiAuthController.ensureSessionToken?.(req, null);
           if (!sessionToken) {

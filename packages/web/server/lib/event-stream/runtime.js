@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { isOpaqueOriginRequest } from '../security/request-security.js';
 
 import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
 import {
@@ -141,6 +142,10 @@ export function createMessageStreamWsRuntime({
 
     const handleUpgrade = async () => {
       try {
+        if (isOpaqueOriginRequest(req)) {
+          rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
         if (uiAuthController?.enabled) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {
