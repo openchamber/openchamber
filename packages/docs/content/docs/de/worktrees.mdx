@@ -10,11 +10,12 @@ Eine Worktree-Sitzung läuft in einer eigenen ausgecheckten Kopie deines Repos a
 ## Eine erstellen
 
 1. Öffne den Dialog für einen neuen Worktree: Wähle **Neuer Worktree…** im Branch-Menü über dem Eingabefeld, wenn du eine neue Sitzung startest, oder nutze die Worktree-Schaltfläche in einer Projektzeile der Seitenleiste.
-2. Wähle einen Startpunkt:
-   - **new branch** — benenne den Branch und wähle, von welchem Branch aus gestartet werden soll
+2. Wähle unter **Start from** eine Option:
+   - **new branch** — benenne den Branch
    - **existing branch** — checke einen bereits vorhandenen Branch aus
-3. Bestätige den Worktree-Ordner (OpenChamber schlägt einen anhand des Branchnamens vor).
-4. Erstelle ihn.
+   - **PR or issue** — wähle einen Eintrag aus GitHub, Linear oder einer Erweiterung; der Branch wird danach benannt (ein PR checkt seinen eigenen Branch aus), und der Eintrag wird an deine erste Nachricht angehängt
+3. Prüfe **Based on** (der Branch, von dem ein neuer Branch ausgeht, standardmäßig der aktuelle Branch des Projekts) und **Folder name**; ändere sie nur, wenn es nötig ist.
+4. Erstelle ihn. Hat das Projekt Setup-Befehle, listet der Dialog sie auf; sie laufen direkt danach.
 
 OpenChamber legt den Branch an, richtet den Ordner ein und öffnet dort eine neue Sitzung, bereit für deine erste Nachricht. Du kannst auch direkt von einer [todo](/notes-todos-plans/) oder einem [GitHub issue or PR](/github/) aus damit beginnen.
 

@@ -28,8 +28,7 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.toggleWorktreeAria': 'Toggle worktree',
     'session.linearIssuePicker.actions.createInWorktree': 'Create in worktree',
     'chat.workStatus.linkedIssues.openLinear': 'Open {identifier} in Linear',
-    'session.newWorktree.actions.startFromLinearIssue': 'Start from Linear Issue',
-    'session.newWorktree.fromLinearIssue': 'From {identifier}: {title}',
+    'session.newWorktree.actions.startFromLinearIssue': 'A Linear issue',
   },
   nl: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear-issue koppelen',
@@ -60,7 +59,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'In worktree maken',
     'chat.workStatus.linkedIssues.openLinear': '{identifier} in Linear openen',
     'session.newWorktree.actions.startFromLinearIssue': 'Starten vanuit Linear-issue',
-    'session.newWorktree.fromLinearIssue': 'Uit {identifier}: {title}',
   },
   de: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear-Issue verknüpfen',
@@ -91,7 +89,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'In Worktree erstellen',
     'chat.workStatus.linkedIssues.openLinear': '{identifier} in Linear öffnen',
     'session.newWorktree.actions.startFromLinearIssue': 'Von Linear-Issue starten',
-    'session.newWorktree.fromLinearIssue': 'Von {identifier}: {title}',
   },
   fr: {
     'chat.chatInput.actions.linkLinearIssue': 'Lier un ticket Linear',
@@ -122,7 +119,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'Créer dans un worktree',
     'chat.workStatus.linkedIssues.openLinear': 'Ouvrir {identifier} dans Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Démarrer depuis un ticket Linear',
-    'session.newWorktree.fromLinearIssue': 'Depuis {identifier} : {title}',
   },
   es: {
     'chat.chatInput.actions.linkLinearIssue': 'Vincular issue de Linear',
@@ -153,7 +149,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'Crear en worktree',
     'chat.workStatus.linkedIssues.openLinear': 'Abrir {identifier} en Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Empezar desde un issue de Linear',
-    'session.newWorktree.fromLinearIssue': 'Desde {identifier}: {title}',
   },
   ja: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear Issueをリンク',
@@ -184,7 +179,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'ワークツリーで作成',
     'chat.workStatus.linkedIssues.openLinear': 'Linearで {identifier} を開く',
     'session.newWorktree.actions.startFromLinearIssue': 'Linear Issueから開始',
-    'session.newWorktree.fromLinearIssue': '{identifier}: {title}から',
   },
   'pt-BR': {
     'chat.chatInput.actions.linkLinearIssue': 'Vincular issue do Linear',
@@ -215,7 +209,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'Criar em worktree',
     'chat.workStatus.linkedIssues.openLinear': 'Abrir {identifier} no Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Começar a partir de uma issue do Linear',
-    'session.newWorktree.fromLinearIssue': 'De {identifier}: {title}',
   },
   uk: {
     'chat.chatInput.actions.linkLinearIssue': 'Прив’язати Linear issue',
@@ -246,7 +239,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'Створити у worktree',
     'chat.workStatus.linkedIssues.openLinear': 'Відкрити {identifier} у Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Почати з Linear issue',
-    'session.newWorktree.fromLinearIssue': 'З {identifier}: {title}',
   },
   ko: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear 이슈 연결',
@@ -277,7 +269,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': '워크트리에서 만들기',
     'chat.workStatus.linkedIssues.openLinear': 'Linear에서 {identifier} 열기',
     'session.newWorktree.actions.startFromLinearIssue': 'Linear 이슈에서 시작',
-    'session.newWorktree.fromLinearIssue': '{identifier}: {title}에서',
   },
   pl: {
     'chat.chatInput.actions.linkLinearIssue': 'Powiąż zgłoszenie Linear',
@@ -308,7 +299,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': 'Utwórz w worktree',
     'chat.workStatus.linkedIssues.openLinear': 'Otwórz {identifier} w Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Zacznij od zgłoszenia Linear',
-    'session.newWorktree.fromLinearIssue': 'Z {identifier}: {title}',
   },
   'zh-CN': {
     'chat.chatInput.actions.linkLinearIssue': '关联 Linear Issue',
@@ -339,7 +329,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': '在 worktree 中创建',
     'chat.workStatus.linkedIssues.openLinear': '在 Linear 中打开 {identifier}',
     'session.newWorktree.actions.startFromLinearIssue': '从 Linear Issue 开始',
-    'session.newWorktree.fromLinearIssue': '来自 {identifier}：{title}',
   },
   'zh-TW': {
     'chat.chatInput.actions.linkLinearIssue': '關聯 Linear Issue',
@@ -370,7 +359,6 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': '在 worktree 中建立',
     'chat.workStatus.linkedIssues.openLinear': '在 Linear 中開啟 {identifier}',
     'session.newWorktree.actions.startFromLinearIssue': '從 Linear Issue 開始',
-    'session.newWorktree.fromLinearIssue': '來自 {identifier}：{title}',
   },
   tr: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear Issue bağla',
@@ -401,6 +389,5 @@ export const linearIssuePickerI18n = {
     'session.linearIssuePicker.actions.createInWorktree': "Worktree'de oluştur",
     'chat.workStatus.linkedIssues.openLinear': "{identifier} issue'unu Linear'da aç",
     'session.newWorktree.actions.startFromLinearIssue': "Linear Issue'dan başla",
-    'session.newWorktree.fromLinearIssue': '{identifier}: {title}',
   },
 } as const;

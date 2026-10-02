@@ -10,11 +10,12 @@ Une session worktree s’exécute dans sa propre copie extraite de votre dépôt
 ## En créer une
 
 1. Ouvrez la boîte de dialogue nouveau worktree : choisissez **Nouveau worktree…** dans le menu des branches au-dessus du champ de saisie quand vous démarrez une session, ou utilisez le bouton worktree sur la ligne d'un projet dans la barre latérale.
-2. Choisissez un point de départ :
-   - **new branch** — nommez la branche et choisissez depuis quelle branche partir
+2. Sous **Start from**, choisissez une option :
+   - **new branch** — nommez la branche
    - **existing branch** — récupérez une branche que vous avez déjà
-3. Confirmez le dossier du worktree (OpenChamber en propose un à partir du nom de branche).
-4. Créez-le.
+   - **PR or issue** — choisissez-en un depuis GitHub, Linear ou une extension ; la branche prend son nom (une PR récupère sa propre branche) et l'élément est joint à votre premier message
+3. Vérifiez **Based on** (la branche de départ d'une nouvelle branche, par défaut la branche actuelle du projet) et **Folder name** ; ne les modifiez que si nécessaire.
+4. Créez-le. Si le projet a des commandes de configuration, la boîte de dialogue les liste ; elles s'exécutent juste après.
 
 OpenChamber crée la branche, prépare le dossier et y ouvre une nouvelle session, prête pour votre premier message. Vous pouvez aussi en lancer une directement depuis une [todo](/notes-todos-plans/) ou une [issue ou PR GitHub](/github/).
 

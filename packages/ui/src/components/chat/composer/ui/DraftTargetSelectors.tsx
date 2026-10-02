@@ -451,6 +451,13 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                             </SelectGroup>
                         ) : null}
                         {projectRootBranchOption ? <SelectSeparator /> : null}
+                        {/* Creating comes before the list, so a long list never hides it. */}
+                        <WorktreeCreateActions
+                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            onQuick={() => { setOpenPicker(null); void createWorktreeDraft(); }}
+                            onCustom={onCreateCustomWorktree ? () => { setOpenPicker(null); onCreateCustomWorktree(); } : undefined}
+                        />
+                        <SelectSeparator />
                         <SelectGroup>
                             <SelectLabel>{t('chat.chatInput.worktrees')}</SelectLabel>
                             {worktreeBranchOptions.map((option) => (
@@ -464,12 +471,6 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
-                        <SelectSeparator />
-                        <WorktreeCreateActions
-                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
-                            onQuick={() => { setOpenPicker(null); void createWorktreeDraft(); }}
-                            onCustom={onCreateCustomWorktree ? () => { setOpenPicker(null); onCreateCustomWorktree(); } : undefined}
-                        />
                         {onCreateSpace ? (
                             <>
                                 <SelectSeparator />
@@ -686,6 +687,13 @@ export function MobileDraftTargetSheets(
                                             {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
                                         </>
                                     ) : null}
+                                    <div className="my-1 h-px bg-border" />
+                                    <WorktreeCreateActions
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
+                                        onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
+                                    />
+                                    <div className="my-1 h-px bg-border" />
                                     <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
                                         {t('chat.chatInput.worktrees')}
                                     </div>
@@ -694,12 +702,6 @@ export function MobileDraftTargetSheets(
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
-                                    <div className="my-1 h-px bg-border" />
-                                    <WorktreeCreateActions
-                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                        onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
-                                        onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
-                                    />
                                     {onCreateSpace ? (
                                         <div className="px-2 pb-1 pt-2">
                                             <button

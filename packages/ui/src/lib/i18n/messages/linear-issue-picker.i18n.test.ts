@@ -32,7 +32,6 @@ const requiredKeys = [
   'session.linearIssuePicker.actions.createInWorktree',
   'chat.workStatus.linkedIssues.openLinear',
   'session.newWorktree.actions.startFromLinearIssue',
-  'session.newWorktree.fromLinearIssue',
 ] as const;
 
 describe('linear issue picker translations', () => {
