@@ -1,4 +1,5 @@
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
+import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Session } from '@/lib/opencode/model';
@@ -665,12 +666,17 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     [groupIssues],
   );
   const groupIssueStates = useLinkedIssueStates(groupIssueRefs);
+  const groupLinearIdentifiers = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
+    [groupIssues],
+  );
+  const groupLinearStates = useLinearIssueStates(groupLinearIdentifiers);
   const groupIssueItems = React.useMemo(
-    () => buildSessionIssueItems(groupIssues, groupIssueStates).map((item) => ({
+    () => buildSessionIssueItems(groupIssues, groupIssueStates, groupLinearStates).map((item) => ({
       ...item,
-      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.label,
+      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     })),
-    [groupIssueStates, groupIssues, t],
+    [groupIssueStates, groupIssues, groupLinearStates, t],
   );
   const primaryGroupIssue = groupIssueItems[0] ?? null;
 

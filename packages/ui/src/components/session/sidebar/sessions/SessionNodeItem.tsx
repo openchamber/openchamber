@@ -1,4 +1,5 @@
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
+import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -458,6 +459,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [linkedIssues],
   );
   const linkedIssueStates = useLinkedIssueStates(linkedGitHubIssueRefs);
+  const linkedLinearIdentifiers = React.useMemo(
+    () => linkedIssues.flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
+    [linkedIssues],
+  );
+  const linkedLinearStates = useLinearIssueStates(linkedLinearIdentifiers);
   // What the row's badge and tooltips list: its PRs, or else its issues.
   const refLines = React.useMemo((): SessionRefLine[] => {
     if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || linkedChanges.length > 0) {
@@ -491,16 +497,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       }));
       return [...githubLines, ...pendingLines, ...otherLines];
     }
-    return buildSessionIssueItems(linkedIssues, linkedIssueStates).map((item) => ({
+    return buildSessionIssueItems(linkedIssues, linkedIssueStates, linkedLinearStates).map((item) => ({
       key: item.key,
       icon: item.icon,
       label: item.label,
       color: item.color ?? undefined,
       url: item.url,
       title: item.title,
-      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.label,
+      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     }));
-  }, [linkedChanges, linkedIssueStates, linkedIssues, linkedPrsWithoutState, prSummaries, t]);
+  }, [linkedChanges, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t]);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');

@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { setLinearAuth, clearLinearAuth } from './auth.js';
-import { getLinearIssue, listLinearIssues, listLinearIssueStates, parseLinearIssueRef, createLinearIssueComment, updateLinearIssue } from './issues.js';
+import { getLinearIssue, getLinearIssueSummaries, listLinearIssues, listLinearIssueStates, parseLinearIssueRef, createLinearIssueComment, updateLinearIssue } from './issues.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-issues-'));
 
@@ -62,6 +62,60 @@ describe('Linear issue list/get', () => {
       process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
     }
     fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('asks the live state of several issues in one query', async () => {
+    const graphql = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.variables).toEqual({ v0: 'ENG-12', v1: 'ENG-13' });
+      return jsonResponse({ data: {
+        i0: { identifier: 'ENG-12', title: 'Broken login', state: { name: 'In Progress', type: 'started' } },
+        i1: { identifier: 'ENG-13', title: 'Done thing', state: { name: 'Done', type: 'completed' } },
+      } });
+    });
+    vi.stubGlobal('fetch', graphql);
+
+    await expect(getLinearIssueSummaries(['eng-12', 'ENG-13', 'ENG-12', 'not an id'])).resolves.toEqual({
+      connected: true,
+      issues: [
+        { identifier: 'ENG-12', title: 'Broken login', state: { name: 'In Progress', type: 'started' } },
+        { identifier: 'ENG-13', title: 'Done thing', state: { name: 'Done', type: 'completed' } },
+      ],
+    });
+    expect(graphql).toHaveBeenCalledTimes(1);
+  });
+
+  it('an issue this workspace lacks falls back to single lookups and is skipped afterwards', async () => {
+    const asked = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      asked.push(Object.values(body.variables));
+      const ids = Object.values(body.variables);
+      if (ids.includes('GONE-1')) {
+        return jsonResponse({ data: null, errors: [{ message: 'Entity not found: Issue', extensions: { code: 'INVALID_INPUT' } }] });
+      }
+      return jsonResponse({ data: Object.fromEntries(Object.keys(body.variables).map((key) => [
+        body.query.includes('LinearIssueSummaries') ? `i${key.slice(1)}` : 'issue',
+        { identifier: body.variables[key], title: 'T', state: { name: 'Todo', type: 'unstarted' } },
+      ])) });
+    }));
+    const now = () => 1_000;
+
+    const first = await getLinearIssueSummaries(['ENG-1', 'GONE-1'], { now });
+    expect(first.issues.map((issue) => issue.identifier)).toEqual(['ENG-1']);
+    expect(asked).toEqual([['ENG-1', 'GONE-1'], ['ENG-1'], ['GONE-1']]);
+
+    asked.length = 0;
+    await getLinearIssueSummaries(['ENG-1', 'GONE-1'], { now });
+    expect(asked).toEqual([['ENG-1']]);
+  });
+
+  it('returns disconnected for live states without calling Linear', async () => {
+    clearLinearAuth();
+    const graphql = vi.fn();
+    vi.stubGlobal('fetch', graphql);
+    await expect(getLinearIssueSummaries(['ENG-1'])).resolves.toEqual({ connected: false });
+    expect(graphql).not.toHaveBeenCalled();
   });
 
   it('returns disconnected without calling Linear when there is no auth', async () => {

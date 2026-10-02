@@ -9,7 +9,9 @@ import { useLinkedIssueStates, useLinkedPrVisualSummaries } from '@/stores/useGi
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
 import { getPrStatusLabel } from '@/components/session/sidebar/prStatusLabel';
-import { getIssueStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
+import { getIssueStateLook, getLinearIssueStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
+import { useLinearIssueStateSync } from '@/hooks/useLinearIssueStateSync';
+import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionKnowledgeSummary } from '@/lib/sessionKnowledgeApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
@@ -177,6 +179,12 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   useOpenPrSummarySync(EMPTY_KEYS, linkedPrRefs, linkedIssueRefs, github, githubConnected);
   const linkedPrSummaries = useLinkedPrVisualSummaries(linkedPrs);
   const linkedIssueStates = useLinkedIssueStates(linkedIssueRefs);
+  const linkedLinearIdentifiers = React.useMemo(
+    () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
+    [session],
+  );
+  useLinearIssueStateSync(linkedLinearIdentifiers, linear);
+  const linkedLinearStates = useLinearIssueStates(linkedLinearIdentifiers);
   // Entry id (`owner/repo#number`, lowercased) -> the coloured status line.
   const liveLookById = React.useMemo(() => {
     const looks = new Map<string, { color: string; text: string }>();
@@ -196,8 +204,17 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
         text: `#${ref.number} · ${t(look.statusKey)}`,
       });
     });
+    // Linear shows its team's own state name; the colour comes from its type.
+    linkedLinearIdentifiers.forEach((identifier, index) => {
+      const state = linkedLinearStates[index];
+      if (!state) return;
+      looks.set(`linear:${identifier}`.toLowerCase(), {
+        color: getLinearIssueStateLook(state.state.type).color,
+        text: `${identifier} · ${state.state.name}`,
+      });
+    });
     return looks;
-  }, [linkedIssueRefs, linkedIssueStates, linkedPrSummaries, t]);
+  }, [linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrSummaries, t]);
   const openLinkedIssue = React.useCallback((entry: (typeof linked)[number]) => {
     if (
       entry.kind === 'linear'
@@ -274,6 +291,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // Keyed by the GitHub thread, so an extension's link to a github.com PR
   // shows the same live state as a direct one.
   const liveLookOf = (entry: (typeof linked)[number]) => {
+    if (entry.kind === 'linear') return liveLookById.get(entry.id.toLowerCase());
     const ref = getGitHubThreadRef(entry);
     return ref ? liveLookById.get(ref.key.toLowerCase()) : undefined;
   };

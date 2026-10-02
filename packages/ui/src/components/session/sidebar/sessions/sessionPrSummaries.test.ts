@@ -45,6 +45,22 @@ describe('findLinkedPrsWithoutState', () => {
   });
 });
 
+describe('linked Linear issues', () => {
+  test('take the colour of their state type and show its team name', () => {
+    const linear = (identifier: string): LinkedSidebarIssue => ({ source: 'linear', key: `linear:${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: 'Old title' });
+    const items = buildSessionIssueItems([linear('ENG-1'), linear('ENG-2'), linear('ENG-3')], [], [
+      { identifier: 'ENG-1', title: 'Shipped', state: { name: 'Done', type: 'completed' } },
+      null,
+      { identifier: 'ENG-3', title: 'Working', state: { name: 'In Progress', type: 'started' } },
+    ]);
+    expect(items.map((item) => [item.label, item.color, item.statusText, item.title])).toEqual([
+      ['ENG-3', 'var(--pr-open)', 'In Progress', 'Working'],
+      ['ENG-2', null, null, 'Old title'],
+      ['ENG-1', 'var(--pr-merged)', 'Done', 'Shipped'],
+    ]);
+  });
+});
+
 describe('getPrStatusLabelKey', () => {
   test('a PR waiting for a required review is open, not ready to merge', () => {
     expect(getPrStatusLabelKey(summary(1, 'open', { mergeableState: 'blocked', canMerge: true })))

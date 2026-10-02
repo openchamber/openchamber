@@ -424,6 +424,79 @@ export async function getLinearIssue(id) {
   });
 }
 
+/** Per request; a sidebar shows a handful, and Linear rates by query complexity. */
+export const MAX_SUMMARY_IDENTIFIERS = 50;
+const MISSING_TTL_MS = 10 * 60_000;
+const SINGLE_LOOKUP_CONCURRENCY = 4;
+const SUMMARY_FIELDS = 'identifier title state { name type }';
+// Identifiers the current workspace did not have, so they stay out of the next
+// batches instead of failing them again. Keyed by workspace: switching it can
+// make them resolvable.
+const missingUntil = new Map();
+
+const missingKey = (identifier) => `${getLinearAuth()?.workspaceId ?? ''}:${identifier}`;
+
+const isRememberedMissing = (identifier, now) => {
+  const key = missingKey(identifier);
+  const until = missingUntil.get(key);
+  if (until === undefined) return false;
+  if (until > now) return true;
+  missingUntil.delete(key);
+  return false;
+};
+
+function readIssueLiveSummary(node) {
+  if (!isPlainObject(node)) return null;
+  const identifier = readTrimmedString(node.identifier);
+  const state = readState(node.state);
+  if (!identifier || !state?.type) return null;
+  return { identifier, title: readTrimmedString(node.title), state: { name: state.name, type: state.type } };
+}
+
+/**
+ * Live state of linked issues, one aliased query per call. In Linear's schema
+ * `issue(id:)` is non-null, so one identifier this workspace does not have
+ * (a deleted issue, another workspace's) fails the whole query. That case is
+ * asked one issue at a time instead, and the missing ones are remembered.
+ */
+export async function getLinearIssueSummaries(identifiers, { now = Date.now } = {}) {
+  const wanted = [...new Set((Array.isArray(identifiers) ? identifiers : [])
+    .map((value) => readTrimmedString(value).toUpperCase())
+    .filter((value) => IDENTIFIER_RE.test(value)))]
+    .slice(0, MAX_SUMMARY_IDENTIFIERS);
+  return withLinearToken(async (token) => {
+    const asked = wanted.filter((identifier) => !isRememberedMissing(identifier, now()));
+    if (asked.length === 0) return { connected: true, issues: [] };
+    const variables = Object.fromEntries(asked.map((identifier, index) => [`v${index}`, identifier]));
+    const query = `query LinearIssueSummaries(${asked.map((_, index) => `$v${index}: String!`).join(', ')}) {
+      ${asked.map((_, index) => `i${index}: issue(id: $v${index}) { ${SUMMARY_FIELDS} }`).join('\n      ')}
+    }`;
+    try {
+      const data = await fetchLinearGraphql(token, query, variables);
+      return { connected: true, issues: asked.map((_, index) => readIssueLiveSummary(data[`i${index}`])).filter(Boolean) };
+    } catch (error) {
+      if (!error?.userError) throw error;
+    }
+
+    const issues = [];
+    for (let start = 0; start < asked.length; start += SINGLE_LOOKUP_CONCURRENCY) {
+      const slice = asked.slice(start, start + SINGLE_LOOKUP_CONCURRENCY);
+      const results = await Promise.all(slice.map(async (identifier) => {
+        try {
+          const data = await fetchLinearGraphql(token, `query LinearIssueSummary($id: String!) { issue(id: $id) { ${SUMMARY_FIELDS} } }`, { id: identifier });
+          return readIssueLiveSummary(data.issue);
+        } catch (error) {
+          if (!error?.userError) throw error;
+          missingUntil.set(missingKey(identifier), now() + MISSING_TTL_MS);
+          return null;
+        }
+      }));
+      issues.push(...results.filter(Boolean));
+    }
+    return { connected: true, issues };
+  });
+}
+
 export async function listLinearIssueStates(teamId) {
   const id = readTrimmedString(teamId);
   if (!id) {

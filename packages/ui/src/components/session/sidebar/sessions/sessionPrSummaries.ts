@@ -1,4 +1,4 @@
-import type { GitHubIssueLiveSummary } from '@/lib/api/types';
+import type { GitHubIssueLiveSummary, LinearIssueLiveSummary, LinearStateType } from '@/lib/api/types';
 import type { LinkedGitHubPullRequest, LinkedSidebarIssue } from '@/lib/linkedIssues';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 
@@ -99,6 +99,8 @@ export type SessionIssueItem = {
   /** Theme PR colour for a known state; null when the state is unknown. */
   color: string | null;
   statusKey: IssueStatusLabelKey | null;
+  /** A tracker's own state name (Linear's "In Progress"), shown as is. */
+  statusText: string | null;
   url: string;
   title: string;
 };
@@ -117,28 +119,64 @@ export const getIssueStateLook = (state: GitHubIssueLiveSummary['state']): { col
   return { color, statusKey };
 };
 
-// Unknown state (Linear, extensions, a GitHub issue not asked yet) sits
+// Linear names its states per team; their type is what maps onto the colours.
+// Not done yet reads as open, done as completed, dropped as not planned.
+const LINEAR_STATE_LOOK: Record<LinearStateType, keyof typeof ISSUE_STATE_LOOK> = {
+  triage: 'open',
+  backlog: 'open',
+  unstarted: 'open',
+  started: 'open',
+  completed: 'completed',
+  canceled: 'not_planned',
+};
+
+/** How a Linear issue in a known state looks: the GitHub issue colour of its type. */
+export const getLinearIssueStateLook = (type: LinearStateType): { color: string; priority: number } => {
+  const { color, priority } = ISSUE_STATE_LOOK[LINEAR_STATE_LOOK[type]];
+  return { color, priority };
+};
+
+// Unknown state (extensions, an issue not asked yet) sits
 // between open and closed ones.
 const UNKNOWN_ISSUE_PRIORITY = 1;
 
 /**
  * The issues a session row shows, most relevant first: open issues, then
  * ones whose state is unknown, then closed ones. `states` lines up with the
- * GitHub issues among `issues`, in order.
+ * GitHub issues among `issues`, in order; `linearStates` with the Linear ones.
  */
 export const buildSessionIssueItems = (
   issues: readonly LinkedSidebarIssue[],
   states: ReadonlyArray<GitHubIssueLiveSummary | null>,
+  linearStates: ReadonlyArray<LinearIssueLiveSummary | null> = [],
 ): SessionIssueItem[] => {
   let githubIndex = 0;
+  let linearIndex = 0;
   const ranked = issues.map((issue) => {
+    if (issue.source === 'linear') {
+      const state = linearStates[linearIndex] ?? null;
+      linearIndex += 1;
+      const look = state ? getLinearIssueStateLook(state.state.type) : null;
+      const item: SessionIssueItem = {
+        key: issue.key,
+        label: issue.identifier,
+        icon: 'linear',
+        color: look?.color ?? null,
+        statusKey: null,
+        statusText: state?.state.name ?? null,
+        url: issue.url,
+        title: state?.title || issue.title,
+      };
+      return { item, priority: look?.priority ?? UNKNOWN_ISSUE_PRIORITY };
+    }
     if (issue.source !== 'github') {
       const item: SessionIssueItem = {
         key: issue.key,
         label: issue.identifier,
-        icon: issue.source === 'linear' ? 'linear' : 'record-circle',
+        icon: 'record-circle',
         color: null,
         statusKey: null,
+        statusText: null,
         url: issue.url,
         title: issue.title,
       };
@@ -153,6 +191,7 @@ export const buildSessionIssueItems = (
       icon: 'record-circle',
       color: look?.color ?? null,
       statusKey: look?.statusKey ?? null,
+      statusText: null,
       url: issue.url,
       title: state?.title || issue.title,
     };

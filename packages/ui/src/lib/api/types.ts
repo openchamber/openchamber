@@ -1415,6 +1415,21 @@ export type LinearIssueGetResult = {
   issue?: LinearIssue | null;
 };
 
+/** Linear's workflow category; team-specific state names map onto these. */
+export type LinearStateType = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
+
+/** Live state of a linked Linear issue, refreshed in batches for list surfaces. */
+export type LinearIssueLiveSummary = {
+  identifier: string;
+  title: string;
+  state: { name: string; type: LinearStateType };
+};
+
+/** Issues the current workspace does not have are left out. */
+export type LinearIssueSummariesResult =
+  | { connected: false }
+  | { connected: true; issues: LinearIssueLiveSummary[] };
+
 export type LinearIssueStatesResult = {
   connected: boolean;
   states?: LinearWorkflowState[];
@@ -1478,6 +1493,8 @@ export interface LinearAPI {
   authActivate(organizationId: string): Promise<LinearAuthStatus>;
   issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
   issueGet(id: string): Promise<LinearIssueGetResult>;
+  /** At most 50 identifiers. Throws on failure; disconnected is `{ connected: false }`. */
+  issueSummaries(identifiers: string[]): Promise<LinearIssueSummariesResult>;
   issueStates(teamId: string): Promise<LinearIssueStatesResult>;
   issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
   mappingGet(): Promise<LinearMappingResult>;

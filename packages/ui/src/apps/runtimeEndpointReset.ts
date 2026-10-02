@@ -19,6 +19,7 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { useLinearIssueStateStore } from '@/stores/useLinearIssueStateStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
@@ -108,6 +109,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // its rail tab, its issue pickers, its work-status rows — against a runtime
   // that has no such integration. `App` re-asks once the new instance answers.
   useLinearAuthStore.getState().resetForRuntimeSwitch();
+  useLinearIssueStateStore.getState().resetForRuntimeSwitch();
   useGitHubAuthStore.getState().resetForRuntimeSwitch();
   // Work-status readouts served from the instance: quotas, MCP servers, skills
   // and agent memory. All were cached globally or by directory alone, so they

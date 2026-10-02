@@ -9,6 +9,7 @@ import type {
   LinearIssueLabel,
   LinearIssuePriority,
   LinearIssueGetResult,
+  LinearIssueSummariesResult,
   LinearIssueState,
   LinearIssueStatesResult,
   LinearIssueUpdateInput,
@@ -29,6 +30,23 @@ import type {
   LinearWorkspaceSummary,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { z } from 'zod';
+
+const issueSummariesSchema = z.union([
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    issues: z.array(z.object({
+      identifier: z.string(),
+      title: z.string(),
+      state: z.object({
+        name: z.string(),
+        type: z.enum(['triage', 'backlog', 'unstarted', 'started', 'completed', 'canceled']),
+      }),
+    // One issue in a state type Linear adds later must not drop the rest.
+    }).nullable().catch(null)).transform((issues) => issues.filter((issue) => issue !== null)),
+  }),
+]);
 
 type LinearJson = {
   connected?: boolean;
@@ -487,6 +505,20 @@ export const createWebLinearAPI = (): LinearAPI => ({
       throw new Error(readErrorMessage(payload, response.statusText || 'Failed to load Linear issue'));
     }
     return result;
+  },
+
+  async issueSummaries(identifiers: string[]): Promise<LinearIssueSummariesResult> {
+    const params = new URLSearchParams({ ids: identifiers.join(',') });
+    const response = await runtimeFetch(`/api/linear/issues/summaries?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    const payload = await response.json().catch(() => null);
+    const parsed = issueSummariesSchema.safeParse(payload);
+    if (!response.ok || !parsed.success) {
+      throw new Error(response.statusText || 'Failed to load Linear issue states');
+    }
+    return parsed.data;
   },
 
   async issueStates(teamId: string): Promise<LinearIssueStatesResult> {
