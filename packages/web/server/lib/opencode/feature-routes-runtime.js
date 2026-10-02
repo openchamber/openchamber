@@ -13,7 +13,7 @@ import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
-import { registerProjectSetupRoutes } from '../projects/routes.js';
+import { registerProjectDirectoryRoutes, registerProjectSetupRoutes } from '../projects/routes.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerMessageSearchRoutes } from '../message-search/routes.js';
@@ -177,11 +177,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodeCompatibility,
       installOpenCodeV2,
       formatSettingsResponse,
-      readSettingsFromDisk,
       readSettingsFromDiskMigrated,
       persistSettings,
-      sanitizeProjects,
-      validateDirectoryPath,
       resolveProjectDirectory,
       getProviderSources,
       removeProviderConfig,
@@ -359,6 +356,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openchamberDataDir,
     });
     registerProjectContextRoutes(app, { projectContextRuntime });
+    registerProjectDirectoryRoutes(app, {
+      fsPromises,
+      validateDirectoryPath,
+      readSettingsFromDisk,
+      sanitizeProjects,
+      persistSettings,
+    });
     registerProjectSetupRoutes(app, { projectConfigRuntime });
     registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });

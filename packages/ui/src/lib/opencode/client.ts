@@ -1834,7 +1834,7 @@ class OpencodeService {
     }
 
     if (options?.asProject) {
-      const response = await runtimeFetch(`${this.baseUrl}/opencode/directory`, {
+      const response = await runtimeFetch('/api/openchamber/directory', {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2076,7 +2076,7 @@ class OpencodeService {
       return null
     }
 
-    const url = `${this.baseUrl}/opencode/directory`
+    const url = '/api/openchamber/directory'
 
     try {
       const response = await runtimeFetch(url, {
