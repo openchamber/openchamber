@@ -302,6 +302,8 @@ describe('OpenCode lifecycle', () => {
     expect(warmups).toEqual([
       ['http://127.0.0.1:45678/api/location', '%2Ftmp%2Fworktree-a'],
     ]);
+    // Server-side reads without a directory of their own go to the warmed one.
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe('/tmp/worktree-a');
   });
 
   it('records an authoritative error terminal event when bootstrap fails', async () => {

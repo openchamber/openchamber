@@ -56,18 +56,28 @@ export const projectEnvironmentKeys = (integrations, environment) => {
  * read on every call because the port and the server password both move
  * across an OpenCode restart. `getLaunchEnvironment` answers the environment
  * a managed OpenCode was started with, or null for an external one.
+ *
+ * Credentials are global, but integrations are read through a location:
+ * without a directory OpenCode would start its own working directory, MCP
+ * servers included, so that read is scoped to `getDefaultDirectory()`.
  */
-export const openCodeCredentialSource = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment = () => null }) => {
-  const client = () => OpenCode.make({
-    baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''),
-    headers: { ...getOpenCodeAuthHeaders() },
-  });
+export const openCodeCredentialSource = ({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getLaunchEnvironment = () => null,
+  getDefaultDirectory = () => null,
+}) => {
+  const client = (directory = null) => {
+    const headers = { ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
+    return OpenCode.make({ baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''), headers });
+  };
   return {
     list: () => client().credential.list(),
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
-      const { data } = await client().integration.list();
+      const { data } = await client(getDefaultDirectory()).integration.list();
       return projectEnvironmentKeys(data, environment);
     },
   };

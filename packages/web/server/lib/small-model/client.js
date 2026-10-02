@@ -43,8 +43,12 @@ export function getSmallModelClient(directory) {
     return null;
   }
   const headers = { ...connection.getOpenCodeAuthHeaders() };
-  if (typeof directory === 'string' && directory.trim()) {
-    headers['x-opencode-directory'] = encodeURIComponent(directory.trim());
+  // Model and provider lists are read through a location; without a directory
+  // OpenCode would start its own working directory, MCP servers included.
+  const requested = typeof directory === 'string' ? directory.trim() : '';
+  const scope = requested || connection.getDefaultDirectory?.() || null;
+  if (scope) {
+    headers['x-opencode-directory'] = encodeURIComponent(scope);
   }
   return OpenCode.make({ baseUrl, headers });
 }

@@ -56,9 +56,11 @@ describe('readOpenCodeCredentials', () => {
   let respond;
   let integrations;
   let launchEnvironment;
+  let directoryHeaders;
 
   beforeEach(async () => {
     requests = [];
+    directoryHeaders = [];
     integrations = [];
     launchEnvironment = null;
     respond = (res) => {
@@ -67,6 +69,7 @@ describe('readOpenCodeCredentials', () => {
     };
     server = http.createServer((req, res) => {
       requests.push({ url: req.url, authorization: req.headers.authorization });
+      directoryHeaders.push([req.url, req.headers['x-opencode-directory'] ?? null]);
       if (req.url.startsWith('/api/integration')) {
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ data: integrations }));
@@ -80,6 +83,7 @@ describe('readOpenCodeCredentials', () => {
       buildOpenCodeUrl: (path) => `http://127.0.0.1:${port}${path}`,
       getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
       getLaunchEnvironment: () => launchEnvironment,
+      getDefaultDirectory: () => '/work/last project',
     }));
   });
 
@@ -107,6 +111,10 @@ describe('readOpenCodeCredentials', () => {
     });
     // A variable is not a stored login.
     await expect(getProviderAuth('zai-coding-plan')).resolves.toBeNull();
+    // Integrations are read through a location: without a directory OpenCode
+    // would start its working directory, MCP servers included.
+    expect(directoryHeaders.find(([url]) => url.startsWith('/api/integration'))?.[1])
+      .toBe(encodeURIComponent('/work/last project'));
   });
 
   it('leaves variable keys out for an external OpenCode', async () => {

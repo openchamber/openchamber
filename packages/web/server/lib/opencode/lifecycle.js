@@ -1047,10 +1047,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       try {
-        const response = await fetch(buildOpenCodeUrl('/api/agent'), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        });
+        const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
+        if (defaultOpenCodeDirectory) headers['x-opencode-directory'] = encodeURIComponent(defaultOpenCodeDirectory);
+        const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
 
         if (response.ok) {
           // OpenCode 2.x answers `/api/*` with `{ location, data }`.
@@ -1216,6 +1215,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
+  // The directory server-side reads use when they have none of their own: the
+  // one warmed at startup, which OpenCode is running anyway. v2 answers a
+  // location read without a directory for its own working directory (the
+  // user's home for a managed OpenCode) and starts it, MCP servers included.
+  let defaultOpenCodeDirectory = null;
+
   // OpenCode initializes each project directory lazily on its first
   // directory-scoped request, and that initialization takes seconds on large
   // session stores. Without warming, the user's first session open pays it
@@ -1232,6 +1237,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
     if (!Array.isArray(directories) || directories.length === 0) return;
+    defaultOpenCodeDirectory = directories[0] || null;
 
     const warmedPort = state.openCodePort;
     for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
@@ -1418,6 +1424,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   return {
     /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
+    /** The directory to scope a server-side OpenCode read that has none, or null before startup picked one. */
+    getDefaultOpenCodeDirectory: () => defaultOpenCodeDirectory,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

@@ -180,6 +180,21 @@ describe('generateSmallModelText', () => {
     expect(lastGenerate().headers['x-opencode-directory']).toBe(encodeURIComponent('/proj/sub dir'));
   });
 
+  // The model lists are read through a location; without a directory OpenCode
+  // would start its own working directory, MCP servers included.
+  it('scopes a request without a directory to the server default', async () => {
+    configureOpenCodeRuntimeProviders({
+      buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+      getDefaultDirectory: () => '/last/project',
+    });
+
+    await generateSmallModelText({ prompt: 'hi' });
+
+    const unscoped = state.requests.filter((entry) => entry.headers['x-opencode-directory'] !== encodeURIComponent('/last/project'));
+    expect(unscoped).toEqual([]);
+  });
+
   it('leads the prompt with the system instructions', async () => {
     await generateSmallModelText({ prompt: 'the task', system: 'you are terse', directory: '/proj' });
 

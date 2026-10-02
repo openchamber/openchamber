@@ -799,7 +799,11 @@ const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.schedul
 // Plugin-registered providers exist only inside the running OpenCode process.
 // Small-model callers resolve them through this connection; without it they
 // stay on the file-based resolution and plugin models remain unreachable.
-configureOpenCodeRuntimeProviders({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+configureOpenCodeRuntimeProviders({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
+});
 
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
@@ -1386,7 +1390,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
         directories.push(project.path);
       }
     }
-    return [...new Set(directories)];
+    // A deleted project would fail every read scoped to it, and the first entry
+    // also scopes server-side reads that have no directory of their own.
+    const existing = await Promise.all([...new Set(directories)].map(async (directory) => (
+      (await fs.promises.stat(directory).catch(() => null))?.isDirectory() ? directory : null
+    )));
+    return existing.filter(Boolean);
   },
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
@@ -1431,6 +1440,7 @@ configureOpenCodeCredentials(openCodeCredentialSource({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getLaunchEnvironment: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv(),
+  getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
 }));
 
 const getOpenCodeCompatibility = async () => {
@@ -1725,9 +1735,6 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
 
-const fetchAgentsSnapshot = (...args) => serverUtilsRuntime.fetchAgentsSnapshot(...args);
-const fetchProvidersSnapshot = (...args) => serverUtilsRuntime.fetchProvidersSnapshot(...args);
-const fetchModelsSnapshot = (...args) => serverUtilsRuntime.fetchModelsSnapshot(...args);
 const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
