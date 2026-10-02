@@ -98,6 +98,12 @@ const ISSUE_STATE_LOOK = {
   completed: { color: 'var(--pr-merged)', statusKey: 'sessions.sidebar.group.issue.status.completed', priority: 2 },
   not_planned: { color: 'var(--pr-closed)', statusKey: 'sessions.sidebar.group.issue.status.notPlanned', priority: 3 },
 } satisfies Record<GitHubIssueLiveSummary['state'], { color: string; statusKey: IssueStatusLabelKey; priority: number }>;
+/** How an issue in a known state looks: its PR-token colour and status line. */
+export const getIssueStateLook = (state: GitHubIssueLiveSummary['state']): { color: string; statusKey: IssueStatusLabelKey } => {
+  const { color, statusKey } = ISSUE_STATE_LOOK[state];
+  return { color, statusKey };
+};
+
 // Unknown state (Linear, extensions, a GitHub issue not asked yet) sits
 // between open and closed ones.
 const UNKNOWN_ISSUE_PRIORITY = 1;

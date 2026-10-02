@@ -4,7 +4,12 @@ import { Icon } from '@/components/icon/Icon';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
-import { getLinkedIssues, canOpenLinearIssueInContextPanel, isGuestPull } from '@/lib/linkedIssues';
+import { getLinkedIssues, getLinkedGitHubPullRequests, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, isGuestPull } from '@/lib/linkedIssues';
+import { useLinkedIssueStates, useLinkedPrVisualSummaries } from '@/stores/useGitHubPrStatusStore';
+import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
+import { getPrStatusLabel } from '@/components/session/sidebar/prStatusLabel';
+import { getIssueStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionKnowledgeSummary } from '@/lib/sessionKnowledgeApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
@@ -20,6 +25,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { resolveDraftPinnedKnowledge } from './draftKnowledge';
+
+const EMPTY_KEYS: string[] = [];
 
 type Props = {
   sessionId: string | null;
@@ -37,7 +44,7 @@ type Props = {
  */
 export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
-  const { linear } = useRuntimeAPIs();
+  const { linear, github } = useRuntimeAPIs();
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
   const mobileActions = useMobileAppActions();
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -154,6 +161,43 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
 
   const linked = React.useMemo(() => getLinkedIssues(session), [session]);
+  // Live state of the linked GitHub PRs and issues, from the same batched
+  // summaries the sidebar uses. This panel asks for its own session too: the
+  // session need not be on screen in the sidebar.
+  const githubConnected = useGitHubAuthStore((state) => Boolean(state.hasChecked && state.status?.connected));
+  const linkedPrs = React.useMemo(() => getLinkedGitHubPullRequests(session), [session]);
+  const linkedPrRefs = React.useMemo(
+    () => linkedPrs.map((link) => ({ owner: link.owner, repo: link.repo, number: link.number })),
+    [linkedPrs],
+  );
+  const linkedIssueRefs = React.useMemo(
+    () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
+    [session],
+  );
+  useOpenPrSummarySync(EMPTY_KEYS, linkedPrRefs, linkedIssueRefs, github, githubConnected);
+  const linkedPrSummaries = useLinkedPrVisualSummaries(linkedPrs);
+  const linkedIssueStates = useLinkedIssueStates(linkedIssueRefs);
+  // Entry id (`owner/repo#number`, lowercased) -> the coloured status line.
+  const liveLookById = React.useMemo(() => {
+    const looks = new Map<string, { color: string; text: string }>();
+    for (const summary of linkedPrSummaries) {
+      const label = getPrStatusLabel(summary, t);
+      looks.set(`${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`.toLowerCase(), {
+        color: `var(--pr-${summary.visualState})`,
+        text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
+      });
+    }
+    linkedIssueRefs.forEach((ref, index) => {
+      const state = linkedIssueStates[index];
+      if (!state) return;
+      const look = getIssueStateLook(state.state);
+      looks.set(`${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase(), {
+        color: look.color,
+        text: `#${ref.number} · ${t(look.statusKey)}`,
+      });
+    });
+    return looks;
+  }, [linkedIssueRefs, linkedIssueStates, linkedPrSummaries, t]);
   const openLinkedIssue = React.useCallback((entry: (typeof linked)[number]) => {
     if (
       entry.kind === 'linear'
@@ -229,6 +273,18 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     }
   }
 
+  // A GitHub thread with a known state shows it in the sidebar's colours;
+  // anything else keeps the plain muted identifier.
+  const renderLinkedValue = (entry: (typeof linked)[number]) => {
+    const look = entry.kind === 'issue' || entry.kind === 'pull' ? liveLookById.get(entry.id.toLowerCase()) : undefined;
+    if (look) return <span style={{ color: look.color }}>{look.text}</span>;
+    return (
+      <WorkStatusValue tone="muted">
+        {entry.kind === 'linear' || entry.kind === 'guest' ? entry.identifier : `#${entry.number}`}
+      </WorkStatusValue>
+    );
+  };
+
   return (
     <WorkStatusCollapsibleSection
       id="context-sources"
@@ -265,11 +321,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
             : entry.kind === 'guest'
               ? t('chat.workStatus.linkedIssues.openGuest', { id: entry.identifier })
               : t('chat.workStatus.linkedIssues.open', { number: entry.number })}
-          value={(
-            <WorkStatusValue tone="muted">
-              {entry.kind === 'linear' || entry.kind === 'guest' ? entry.identifier : `#${entry.number}`}
-            </WorkStatusValue>
-          )}
+          value={renderLinkedValue(entry)}
         />
       ))}
 
