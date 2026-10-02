@@ -73,6 +73,7 @@ import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { loadDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
 import { useSshConfirmation } from './useSshConfirmation';
 
 const randomPort = (): number => {
@@ -448,6 +449,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const selectedId = useUIStore((state) => state.settingsRemoteInstancesSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
+  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const { confirm: confirmSsh, dialog: sshConfirmationDialog } = useSshConfirmation(selectedId);
 
   const selectedInstance = React.useMemo(() => {
@@ -1268,16 +1270,27 @@ export const RemoteInstancesPage: React.FC = () => {
     [importCandidates, sshHostSearch],
   );
 
-  // Opening a ready instance means pointing this window at the forwarded local
-  // URL — the same navigation the host switcher performs after its own connect.
-  const openInstanceUrl = React.useCallback((localUrl?: string) => {
-    const target = (localUrl || '').trim();
-    if (!target) {
+  // Opening a ready instance switches this window's runtime to the forwarded
+  // local URL, the way the host switcher does, instead of navigating to it.
+  // Navigating would load the remote server's own UI on the tunnel origin,
+  // where the desktop shell refuses SSH commands: once the tunnel dropped, the
+  // window could no longer reconnect it.
+  const openInstance = React.useCallback(async (instanceId: string) => {
+    const config = await desktopHostsGet().catch(() => null);
+    const host = config?.hosts.find((entry) => entry.id === instanceId);
+    const apiBaseUrl = host ? normalizeHostUrl(getDesktopHostApiUrl(host)) : null;
+    if (!host || !apiBaseUrl) {
       toast.error(t('settings.remoteInstances.page.toast.instanceUrlUnavailable'));
       return;
     }
-    navigateToUrl(target);
-  }, [t]);
+    switchRuntimeEndpoint({
+      apiBaseUrl,
+      clientToken: host.clientToken || null,
+      requestHeaders: host.requestHeaders || null,
+      runtimeKey: runtimeKeyForDesktopHost(host),
+    });
+    setSettingsDialogOpen(false);
+  }, [setSettingsDialogOpen, t]);
 
   const handlePatternCreate = React.useCallback(async () => {
     const host = patternHost;
@@ -1456,21 +1469,6 @@ export const RemoteInstancesPage: React.FC = () => {
       });
     }
   }, [draft, t]);
-
-  const handleOpenCurrentInstance = React.useCallback(async () => {
-    if (!status?.localUrl) {
-      toast.error(t('settings.remoteInstances.page.toast.instanceUrlUnavailable'));
-      return;
-    }
-
-    const target = status.localUrl.trim();
-    if (!target) {
-      toast.error(t('settings.remoteInstances.page.toast.instanceUrlUnavailable'));
-      return;
-    }
-
-    navigateToUrl(target);
-  }, [status?.localUrl, t]);
 
   const handlePrimaryConnectionAction = React.useCallback(() => {
     if (!draft) {
@@ -2002,7 +2000,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       {ready ? (
-                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => openInstanceUrl(instanceStatus?.localUrl)}>
+                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void openInstance(instance.id)}>
                           <Icon name="external-link" className="h-3.5 w-3.5" />
                           {t('settings.remoteInstances.page.actions.open')}
                         </Button>
@@ -2971,7 +2969,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 size="xs"
                 className="!font-normal"
                 onClick={() => {
-                  void handleOpenCurrentInstance();
+                  if (draft) void openInstance(draft.id);
                 }}
               >
                 <Icon name="external-link" className="h-3.5 w-3.5" />
