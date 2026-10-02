@@ -809,6 +809,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': 'Lowercase, numbers, hyphens',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': 'The agent uses this to decide when to load the skill',
+  'settings.skills.page.field.disableModelInvocation': 'Run only when called manually',
+  'settings.skills.page.field.disableModelInvocationHint': 'The agent won\'t pick this skill on its own. It loads only when you call it by name.',
   'settings.skills.page.field.descriptionPlaceholder': 'Brief description of what this skill does...',
   'settings.skills.page.field.instructionsPlaceholder': 'Step-by-step instructions, guidelines, or reference content...',
   'settings.skills.page.badge.claudeCompatible': 'Claude-compatible',

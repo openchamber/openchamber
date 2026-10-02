@@ -777,6 +777,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': '소문자, 숫자, 하이픈',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': '에이전트는 이 설명을 보고 스킬을 로드할 시점을 판단합니다',
+  'settings.skills.page.field.disableModelInvocation': '수동으로 호출할 때만 실행',
+  'settings.skills.page.field.disableModelInvocationHint': '에이전트가 이 스킬을 스스로 선택하지 않습니다. 이름으로 호출할 때만 로드됩니다.',
   'settings.skills.page.field.descriptionPlaceholder': '이 스킬이 하는 일을 간략히 설명하세요...',
   'settings.skills.page.field.instructionsPlaceholder': '단계별 지침, 가이드라인 또는 참조 내용을 입력하세요...',
   'settings.skills.page.badge.claudeCompatible': 'Claude 호환',

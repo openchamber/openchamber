@@ -777,6 +777,8 @@ export const settingsDict = {
   "settings.skills.page.field.skillNameHint": "Minúsculas, números e hífens",
   "settings.skills.page.field.skillNamePlaceholder": "nome-de-habilidade",
   "settings.skills.page.field.descriptionHint": "O agente usa esta descrição para decidir quando carregar a habilidade",
+  "settings.skills.page.field.disableModelInvocation": "Executar só quando chamada manualmente",
+  "settings.skills.page.field.disableModelInvocationHint": "O agente não vai escolher esta habilidade por conta própria. Ela só é carregada quando você a chama pelo nome.",
   "settings.skills.page.field.descriptionPlaceholder": "Breve descrição do que esta habilidade faz...",
   "settings.skills.page.field.instructionsPlaceholder": "Instruções passo a passo, guias ou conteúdo de referência...",
   "settings.skills.page.badge.claudeCompatible": "Compatível com Claude",

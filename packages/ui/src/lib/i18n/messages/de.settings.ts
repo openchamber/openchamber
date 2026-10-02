@@ -761,6 +761,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': 'Kleinbuchstaben, Zahlen, Bindestriche',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': 'Der Agent verwendet dies, um zu entscheiden, wann der Skill geladen wird',
+  'settings.skills.page.field.disableModelInvocation': 'Nur bei manuellem Aufruf ausführen',
+  'settings.skills.page.field.disableModelInvocationHint': 'Der Agent wählt diesen Skill nicht selbst aus. Er wird nur geladen, wenn Sie ihn per Name aufrufen.',
   'settings.skills.page.field.descriptionPlaceholder': 'Kurze Beschreibung, was dieser Skill tut...',
   'settings.skills.page.field.instructionsPlaceholder': 'Schritt-für-Schritt-Anweisungen, Richtlinien oder Referenzinhalte...',
   'settings.skills.page.badge.claudeCompatible': 'Claude-kompatibel',

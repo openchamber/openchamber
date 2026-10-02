@@ -2091,6 +2091,8 @@ export const settingsDict = {
   'settings.skills.page.empty.description': 'lub utwórz nową',
   'settings.skills.page.empty.title': 'Wybierz umiejętność z paska bocznego',
   'settings.skills.page.field.descriptionHint': 'Agent używa tego, aby zdecydować, kiedy załadować umiejętność',
+  'settings.skills.page.field.disableModelInvocation': 'Uruchamiaj tylko po ręcznym wywołaniu',
+  'settings.skills.page.field.disableModelInvocationHint': 'Agent nie wybierze tej umiejętności sam. Zostanie załadowana tylko wtedy, gdy wywołasz ją po nazwie.',
   'settings.skills.page.field.descriptionPlaceholder': 'Krótki opis tego, co robi ta umiejętność...',
   'settings.skills.page.field.instructionsPlaceholder': 'Instrukcje krok po kroku, wytyczne lub treść referencyjna...',
   'settings.skills.page.field.skillNameHint': 'Małe litery, cyfry, myślniki',

@@ -695,6 +695,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': 'Minuscules, chiffres, tirets',
   'settings.skills.page.field.skillNamePlaceholder': 'nom-du-skill',
   'settings.skills.page.field.descriptionHint': 'L\'agent s\'en sert pour décider quand charger le skill',
+  'settings.skills.page.field.disableModelInvocation': 'Exécuter uniquement sur appel manuel',
+  'settings.skills.page.field.disableModelInvocationHint': 'L\'agent ne choisira pas ce skill de lui-même. Il ne se charge que lorsque vous l\'appelez par son nom.',
   'settings.skills.page.field.descriptionPlaceholder': 'Brève description de ce que fait ce skill...',
   'settings.skills.page.field.instructionsPlaceholder': 'Instructions étape par étape, directives ou contenu de référence...',
   'settings.skills.page.badge.claudeCompatible': 'Compatible Claude',

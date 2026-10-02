@@ -19,6 +19,7 @@ import {
   deleteSkillSupportingFile,
   getAncestors,
   findWorktreeRoot,
+  isPlainObject,
 } from './shared.js';
 
 const BUILT_IN_SKILL_LOCATION = '<built-in>';
@@ -263,6 +264,50 @@ function mergeDiscoveredSkills(primarySkills = [], fallbackSkills = []) {
   return merged;
 }
 
+// "Only when asked" is written as two frontmatter keys: the portable
+// `disable-model-invocation` (Claude Code, OpenCode 2.0.23+) and OpenCode's own
+// `metadata.opencode/autoinvoke`, which every supported OpenCode 2.x reads and
+// which wins when both are present.
+const DISABLE_MODEL_INVOCATION_KEY = 'disable-model-invocation';
+const AUTOINVOKE_METADATA_KEY = 'opencode/autoinvoke';
+
+// Same spellings OpenCode accepts for these frontmatter booleans; YAML true,
+// 1 and "yes" all reach it as the same text.
+const FRONTMATTER_BOOLEANS = new Map([
+  ['true', true], ['yes', true], ['on', true], ['1', true],
+  ['false', false], ['no', false], ['off', false], ['0', false],
+]);
+
+function parseFrontmatterBoolean(value) {
+  if (value == null || isPlainObject(value) || Array.isArray(value)) return undefined;
+  return FRONTMATTER_BOOLEANS.get(String(value).trim().toLowerCase());
+}
+
+function isModelInvocationDisabled(frontmatter) {
+  const autoinvoke = isPlainObject(frontmatter.metadata)
+    ? parseFrontmatterBoolean(frontmatter.metadata[AUTOINVOKE_METADATA_KEY])
+    : undefined;
+  if (autoinvoke !== undefined) return !autoinvoke;
+  return parseFrontmatterBoolean(frontmatter[DISABLE_MODEL_INVOCATION_KEY]) === true;
+}
+
+function applyModelInvocation(frontmatter, disabled) {
+  const metadata = isPlainObject(frontmatter.metadata) ? { ...frontmatter.metadata } : null;
+  if (disabled) {
+    frontmatter[DISABLE_MODEL_INVOCATION_KEY] = true;
+    frontmatter.metadata = { ...metadata, [AUTOINVOKE_METADATA_KEY]: false };
+    return;
+  }
+  delete frontmatter[DISABLE_MODEL_INVOCATION_KEY];
+  if (!metadata) return;
+  delete metadata[AUTOINVOKE_METADATA_KEY];
+  if (Object.keys(metadata).length > 0) {
+    frontmatter.metadata = metadata;
+  } else {
+    delete frontmatter.metadata;
+  }
+}
+
 function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
   const isReadableFile = (filePath) => {
     if (!filePath) return false;
@@ -368,7 +413,8 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
       supportingFiles: [],
       name: matchedDiscovered?.name || skillName,
       description: discoveredDescription,
-      instructions: isBuiltInDiscovered ? discoveredContent : ''
+      instructions: isBuiltInDiscovered ? discoveredContent : '',
+      disableModelInvocation: false
     },
     projectMd: {
       exists: projectExists,
@@ -402,6 +448,7 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
     sources.md.fields = Object.keys(frontmatter);
     sources.md.description = frontmatter.description || '';
     sources.md.name = frontmatter.name || skillName;
+    sources.md.disableModelInvocation = isModelInvocationDisabled(frontmatter);
     if (body) {
       sources.md.fields.push('instructions');
       sources.md.instructions = body;
@@ -466,7 +513,14 @@ function createSkill(skillName, config, workingDirectory, scope) {
 
   fs.mkdirSync(targetDir, { recursive: true });
 
-  const { instructions, scope: _scopeFromConfig, source: _sourceFromConfig, supportingFiles, ...frontmatter } = config;
+  const {
+    instructions,
+    scope: _scopeFromConfig,
+    source: _sourceFromConfig,
+    supportingFiles,
+    disableModelInvocation,
+    ...frontmatter
+  } = config;
   void _scopeFromConfig;
   void _sourceFromConfig;
 
@@ -475,6 +529,9 @@ function createSkill(skillName, config, workingDirectory, scope) {
   }
   if (!frontmatter.description) {
     throw new Error('Skill description is required');
+  }
+  if (disableModelInvocation === true) {
+    applyModelInvocation(frontmatter, true);
   }
 
   writeMdFile(targetPath, frontmatter, instructions || '');
@@ -537,6 +594,14 @@ function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
             writeSkillSupportingFile(mdDir, file.path, file.content);
           }
         }
+      }
+      continue;
+    }
+
+    if (field === 'disableModelInvocation') {
+      if (value === true || value === false) {
+        applyModelInvocation(mdData.frontmatter, value);
+        mdModified = true;
       }
       continue;
     }

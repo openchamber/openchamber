@@ -805,6 +805,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': 'Küçük harfler, sayılar, tire',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': 'Agent, skill\'i ne zaman yükleyeceğine karar vermek için bunu kullanır',
+  'settings.skills.page.field.disableModelInvocation': 'Yalnızca elle çağrıldığında çalıştır',
+  'settings.skills.page.field.disableModelInvocationHint': 'Agent bu skill\'i kendi başına seçmez. Yalnızca adıyla çağırdığınızda yüklenir.',
   'settings.skills.page.field.descriptionPlaceholder': 'Bu skill\'in ne yaptığına dair kısa bir açıklama...',
   'settings.skills.page.field.instructionsPlaceholder': 'Adım adım talimatlar, yönergeler veya başvuru içeriği...',
   'settings.skills.page.badge.claudeCompatible': 'Claude uyumlu',

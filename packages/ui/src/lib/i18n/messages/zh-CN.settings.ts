@@ -777,6 +777,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': '小写字母、数字、连字符',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': '智能体会用它判断何时加载此技能',
+  'settings.skills.page.field.disableModelInvocation': '仅在手动调用时运行',
+  'settings.skills.page.field.disableModelInvocationHint': '智能体不会自行选用此技能，只有在你按名称调用时才会加载。',
   'settings.skills.page.field.descriptionPlaceholder': '简要描述该技能的作用...',
   'settings.skills.page.field.instructionsPlaceholder': '分步说明、指南或参考内容...',
   'settings.skills.page.badge.claudeCompatible': 'Claude 兼容',

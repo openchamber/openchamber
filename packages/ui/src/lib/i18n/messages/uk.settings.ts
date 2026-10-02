@@ -777,6 +777,8 @@ export const settingsDict = {
   "settings.skills.page.field.skillNameHint": "Малі літери, цифри, дефіси",
   "settings.skills.page.field.skillNamePlaceholder": "назва-навички",
   "settings.skills.page.field.descriptionHint": "Агент використовує це, щоб вирішити, коли завантажити навичку",
+  "settings.skills.page.field.disableModelInvocation": "Запускати лише за ручним викликом",
+  "settings.skills.page.field.disableModelInvocationHint": "Агент не обиратиме цю навичку сам. Вона завантажується, лише коли ви викликаєте її на ім'я.",
   "settings.skills.page.field.descriptionPlaceholder": "Короткий опис того, що робить ця навичка...",
   "settings.skills.page.field.instructionsPlaceholder": "Покрокові інструкції, рекомендації чи довідковий вміст...",
   "settings.skills.page.badge.claudeCompatible": "Claude-сумісний",

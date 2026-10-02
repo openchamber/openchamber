@@ -810,6 +810,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': '小文字、数字、ハイフン',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': 'Agent はこれを使用して Skill を読み込むタイミングを判断します',
+  'settings.skills.page.field.disableModelInvocation': '手動で呼び出したときのみ実行',
+  'settings.skills.page.field.disableModelInvocationHint': 'Agent がこの Skill を自動で選ぶことはありません。名前で呼び出したときにのみ読み込まれます。',
   'settings.skills.page.field.descriptionPlaceholder': 'この Skill の簡単な説明...',
   'settings.skills.page.field.instructionsPlaceholder': 'ステップごとの指示、ガイドライン、参考内容...',
   'settings.skills.page.badge.claudeCompatible': 'Claude 互換',

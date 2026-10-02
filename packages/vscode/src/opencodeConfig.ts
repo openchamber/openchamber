@@ -2513,6 +2513,7 @@ export type SkillConfigSources = {
     name?: string;
     description?: string;
     instructions?: string;
+    disableModelInvocation: boolean;
   };
   projectMd?: { exists: boolean; path: string | null };
   claudeMd?: { exists: boolean; path: string | null };
@@ -2786,6 +2787,52 @@ export const discoverSkills = (workingDirectory?: string): DiscoveredSkill[] => 
   return Array.from(skills.values());
 };
 
+// "Only when asked" is written as two frontmatter keys: the portable
+// `disable-model-invocation` (Claude Code, OpenCode 2.0.23+) and OpenCode's own
+// `metadata.opencode/autoinvoke`, which every supported OpenCode 2.x reads and
+// which wins when both are present.
+const DISABLE_MODEL_INVOCATION_KEY = 'disable-model-invocation';
+const AUTOINVOKE_METADATA_KEY = 'opencode/autoinvoke';
+
+type SkillFrontmatter = ReturnType<typeof parseMdFile>['frontmatter'];
+
+// Same spellings OpenCode accepts for these frontmatter booleans; YAML true,
+// 1 and "yes" all reach it as the same text.
+const FRONTMATTER_BOOLEANS = new Map<string, boolean>([
+  ['true', true], ['yes', true], ['on', true], ['1', true],
+  ['false', false], ['no', false], ['off', false], ['0', false],
+]);
+
+const parseFrontmatterBoolean = (value: SkillFrontmatter[string]): boolean | undefined => {
+  if (value == null || isPlainObject(value) || Array.isArray(value)) return undefined;
+  return FRONTMATTER_BOOLEANS.get(String(value).trim().toLowerCase());
+};
+
+const isModelInvocationDisabled = (frontmatter: SkillFrontmatter): boolean => {
+  const autoinvoke = isPlainObject(frontmatter.metadata)
+    ? parseFrontmatterBoolean(frontmatter.metadata[AUTOINVOKE_METADATA_KEY])
+    : undefined;
+  if (autoinvoke !== undefined) return !autoinvoke;
+  return parseFrontmatterBoolean(frontmatter[DISABLE_MODEL_INVOCATION_KEY]) === true;
+};
+
+const applyModelInvocation = (frontmatter: SkillFrontmatter, disabled: boolean): void => {
+  const metadata = isPlainObject(frontmatter.metadata) ? { ...frontmatter.metadata } : null;
+  if (disabled) {
+    frontmatter[DISABLE_MODEL_INVOCATION_KEY] = true;
+    frontmatter.metadata = { ...metadata, [AUTOINVOKE_METADATA_KEY]: false };
+    return;
+  }
+  delete frontmatter[DISABLE_MODEL_INVOCATION_KEY];
+  if (!metadata) return;
+  delete metadata[AUTOINVOKE_METADATA_KEY];
+  if (Object.keys(metadata).length > 0) {
+    frontmatter.metadata = metadata;
+  } else {
+    delete frontmatter.metadata;
+  }
+};
+
 export const getSkillSources = (
   skillName: string,
   workingDirectory?: string,
@@ -2856,11 +2903,13 @@ export const getSkillSources = (
   let supportingFiles: SupportingFile[] = [];
   let mdDescription = typeof matchedDiscovered?.description === 'string' ? matchedDiscovered.description : '';
   let mdInstructions = isBuiltInDiscovered && typeof matchedDiscovered?.content === 'string' ? matchedDiscovered.content : '';
+  let mdDisableModelInvocation = false;
   
   if (mdExists && mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
     mdFields = Object.keys(frontmatter);
     mdDescription = typeof frontmatter.description === 'string' ? frontmatter.description : '';
+    mdDisableModelInvocation = isModelInvocationDisabled(frontmatter);
     if (body) mdFields.push('instructions');
     mdInstructions = body || '';
     if (mdDir) {
@@ -2880,6 +2929,7 @@ export const getSkillSources = (
       name: matchedDiscovered?.name || skillName,
       description: mdDescription,
       instructions: mdInstructions,
+      disableModelInvocation: mdDisableModelInvocation,
     },
     projectMd: { exists: projectExists, path: projectPath },
     claudeMd: { exists: claudeExists, path: claudePath },
@@ -2957,11 +3007,19 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   const targetPath = path.join(targetDir, 'SKILL.md');
   
   // Extract fields
-  const { instructions, scope: _ignored, source: _sourceIgnored, supportingFiles: supportingFilesData, ...frontmatter } = config as Record<string, unknown> & { 
+  const {
+    instructions,
+    scope: _ignored,
+    source: _sourceIgnored,
+    supportingFiles: supportingFilesData,
+    disableModelInvocation,
+    ...frontmatter
+  } = config as Record<string, unknown> & { 
     instructions?: unknown; 
     scope?: unknown; 
     source?: unknown;
     supportingFiles?: Array<{ path: string; content: string }>;
+    disableModelInvocation?: unknown;
   };
   void _ignored;
   void _sourceIgnored;
@@ -2972,6 +3030,9 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   }
   if (!frontmatter.description) {
     throw new Error('Skill description is required');
+  }
+  if (disableModelInvocation === true) {
+    applyModelInvocation(frontmatter, true);
   }
   
   writeMdFile(targetPath, frontmatter, typeof instructions === 'string' ? instructions : '');
@@ -3014,6 +3075,14 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
         } else if (file.path && file.content !== undefined) {
           writeSkillSupportingFile(mdDir, file.path, file.content);
         }
+      }
+      continue;
+    }
+
+    if (field === 'disableModelInvocation') {
+      if (value === true || value === false) {
+        applyModelInvocation(mdData.frontmatter, value);
+        mdModified = true;
       }
       continue;
     }

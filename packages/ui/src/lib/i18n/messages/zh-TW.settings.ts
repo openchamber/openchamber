@@ -774,6 +774,8 @@ export const settingsDict = {
   'settings.skills.page.field.skillNameHint': '小寫字母、數字、連字號',
   'settings.skills.page.field.skillNamePlaceholder': 'skill-name',
   'settings.skills.page.field.descriptionHint': 'agent 會用它判斷何時載入此 skill',
+  'settings.skills.page.field.disableModelInvocation': '僅在手動呼叫時執行',
+  'settings.skills.page.field.disableModelInvocationHint': 'agent 不會自行選用此 skill，只有在你按名稱呼叫時才會載入。',
   'settings.skills.page.field.descriptionPlaceholder': '簡要說明該 skill 的作用...',
   'settings.skills.page.field.instructionsPlaceholder': '逐步說明、指南或參考內容...',
   'settings.skills.page.badge.claudeCompatible': 'Claude 相容',
