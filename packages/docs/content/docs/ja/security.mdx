@@ -87,6 +87,23 @@ OPENCHAMBER_ENTERPRISE_MODE=1
 
 この変数を使う場合、リレー、Jev、ネットワークアクセス、許可する拡張機能もそれぞれの変数（`OPENCHAMBER_RELAY_URL`、`OPENCHAMBER_JEV_URL`、`OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`、`OPENCHAMBER_ALLOWED_EXTENSIONS`、`OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`）で指定します。`OPENCHAMBER_ALLOWED_EXTENSIONS` にはリポジトリの URL をカンマ区切りで並べます。Docker ではサーバーがコンテナーの外に向けて待ち受ける必要があるため、ネットワークアクセスの変数が必要です。
 
+### OpenCode CLI を固定する
+
+マシンにすでに OpenCode がインストールされていて、OpenChamber にそれを使わせたい場合は、そのパスをポリシーファイルに書きます。エンタープライズモードの有無に関係なく使えます。
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber はこのパスからだけ OpenCode を起動します。設定のパス、`OPENCODE_BINARY`、デスクトップアプリに同梱されたコピーは無視されます。同梱のコピーはディスクに残りますが使われません。
+- このパスに実行できるものがない場合、OpenChamber は別のコピーに切り替えません。パスを示したエラーで停止します。
+- 設定にはパスが読み取り専用で表示され、管理者が設定したことが書かれます。
+- OpenChamber は固定された OpenCode をインストールも更新もせず、新しいバージョンの通知もしません。更新は管理者の配布で行います。
+- CLI は OpenCode 2.x で、OpenChamber が求めるバージョン以上である必要があります。古い場合、OpenChamber は「OpenCode を更新」画面で止まります。
+- `opencode`（Windows では `opencode.exe`）が入ったフォルダーを指定することもできます。環境変数は用意していません。ユーザーが自分で設定できてしまうためです。
+
 ### 例
 
 Mac にポリシーファイルを置くには、ターミナルで管理者として次を実行します。

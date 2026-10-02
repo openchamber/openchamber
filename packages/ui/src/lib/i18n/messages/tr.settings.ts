@@ -1141,6 +1141,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary dosyası.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary Yolu',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': 'Bu yolu yöneticiniz belirledi; OpenChamber OpenCode’u her zaman buradan başlatır.',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': 'OpenCode güncelleme bildirimlerini göster',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'OpenCode güncelleme bildirimlerini göster',
   'settings.openchamber.opencodeCli.actions.browseAria': 'OpenCode binary yolu için gözat',

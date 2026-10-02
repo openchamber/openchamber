@@ -1113,6 +1113,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode binary 경로',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': '관리자가 이 경로를 지정했습니다. OpenChamber는 항상 이 경로에서 OpenCode를 시작합니다.',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': 'OpenCode 업데이트 알림 표시',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'OpenCode 업데이트 알림 표시',
   'settings.openchamber.opencodeCli.actions.browseAria': 'OpenCode binary 경로 찾아보기',

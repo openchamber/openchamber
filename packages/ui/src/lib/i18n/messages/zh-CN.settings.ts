@@ -1113,6 +1113,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': '二进制绝对路径。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可执行文件路径',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': '此路径由管理员设定，OpenChamber 始终从这里启动 OpenCode。',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': '显示 OpenCode 更新通知',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': '显示 OpenCode 更新通知',
   'settings.openchamber.opencodeCli.actions.browseAria': '浏览 OpenCode 可执行文件路径',

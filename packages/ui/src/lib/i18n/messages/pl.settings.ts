@@ -915,6 +915,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'Wybierz plik binarny opencode',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Ścieżka do pliku binarnego OpenCode',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': 'Tę ścieżkę ustawił Twój administrator, więc OpenChamber zawsze uruchamia OpenCode z niej.',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': 'Pokazuj powiadomienia o aktualizacjach OpenCode',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'Pokazuj powiadomienia o aktualizacjach OpenCode',
   'settings.openchamber.opencodeCli.tipMiddle': 'zmienna środowiskowa, ale to ustawienie jest zapisywane w',

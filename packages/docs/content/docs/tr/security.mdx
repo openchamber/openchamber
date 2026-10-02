@@ -87,6 +87,23 @@ Dizüstü bilgisayarda bu daha zayıf bir kilittir: masaüstü uygulaması deği
 
 Değişkenle birlikte relay, Jev, ağ erişimi ve izin verilen eklentiler de kendi değişkenlerinden gelir: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (virgülle ayrılmış depo URL'leri) ve `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. Docker'da ağ erişimi değişkenine ihtiyacınız olacak, çünkü sunucunun container dışından gelen bağlantıları da dinlemesi gerekir.
 
+### OpenCode CLI'yi sabitlemek
+
+Makinelerinizde OpenCode zaten kuruluysa ve OpenChamber'ın bu kurulumu kullanmasını istiyorsanız, yolunu politika dosyasına yazın. Kurumsal mod açık olsun ya da olmasın çalışır.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber, OpenCode'u yalnızca bu yoldan başlatır. Ayarlar'daki yolu, `OPENCODE_BINARY` değişkenini ve masaüstü uygulamasıyla gelen kopyayı yok sayar; o kopya diskte kalır ama kullanılmaz.
+- Bu yolda çalıştırılabilir bir şey yoksa OpenChamber başka bir kopyaya geçmez. Yolu belirten bir hatayla durur.
+- Ayarlar yolu salt okunur gösterir ve yöneticinin belirlediğini not eder.
+- OpenChamber sabitlenmiş bir OpenCode'u kurmaz, güncellemez ve yeni sürümleri duyurmaz. Güncellemeler sizin dağıtımınızla gelir.
+- CLI, OpenCode 2.x olmalı ve en az OpenChamber'ın istediği sürümde bulunmalı. Daha eskiyse OpenChamber "OpenCode'u güncelle" ekranında kalır.
+- `opencode` (Windows'ta `opencode.exe`) içeren bir klasör de olur. Bunun için ortam değişkeni yok, çünkü kullanıcı bunları kendisi ayarlayabilir.
+
 ### Örnekler
 
 Politika dosyasını bir Mac'e koymak için Terminal'de yönetici olarak şunu çalıştırın:

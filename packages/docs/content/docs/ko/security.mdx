@@ -87,6 +87,23 @@ OPENCHAMBER_ENTERPRISE_MODE=1
 
 이 변수를 쓸 때는 릴레이, Jev, 네트워크 접근, 허용된 확장도 각자의 변수 `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS`(쉼표로 구분한 저장소 URL), `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`로 정합니다. Docker에서는 서버가 컨테이너 밖에서 오는 연결도 받아야 하므로 네트워크 접근 변수가 필요합니다.
 
+### OpenCode CLI 고정하기
+
+컴퓨터에 이미 OpenCode가 설치되어 있고 OpenChamber가 그 설치본을 쓰게 하려면, 정책 파일에 경로를 넣으세요. 엔터프라이즈 모드와 상관없이 동작합니다.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber는 이 경로에서만 OpenCode를 시작합니다. 설정의 경로, `OPENCODE_BINARY`, 데스크톱 앱에 포함된 사본은 무시합니다. 포함된 사본은 디스크에 남지만 쓰이지 않습니다.
+- 이 경로에 실행할 수 있는 파일이 없으면 OpenChamber는 다른 사본으로 넘어가지 않습니다. 경로를 알려 주는 오류와 함께 멈춥니다.
+- 설정에는 경로가 읽기 전용으로 표시되고, 관리자가 지정했다는 안내가 붙습니다.
+- OpenChamber는 고정된 OpenCode를 설치하거나 업데이트하지 않고, 새 버전도 알리지 않습니다. 업데이트는 관리자의 배포로 이뤄집니다.
+- CLI는 OpenCode 2.x이고, OpenChamber가 요구하는 버전 이상이어야 합니다. 더 오래된 버전이면 OpenChamber는 "OpenCode 업데이트" 화면에서 멈춥니다.
+- `opencode`(Windows에서는 `opencode.exe`)가 들어 있는 폴더를 지정해도 됩니다. 사용자가 직접 설정할 수 있기 때문에 이를 위한 환경 변수는 없습니다.
+
 ### 예시
 
 Mac에 정책 파일을 두려면 터미널에서 관리자 권한으로 다음을 실행하세요.

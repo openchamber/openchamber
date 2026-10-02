@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
@@ -55,6 +56,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const wellKnownOpencodePaths = Array.isArray(deps.wellKnownOpencodePaths)
     ? deps.wellKnownOpencodePaths
     : WELL_KNOWN_OPENCODE_PATHS;
+  const readPinnedOpencodeBinary = deps.readPinnedOpencodeBinary ?? (() => readEnterprisePolicy().opencodeBinary);
 
   const parseNullSeparatedEnvSnapshot = (raw) => {
     if (typeof raw !== 'string' || raw.length === 0) {
@@ -1073,8 +1075,59 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return trimmed;
   };
 
+  const createPinnedOpencodeBinaryError = (candidate) => {
+    const error = new Error(
+      `The OpenCode CLI pinned by your administrator (opencodeBinary in the OpenChamber policy file) is missing or not executable: ${candidate}. `
+      + 'Ask your administrator to install the standalone opencode CLI at that path or update the policy.'
+    );
+    error.code = 'OPENCODE_BINARY_INVALID';
+    return error;
+  };
+
+  /**
+   * The administrator's pin (`opencodeBinary` in the policy file) wins over
+   * the user's setting, the environment and the bundled CLI, and a pin that
+   * does not resolve never falls back to them. Read at every call, so a
+   * removed pin hands resolution back to the usual order.
+   * Returns `{ pinned: false }` or `{ pinned: true, binary, error }`.
+   */
+  const applyPinnedOpencodeBinary = () => {
+    const pinned = readPinnedOpencodeBinary();
+    if (!pinned) {
+      if (state.resolvedOpencodeBinarySource === 'policy') {
+        delete process.env.OPENCODE_BINARY;
+        state.resolvedOpencodeBinary = null;
+        state.resolvedOpencodeBinarySource = null;
+      }
+      return { pinned: false };
+    }
+
+    const normalized = normalizeOpencodeBinarySetting(stripWrappingQuotes(pinned));
+    if (!normalized || !isExecutable(normalized) || isKnownOpenCodeDesktopAppPath(normalized)) {
+      state.resolvedOpencodeBinary = null;
+      state.resolvedOpencodeBinarySource = null;
+      clearWslOpencodeResolution();
+      return { pinned: true, binary: null, error: createPinnedOpencodeBinaryError(normalized || pinned) };
+    }
+
+    clearWslOpencodeResolution();
+    process.env.OPENCODE_BINARY = normalized;
+    prependToPath(path.dirname(normalized));
+    state.resolvedOpencodeBinary = normalized;
+    state.resolvedOpencodeBinarySource = 'policy';
+    ensureOpencodeShimRuntime(normalized);
+    return { pinned: true, binary: normalized, error: null };
+  };
+
   const applyOpencodeBinaryFromSettings = async (options = {}) => {
     const strict = options?.strict === true;
+    const pin = applyPinnedOpencodeBinary();
+    if (pin.pinned) {
+      if (pin.binary) return pin.binary;
+      if (strict) throw pin.error;
+      console.warn(pin.error.message);
+      return null;
+    }
     try {
       const settings = await readSettingsFromDiskMigrated();
       if (!settings || typeof settings !== 'object') {
@@ -1149,6 +1202,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const ensureOpencodeCliEnv = () => {
+    const pin = applyPinnedOpencodeBinary();
+    if (pin.pinned) return pin.binary;
+
     if (state.resolvedOpencodeBinary) {
       if (state.useWslForOpencode) {
         return state.resolvedOpencodeBinary;

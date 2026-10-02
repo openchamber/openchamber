@@ -1087,6 +1087,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': '二進位檔絕對路徑。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可執行檔路徑',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': '此路徑由管理員設定，OpenChamber 一律從這裡啟動 OpenCode。',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': '顯示 OpenCode 更新通知',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': '顯示 OpenCode 更新通知',
   'settings.openchamber.opencodeCli.actions.browseAria': '瀏覽 OpenCode 可執行檔路徑',

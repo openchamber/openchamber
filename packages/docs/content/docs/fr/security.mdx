@@ -87,6 +87,23 @@ Sur un portable, c’est un verrou plus faible : l’application de bureau la li
 
 Avec la variable, le relais, Jev, l’accès réseau et les extensions autorisées viennent eux aussi de leurs propres variables : `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (des URL de dépôts séparées par des virgules) et `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. Dans Docker, il vous faudra celle de l’accès réseau, puisque le serveur doit écouter au-delà du conteneur.
 
+### Imposer la CLI OpenCode
+
+Si OpenCode est déjà installé sur vos machines et qu’OpenChamber doit utiliser cette installation, indiquez son chemin dans le fichier de politique. Cela marche avec ou sans le mode entreprise.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber lance OpenCode uniquement depuis ce chemin. Il ignore le chemin des Paramètres, `OPENCODE_BINARY` et la copie fournie avec l’application de bureau, qui reste sur le disque sans servir.
+- S’il n’y a rien d’exécutable à ce chemin, OpenChamber ne se rabat pas sur une autre copie. Il s’arrête avec une erreur qui donne le chemin.
+- Les Paramètres affichent le chemin en lecture seule, avec une note indiquant que l’administrateur l’a défini.
+- OpenChamber n’installe ni ne met à jour un OpenCode imposé et n’annonce pas les nouvelles versions. Les mises à jour arrivent avec votre déploiement.
+- La CLI doit être OpenCode 2.x, au moins la version demandée par OpenChamber. Avec une version plus ancienne, OpenChamber s’arrête sur l’écran « mettre à jour OpenCode ».
+- Un dossier fonctionne aussi, s’il contient `opencode` (`opencode.exe` sous Windows). Il n’y a pas de variable d’environnement pour cela, puisqu’un utilisateur peut les définir lui-même.
+
 ### Exemples
 
 Pour placer le fichier de politique sur un Mac, exécutez ceci dans le Terminal en tant qu’administrateur :

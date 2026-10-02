@@ -3006,6 +3006,7 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.actions.browse': '찾아보기',
   'onboarding.localSetup.actions.apply': '적용',
   'onboarding.localSetup.helper.saveAndReload': 'OpenChamber 설정에 저장하고 OpenCode 구성을 다시 로드합니다.',
+  'onboarding.localSetup.helper.pinnedByAdministrator': '관리자가 이 경로를 지정했습니다. 그곳에 OpenCode가 없다면 관리자에게 설치를 요청하세요.',
   'onboarding.localSetup.remotePreference': '원격 서버를 사용하시겠어요?',
   'onboarding.localSetup.actions.connectRemoteServer': '리모트 서버 연결 →',
   'onboarding.localSetup.windows.hintInstallInWsl': 'Windows에서는 OpenCode를 네이티브로 설치하고 실행하세요.',

@@ -1146,6 +1146,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': 'programma.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Pad naar de OpenCode-binary',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': 'Je beheerder heeft dit pad ingesteld, dus OpenChamber start OpenCode altijd vanaf hier.',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': 'Updatemeldingen van OpenCode tonen',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'Updatemeldingen van OpenCode tonen',
   'settings.openchamber.opencodeCli.actions.browseAria': 'Zoek het pad naar de OpenCode-binary',

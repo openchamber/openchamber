@@ -2972,6 +2972,7 @@ export const dict: Record<I18nKey, string> = {
   "onboarding.localSetup.actions.browse": "Explorar",
   "onboarding.localSetup.actions.apply": "Aplicar",
   "onboarding.localSetup.helper.saveAndReload": "Salve nas configurações do OpenChamber e recarregue configurações do OpenCode.",
+  "onboarding.localSetup.helper.pinnedByAdministrator": "Seu administrador definiu este caminho. Se o OpenCode não estiver lá, peça para ele instalar.",
   "onboarding.localSetup.remotePreference": "Prefere usar um servidor remoto?",
   "onboarding.localSetup.actions.connectRemoteServer": "Conectar a um servidor remoto →",
   "onboarding.localSetup.windows.hintInstallInWsl": "No Windows, instale e execute o OpenCode nativamente.",

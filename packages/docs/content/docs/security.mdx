@@ -87,6 +87,23 @@ On a laptop it's a weaker lock: the desktop app reads it from the login shell pr
 
 With the variable, the relay, Jev, network access and allowed extensions come from their own variables too: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (repository URLs separated by commas) and `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. In Docker you'll need the network one, since the server has to listen beyond the container.
 
+### Pin the OpenCode CLI
+
+If your machines already have OpenCode installed and OpenChamber should use that install, put its path in the policy file. This works with or without enterprise mode.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber starts OpenCode only from that path. It ignores the path in Settings, `OPENCODE_BINARY`, and the copy bundled with the desktop app, which stays on disk unused.
+- If nothing runnable is at that path, OpenChamber doesn't fall back to another copy. It stops with an error that names the path.
+- Settings shows the path read-only, with a note that the administrator set it.
+- OpenChamber doesn't install or update a pinned OpenCode and doesn't announce new versions. Updates come with your rollout.
+- The CLI has to be OpenCode 2.x, at least the version OpenChamber asks for. With an older one, OpenChamber stops at the "update OpenCode" screen.
+- A folder works too, if it holds `opencode` (`opencode.exe` on Windows). There's no environment variable for this, since a user can set those themselves.
+
 ### Examples
 
 Put the policy file on a Mac. Run in Terminal as an administrator:

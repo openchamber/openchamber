@@ -87,6 +87,23 @@ Op een laptop is dit een zwakkere beperking. De desktopapp leest de waarde uit h
 
 Met de variabele komen de relay, Jev, netwerktoegang en toegestane extensies ook uit hun eigen variabelen: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (repository-URL's gescheiden door komma's) en `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. In Docker hebt u die voor netwerktoegang nodig, omdat de server ook buiten de container moet luisteren.
 
+### De OpenCode-CLI vastzetten
+
+Staat OpenCode al op je computers en moet OpenChamber die installatie gebruiken, zet het pad dan in het beleidsbestand. Dat werkt met en zonder bedrijfsmodus.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber start OpenCode alleen vanaf dat pad. Het negeert het pad uit Instellingen, `OPENCODE_BINARY` en de kopie die bij de desktop-app zit; die kopie blijft ongebruikt op de schijf staan.
+- Staat er op dat pad niets uitvoerbaars, dan valt OpenChamber niet terug op een andere kopie. Het stopt met een foutmelding die het pad noemt.
+- Instellingen toont het pad alleen-lezen, met een opmerking dat de beheerder het heeft ingesteld.
+- OpenChamber installeert of werkt een vastgezette OpenCode niet bij en meldt geen nieuwe versies. Updates komen met je eigen uitrol.
+- De CLI moet OpenCode 2.x zijn, minstens de versie die OpenChamber vraagt. Met een oudere blijft OpenChamber staan op het scherm "OpenCode bijwerken".
+- Een map kan ook, als die `opencode` bevat (`opencode.exe` op Windows). Een omgevingsvariabele hiervoor is er niet, omdat gebruikers die zelf kunnen instellen.
+
 ### Voorbeelden
 
 Om het beleidsbestand op een Mac te plaatsen, voert u dit in Terminal uit als beheerder:

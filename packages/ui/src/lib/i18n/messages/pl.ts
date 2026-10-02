@@ -1111,6 +1111,7 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.actions.browse': 'Przeglądaj',
   'onboarding.localSetup.actions.apply': 'Zastosuj',
   'onboarding.localSetup.helper.saveAndReload': 'Zapisuje do ustawień OpenChamber i przeładowuje konfigurację OpenCode.',
+  'onboarding.localSetup.helper.pinnedByAdministrator': 'Tę ścieżkę ustawił Twój administrator. Jeśli nie ma tam OpenCode, poproś go o instalację.',
   'onboarding.localSetup.remotePreference': 'Wolisz używać zdalnego serwera?',
   'onboarding.localSetup.actions.connectRemoteServer': 'Połącz z serwerem zdalnym →',
   'onboarding.localSetup.windows.hintInstallInWsl': 'W Windows zainstaluj i uruchom OpenCode natywnie.',

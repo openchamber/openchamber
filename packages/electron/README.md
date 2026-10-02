@@ -207,6 +207,7 @@ Packaged Desktop builds include the official OpenCode CLI release pinned by `ope
 
 Managed local Desktop startup prefers OpenCode binaries in this order:
 
+0. `opencodeBinary` in the machine policy file, when an administrator pinned one. It has no fallback: an unusable pin stops startup instead of trying the entries below (see `packages/web/server/lib/enterprise-mode.js`).
 1. `settings.opencodeBinary`.
 2. Environment overrides: `OPENCODE_BINARY`, `OPENCODE_PATH`, `OPENCHAMBER_OPENCODE_PATH`, or `OPENCHAMBER_OPENCODE_BIN`.
 3. The bundled Desktop CLI in `process.resourcesPath/opencode-cli`.

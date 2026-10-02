@@ -40,6 +40,7 @@ describe('enterprise policy', () => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      opencodeBinary: null,
     });
   });
 
@@ -68,6 +69,32 @@ describe('enterprise policy', () => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      opencodeBinary: null,
+    });
+  });
+
+  describe('pinned OpenCode binary', () => {
+    const env = { OPENCODE_BINARY: '/home/me/opencode' };
+
+    it('comes from the file with or without enterprise mode', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "/opt/acme/opencode"}' }, { env })))
+        .toMatchObject({ enterpriseMode: false, opencodeBinary: '/opt/acme/opencode' });
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"enterpriseMode": true, "opencodeBinary": " /opt/acme/opencode "}' })).opencodeBinary)
+        .toBe('/opt/acme/opencode');
+    });
+
+    it('is never taken from the environment', () => {
+      expect(readEnterprisePolicy(machine({}, { env: { ...env, OPENCHAMBER_ENTERPRISE_MODE: '1' } })).opencodeBinary).toBeNull();
+    });
+
+    it('pins nothing when blank or when the file is broken', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "  "}' })).opencodeBinary).toBeNull();
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": 42}' })).opencodeBinary).toBeNull();
+    });
+
+    it('is shown to clients', () => {
+      expect(publicEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "/opt/acme/opencode"}' })).opencodeBinary)
+        .toBe('/opt/acme/opencode');
     });
   });
 
@@ -191,7 +218,7 @@ describe('enterprise policy', () => {
     const policy = publicEnterprisePolicy(machine({
       [LINUX_POLICY]: '{"enterpriseMode": true, "organization": "Acme", "jev": {"url": "https://x.test", "apiKey": "secret"}}',
     }));
-    expect(policy).toEqual({ enterpriseMode: true, source: 'policy-file', organization: 'Acme', policyError: null, networkAccessBlocked: true });
+    expect(policy).toEqual({ enterpriseMode: true, source: 'policy-file', organization: 'Acme', policyError: null, networkAccessBlocked: true, opencodeBinary: null });
   });
 
   describe('file location', () => {

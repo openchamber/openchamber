@@ -1146,6 +1146,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': 'バイナリ。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode バイナリパス',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': 'このパスは管理者が設定しています。OpenChamber は常にここから OpenCode を起動します。',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': 'OpenCode のアップデート通知を表示',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'OpenCode のアップデート通知を表示',
   'settings.openchamber.opencodeCli.actions.browseAria': 'OpenCode バイナリパスを参照',

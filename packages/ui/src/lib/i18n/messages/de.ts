@@ -2790,6 +2790,7 @@ export const dict = {
   'onboarding.localSetup.actions.browse': 'Durchsuchen',
   'onboarding.localSetup.actions.apply': 'Anwenden',
   'onboarding.localSetup.helper.saveAndReload': 'Speichert in die OpenChamber-Einstellungen und lädt die OpenCode-Konfiguration neu.',
+  'onboarding.localSetup.helper.pinnedByAdministrator': 'Dein Administrator hat diesen Pfad festgelegt. Wenn OpenCode dort fehlt, bitte ihn, es zu installieren.',
   'onboarding.localSetup.remotePreference': 'Bevorzugen Sie die Verwendung eines Remote-Servers?',
   'onboarding.localSetup.actions.connectRemoteServer': 'Mit Remote-Server verbinden →',
   'onboarding.localSetup.windows.hintInstallInWsl': 'Unter Windows installieren und führen Sie OpenCode nativ aus.',

@@ -3006,6 +3006,7 @@ export const dict = {
   'onboarding.localSetup.actions.browse': 'Bladeren',
   'onboarding.localSetup.actions.apply': 'Toepassen',
   'onboarding.localSetup.helper.saveAndReload': 'Slaat op in de instellingen van OpenChamber en herlaadt de OpenCode-configuratie.',
+  'onboarding.localSetup.helper.pinnedByAdministrator': 'Je beheerder heeft dit pad ingesteld. Staat OpenCode er niet, vraag dan of die het installeert.',
   'onboarding.localSetup.remotePreference': 'Liever een remote server gebruiken?',
   'onboarding.localSetup.actions.connectRemoteServer': 'Verbinden met remote server →',
   'onboarding.localSetup.windows.hintInstallInWsl': 'Installeer OpenCode op Windows en voer het daar rechtstreeks uit.',

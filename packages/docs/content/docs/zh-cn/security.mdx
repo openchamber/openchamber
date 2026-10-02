@@ -87,6 +87,23 @@ OPENCHAMBER_ENTERPRISE_MODE=1
 
 使用这个变量时，中继、Jev、网络访问和允许的扩展也来自各自的变量：`OPENCHAMBER_RELAY_URL`、`OPENCHAMBER_JEV_URL`、`OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`、`OPENCHAMBER_ALLOWED_EXTENSIONS`（用逗号分隔的仓库 URL）和 `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`。在 Docker 中你需要网络访问的那个变量，因为服务器必须监听来自容器之外的连接。
 
+### 固定 OpenCode CLI
+
+如果你的机器上已经装好了 OpenCode，并且希望 OpenChamber 使用这份安装，把它的路径写进策略文件即可。开不开企业模式都能用。
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber 只从这个路径启动 OpenCode。它会忽略设置里的路径、`OPENCODE_BINARY` 以及桌面应用自带的副本，那份副本留在磁盘上但不会被使用。
+- 如果这个路径下没有可运行的文件，OpenChamber 不会退回到其他副本，而是停下来并报错，错误里写明路径。
+- 设置里的路径变为只读，并注明由管理员设定。
+- OpenChamber 不会安装或更新被固定的 OpenCode，也不会提示新版本。更新随你的统一部署进行。
+- CLI 必须是 OpenCode 2.x，且不低于 OpenChamber 要求的版本。版本更旧时，OpenChamber 会停在"更新 OpenCode"的界面。
+- 也可以填一个文件夹，只要里面有 `opencode`（Windows 上是 `opencode.exe`）。这一项没有对应的环境变量，因为用户可以自己设置环境变量。
+
 ### 示例
 
 要在 Mac 上放置策略文件，以管理员身份在终端中运行：

@@ -2922,6 +2922,7 @@ export const dict = {
   'onboarding.localSetup.actions.browse': 'Göz at',
   'onboarding.localSetup.actions.apply': 'Uygula',
   'onboarding.localSetup.helper.saveAndReload': 'OpenChamber ayarlarına kaydeder ve OpenCode yapılandırmasını yeniden yükler.',
+  'onboarding.localSetup.helper.pinnedByAdministrator': 'Bu yolu yöneticiniz belirledi. OpenCode orada değilse yüklemesini isteyin.',
   'onboarding.localSetup.remotePreference': 'Uzak bir sunucu kullanmayı mı tercih edersiniz?',
   'onboarding.localSetup.actions.connectRemoteServer': 'Uzak Sunucuya Bağlan →',
   'onboarding.localSetup.windows.hintInstallInWsl': 'Windows\'ta OpenCode\'u yerel olarak kurun ve çalıştırın.',

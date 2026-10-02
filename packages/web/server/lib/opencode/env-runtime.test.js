@@ -117,6 +117,8 @@ const createRuntime = (settings, options = {}) => {
     homedir: options.homedir,
     wellKnownOpencodePaths: options.wellKnownOpencodePaths,
     providedLoginShellEnvSnapshot: options.providedLoginShellEnvSnapshot,
+    // Never the real machine policy: a developer's own file must not flip a suite.
+    readPinnedOpencodeBinary: options.readPinnedOpencodeBinary ?? (() => null),
   });
 
   return { runtime, state };
@@ -358,6 +360,61 @@ describe('OpenCode env runtime', () => {
     expect(process.env.OPENCODE_BINARY).toBeUndefined();
     expect(state.resolvedOpencodeBinary).toBeNull();
     expect(state.resolvedOpencodeBinarySource).toBeNull();
+  });
+
+  describe('binary pinned by the policy file', () => {
+    const createCli = (prefix) => {
+      const dir = createTempDir(prefix);
+      const binary = path.join(dir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+      fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      return binary;
+    };
+
+    it('wins over the user setting, the environment and the bundled CLI', async () => {
+      createBundledCli();
+      process.env.OPENCODE_BINARY = createCli('openchamber-env-opencode-');
+      const pinned = createCli('openchamber-pinned-opencode-');
+      const { runtime, state } = createRuntime(
+        { opencodeBinary: createCli('openchamber-settings-opencode-') },
+        { readPinnedOpencodeBinary: () => pinned },
+      );
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(pinned);
+      expect(runtime.ensureOpencodeCliEnv()).toBe(pinned);
+      expect(state.resolvedOpencodeBinarySource).toBe('policy');
+      expect(process.env.OPENCODE_BINARY).toBe(pinned);
+    });
+
+    it('accepts a directory that holds the CLI', async () => {
+      const pinned = createCli('openchamber-pinned-dir-');
+      const { runtime } = createRuntime({}, { readPinnedOpencodeBinary: () => path.dirname(pinned) });
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(pinned);
+    });
+
+    it('refuses to start and never falls back when the pinned path is unusable', async () => {
+      const bundled = createBundledCli();
+      const { runtime, state } = createRuntime({ opencodeBinary: bundled }, { readPinnedOpencodeBinary: () => '/missing/opencode' });
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+        code: 'OPENCODE_BINARY_INVALID',
+        message: expect.stringContaining('pinned by your administrator'),
+      });
+      expect(runtime.ensureOpencodeCliEnv()).toBeNull();
+      expect(state.resolvedOpencodeBinary).toBeNull();
+    });
+
+    it('hands resolution back to the usual order once the pin is removed', async () => {
+      delete process.env.OPENCODE_BINARY;
+      const pinned = createCli('openchamber-pinned-opencode-');
+      const fromSettings = createCli('openchamber-settings-opencode-');
+      let pin = pinned;
+      const { runtime, state } = createRuntime({ opencodeBinary: fromSettings }, { readPinnedOpencodeBinary: () => pin });
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(pinned);
+      pin = null;
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(fromSettings);
+      expect(state.resolvedOpencodeBinarySource).toBe('settings');
+    });
   });
 
   it('prefers the bundled CLI over a user-installed OpenCode from PATH', () => {

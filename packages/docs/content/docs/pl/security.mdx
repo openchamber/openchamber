@@ -87,6 +87,23 @@ Na laptopie to słabsza blokada: aplikacja desktopowa odczytuje zmienną z profi
 
 Przy zmiennej relay, Jev, dostęp sieciowy i dozwolone rozszerzenia też pochodzą z własnych zmiennych: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (adresy URL repozytoriów rozdzielone przecinkami) i `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. W Dockerze będziesz potrzebować tej od dostępu sieciowego, bo serwer musi nasłuchiwać poza kontenerem.
 
+### Przypięcie CLI OpenCode
+
+Jeśli na Twoich maszynach OpenCode jest już zainstalowany i OpenChamber ma używać właśnie tej instalacji, wpisz jej ścieżkę w pliku polityki. Działa to z trybem enterprise i bez niego.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber uruchamia OpenCode tylko z tej ścieżki. Pomija ścieżkę z Ustawień, `OPENCODE_BINARY` i kopię dołączoną do aplikacji desktopowej, która zostaje na dysku nieużywana.
+- Jeśli pod tą ścieżką nie ma nic, co da się uruchomić, OpenChamber nie sięga po inną kopię. Zatrzymuje się z błędem, który podaje ścieżkę.
+- Ustawienia pokazują ścieżkę tylko do odczytu, z informacją, że ustawił ją administrator.
+- OpenChamber nie instaluje ani nie aktualizuje przypiętego OpenCode i nie ogłasza nowych wersji. Aktualizacje przychodzą razem z Twoim wdrożeniem.
+- CLI musi być OpenCode 2.x, co najmniej w wersji, której wymaga OpenChamber. Przy starszej OpenChamber zatrzyma się na ekranie „zaktualizuj OpenCode”.
+- Można też podać folder, jeśli zawiera `opencode` (`opencode.exe` w Windows). Nie ma do tego zmiennej środowiskowej, bo użytkownik może ustawić ją sam.
+
 ### Przykłady
 
 Aby umieścić plik polityki na Macu, uruchom w Terminalu jako administrator:

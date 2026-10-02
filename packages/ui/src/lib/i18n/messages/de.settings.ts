@@ -1089,6 +1089,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.tooltipSuffix': 'Binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary-Pfad',
   'settings.openchamber.opencodeCli.field.binaryPathPlaceholder': '/Users/you/.bun/bin/opencode',
+  'settings.openchamber.opencodeCli.field.pinnedByAdministrator': 'Dein Administrator hat diesen Pfad festgelegt, daher startet OpenChamber OpenCode immer von hier.',
   'settings.openchamber.opencodeCli.field.showUpdateNotifications': 'OpenCode-Update-Benachrichtigungen anzeigen',
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'OpenCode-Update-Benachrichtigungen anzeigen',
   'settings.openchamber.opencodeCli.actions.browseAria': 'Nach OpenCode-Binärpfad suchen',

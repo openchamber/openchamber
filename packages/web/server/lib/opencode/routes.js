@@ -141,12 +141,15 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     const capability = getOpenCodeUpgradeCapability();
     if (!capability.supported) {
       const bundled = capability.reason === 'bundled';
+      const pinned = capability.reason === 'policy';
       return res.status(409).json({
         success: false,
         code: bundled ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER' : 'OPENCODE_UPGRADE_UNSUPPORTED',
         error: bundled
           ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
-          : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
+          : pinned
+            ? 'Your administrator manages this OpenCode installation.'
+            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
       });
     }
     try {
@@ -186,9 +189,12 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       if (!currentVersion || !latestVersion) {
         return res.json({ available: null, currentVersion, latestVersion: latestVersion || null, upgrade: capability });
       }
-      // A bundled binary updates together with the desktop app, so a newer
-      // OpenCode is not something the user can act on: never announce it.
-      const available = capability.reason === 'bundled' ? false : compareVersions(latestVersion, currentVersion) > 0;
+      // A bundled binary updates together with the desktop app, and a pinned
+      // one with the administrator's rollout, so a newer OpenCode is not
+      // something the user can act on: never announce it.
+      const available = capability.reason === 'bundled' || capability.reason === 'policy'
+        ? false
+        : compareVersions(latestVersion, currentVersion) > 0;
       return res.json({
         available,
         currentVersion,

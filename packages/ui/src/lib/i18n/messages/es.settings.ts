@@ -1113,6 +1113,7 @@ export const settingsDict = {
   "settings.openchamber.opencodeCli.tooltipSuffix": "ejecutable.",
   "settings.openchamber.opencodeCli.field.binaryPath": "Ruta del ejecutable de OpenCode",
   "settings.openchamber.opencodeCli.field.binaryPathPlaceholder": "/Users/you/.bun/bin/opencode",
+  "settings.openchamber.opencodeCli.field.pinnedByAdministrator": "Tu administrador fijó esta ruta, así que OpenChamber siempre inicia OpenCode desde ella.",
   "settings.openchamber.opencodeCli.field.showUpdateNotifications": "Mostrar notificaciones de actualización de OpenCode",
   "settings.openchamber.opencodeCli.field.showUpdateNotificationsAria": "Mostrar notificaciones de actualización de OpenCode",
   "settings.openchamber.opencodeCli.actions.browseAria": "Buscar ruta del ejecutable de OpenCode",

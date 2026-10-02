@@ -53,6 +53,13 @@ import { z } from 'zod';
  *   listed (`allowedExtensions` / `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
+ *
+ * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
+ * enterprise mode: managed OpenCode then starts only from that path, never
+ * falls back to the bundled CLI or PATH, ignores the user's binary setting,
+ * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`,
+ * `packages/vscode/src/opencode.ts`).
+ *
  * The VS Code extension host, which runs no OpenChamber server, reads the
  * same policy through this module for the parts it has (provider connection,
  * update checks).
@@ -91,6 +98,7 @@ const policyFileSchema = z.object({
   allowedExtensions: z.array(z.string().trim().min(1)).max(200).optional(),
   allowLocalExtensions: z.boolean().optional(),
   jev: z.object({ url: optionalText, model: optionalText, apiKey: optionalText }).optional(),
+  opencodeBinary: optionalText,
 }).refine((policy) => !policy.jev || policy.jev.url || (!policy.jev.model && !policy.jev.apiKey), {
   message: '"jev" needs a "url"',
   path: ['jev'],
@@ -111,7 +119,7 @@ const parsePolicyFile = (text) => {
     const field = issue.path.length > 0 ? `"${issue.path.join('.')}": ` : '';
     throw new Error(`${field}${issue.message}`);
   }
-  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev } = parsed.data;
+  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary } = parsed.data;
   return {
     enterpriseMode: enterpriseMode === true,
     organization: organization ?? null,
@@ -120,6 +128,7 @@ const parsePolicyFile = (text) => {
     allowedExtensions,
     allowLocalExtensions,
     jev: jev?.url ? { url: jev.url, model: jev.model ?? null, apiKey: jev.apiKey ?? null } : undefined,
+    opencodeBinary: opencodeBinary ?? null,
   };
 };
 
@@ -189,6 +198,7 @@ export const readEnterprisePolicy = (options = {}) => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      opencodeBinary: null,
     };
   }
 
@@ -220,6 +230,9 @@ export const readEnterprisePolicy = (options = {}) => {
     allowNetworkAccess,
     allowedExtensions,
     allowLocalExtensions,
+    // File only, in or out of enterprise mode: OPENCODE_BINARY already lets a
+    // user pick a binary, and a pin they could override would not be one.
+    opencodeBinary: fromFile?.opencodeBinary ?? null,
   };
 };
 
@@ -236,8 +249,8 @@ export const NETWORK_ACCESS_BLOCKED_ERROR = 'Enterprise mode keeps OpenChamber o
 
 /** What a client may know about the policy; pinned endpoints and keys stay on the server. */
 export const publicEnterprisePolicy = (options) => {
-  const { enterpriseMode, source, organization, policyError, allowNetworkAccess } = readEnterprisePolicy(options);
-  return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess };
+  const { enterpriseMode, source, organization, policyError, allowNetworkAccess, opencodeBinary } = readEnterprisePolicy(options);
+  return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess, opencodeBinary };
 };
 
 // OpenCode registers every remote MCP server with OAuth as an integration

@@ -87,6 +87,23 @@ En un portátil es un bloqueo más débil: la app de escritorio la lee del perfi
 
 Con la variable, el relay, Jev, el acceso de red y las extensiones permitidas también salen de sus propias variables: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (URL de repositorios separadas por comas) y `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. En Docker vas a necesitar la del acceso de red, porque el servidor tiene que escuchar más allá del contenedor.
 
+### Fijar la CLI de OpenCode
+
+Si tus equipos ya tienen OpenCode instalado y OpenChamber debe usar esa instalación, pon su ruta en el archivo de políticas. Funciona con o sin el modo empresa.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber inicia OpenCode solo desde esa ruta. Ignora la ruta de Ajustes, `OPENCODE_BINARY` y la copia incluida en la app de escritorio, que se queda en el disco sin usarse.
+- Si en esa ruta no hay nada ejecutable, OpenChamber no recurre a otra copia. Se detiene con un error que indica la ruta.
+- Ajustes muestra la ruta en solo lectura, con una nota de que la fijó el administrador.
+- OpenChamber no instala ni actualiza un OpenCode fijado y no anuncia versiones nuevas. Las actualizaciones llegan con tu despliegue.
+- La CLI tiene que ser OpenCode 2.x, como mínimo la versión que pide OpenChamber. Con una más antigua, OpenChamber se queda en la pantalla de "actualizar OpenCode".
+- También sirve una carpeta, si contiene `opencode` (`opencode.exe` en Windows). No hay variable de entorno para esto, porque un usuario puede definirlas por su cuenta.
+
 ### Ejemplos
 
 Para poner el archivo de políticas en un Mac, ejecuta en Terminal como administrador:

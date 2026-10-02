@@ -2971,6 +2971,7 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.actions.browse': '瀏覽',
   'onboarding.localSetup.actions.apply': '套用',
   'onboarding.localSetup.helper.saveAndReload': '將儲存到 OpenChamber 設定並重新載入 OpenCode 設定。',
+  'onboarding.localSetup.helper.pinnedByAdministrator': '此路徑由管理員設定。如果那裡沒有 OpenCode，請聯絡管理員安裝。',
   'onboarding.localSetup.remotePreference': '更希望使用遠端伺服器？',
   'onboarding.localSetup.actions.connectRemoteServer': '連接遠端伺服器 →',
   'onboarding.localSetup.windows.hintInstallInWsl': '在 Windows 上，請原生安裝並執行 OpenCode。',

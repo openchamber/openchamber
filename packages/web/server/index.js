@@ -25,7 +25,7 @@ import {
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
 } from './lib/security/bind-host.js';
-import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR } from './lib/enterprise-mode.js';
+import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy } from './lib/enterprise-mode.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -1442,7 +1442,9 @@ const getOpenCodeCompatibility = async () => {
   const binary = ensureOpencodeCliEnv();
   const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
   const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
-  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install());
+  // A CLI pinned by the administrator is theirs to replace, never ours.
+  const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
+  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy);
 };
 
 const getOpenCodeUpgradeCapability = () => {
@@ -1454,6 +1456,7 @@ const getOpenCodeUpgradeCapability = () => {
     hasManagedProcess: Boolean(openCodeProcess),
     activeBinary,
     isBundledBinary: isBundledOpenCodeCliPath,
+    pinnedByPolicy: Boolean(readEnterprisePolicy().opencodeBinary),
   });
 };
 

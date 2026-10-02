@@ -3003,6 +3003,7 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.actions.browse': '参照',
   'onboarding.localSetup.actions.apply': '適用',
   'onboarding.localSetup.helper.saveAndReload': 'OpenChamber設定に保存し、OpenCode設定を再読み込みします。',
+  'onboarding.localSetup.helper.pinnedByAdministrator': 'このパスは管理者が設定しています。そこに OpenCode がない場合は、管理者にインストールを依頼してください。',
   'onboarding.localSetup.remotePreference': 'リモートサーバーを使用しますか？',
   'onboarding.localSetup.actions.connectRemoteServer': 'リモートサーバーに接続 →',
   'onboarding.localSetup.windows.hintInstallInWsl': 'Windowsでは、OpenCodeをネイティブでインストールして実行します。',
