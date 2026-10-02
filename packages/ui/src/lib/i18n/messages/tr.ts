@@ -74,6 +74,7 @@ export const dict = {
   'terminalView.toast.copyFailed': 'Kopyalama başarısız',
   'terminalView.actions.copy': 'Kopyala',
   'terminalView.actions.paste': 'Yapıştır',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Bu terminal korumalı yapıştırmayı etkinleştirmemiş. Satır sonlarını yapıştırmak komutları hemen çalıştırabilir. Yine de yapıştırılsın mı?',
   'terminalView.toast.pasteFailed': 'Pano okunamadı. Yapıştırmak için klavye kısayolunu kullanın.',
   'terminalView.actions.restart': 'Terminali yeniden başlat',
   'chat.message.terminalContext': '{terminal}, {start}-{end}. satırlar',

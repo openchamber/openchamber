@@ -75,6 +75,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': '复制失败',
   'terminalView.actions.copy': '复制',
   'terminalView.actions.paste': '粘贴',
+  'terminalView.confirm.unprotectedMultilinePaste': '此终端未启用受保护的粘贴。粘贴换行符可能会立即执行命令。仍要粘贴吗？',
   'terminalView.toast.pasteFailed': '无法读取剪贴板。请使用粘贴快捷键。',
   'terminalView.actions.restart': '重启终端',
   'chat.message.terminalContext': '{terminal}，第 {start}-{end} 行',

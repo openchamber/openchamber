@@ -74,6 +74,7 @@ export const dict = {
   'terminalView.toast.copyFailed': 'Kan niet kopiëren',
   'terminalView.actions.copy': 'Kopiëren',
   'terminalView.actions.paste': 'Plakken',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Deze terminal heeft beveiligd plakken niet ingeschakeld. Regeleinden kunnen opdrachten onmiddellijk uitvoeren. Toch plakken?',
   'terminalView.toast.pasteFailed': 'Kan het klembord niet lezen. Gebruik de sneltoets voor plakken.',
   'terminalView.actions.restart': 'Terminal herstarten',
   'chat.message.terminalContext': '{terminal}, regels {start}-{end}',

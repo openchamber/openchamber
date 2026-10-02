@@ -75,6 +75,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': 'Не вдалося скопіювати',
   'terminalView.actions.copy': 'Копіювати',
   'terminalView.actions.paste': 'Вставити',
+  'terminalView.confirm.unprotectedMultilinePaste': 'У цьому терміналі не ввімкнено захищене вставлення. Вставлення переносів рядка може негайно виконати команди. Усе одно вставити?',
   'terminalView.toast.pasteFailed': 'Не вдалося прочитати буфер обміну. Скористайтеся комбінацією клавіш для вставлення.',
   'terminalView.actions.restart': 'Перезапустити термінал',
   'chat.message.terminalContext': '{terminal}, рядки {start}-{end}',

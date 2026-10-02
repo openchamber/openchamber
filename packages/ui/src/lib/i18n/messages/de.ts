@@ -3105,6 +3105,7 @@ export const dict = {
   'terminalView.toast.copyFailed': 'Kopieren fehlgeschlagen',
   'terminalView.actions.copy': 'Kopieren',
   'terminalView.actions.paste': 'Einfügen',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Dieses Terminal hat geschütztes Einfügen nicht aktiviert. Zeilenumbrüche können Befehle sofort ausführen. Trotzdem einfügen?',
   'terminalView.toast.pasteFailed': 'Die Zwischenablage konnte nicht gelesen werden. Verwende die Tastenkombination zum Einfügen.',
   'terminalView.actions.restart': 'Terminal neu starten',
   'chat.message.terminalContext': '{terminal}, Zeilen {start}-{end}',

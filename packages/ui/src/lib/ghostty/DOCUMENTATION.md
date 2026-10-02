@@ -16,6 +16,8 @@ This directory is OpenChamber's browser adapter for the official `libghostty-vt`
 
 The viewport owns the desktop Copy/Paste context menu. Its trigger accepts only the native event forwarded by `surface.onContextMenu`, so mouse-reporting applications retain right clicks and the surface's Shift override still applies. Touch-owned viewports keep their existing gestures. Copy snapshots the selection when the menu opens; Paste uses `surface.pasteFromClipboard` for bracketed-paste encoding and native-paste deduplication. The viewport invalidates pending clipboard reads on session changes, hide and unmount. Clipboard read failures show a translated error with a keyboard-paste fallback.
 
+`TerminalView` exposes Paste beside Copy in its tab toolbar, including touch hosts, through `TerminalController.pasteClipboard`. Both host paste entry points supply a translated confirmation for line breaks when the live terminal has not enabled bracketed-paste mode. The core checks mode 2004 at encoding time; cancellation emits no input. Text is not reformatted and no Enter is appended. Native paste events and keyboard shortcuts keep their existing behavior.
+
 ## Invariants
 
 - On macOS, unshifted Option+Left/Right sends ESC+b/f and Option+Backspace sends Ctrl+W at legacy prompts. `core.encodeMacWordShortcut` checks the active screen and Kitty keyboard flags before translating; alternate-screen and Kitty-enabled programs receive the original keys. `surface.ts` consumes the matching keyup for translated shortcuts. Other platforms, extra modifiers and Option character input retain normal encoding.
