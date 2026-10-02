@@ -1455,6 +1455,7 @@ export const dict = {
   "diffView.scope.selectorAria": "Sélectionner le mode de changements",
   'diffView.actions.retry': 'Réessayer',
   'diffView.actions.renderAnyway': 'Afficher quand même',
+  'diffView.actions.showLinesBelow': 'Afficher les lignes suivantes',
   'diffView.actions.expandAll': 'Tout développer',
   'diffView.actions.collapseAll': 'Tout réduire',
   'diffView.actions.disableLineWrap': 'Désactiver le retour à la ligne',

@@ -1705,6 +1705,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.selectorAria": "변경 모드 선택",
   'diffView.actions.retry': '다시 시도',
   'diffView.actions.renderAnyway': '그래도 렌더링',
+  'diffView.actions.showLinesBelow': '아래 줄 표시',
   'diffView.actions.expandAll': '모두 펼치기',
   'diffView.actions.collapseAll': '모두 접기',
   'diffView.actions.disableLineWrap': '줄 바꿈 끄기',

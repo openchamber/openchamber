@@ -1703,6 +1703,7 @@ export const dict = {
   'diffView.scope.selectorAria': 'Select change mode',
   'diffView.actions.retry': 'Retry',
   'diffView.actions.renderAnyway': 'Render anyway',
+  'diffView.actions.showLinesBelow': 'Show lines below',
   'diffView.actions.expandAll': 'Expand all',
   'diffView.actions.collapseAll': 'Collapse all',
   'diffView.actions.disableLineWrap': 'Disable line wrap',

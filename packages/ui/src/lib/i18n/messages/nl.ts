@@ -1703,6 +1703,7 @@ export const dict = {
   'diffView.scope.selectorAria': 'Kies de wijzigingsmodus',
   'diffView.actions.retry': 'Opnieuw proberen',
   'diffView.actions.renderAnyway': 'Toch weergeven',
+  'diffView.actions.showLinesBelow': 'Regels hieronder tonen',
   'diffView.actions.expandAll': 'Alles uitvouwen',
   'diffView.actions.collapseAll': 'Alles samenvouwen',
   'diffView.actions.disableLineWrap': 'Regelafbreking uitzetten',

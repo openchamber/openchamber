@@ -1669,6 +1669,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.selectorAria": "选择更改模式",
   'diffView.actions.retry': '重试',
   'diffView.actions.renderAnyway': '仍然渲染',
+  'diffView.actions.showLinesBelow': '显示下方的行',
   'diffView.actions.expandAll': '全部展开',
   'diffView.actions.collapseAll': '全部折叠',
   'diffView.actions.disableLineWrap': '关闭自动换行',

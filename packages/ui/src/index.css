@@ -836,6 +836,54 @@ html:not(.dark) .chat-scroll {
   display: block;
 }
 
+/* Row below the last hunk of a patch-only diff (PierreDiffViewer). Pierre
+   draws no separator there, so this mirrors its on-demand separators. */
+.pierre-diff-wrapper [data-oc-trailing-expand] {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  height: 24px;
+  padding: 0 0 0 1ch;
+  border: none;
+  background: transparent;
+  color: var(--diffs-fg-number, var(--surface-muted-foreground));
+  font-family: var(--diffs-header-font-family, var(--font-sans));
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pierre-diff-wrapper [data-oc-trailing-expand]::before {
+  content: '\2193';
+  display: block;
+  flex-shrink: 0;
+}
+
+.pierre-diff-wrapper [data-oc-trailing-expand]:hover {
+  color: var(--diffs-fg, var(--surface-foreground));
+}
+
+/* Full file requested: same spinner and dimming as the separators. */
+.pierre-diff-wrapper diffs-container[data-oc-expand-loading] [data-oc-trailing-expand] {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.pierre-diff-wrapper diffs-container[data-oc-expand-loading] [data-oc-trailing-expand]::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: oc-trailing-expand-spin 0.8s linear infinite;
+}
+
+@keyframes oc-trailing-expand-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Header tab responsiveness */
 :root:not(.mobile-pointer):not(.vscode-runtime) .header-tab-label {
   display: inline;

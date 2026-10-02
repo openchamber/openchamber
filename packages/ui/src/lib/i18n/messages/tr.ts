@@ -1670,6 +1670,7 @@ export const dict = {
   'diffView.scope.selectorAria': 'Değişiklik modunu seç',
   'diffView.actions.retry': 'Yeniden dene',
   'diffView.actions.renderAnyway': 'Yine de render et',
+  'diffView.actions.showLinesBelow': 'Alttaki satırları göster',
   'diffView.actions.expandAll': 'Tümünü genişlet',
   'diffView.actions.collapseAll': 'Tümünü daralt',
   'diffView.actions.disableLineWrap': 'Satır kaydırmayı devre dışı bırak',

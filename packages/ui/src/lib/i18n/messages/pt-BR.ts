@@ -1669,6 +1669,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.selectorAria": "Selecionar modo de alterações",
   "diffView.actions.retry": "Tentar novamente",
   "diffView.actions.renderAnyway": "Renderizar mesmo assim",
+  "diffView.actions.showLinesBelow": "Mostrar linhas abaixo",
   "diffView.actions.expandAll": "Expandir tudo",
   "diffView.actions.collapseAll": "Recolher tudo",
   "diffView.actions.disableLineWrap": "Desativar ajuste de linha",

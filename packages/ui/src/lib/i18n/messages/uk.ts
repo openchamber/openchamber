@@ -1669,6 +1669,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.selectorAria": "Вибрати режим змін",
   "diffView.actions.retry": "Повторити спробу",
   "diffView.actions.renderAnyway": "Все одно відрендерити",
+  "diffView.actions.showLinesBelow": "Показати рядки нижче",
   "diffView.actions.expandAll": "Розгорнути все",
   "diffView.actions.collapseAll": "Згорнути все",
   "diffView.actions.disableLineWrap": "Вимкнути перенос рядків",

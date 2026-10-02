@@ -1911,6 +1911,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.hunk.unsupported': 'Przygotowywanie pojedynczych fragmentów nie jest obsługiwane w tym środowisku.',
   'diffView.actions.openFileInEditorAtChange': 'Otwórz plik w edytorze na zmianie',
   'diffView.actions.renderAnyway': 'Renderuj mimo to',
+  'diffView.actions.showLinesBelow': 'Pokaż kolejne wiersze',
   'diffView.actions.retry': 'Ponów',
   'diffView.binary.unavailable': 'Nie można wyświetlić zawartości tego pliku.',
   'diffView.change.copied': 'Skopiowany plik',

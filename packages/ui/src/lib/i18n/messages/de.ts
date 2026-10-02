@@ -1514,6 +1514,7 @@ export const dict = {
   'diffView.scope.selectorAria': 'Änderungsmodus auswählen',
   'diffView.actions.retry': 'Erneut versuchen',
   'diffView.actions.renderAnyway': 'Trotzdem rendern',
+  'diffView.actions.showLinesBelow': 'Zeilen darunter anzeigen',
   'diffView.actions.expandAll': 'Alle erweitern',
   'diffView.actions.collapseAll': 'Alle reduzieren',
   'diffView.actions.disableLineWrap': 'Zeilenumbruch deaktivieren',

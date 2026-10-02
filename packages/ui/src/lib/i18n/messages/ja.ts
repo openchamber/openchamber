@@ -1699,6 +1699,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.scope.selectorAria': '変更モードを選択',
   'diffView.actions.retry': '再試行',
   'diffView.actions.renderAnyway': 'とにかくレンダリング',
+  'diffView.actions.showLinesBelow': '以降の行を表示',
   'diffView.actions.expandAll': 'すべて展開',
   'diffView.actions.collapseAll': 'すべて折りたたむ',
   'diffView.actions.disableLineWrap': '行の折り返しを無効にする',
