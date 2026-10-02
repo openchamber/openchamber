@@ -1166,7 +1166,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       const binary = cliPath || resolveOpencodeCliPath();
       const detected = binary ? await readOpenCodeCliVersion(resolveWindowsLaunchSpec(binary, []), { env: process.env }).catch(() => null) : null;
       // A CLI pinned by the administrator is theirs to replace, never ours.
-      return describeOpenCodeCompatibility(detected, 'managed', supportsOpenCodeV2Install() && !readPinnedOpencodeBinary());
+      return describeOpenCodeCompatibility(detected, 'managed', supportsOpenCodeV2Install() && !readPinnedOpencodeBinary(), binary || null);
     },
     installV2: () => {
       if (installInFlight) return installInFlight;

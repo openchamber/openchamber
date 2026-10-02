@@ -5,6 +5,8 @@ const openCodeCompatibilitySchema = z.object({
   state: z.enum(['compatible', 'incompatible', 'unavailable']),
   version: z.string().nullable(),
   installation: z.enum(['managed', 'external', 'bundled']),
+  // The local CLI that was checked; absent from older hosts, null for external servers.
+  binary: z.string().nullable().optional(),
   // Absent from hosts that predate the minimum-version gate.
   minimumVersion: z.string().optional(),
   canInstall: z.boolean(),

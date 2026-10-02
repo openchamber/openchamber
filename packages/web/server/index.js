@@ -1461,7 +1461,7 @@ const getOpenCodeCompatibility = async () => {
   const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
   // A CLI pinned by the administrator is theirs to replace, never ours.
   const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
-  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy);
+  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
 };
 
 const getOpenCodeUpgradeCapability = () => {

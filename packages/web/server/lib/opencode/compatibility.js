@@ -81,10 +81,13 @@ export const readExternalOpenCodeVersion = async (baseUrl, headers, fetchImpl = 
   return parsed.success && parsed.data.version.startsWith('1.') ? parsed.data.version : null;
 };
 
-export const describeOpenCodeCompatibility = (version, installation, canInstall) => ({
+// `binary` is the local CLI that was checked, so a user with several installs
+// can see which one OpenChamber runs; external servers have none.
+export const describeOpenCodeCompatibility = (version, installation, canInstall, binary = null) => ({
   state: version === null ? 'unavailable' : isSupportedOpenCodeVersion(version) ? 'compatible' : 'incompatible',
   version,
   installation,
+  binary,
   minimumVersion: MINIMUM_OPENCODE_VERSION,
   // The installer fetches the latest release, which clears both a 1.x CLI and
   // a 2.x one older than the minimum.

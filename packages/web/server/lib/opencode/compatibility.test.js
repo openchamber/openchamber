@@ -57,6 +57,11 @@ describe('OpenCode compatibility', () => {
     expect(describeOpenCodeCompatibility('2.0.19', 'managed', true).minimumVersion).toBe('2.0.20');
   });
 
+  it('reports which local CLI was checked', () => {
+    expect(describeOpenCodeCompatibility('2.0.16', 'managed', true, '/opt/homebrew/bin/opencode').binary).toBe('/opt/homebrew/bin/opencode');
+    expect(describeOpenCodeCompatibility('2.0.16', 'external', false).binary).toBeNull();
+  });
+
   it('only offers installation for a known managed CLI older than the minimum', () => {
     expect(describeOpenCodeCompatibility('1.18.32', 'managed', true)).toMatchObject({ state: 'incompatible', canInstall: true });
     expect(describeOpenCodeCompatibility('2.0.19', 'managed', true)).toMatchObject({ state: 'incompatible', canInstall: true });
