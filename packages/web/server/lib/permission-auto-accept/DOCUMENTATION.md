@@ -32,6 +32,8 @@ Unknown lineage and failed policy loads fail closed (`ask`). A failed pending-pe
 
 Each request's outcome (`replied`, `held`, `ignored`, `failed`) is kept for a bounded while. `isPermissionAutoAnswered` lets notifications skip only a request that was actually answered: a held one still notifies.
 
+A `held` or `failed` outcome is broadcast as `openchamber:permission-auto-accept.left-for-user` (`permissionId`, `sessionId`, `directory`). Clients keep a `safety` or `auto` session's request out of sight until this arrives or the request is answered, so an accepted request never flashes a card; the broadcast is what puts a held one on screen. Reconnect reconciliation broadcasts again for a request still held, which a client that already shows it ignores.
+
 ## Routes
 
 - `GET /api/permission-auto-accept` answers `{ sessions, modes, revision }`. `modes` is the policy; `sessions` is its on/off view (`ask` is off) for clients from before the modes.

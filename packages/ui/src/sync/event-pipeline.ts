@@ -188,6 +188,17 @@ const openchamberAutoAcceptSchema = z.object({
   }),
 })
 
+// The server's auto-answer in a `safety` or `auto` session held back or failed:
+// the request is the user's after all.
+const openchamberLeftForUserSchema = z.object({
+  type: z.literal("openchamber:permission-auto-accept.left-for-user"),
+  properties: z.object({
+    permissionId: z.string().min(1),
+    sessionId: z.string().min(1),
+    directory: z.string().nullable(),
+  }),
+})
+
 // The wire event contract is generated from the server; the stream is trusted
 // once its shape matches. Only the discriminator and location are checked here
 // because the translator narrows on `type` for everything else.
@@ -216,6 +227,8 @@ function translateOpenchamberNative(payload: unknown): SyncEvent | null {
   if (notification.success) return { type: "openchamber.notification", properties: notification.data.properties }
   const autoAccept = openchamberAutoAcceptSchema.safeParse(payload)
   if (autoAccept.success) return { type: "openchamber.permission-auto-accept", properties: autoAccept.data.properties }
+  const leftForUser = openchamberLeftForUserSchema.safeParse(payload)
+  if (leftForUser.success) return { type: "openchamber.permission-left-for-user", properties: leftForUser.data.properties }
   return null
 }
 

@@ -274,6 +274,15 @@ export function createPermissionAutoAcceptRuntime({
       return 'failed';
     })();
     rememberOutcome(key, outcome);
+    // A client hides a `safety` or `auto` session's request until it hears
+    // here that the request was not answered for the user.
+    void outcome.then((result) => {
+      if (result !== 'held' && result !== 'failed') return;
+      broadcastGlobalUiEvent?.({
+        type: 'openchamber:permission-auto-accept.left-for-user',
+        properties: { permissionId: key, sessionId: permission.sessionID, directory: directory ?? null },
+      });
+    });
     const task = outcome.then((result) => result !== 'ignored' && result !== 'failed').finally(() => inFlight.delete(key));
     inFlight.set(key, task);
     return task;

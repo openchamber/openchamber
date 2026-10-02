@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode, broadcastGlobalUiEvent } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -19,6 +19,7 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermiss
     evaluatePermission,
     onPermissionReplied,
     resolveLegacyEnabledMode,
+    broadcastGlobalUiEvent,
   });
   runtime.start();
   return {
@@ -246,6 +247,34 @@ describe('permission auto-accept runtime', () => {
 
     emit({ type: 'permission.replied', properties: { sessionID: 'root', requestID: 'held', reply: 'once' } });
     expect(onPermissionReplied).toHaveBeenCalledWith('held');
+  });
+
+  it('tells clients about every request it left for the user, and only those', async () => {
+    const fetchImpl = vi.fn(async (url) => (
+      String(url).endsWith('/permission/broken/reply') ? new Response('', { status: 500 }) : Response.json({})
+    ));
+    const verdicts = { held: { action: 'hold' }, safe: { action: 'accept' }, broken: { action: 'accept' } };
+    const broadcastGlobalUiEvent = vi.fn();
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety', manual: 'ask' } } },
+      fetchImpl,
+      evaluatePermission: async (permission) => verdicts[permission.id],
+      broadcastGlobalUiEvent,
+    });
+    await runtime.load();
+
+    for (const [id, sessionID] of [['held', 'root'], ['safe', 'root'], ['broken', 'root'], ['asked', 'manual']]) {
+      emit({ type: 'permission.asked', properties: { id, sessionID } });
+    }
+    await flush();
+
+    const leftForUser = broadcastGlobalUiEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === 'openchamber:permission-auto-accept.left-for-user');
+    expect(leftForUser).toEqual([
+      { type: 'openchamber:permission-auto-accept.left-for-user', properties: { permissionId: 'held', sessionId: 'root', directory: '/project' } },
+      { type: 'openchamber:permission-auto-accept.left-for-user', properties: { permissionId: 'broken', sessionId: 'root', directory: '/project' } },
+    ]);
   });
 
   it('never consults the safety net in an auto session', async () => {

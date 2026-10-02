@@ -152,6 +152,8 @@ export type SyncEvent =
   | { type: "openchamber.notification"; properties: OpenchamberNotification }
   // `modes` is the policy; `sessions` is its on/off view for clients from before the modes.
   | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; modes?: Record<string, "ask" | "safety" | "auto">; revision?: number } }
+  /** The server did not answer this request on the user's behalf: it waits for the user. */
+  | { type: "openchamber.permission-left-for-user"; properties: { permissionId: string; sessionId: string; directory: string | null } }
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {

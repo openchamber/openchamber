@@ -187,8 +187,9 @@ limited time", and the keys are what users fall back to when it ends.
 Broadcast on the OpenChamber control stream: `openchamber:routing.updated`
 (availability, including `jevAvailable`), `openchamber:routing.decision` (per
 send), `openchamber:routing.permission-held`,
-`openchamber:routing.safety-skipped`. The last two carry the request's
-directory so the UI can raise the permission toast for a held request.
+`openchamber:routing.safety-skipped`. Showing the held request itself is not
+routing's job: the permission auto-accept runtime reports every request it
+left for the user (`../permission-auto-accept/DOCUMENTATION.md`).
 
 `/api/routing` keeps `jevSource` (`typesafe` or `zen-free`) for clients from
 before the classifier pick and adds `jevAvailable`, `classifier` and
@@ -203,8 +204,7 @@ Vercel or a custom endpoint is picked or answering (`legacyClassifier`). Current
 
 `packages/ui/src/stores/useRoutingStore.ts` projects `/api/routing` and these
 events (`selectSafetyNetAvailable` gates the safety-net mode everywhere);
-`hooks/useRoutingSync.ts` keeps it current, shows the skipped-check toast and
-raises the permission toast for a held request (`notifyHeldPermission`). `lib/routing/autoModel.ts` owns the sentinel; `useConfigStore` accepts it
+`hooks/useRoutingSync.ts` keeps it current and shows the skipped-check toast. `lib/routing/autoModel.ts` owns the sentinel; `useConfigStore` accepts it
 as a valid selection while `autoReady`. `ModelPickerList` renders it as the
 pinned `leadingEntry`; `ModelControls` hides the agent and thinking controls
 while Auto is selected. `PermissionCard` shows the hold reason. Settings →

@@ -1580,20 +1580,62 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
 
 /**
  * Whether the server answers this session's requests without the user: `auto`
- * always, `safety` while the safety net can run. Those raise no toast when
- * asked; a request the safety net holds is announced when it is held
- * (`notifyHeldPermission`).
+ * always, `safety` while the safety net can run.
  */
 const isAnsweredWithoutUser = (sessionID: string): boolean => {
   const mode = usePermissionStore.getState().getSessionMode(sessionID)
   return mode === "auto" || (mode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))
 }
 
-/** The toast an `ask` session's request would have raised, for one the safety net left to the user. */
-export const notifyHeldPermission = (permissionID: string, sessionID: string, directory: string | null): void => {
-  if (!directory || isVSCodeRuntime()) return
-  const permission = getDirectoryState(directory)?.permission[sessionID]?.find((entry) => entry.id === permissionID)
-  if (permission) notifyPermissionAsked(permission, directory)
+// A request the server may answer on its own stays out of sight: no card, no
+// badge, no toast, so an accepted one never flashes. It is replayed as an
+// `ask` request when the server reports it left the request for the user
+// (`openchamber.permission-left-for-user`: the safety net held it, Jev failed,
+// or the reply did not go through), and dropped when it is answered.
+const MAX_EARLY_LEFT_FOR_USER = 100
+const permissionsAwaitingAutoAnswer = new Map<string, () => void>()
+// Reports that arrived before their request: the request is shown at once.
+const leftForUserBeforeAsked = new Set<string>()
+
+/** Whether `permission.asked` is held back until the server rules on it. */
+const holdBackUntilAutoAnswered = (permission: PermissionRequest, replayAsAsk: () => void): boolean => {
+  if (leftForUserBeforeAsked.delete(permission.id)) return false
+  if (isVSCodeRuntime() || !isAnsweredWithoutUser(permission.sessionID)) return false
+  permissionsAwaitingAutoAnswer.set(permission.id, replayAsAsk)
+  return true
+}
+
+const showPermissionLeftForUser = (
+  { permissionId, sessionId, directory }: Extract<SyncEvent, { type: "openchamber.permission-left-for-user" }>["properties"],
+): void => {
+  const replayAsAsk = permissionsAwaitingAutoAnswer.get(permissionId)
+  if (replayAsAsk) {
+    permissionsAwaitingAutoAnswer.delete(permissionId)
+    replayAsAsk()
+    return
+  }
+  // Already on screen: shown as an `ask` request, or loaded by a resync.
+  if (directory && getDirectoryState(directory)?.permission[sessionId]?.some((entry) => entry.id === permissionId)) return
+  leftForUserBeforeAsked.add(permissionId)
+  const oldest = leftForUserBeforeAsked.values().next()
+  if (leftForUserBeforeAsked.size > MAX_EARLY_LEFT_FOR_USER && !oldest.done) leftForUserBeforeAsked.delete(oldest.value)
+}
+
+const permissionReplayAsAsk = (
+  rawDirectory: string,
+  payload: SyncEvent,
+  childStores: ChildStoreManager,
+  routingIndex: EventRoutingIndex,
+  expectedRuntimeKey: string,
+  streamingDirectory: string | undefined,
+) => () => {
+  if (expectedRuntimeKey !== getRuntimeKey()) return
+  handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory, undefined, true)
+}
+
+const forgetAutoAnswerWait = (permissionID: string): void => {
+  permissionsAwaitingAutoAnswer.delete(permissionID)
+  leftForUserBeforeAsked.delete(permissionID)
 }
 
 const notifyFormCreated = (form: FormRequest, directory: string): void => {
@@ -1612,11 +1654,11 @@ const notifyFormCreated = (form: FormRequest, directory: string): void => {
 // toast: the sidebar row and tray approvals need the directory store, but the
 // toast only needs the request and where to open it. VS Code keeps its
 // extension-host auto-accept path, which runs on the store branch only.
-const notifyBlockingRequestWithoutStore = (payload: SyncEvent, directory: string): void => {
+const notifyBlockingRequestWithoutStore = (payload: SyncEvent, directory: string, replayAsAsk: (() => void) | null): void => {
   if (isVSCodeRuntime()) return
   if (payload.type === "permission.asked") {
     const permission = payload.properties
-    if (isAnsweredWithoutUser(permission.sessionID)) return
+    if (replayAsAsk && holdBackUntilAutoAnswered(permission, replayAsAsk)) return
     notifyPermissionAsked(permission, directory)
     return
   }
@@ -1656,13 +1698,20 @@ export function handleEvent(
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
   expectedRuntimeKey: string,
-  skipVSCodeAutoAccept = false,
+  // A `permission.asked` replayed because nothing answered it automatically:
+  // VS Code's extension host declined it, or the server left it for the user.
+  autoAnswerDeclined = false,
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
   globalEffectsAlreadyApplied = false,
 ) {
   if (payload.type === "openchamber.notification") {
     handleUiNotificationEvent(payload.properties, normalizeEventDirectory(rawDirectory))
+    return
+  }
+
+  if (payload.type === "openchamber.permission-left-for-user") {
+    showPermissionLeftForUser(payload.properties)
     return
   }
 
@@ -1813,11 +1862,18 @@ export function handleEvent(
     }
   }
 
+  if (payload.type === "permission.replied" && payload.properties.requestID) {
+    forgetAutoAnswerWait(payload.properties.requestID)
+  }
+
   if (!store) {
     if (payload.type === "session.revert.committed") {
       getImperativeSessionMessageLoader()?.invalidateSession({ directory: resolvedDirectory, sessionID: payload.properties.sessionID })
     }
-    notifyBlockingRequestWithoutStore(payload, directory)
+    const replayAsAsk = payload.type === "permission.asked" && !autoAnswerDeclined
+      ? permissionReplayAsAsk(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, streamingDirectory)
+      : null
+    notifyBlockingRequestWithoutStore(payload, directory, replayAsAsk)
     // Try as global event for unknown directories
     const result = reduceGlobalEvent(payload)
     if (result?.type === "refresh") {
@@ -1832,7 +1888,7 @@ export function handleEvent(
 
   if (payload.type === "permission.asked") {
     const permission: PermissionRequest = payload.properties
-    if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
+    if (isVSCodeRuntime() && !autoAnswerDeclined) {
       const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, permission.sessionID, permission.id)
       const eventToken = Symbol(eventKey ?? permission.id)
       if (eventKey) pendingVSCodePermissionEvents.set(eventKey, eventToken)
@@ -1859,7 +1915,10 @@ export function handleEvent(
       )
       return
     }
-    if (!isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)) {
+    if (!autoAnswerDeclined && holdBackUntilAutoAnswered(
+      permission,
+      permissionReplayAsAsk(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, streamingDirectory),
+    )) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
