@@ -30,7 +30,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Open {identifier} in Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Start from Linear Issue',
     'session.newWorktree.fromLinearIssue': 'From {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Failed to send Linear context',
   },
   nl: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear-issue koppelen',
@@ -62,7 +61,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': '{identifier} in Linear openen',
     'session.newWorktree.actions.startFromLinearIssue': 'Starten vanuit Linear-issue',
     'session.newWorktree.fromLinearIssue': 'Uit {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Kan Linear-context niet versturen',
   },
   de: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear-Issue verknüpfen',
@@ -94,7 +92,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': '{identifier} in Linear öffnen',
     'session.newWorktree.actions.startFromLinearIssue': 'Von Linear-Issue starten',
     'session.newWorktree.fromLinearIssue': 'Von {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Linear-Kontext konnte nicht gesendet werden',
   },
   fr: {
     'chat.chatInput.actions.linkLinearIssue': 'Lier un ticket Linear',
@@ -126,7 +123,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Ouvrir {identifier} dans Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Démarrer depuis un ticket Linear',
     'session.newWorktree.fromLinearIssue': 'Depuis {identifier} : {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Impossible d’envoyer le contexte Linear',
   },
   es: {
     'chat.chatInput.actions.linkLinearIssue': 'Vincular issue de Linear',
@@ -158,7 +154,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Abrir {identifier} en Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Empezar desde un issue de Linear',
     'session.newWorktree.fromLinearIssue': 'Desde {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'No se pudo enviar el contexto de Linear',
   },
   ja: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear Issueをリンク',
@@ -190,7 +185,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Linearで {identifier} を開く',
     'session.newWorktree.actions.startFromLinearIssue': 'Linear Issueから開始',
     'session.newWorktree.fromLinearIssue': '{identifier}: {title}から',
-    'session.newWorktree.error.sendLinearContextFailed': 'Linearのコンテキストを送信できませんでした',
   },
   'pt-BR': {
     'chat.chatInput.actions.linkLinearIssue': 'Vincular issue do Linear',
@@ -222,7 +216,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Abrir {identifier} no Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Começar a partir de uma issue do Linear',
     'session.newWorktree.fromLinearIssue': 'De {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Não foi possível enviar o contexto do Linear',
   },
   uk: {
     'chat.chatInput.actions.linkLinearIssue': 'Прив’язати Linear issue',
@@ -254,7 +247,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Відкрити {identifier} у Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Почати з Linear issue',
     'session.newWorktree.fromLinearIssue': 'З {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Не вдалося надіслати контекст Linear',
   },
   ko: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear 이슈 연결',
@@ -286,7 +278,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Linear에서 {identifier} 열기',
     'session.newWorktree.actions.startFromLinearIssue': 'Linear 이슈에서 시작',
     'session.newWorktree.fromLinearIssue': '{identifier}: {title}에서',
-    'session.newWorktree.error.sendLinearContextFailed': 'Linear 컨텍스트를 보내지 못했습니다',
   },
   pl: {
     'chat.chatInput.actions.linkLinearIssue': 'Powiąż zgłoszenie Linear',
@@ -318,7 +309,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': 'Otwórz {identifier} w Linear',
     'session.newWorktree.actions.startFromLinearIssue': 'Zacznij od zgłoszenia Linear',
     'session.newWorktree.fromLinearIssue': 'Z {identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Nie udało się wysłać kontekstu Linear',
   },
   'zh-CN': {
     'chat.chatInput.actions.linkLinearIssue': '关联 Linear Issue',
@@ -350,7 +340,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': '在 Linear 中打开 {identifier}',
     'session.newWorktree.actions.startFromLinearIssue': '从 Linear Issue 开始',
     'session.newWorktree.fromLinearIssue': '来自 {identifier}：{title}',
-    'session.newWorktree.error.sendLinearContextFailed': '无法发送 Linear 上下文',
   },
   'zh-TW': {
     'chat.chatInput.actions.linkLinearIssue': '關聯 Linear Issue',
@@ -382,7 +371,6 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': '在 Linear 中開啟 {identifier}',
     'session.newWorktree.actions.startFromLinearIssue': '從 Linear Issue 開始',
     'session.newWorktree.fromLinearIssue': '來自 {identifier}：{title}',
-    'session.newWorktree.error.sendLinearContextFailed': '無法傳送 Linear 內容',
   },
   tr: {
     'chat.chatInput.actions.linkLinearIssue': 'Linear Issue bağla',
@@ -414,6 +402,5 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openLinear': "{identifier} issue'unu Linear'da aç",
     'session.newWorktree.actions.startFromLinearIssue': "Linear Issue'dan başla",
     'session.newWorktree.fromLinearIssue': '{identifier}: {title}',
-    'session.newWorktree.error.sendLinearContextFailed': 'Linear bağlamı gönderilemedi',
   },
 } as const;

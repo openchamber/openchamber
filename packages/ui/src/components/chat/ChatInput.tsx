@@ -86,6 +86,8 @@ import {
     withoutComposerReference,
     type ComposerReference,
 } from './composer/composerReferences';
+import { usePendingComposerReferences } from './composer/pendingComposerReferences';
+import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
@@ -198,6 +200,7 @@ import {
     MobileDraftTargetTriggers,
 } from './composer/ui/DraftTargetSelectors';
 import { NewSpaceDialog } from '@/components/session/spaces/NewSpaceDialog';
+import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { isSpaceCreationRequest } from '@/lib/spaces/space-creation';
 import { spaceModelRefusal } from '@/lib/spaces/space-model-access';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
@@ -498,6 +501,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const pendingInputText = useInputStore((s) => s.pendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
+    const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.references.length);
 
     React.useEffect(() => {
         if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
@@ -1401,7 +1405,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     head: '',
                     base: '',
                     includeDiff: false,
-                    instructionsText: part.instructions ?? '',
                     contextText: part.text,
                 });
             } else if (payload.kind === 'linear-issue') {
@@ -2060,6 +2063,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     ?? currentDirectory;
             if (linkTargetSessionId) {
                 recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
+            }
+            // A session that starts with a Linear issue attached reports itself
+            // on that issue (the Linear card's Session comments), however it
+            // was started: a draft, a worktree made from the issue.
+            if (!currentSessionId && linkTargetSessionId) {
+                for (const reference of linkedReferences) {
+                    if (reference.kind !== 'linear-issue') continue;
+                    postLinearSessionStarted(runtimeLinear, { sessionId: linkTargetSessionId, issueIdentifier: reference.identifier });
+                }
             }
 
             // The sent references leave the composer; one attached while the
@@ -3390,6 +3402,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             handleGuestAttach(issue);
         }
     }, [consumePendingGuestIssue, handleGuestAttach, pendingGuestIssue]);
+    React.useEffect(() => {
+        if (pendingComposerReferenceCount === 0) return;
+        const references = usePendingComposerReferences.getState().consume();
+        if (references.length > 0) {
+            setLinkedReferences((current) => withComposerReferences(current, references));
+        }
+    }, [pendingComposerReferenceCount]);
     const showLinearPicker = Boolean(runtimeLinear) && !isVSCode;
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
@@ -3427,6 +3446,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
         return () => setNewSpaceProject(project);
     }, [isVSCode, isolatedSpacesEnabled, selectedDraftProject]);
+
+    // The full New Worktree dialog for the draft's project, so a named worktree, an existing
+    // branch or a PR branch can be made where the sidebar has no project headers (Timeline).
+    const [newWorktreeProject, setNewWorktreeProject] = React.useState<{ id: string; path: string } | null>(null);
+    const handleCreateCustomWorktree = React.useMemo(() => {
+        if (!selectedDraftProject || selectedDraftProject.kind === 'chat') return undefined;
+        const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
+        return () => setNewWorktreeProject(project);
+    }, [selectedDraftProject]);
+    const handleCustomWorktreeCreated = React.useCallback((worktreePath: string) => {
+        const project = newWorktreeProject;
+        if (!project) return;
+        // Pin the draft to the new directory: until the worktree list refreshes,
+        // the draft's validity check would otherwise reset it to the project root.
+        const sessionStore = useSessionUIStore.getState();
+        if (sessionStore.newSessionDraft.open) {
+            sessionStore.overrideNewSessionDraftTarget({
+                projectId: project.id,
+                directoryOverride: worktreePath,
+                pendingWorktreeRequestId: null,
+                bootstrapPendingDirectory: worktreePath,
+                preserveDirectoryOverride: true,
+            });
+        } else {
+            sessionStore.openNewSessionDraft({
+                selectedProjectId: project.id,
+                directoryOverride: worktreePath,
+                bootstrapPendingDirectory: worktreePath,
+                preserveDirectoryOverride: true,
+            });
+        }
+        useDirectoryStore.getState().setDirectory(worktreePath, { showOverlay: false });
+    }, [newWorktreeProject]);
 
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
@@ -3768,6 +3820,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             onProjectChange={handleDraftProjectChange}
                             onDirectoryChange={handleDraftDirectoryChange}
                             onCreateSpace={handleCreateSpace}
+                            onCreateCustomWorktree={handleCreateCustomWorktree}
                             theme={currentTheme}
                         />
                     </div>
@@ -4268,6 +4321,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onProjectChange={handleDraftProjectChange}
                 onDirectoryChange={handleDraftDirectoryChange}
                 onCreateSpace={handleCreateSpace}
+                onCreateCustomWorktree={handleCreateCustomWorktree}
                 theme={currentTheme}
                 openPicker={mobileDraftPicker}
                 onOpenPickerChange={setMobileDraftPicker}
@@ -4275,6 +4329,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ) : null}
         {newSpaceProject ? (
             <NewSpaceDialog open onOpenChange={(open) => { if (!open) setNewSpaceProject(null); }} project={newSpaceProject} />
+        ) : null}
+        {newWorktreeProject ? (
+            <NewWorktreeDialog
+                open
+                onOpenChange={(open) => { if (!open) setNewWorktreeProject(null); }}
+                project={newWorktreeProject}
+                onWorktreeCreated={handleCustomWorktreeCreated}
+            />
         ) : null}
         </>
     );

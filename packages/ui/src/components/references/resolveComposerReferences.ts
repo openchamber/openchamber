@@ -11,7 +11,6 @@
 import type { ComposerReference } from '@/components/chat/composer/composerReferences';
 import type { GitHubAPI, GitHubPullRequestContextResult, LinearIssue } from '@/lib/api/types';
 import { buildIssueContextText as buildLinearContextText } from '@/lib/linearStartSession';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
 
 import { referencePickerItemKey, type ReferencePickerSelection } from './referencePickerItems';
 
@@ -75,10 +74,7 @@ async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceRe
         };
     }
 
-    const [context, instructionsText] = await Promise.all([
-        github.prContext(directory, reference.number, { includeDiff: selection.includeDiff, includeCheckDetails: false, sourceRepo }),
-        renderMagicPrompt('github.pr.review.instructions'),
-    ]);
+    const context = await github.prContext(directory, reference.number, { includeDiff: selection.includeDiff, includeCheckDetails: false, sourceRepo });
     if (context.connected === false) throw new Error('GitHub is not connected');
     if (!context.pr) throw new Error('Pull request not found');
     return {
@@ -89,7 +85,6 @@ async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceRe
         head: context.pr.head,
         base: context.pr.base,
         includeDiff: selection.includeDiff,
-        instructionsText,
         contextText: buildPullRequestContextText(context),
         author,
     };

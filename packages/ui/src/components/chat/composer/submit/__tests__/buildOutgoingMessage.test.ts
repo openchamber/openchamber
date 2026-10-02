@@ -210,15 +210,14 @@ describe('context drafts', () => {
 });
 
 describe('synthetic context', () => {
-    test('a linked PR sends its instructions before its diff', () => {
+    test('a linked PR is sent as its context only, with no instructions guessing the intent', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'review this',
-            references: [{ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'how to read it', context: 'the diff' }],
+            references: [{ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'the diff' }],
         }), deps());
-        expect(result.additionalParts.map((p) => p.text))
-            .toEqual(['how to read it', 'the diff']);
+        expect(result.additionalParts.map((p) => p.text)).toEqual(['the diff']);
         expect(result.additionalParts.every((p) => p.synthetic)).toBe(true);
-        expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
             .toEqual({ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' });
     });
 
@@ -383,7 +382,7 @@ describe('full assembly order', () => {
             syntheticTexts: ['synthetic'],
             references: [
                 { kind: 'github-issue', number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
-                { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
+                { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
                 { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
         }), deps());
@@ -394,7 +393,6 @@ describe('full assembly order', () => {
             'typed /deploy',
             'synthetic',
             'issue',
-            'pr-how',
             'pr-diff',
             'linear',
         ]);
@@ -416,7 +414,7 @@ describe('capturing composer context for the queue', () => {
             syntheticTexts: ['conflict note'],
             references: [
                 { kind: 'github-issue', number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
-                { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
+                { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
                 { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
         }), 'use: deploy');
@@ -429,10 +427,17 @@ describe('capturing composer context for the queue', () => {
         expect(context[3]).toEqual({
             kind: 'context',
             text: 'pr-diff',
-            instructions: 'pr-how',
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
         expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
+    });
+
+    test('a message queued with instructions before they were dropped still delivers them first', () => {
+        const metadata = { [CONTEXT_METADATA_KEY]: { kind: 'github-pr' as const, number: 7, title: 'PR', url: 'https://x/pr/7' } };
+        expect(queuedContextToParts([{ kind: 'context', text: 'pr-diff', instructions: 'pr-how', metadata }])).toEqual([
+            { text: 'pr-how', synthetic: true },
+            { text: 'pr-diff', synthetic: true, metadata },
+        ]);
     });
 
     test('nothing attached captures nothing', () => {
@@ -443,7 +448,7 @@ describe('capturing composer context for the queue', () => {
         const input = contextInput({
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
-            references: [{ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' }],
+            references: [{ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' }],
         });
         // The skill instruction is the one intended difference: a direct send
         // attaches the skill to the prompt, a queued one carries the instruction.
@@ -522,7 +527,7 @@ describe('the composer send gate counts what the submission builder counts', () 
 
         const onlyLinked: Partial<OutgoingMessageInput>[] = [
             { references: [{ kind: 'github-issue', number: 12, title: 'Attached', url: 'https://github.com/acme/app/issues/12', contextText: 'body' }] },
-            { references: [{ kind: 'github-pr', number: 34, title: 'Attached', url: 'https://github.com/acme/app/pull/34', instructions: 'review', context: 'body' }] },
+            { references: [{ kind: 'github-pr', number: 34, title: 'Attached', url: 'https://github.com/acme/app/pull/34', context: 'body' }] },
             { references: [{ kind: 'linear-issue', identifier: 'ENG-1', title: 'Attached', url: 'https://linear.app/acme/issue/ENG-1', contextText: 'body' }] },
             { references: [{ kind: 'guest', providerId: 'guest.example', id: 'guest-1', title: 'Attached', url: 'https://example.com/issues/1', contextText: 'body' }] },
         ];

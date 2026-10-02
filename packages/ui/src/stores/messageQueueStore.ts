@@ -74,7 +74,11 @@ export type QueuedContextPart =
         kind: 'context';
         text: string;
         metadata: ContextPartMetadata;
-        /** Delivered as its own synthetic part right before this one (a linked PR's reading instructions). */
+        /**
+         * Delivered as its own synthetic part right before this one. Nothing writes it any
+         * more (attached PRs no longer carry review instructions); messages queued before
+         * that still do, and are delivered as they were captured.
+         */
         instructions?: string;
     }
     | {

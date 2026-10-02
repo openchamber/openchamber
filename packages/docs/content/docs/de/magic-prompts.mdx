@@ -12,7 +12,7 @@ Für die normale Nutzung brauchst du diese Seite nicht. Nutze sie, wenn ein Abla
 ## Einen Prompt bearbeiten
 
 1. Öffne **Einstellungen → Magische Prompts**.
-2. Wähle einen Prompt aus den Gruppen in der Seitenleiste — Git, GitHub, Planung und Sitzung.
+2. Wähle einen Prompt aus den Gruppen in der Seitenleiste — Git, Linear, Planung und Sitzung.
 3. Bearbeite den Text und speichere ihn.
 
 Einige Prompts haben einen sichtbaren Teil (die Nachricht, die du sehen würdest) und einen Anweisungsteil (versteckte Hinweise für den Agenten). Prompts können `{{placeholders}}` enthalten, die OpenChamber einsetzt, zum Beispiel den Diff oder den Issue-Titel — lass diese unverändert.
@@ -33,14 +33,6 @@ Für jeden Prompt steht unten, wo er läuft und was ihn auslöst. Prüfe den Aus
 | PR-Erstellung | Das Pull-Request-Anlegen-Formular im PR-Tab der Git-Ansicht | Du erzeugst Titel und Beschreibung eines PRs. Eingebaut werden Base- und Head-Branch, die Commits und geänderten Dateien dazwischen, dein zusätzlicher Kontext und die PR-Vorlage des Repos, falls vorhanden. |
 | Merge/Rebase-Konfliktlösung | Der Konflikt-Dialog der Git-Ansicht, wenn ein Merge oder Rebase auf Konflikten stoppt | Du wählst "Resolve in current session" oder "Resolve in new session". Der Agent liest die konfliktbehafteten Dateien, schlägt eine Lösungsstrategie pro Datei vor und wartet auf deine Bestätigung, bevor er etwas ändert, staged oder fortfährt. |
 | Cherry-pick-Konfliktlösung | Der Bereich "Re-integrate commits" einer Worktree-Sitzung | Beim Übertragen der Sitzungs-Commits auf den Zielbranch entsteht ein Konflikt und du übergibst ihn dem Agenten. Der Agent löst im temporären Worktree, staged die Dateien und setzt den Cherry-pick fort. |
-
-### GitHub
-
-| Prompt | Wo er läuft | Wann er ausgelöst wird |
-| --- | --- | --- |
-| PR-Review | Der "Link GitHub PR"-Picker im Anhänge-Menü des Composers und der neue Worktree-Dialog | Zwei Auslöser. Hängst du einen PR als Kontext an, werden die Anweisungen erzeugt und mit deiner nächsten Nachricht mitgesendet. Startest du eine Worktree-Sitzung aus einem PR, bildet der Prompt die erste Nachricht dieser Sitzung, mit dem vollständigen PR-Kontext. |
-| Issue-Review | Der neue Worktree-Dialog, wenn der Worktree aus einem Issue startet | Die erste Nachricht der neuen Sitzung reviewed das Issue, mit Titel, Text und Kommentaren als Kontext. |
-| Fehlgeschlagene PR-Checks / PR-Kommentare / einzelner PR-Kommentar | — | Wird heute von keinem Ablauf gesendet. Die PR-Ansicht löste sie früher über Ein-Klick-Review-Aktionen aus; fehlgeschlagene Checks und Kommentare werden jetzt als Chat-Kontext-Entwürfe angeheftet. Sie bleiben editierbar, damit bestehende Overrides weiter funktionieren. |
 
 ### Planung
 

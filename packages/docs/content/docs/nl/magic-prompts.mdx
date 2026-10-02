@@ -12,7 +12,7 @@ Voor normaal gebruik hoeft u hier niets te wijzigen. Gebruik deze instellingen a
 ## Een prompt bewerken
 
 1. Open **Instellingen → Magic Prompts**.
-2. Kies een prompt uit de groepen in de zijbalk: Git, GitHub, Planning en Sessie.
+2. Kies een prompt uit de groepen in de zijbalk: Git, Linear, Planning en Sessie.
 3. Bewerk de tekst en sla deze op.
 
 Sommige prompts hebben een zichtbaar deel, het bericht dat u zou zien, en een instructiedeel met verborgen aanwijzingen voor de agent. Prompts kunnen `{{placeholders}}` bevatten die OpenChamber invult, bijvoorbeeld met de diff of de issuetitel. Laat die staan.
@@ -33,14 +33,6 @@ Hieronder staat voor elke prompt waar en wanneer die wordt gebruikt. Controleer 
 | PR genereren | Het formulier voor een nieuwe pull request in het PR-tabblad van de Git-weergave | U genereert een titel en beschrijving. De basis- en head-branch, tussenliggende commits en gewijzigde bestanden, extra context en een eventueel PR-sjabloon worden ingevuld. |
 | Merge- of rebaseconflicten oplossen | Het conflictenvenster van de Git-weergave als een merge of rebase op conflicten stopt | U kiest oplossen in de huidige of een nieuwe sessie. De agent leest de bestanden, stelt per bestand een aanpak voor en wacht op uw bevestiging voordat hij bewerkt, staget of de bewerking voortzet. |
 | Cherry-pickconflicten oplossen | Het gedeelte voor het opnieuw integreren van commits bij een worktree-sessie | Het overnemen van sessiecommits naar de doelbranch loopt vast op een conflict en u draagt het over aan de agent. Die lost het op in de tijdelijke worktree, staget de herstelde bestanden en zet de cherry-pick voort. |
-
-### GitHub
-
-| Prompt | Waar | Wanneer |
-| --- | --- | --- |
-| PR-review | De kiezer om een GitHub-PR te koppelen in het bijlagenmenu van het invoerveld, en het venster voor een nieuwe worktree | Bij het koppelen als context worden de instructies samengesteld en met uw volgende bericht verstuurd. Bij het starten van een worktree-sessie vanuit een PR vormt de prompt het eerste bericht, met de volledige PR-context erbij. |
-| Issue-review | Het venster voor een nieuwe worktree wanneer u vanuit een issue begint | Het eerste bericht van de nieuwe sessie laat het issue beoordelen, met de beschrijving en reacties als context. |
-| Mislukte PR-controles / PR-reacties / één PR-reactie | Niet in gebruik | Momenteel verstuurt geen enkele functie deze prompts. Vroeger gebeurde dat via reviewknoppen in de PR-weergave. Mislukte controles en reacties worden nu als concept voor de chatcontext vastgezet. De prompts blijven bewerkbaar om bestaande aangepaste versies te behouden. |
 
 ### Planning
 

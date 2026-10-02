@@ -11,7 +11,7 @@ import {
 import { GuestAttachDialog } from '@/components/layout/GuestAttachDialog';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestAttachItems } from '@/hooks/useGuestSurfaces';
-import { guestSessionTitle, guestWorktreeBranch } from '@/lib/guests/start-session';
+import { guestWorktreeBranch } from '@/lib/guests/start-session';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -36,21 +36,12 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
-import * as sessionActions from '@/sync/session-actions';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
-import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import {
   LAST_WORKTREE_SOURCE_BRANCH_KEY,
@@ -61,17 +52,16 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
 import { referencePickerItemKey, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
+import { readLinearIssueDetail } from '@/components/references/referenceSources';
+import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
+import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
+import { useInputStore } from '@/sync/input-store';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import type {
   GitHubIssue,
-  GitHubIssueComment,
-  GitHubIssueGetResult,
-  GitHubPullRequestContextResult,
   GitHubPullRequestSummary,
-  LinearIssue,
-  LinearIssueComment,
 } from '@/lib/api/types';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n } from '@/lib/i18n';
@@ -102,6 +92,8 @@ interface NewBranchState {
   linkedPr: GitHubPullRequestSummary | null;
   linkedLinearIssue: LinkedLinearWorktreeIssue | null;
   linkedGuest: AttachIssueRequest | null;
+  /** The picker's choice behind the GitHub or Linear link, handed to the new draft's composer. */
+  linkedSelection: ReferencePickerSelection | null;
   includePrDiff: boolean;
 }
 
@@ -211,40 +203,16 @@ const slugifyWorktreeName = (value: string): string => {
 interface NewWorktreeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onWorktreeCreated?: (worktreePath: string, options?: { sessionId?: string }) => void;
+  /** The project to create in; the sidebar's active project when absent. A draft passes its own. */
+  project?: { id: string; path: string };
+  /** The dialog is closed by then; a chosen issue or PR follows as a composer chip. */
+  onWorktreeCreated?: (worktreePath: string) => void;
 }
-
-const buildIssueContextText = (args: {
-  repo: GitHubIssueGetResult['repo'] | undefined;
-  issue: GitHubIssue;
-  comments: GitHubIssueComment[];
-}) => {
-  const payload = {
-    repo: args.repo ?? null,
-    issue: args.issue,
-    comments: args.comments,
-  };
-  return `GitHub issue context (JSON)\n${JSON.stringify(payload, null, 2)}`;
-};
-
-const buildPullRequestContextText = (payload: GitHubPullRequestContextResult) => {
-  return `GitHub pull request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
-};
-
-const buildLinearIssueContextText = (args: {
-  issue: LinearIssue;
-  comments: LinearIssueComment[];
-}) => {
-  const payload = {
-    issue: args.issue,
-    comments: args.comments,
-  };
-  return `Linear issue context (JSON)\n${JSON.stringify(payload, null, 2)}`;
-};
 
 export function NewWorktreeDialog({
   open,
   onOpenChange,
+  project,
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
@@ -261,14 +229,12 @@ export function NewWorktreeDialog({
   );
   const [guestDialogId, setGuestDialogId] = React.useState<string | null>(null);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
-  
-  const projectDirectory = activeProject?.path ?? null;
-  const projectRef: ProjectRef | null = React.useMemo(() => {
-    if (projectDirectory && activeProject) {
-      return { id: activeProject.id, path: projectDirectory };
-    }
-    return null;
-  }, [activeProject, projectDirectory]);
+  const projectId = project?.id ?? activeProject?.id ?? null;
+  const projectDirectory = project?.path ?? activeProject?.path ?? null;
+  const projectRef: ProjectRef | null = React.useMemo(
+    () => (projectId && projectDirectory ? { id: projectId, path: projectDirectory } : null),
+    [projectDirectory, projectId],
+  );
 
   // Mode state
   const [mode, setMode] = React.useState<Mode>('new-branch');
@@ -283,6 +249,7 @@ export function NewWorktreeDialog({
     linkedPr: null,
     linkedLinearIssue: null,
     linkedGuest: null,
+    linkedSelection: null,
     includePrDiff: false,
   });
   
@@ -473,304 +440,6 @@ export function NewWorktreeDialog({
   const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
   const initializedForCurrentOpen = React.useRef(false);
 
-  const resolveDefaultAgentName = React.useCallback((): string | undefined => {
-    const configState = useConfigStore.getState();
-    const visibleAgents = configState.getVisibleAgents();
-
-    if (configState.settingsDefaultAgent) {
-      const settingsAgent = visibleAgents.find((a) => a.name === configState.settingsDefaultAgent);
-      if (settingsAgent) {
-        return settingsAgent.name;
-      }
-    }
-
-    return visibleAgents.find((agent) => agent.name === 'build')?.name || visibleAgents[0]?.name;
-  }, []);
-
-  const resolveDefaultModelSelection = React.useCallback((): { providerID: string; modelID: string } | null => {
-    const configState = useConfigStore.getState();
-    const settingsDefaultModel = configState.settingsDefaultModel;
-    if (!settingsDefaultModel) return null;
-
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed) return null;
-    const { providerId: providerID, modelId: modelID } = parsed;
-
-    const modelMetadata = configState.getModelMetadata(providerID, modelID);
-    if (!modelMetadata) return null;
-    return { providerID, modelID };
-  }, []);
-
-  const resolveDefaultVariant = React.useCallback((providerID: string, modelID: string): string | undefined => {
-    const configState = useConfigStore.getState();
-    const settingsDefaultVariant = configState.settingsDefaultVariant;
-    const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
-      ? configState.currentVariant
-      : undefined;
-
-    const provider = configState.providers.find((p) => p.id === providerID);
-    const model = provider?.models.find((m) => m.id === modelID);
-    const variants = model?.variants;
-    if (!variants) return settingsDefaultVariant || currentVariant || undefined;
-    if (settingsDefaultVariant && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) return settingsDefaultVariant;
-    if (currentVariant && Object.prototype.hasOwnProperty.call(variants, currentVariant)) return currentVariant;
-    return undefined;
-  }, []);
-
-  const sendLinkedContextMessage = React.useCallback(async (args: {
-    sessionId: string;
-    directory: string;
-    issue: GitHubIssue | null;
-    pr: GitHubPullRequestSummary | null;
-    linearIssue: LinkedLinearWorktreeIssue | null;
-    guest: AttachIssueRequest | null;
-    includeDiff: boolean;
-  }) => {
-    const configState = useConfigStore.getState();
-    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
-    const defaultModel = resolveDefaultModelSelection();
-    const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
-    const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
-    const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
-
-    if (args.guest) {
-      const kind = args.guest.kind === 'pull' ? 'pull' : 'issue';
-      void sessionActions.setLinkedIssue(
-        args.sessionId,
-        args.directory,
-        buildLinkedGuestIssue({
-          providerId: args.guest.providerId,
-          identifier: args.guest.id,
-          title: args.guest.title,
-          url: args.guest.url,
-          thread: kind,
-          author: args.guest.author,
-          head: args.guest.branches?.head,
-          base: args.guest.branches?.base,
-          data: args.guest.data,
-          linkedAt: Date.now(),
-        }),
-        true,
-      ).catch(() => undefined);
-
-      if (args.guest.text) {
-        if (!providerID || !modelID) {
-          toast.error(t('session.newWorktree.error.noModelSelected'));
-          return;
-        }
-        await useSessionUIStore.getState().sendMessage(
-          args.guest.text,
-          providerID,
-          modelID,
-          agentName,
-          undefined,
-          undefined,
-          undefined,
-          resolveDefaultVariant(providerID, modelID),
-          undefined,
-          { sessionId: args.sessionId, directory: args.directory },
-        );
-      }
-
-      toast.success(kind === 'pull'
-        ? t('session.newWorktree.toast.sessionFromPr')
-        : t('session.newWorktree.toast.sessionFromIssue'));
-      return;
-    }
-
-    if (!providerID || !modelID) {
-      toast.error(t('session.newWorktree.error.noModelSelected'));
-      return;
-    }
-
-    const variant = resolveDefaultVariant(providerID, modelID);
-
-    if (args.linearIssue) {
-      if (!linear?.issueGet) {
-        return;
-      }
-
-      const issueRes = await linear.issueGet(args.linearIssue.identifier);
-      if (issueRes.connected === false || !issueRes.issue) {
-        throw new Error('Failed to load issue context');
-      }
-
-      const issue = issueRes.issue;
-      const comments = issue.comments ?? [];
-      const login = issue.assignee?.displayName || issue.assignee?.name;
-      const visiblePromptText = await renderMagicPrompt('linear.issue.review.visible', {
-        identifier: issue.identifier,
-      });
-      const instructionsText = await renderMagicPrompt('linear.issue.review.instructions');
-      const contextText = buildLinearIssueContextText({ issue, comments });
-
-      postLinearSessionStarted(linear, {
-        sessionId: args.sessionId,
-        issueIdentifier: issue.identifier,
-      });
-
-      await useSessionUIStore.getState().sendMessage(
-        visiblePromptText,
-        providerID,
-        modelID,
-        agentName,
-        undefined,
-        undefined,
-        [
-          { text: instructionsText, synthetic: true },
-          { text: contextText, synthetic: true },
-        ],
-        variant,
-        undefined,
-        { sessionId: args.sessionId, directory: args.directory },
-      );
-
-      void sessionActions.setLinkedIssue(
-        args.sessionId,
-        args.directory,
-        buildLinkedLinearIssue({
-          identifier: issue.identifier,
-          title: issue.title,
-          url: issue.url,
-          author: login
-            ? { login, avatarUrl: issue.assignee?.avatarUrl || undefined }
-            : args.linearIssue.author,
-          linkedAt: Date.now(),
-        }),
-        true,
-      ).catch(() => undefined);
-
-      toast.success(t('session.newWorktree.toast.sessionFromIssue'));
-      return;
-    }
-
-    if (!projectDirectory || !github) {
-      return;
-    }
-
-    if (args.issue) {
-      if (!github.issueGet || !github.issueComments) {
-        return;
-      }
-
-      const issueRes = await github.issueGet(projectDirectory, args.issue.number, { sourceRepo: args.issue.sourceRepo ?? null });
-      if (issueRes.connected === false || !issueRes.repo || !issueRes.issue) {
-        throw new Error('Failed to load issue context');
-      }
-
-      const commentsRes = await github.issueComments(projectDirectory, args.issue.number, { sourceRepo: args.issue.sourceRepo ?? null });
-      if (commentsRes.connected === false) {
-        throw new Error('Failed to load issue comments');
-      }
-
-      const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
-        issue_number: String(args.issue.number),
-      });
-      const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
-      const contextText = buildIssueContextText({
-        repo: issueRes.repo,
-        issue: issueRes.issue,
-        comments: commentsRes.comments ?? [],
-      });
-
-      await useSessionUIStore.getState().sendMessage(
-        visiblePromptText,
-        providerID,
-        modelID,
-        agentName,
-        undefined,
-        undefined,
-        [
-          { text: instructionsText, synthetic: true },
-          { text: contextText, synthetic: true },
-        ],
-        variant,
-        undefined,
-        { sessionId: args.sessionId },
-      );
-
-      // Record the thread this worktree session was created for, so it stays
-      // visible as a context source after the opening message scrolls away.
-      void sessionActions.setLinkedIssue(
-        args.sessionId,
-        args.directory,
-        buildLinkedIssue({
-          url: issueRes.issue.url,
-          number: issueRes.issue.number,
-          title: issueRes.issue.title,
-          kind: 'issue',
-          author: issueRes.issue.author,
-          linkedAt: Date.now(),
-        }),
-        true,
-      ).catch(() => undefined);
-
-      toast.success(t('session.newWorktree.toast.sessionFromIssue'));
-      return;
-    }
-
-    if (args.pr) {
-      if (!github.prContext) {
-        return;
-      }
-
-      const prContext = await github.prContext(projectDirectory, args.pr.number, {
-        sourceRepo: args.pr.sourceRepo ?? null,
-        includeDiff: args.includeDiff,
-        includeCheckDetails: false,
-      });
-      if (prContext.connected === false || !prContext.repo || !prContext.pr) {
-        throw new Error('Failed to load PR context');
-      }
-
-      const visiblePromptText = await renderMagicPrompt('github.pr.review.visible', {
-        pr_number: String(args.pr.number),
-      });
-      const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
-      const contextText = buildPullRequestContextText(prContext);
-
-      await useSessionUIStore.getState().sendMessage(
-        visiblePromptText,
-        providerID,
-        modelID,
-        agentName,
-        undefined,
-        undefined,
-        [
-          { text: instructionsText, synthetic: true },
-          { text: contextText, synthetic: true },
-        ],
-        variant,
-        undefined,
-        { sessionId: args.sessionId },
-      );
-
-      void sessionActions.setLinkedIssue(
-        args.sessionId,
-        args.directory,
-        buildLinkedIssue({
-          url: prContext.pr.url,
-          number: prContext.pr.number,
-          title: prContext.pr.title,
-          kind: 'pull',
-          author: prContext.pr.author,
-          linkedAt: Date.now(),
-        }),
-        true,
-      ).catch(() => undefined);
-
-      toast.success(t('session.newWorktree.toast.sessionFromPr'));
-    }
-  }, [
-    github,
-    linear,
-    projectDirectory,
-    resolveDefaultAgentName,
-    resolveDefaultModelSelection,
-    resolveDefaultVariant,
-    t,
-  ]);
-
   // Get current state based on mode
   const currentState = mode === 'new-branch' ? newBranchState : existingBranchState;
 
@@ -858,6 +527,7 @@ export function NewWorktreeDialog({
       linkedPr: null,
       linkedLinearIssue: null,
       linkedGuest: null,
+      linkedSelection: null,
       includePrDiff: false,
     });
   }, [open, generateUniqueSlug]);
@@ -1018,12 +688,8 @@ export function NewWorktreeDialog({
     
     try {
       const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
-      const linkedIssue = mode === 'new-branch' ? newBranchState.linkedIssue : null;
-      const linkedLinearIssue = mode === 'new-branch' ? newBranchState.linkedLinearIssue : null;
       const linkedGuest = mode === 'new-branch' ? newBranchState.linkedGuest : null;
-      const linkedPrState = mode === 'new-branch' ? newBranchState.linkedPr : null;
-      const includePrDiff = mode === 'new-branch' ? newBranchState.includePrDiff : false;
-      const shouldCreateSession = Boolean(linkedIssue || linkedPrState || linkedLinearIssue || linkedGuest);
+      const linkedSelection = mode === 'new-branch' ? newBranchState.linkedSelection : null;
 
       const setupCommands = await resolveWorktreeSetupCommands(projectRef);
       const sourceBranch = newBranchState.sourceBranch;
@@ -1066,45 +732,12 @@ export function NewWorktreeDialog({
 
       const metadata = await createWorktreeWithDefaults(projectRef, args);
 
-      let createdSessionId: string | null = null;
+      onOpenChange(false);
+      setIsCreating(false);
+      // The draft opens in the new worktree before the chosen item arrives,
+      // so its chip lands on that draft's composer and not the one behind.
+      onWorktreeCreated?.(metadata.path);
 
-      if (shouldCreateSession) {
-        if (await getWorktreeSetupWaitEnabled(projectRef)) {
-          await waitForWorktreeBootstrap(metadata.path);
-        }
-
-        const sessionTitle = linkedGuest
-          ? guestSessionTitle(linkedGuest)
-          : linkedLinearIssue
-          ? `${linkedLinearIssue.identifier} ${linkedLinearIssue.title}`.trim()
-          : linkedIssue
-          ? `#${linkedIssue.number} ${linkedIssue.title}`.trim()
-          : linkedPrState
-            ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
-            : t('session.newWorktree.newSessionTitle');
-
-        const session = await sessionActions.createSession(sessionTitle, metadata.path);
-        if (!session?.id) {
-          throw new Error('Failed to create session');
-        }
-
-        createdSessionId = session.id;
-        onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
-        onOpenChange(false);
-        setIsCreating(false);
-
-        void sessionActions.updateSessionTitle(session.id, sessionTitle).catch(() => undefined);
-
-        try {
-          useSessionUIStore.getState().initializeNewOpenChamberSession(session.id, useConfigStore.getState().agents);
-        } catch {
-          // ignore
-        }
-      } else {
-        onOpenChange(false);
-        setIsCreating(false);
-      }
-      
       // Save the last source-branch choice for the next open.
       const lastSourceBranch = resolveWorktreeSourceBranchToPersist({
         mode,
@@ -1123,26 +756,25 @@ export function NewWorktreeDialog({
         }),
       });
 
-      if (createdSessionId) {
-        void sendLinkedContextMessage({
-          sessionId: createdSessionId,
-          directory: metadata.path,
-          issue: linkedIssue,
-          pr: linkedPrState,
-          linearIssue: linkedLinearIssue,
-          guest: linkedGuest,
-          includeDiff: includePrDiff,
-        }).catch((error) => {
-          const fallback = linkedGuest
-            ? t('session.newWorktree.error.sendGuestContextFailed')
-            : linkedLinearIssue
-            ? t('session.newWorktree.error.sendLinearContextFailed')
-            : t('session.newWorktree.error.sendGitHubContextFailed');
-          const message = error instanceof Error ? error.message : fallback;
-          toast.error(fallback, { description: message });
+      // The chosen item goes to the draft as a composer chip; the user writes
+      // the first message. Its context is read here, where the item's project
+      // is known; reading takes a moment, so the draft opens first.
+      if (linkedGuest) {
+        useInputStore.getState().setPendingGuestIssue(linkedGuest);
+      } else if (linkedSelection) {
+        void resolveComposerReferences([linkedSelection], {
+          github,
+          directory: projectDirectory,
+          readLinearDetail: (issueId) => (linear
+            ? readLinearIssueDetail(linear, issueId)
+            : Promise.reject(new Error('Linear is not available here'))),
+        }).then(({ references, failures }) => {
+          if (references.length > 0) usePendingComposerReferences.getState().push(references);
+          const failure = failures[0];
+          if (failure) {
+            toast.error(t('session.newWorktree.error.attachLinkedFailed', { item: failure.label }), { description: failure.error });
+          }
         });
-      } else {
-        onWorktreeCreated?.(metadata.path);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : t('session.newWorktree.error.createWorktreeFailed');
@@ -1175,6 +807,7 @@ export function NewWorktreeDialog({
           url: issue.url,
           author: assignee ? { login: assignee, avatarUrl: issue.assignee?.avatarUrl || undefined } : undefined,
         },
+        linkedSelection: choice,
         linkedIssue: null,
         linkedPr: null,
         linkedGuest: null,
@@ -1201,6 +834,7 @@ export function NewWorktreeDialog({
       setNewBranchState(prev => ({
         ...prev,
         linkedIssue: issue,
+        linkedSelection: choice,
         linkedPr: null,
         linkedLinearIssue: null,
         linkedGuest: null,
@@ -1240,6 +874,7 @@ export function NewWorktreeDialog({
     setNewBranchState(prev => ({
       ...prev,
       linkedPr: pr,
+      linkedSelection: choice,
       linkedIssue: null,
       linkedLinearIssue: null,
       linkedGuest: null,
@@ -1257,6 +892,7 @@ export function NewWorktreeDialog({
     setNewBranchState((prev) => ({
       ...prev,
       linkedGuest: issue,
+      linkedSelection: null,
       linkedIssue: null,
       linkedPr: null,
       linkedLinearIssue: null,
@@ -1297,6 +933,8 @@ export function NewWorktreeDialog({
     });
   };
 
+  // Only this unlinks: editing the branch name keeps the chosen item. The name
+  // stays too, unless it was the PR's own branch.
   const handleClearLinkedItem = () => {
     setNewBranchState(prev => ({
       ...prev,
@@ -1304,7 +942,8 @@ export function NewWorktreeDialog({
       linkedPr: null,
       linkedLinearIssue: null,
       linkedGuest: null,
-      branchName: '',
+      linkedSelection: null,
+      branchName: prev.linkedPr ? '' : prev.branchName,
       includePrDiff: false,
       isSyncingWorktreeName: true,
     }));
@@ -1594,10 +1233,6 @@ export function NewWorktreeDialog({
                       ...prev,
                       branchName: e.target.value,
                       isSyncingWorktreeName: true,
-                      linkedIssue: null,
-                      linkedPr: null,
-                      linkedLinearIssue: null,
-      linkedGuest: null,
                     }));
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
@@ -1903,7 +1538,10 @@ export function NewWorktreeDialog({
                   </a>
                   
                   <button
+                    type="button"
                     onClick={handleClearLinkedItem}
+                    aria-label={t('session.newWorktree.actions.unlink')}
+                    title={t('session.newWorktree.actions.unlink')}
                     className="text-muted-foreground hover:text-foreground shrink-0 p-0.5 rounded hover:bg-muted transition-colors"
                   >
                     <Icon name="close" className="h-3.5 w-3.5" />
@@ -2118,10 +1756,6 @@ export function NewWorktreeDialog({
                         ...prev,
                         branchName: e.target.value,
                         isSyncingWorktreeName: true,
-                        linkedIssue: null,
-                        linkedPr: null,
-                        linkedLinearIssue: null,
-      linkedGuest: null,
                       }));
                     }}
                     onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
@@ -2400,7 +2034,10 @@ export function NewWorktreeDialog({
                     </a>
                     
                     <button
+                      type="button"
                       onClick={handleClearLinkedItem}
+                      aria-label={t('session.newWorktree.actions.unlink')}
+                      title={t('session.newWorktree.actions.unlink')}
                       className="text-muted-foreground hover:text-foreground shrink-0 p-0.5 rounded hover:bg-muted transition-colors"
                     >
                       <Icon name="close" className="h-3.5 w-3.5" />

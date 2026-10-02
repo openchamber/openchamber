@@ -25,7 +25,6 @@ const pull: ComposerReference = {
     head: 'fix/login',
     base: 'main',
     includeDiff: false,
-    instructionsText: 'review it',
     contextText: 'pr 7',
 };
 
@@ -67,7 +66,7 @@ test('removing one keeps the rest', () => {
 });
 
 test('a reference sends its text and identity, and a guest keeps its data', () => {
-    expect(toContextReference(pull)).toEqual({ kind: 'github-pr', number: 7, title: 'Fix login', url: 'https://github.com/acme/app/pull/7', instructions: 'review it', context: 'pr 7' });
+    expect(toContextReference(pull)).toEqual({ kind: 'github-pr', number: 7, title: 'Fix login', url: 'https://github.com/acme/app/pull/7', context: 'pr 7' });
     expect(toContextReference(guest)).toEqual({ kind: 'guest', providerId: 'jira', id: 'OPS-2', title: 'Ops', url: 'https://jira/OPS-2', contextText: 'jira', thread: 'issue', data: { status: 'open' } });
 });
 

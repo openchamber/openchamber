@@ -34,7 +34,6 @@ export type ComposerReference =
         head: string;
         base: string;
         includeDiff: boolean;
-        instructionsText: string;
         contextText: string;
         author?: ComposerReferenceAuthor;
     }
@@ -143,7 +142,6 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
                 number: reference.number,
                 title: reference.title,
                 url: reference.url,
-                instructions: reference.instructionsText,
                 context: reference.contextText,
             };
         case 'linear-issue':

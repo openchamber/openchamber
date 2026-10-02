@@ -59,7 +59,7 @@ export interface QueuedInput {
 /** An issue, PR or tracker item attached to the composer, as it is sent. */
 export type ComposerContextReference =
     | { kind: 'github-issue'; number: number; title: string; url: string; contextText: string }
-    | { kind: 'github-pr'; number: number; title: string; url: string; instructions: string; context: string }
+    | { kind: 'github-pr'; number: number; title: string; url: string; context: string }
     | { kind: 'linear-issue'; identifier: string; title: string; url: string; contextText: string }
     | {
         kind: 'guest';
@@ -197,10 +197,10 @@ export function buildComposerContext(
     skillInstruction: string | null,
 ): QueuedContextPart[] {
     const context: QueuedContextPart[] = [];
-    const attach = (part: { text: string; metadata: ContextPartMetadata }, instructions?: string) => {
-        const entry: QueuedContextPart = { kind: 'context', text: part.text, metadata: part.metadata };
-        if (instructions) entry.instructions = instructions;
-        context.push(entry);
+    // An attached item is context only: no instructions guess what the user
+    // wants from it; their message says that.
+    const attach = (part: { text: string; metadata: ContextPartMetadata }) => {
+        context.push({ kind: 'context', text: part.text, metadata: part.metadata });
     };
 
     for (const draft of input.inlineComments) {
@@ -219,10 +219,8 @@ export function buildComposerContext(
                 break;
             }
             case 'github-pr': {
-                // Instructions before context: the model is told how to read the
-                // diff before it is given the diff.
-                const { number, title, url, instructions, context: prContext } = reference;
-                attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext), instructions);
+                const { number, title, url, context: prContext } = reference;
+                attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext));
                 break;
             }
             case 'linear-issue': {

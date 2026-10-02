@@ -71,7 +71,32 @@ export interface DraftTargetProps {
      * the feature's switch is off, and always in VS Code (decision 16 of the design).
      */
     onCreateSpace?: () => void;
+    /** Opens the New Worktree dialog (name, branch, PR or issue) for the draft's project. */
+    onCreateCustomWorktree?: () => void;
     theme: Theme;
+}
+
+/** The two ways to make a worktree from the draft: at once, or through the dialog. */
+function WorktreeCreateActions({ onQuick, onCustom, className }: {
+    onQuick: () => void;
+    onCustom?: () => void;
+    className: string;
+}) {
+    const { t } = useI18n();
+    return (
+        <>
+            <button type="button" className={className} onPointerDown={(e) => { e.stopPropagation(); }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onQuick(); }}>
+                <Icon name="flashlight" className="size-4 shrink-0 text-muted-foreground" />
+                {t('chat.chatInput.worktreeQuick')}
+            </button>
+            {onCustom ? (
+                <button type="button" className={className} onPointerDown={(e) => { e.stopPropagation(); }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCustom(); }}>
+                    <Icon name="git-branch" className="size-4 shrink-0 text-muted-foreground" />
+                    {t('chat.chatInput.worktreeCustom')}
+                </button>
+            ) : null}
+        </>
+    );
 }
 
 const getProjectIconColor = (projectColor?: string | null): string | undefined =>
@@ -129,6 +154,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
         onProjectChange,
         onDirectoryChange,
         onCreateSpace,
+        onCreateCustomWorktree,
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
@@ -426,17 +452,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                         ) : null}
                         {projectRootBranchOption ? <SelectSeparator /> : null}
                         <SelectGroup>
-                            <div className="flex items-center justify-between px-2 py-1.5">
-                                <span className="text-muted-foreground typography-meta">{t('chat.chatInput.worktrees')}</span>
-                                <button
-                                    type="button"
-                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                    onPointerDown={(e) => { e.stopPropagation(); }}
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); void createWorktreeDraft(); }}
-                                >
-                                    {t('chat.chatInput.worktreeNew')}
-                                </button>
-                            </div>
+                            <SelectLabel>{t('chat.chatInput.worktrees')}</SelectLabel>
                             {worktreeBranchOptions.map((option) => (
                                 <SelectItem key={option.value} value={option.value} showSelectedBackground={false} className="max-w-[24rem] truncate">
                                     {option.pending ? '⏳ ' : ''}{option.label}
@@ -448,6 +464,12 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
+                        <SelectSeparator />
+                        <WorktreeCreateActions
+                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            onQuick={() => { setOpenPicker(null); void createWorktreeDraft(); }}
+                            onCustom={onCreateCustomWorktree ? () => { setOpenPicker(null); onCreateCustomWorktree(); } : undefined}
+                        />
                         {onCreateSpace ? (
                             <>
                                 <SelectSeparator />
@@ -594,6 +616,7 @@ export function MobileDraftTargetSheets(
         onProjectChange,
         onDirectoryChange,
         onCreateSpace,
+        onCreateCustomWorktree,
         openPicker,
         onOpenPickerChange,
         theme,
@@ -663,24 +686,20 @@ export function MobileDraftTargetSheets(
                                             {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
                                         </>
                                     ) : null}
-                                    <div className="flex items-center justify-between px-2 pb-1 pt-2">
-                                        <span className="text-muted-foreground typography-meta">{t('chat.chatInput.worktrees')}</span>
-                                        <button
-                                            type="button"
-                                            className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
-                                            onClick={() => {
-                                                onOpenPickerChange(null);
-                                                void createWorktreeDraft();
-                                            }}
-                                        >
-                                            {t('chat.chatInput.worktreeNew')}
-                                        </button>
+                                    <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
+                                        {t('chat.chatInput.worktrees')}
                                     </div>
                                     {rankByQuery(worktreeBranchOptions, branchQuery, (option) => [option.label])
                                         .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
+                                    <div className="my-1 h-px bg-border" />
+                                    <WorktreeCreateActions
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
+                                        onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
+                                    />
                                     {onCreateSpace ? (
                                         <div className="px-2 pb-1 pt-2">
                                             <button

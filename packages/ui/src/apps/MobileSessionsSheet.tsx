@@ -2426,14 +2426,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             setNewWorktreeDialogOpen(value);
             if (!value) setWorktreeDialogProjectId(null);
           }}
-          onWorktreeCreated={(worktreePath, options) => {
-            if (options?.sessionId) void setCurrentSession(options.sessionId, worktreePath);
-            else
-              openNewSessionDraft({
-                selectedProjectId: worktreeDialogProjectId,
-                directoryOverride: worktreePath,
-                preserveDirectoryOverride: true,
-              });
+          project={(() => {
+            const project = projectsMeta.find((entry) => entry.id === worktreeDialogProjectId);
+            return project ? { id: project.id, path: project.path } : undefined;
+          })()}
+          onWorktreeCreated={(worktreePath) => {
+            openNewSessionDraft({
+              selectedProjectId: worktreeDialogProjectId,
+              directoryOverride: worktreePath,
+              preserveDirectoryOverride: true,
+            });
             onOpenChange(false);
           }}
         />

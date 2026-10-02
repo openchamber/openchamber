@@ -311,7 +311,14 @@ and the send path reading the same grammar.
   item (inline comments, terminal selections, browser annotations, PR context,
   each linked issue, PR or guest item) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
-  metadata back to render context blocks. PR instructions precede the PR diff.
+  metadata back to render context blocks. An attached item is context only:
+  no instructions guess what the user wants from it (the PR review
+  instructions were removed); a queued message captured before that still
+  delivers its `instructions` part first. A flow outside the composer hands
+  references to the next draft through `pendingComposerReferences.ts`
+  (New Worktree does), which `ChatInput` consumes into its chips; a draft's
+  first send with a Linear issue attached posts Linear's session-started
+  status.
   The same module's `buildComposerContext` captures that context when a message
   is **queued** instead of sent: the chips leave the composer with the message
   (as `QueuedContextPart`s on the queue item), the server or the VS Code
@@ -402,7 +409,12 @@ and the send path reading the same grammar.
   through the existing project-change flow only on explicit activation.
   Filtering changes the result area below the anchored input without moving
   the search field. The worktree picker remains a Select; mobile keeps its
-  bottom sheets. `ProjectPickerSheet` shares the mobile project list and
+  bottom sheets. Both end with the two ways to make a worktree: **Quick
+  worktree** (`createWorktreeDraft`, auto-named, at once) and **New worktree…**,
+  which opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
+  that dialog, like the isolated-space one, because Timeline has no project
+  headers to open it from; a plain worktree pins the draft to the new
+  directory, one made for an issue or PR opens its session. `ProjectPickerSheet` shares the mobile project list and
   transient search state with the Settings selector. Settings passes its own
   directory selection callback, so choosing a project there leaves chat in
   place. Both callers use the same ranked label/path search and project icons.
