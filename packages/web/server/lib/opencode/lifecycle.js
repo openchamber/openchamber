@@ -1241,13 +1241,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), WARMUP_REQUEST_TIMEOUT_MS);
-        // Warming a directory is the point, not the answer: any directory-scoped
-        // read makes OpenCode initialise it. `/api/session` is the cheapest one
-        // that takes a directory (`/api/session/active` is global).
-        const url = `${buildOpenCodeUrl('/api/session', '')}?directory=${encodeURIComponent(directory)}&limit=1`;
+        // Warming a directory is the point, not the answer: any read that goes
+        // through v2's location middleware makes OpenCode initialise it.
+        // `/api/location` is the cheapest; `/api/session` is a global list and
+        // warms nothing. v2 takes the directory from this header, not from a
+        // `?directory=` query.
+        const url = buildOpenCodeUrl('/api/location', '');
         await fetch(url, {
           method: 'GET',
-          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+          headers: {
+            Accept: 'application/json',
+            'x-opencode-directory': encodeURIComponent(directory),
+            ...getOpenCodeAuthHeaders(),
+          },
           signal: controller.signal,
         });
       } catch {

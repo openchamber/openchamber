@@ -293,12 +293,14 @@ describe('OpenCode lifecycle', () => {
     await runtime.bootstrapOpenCodeAtStartup();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const warmupUrls = fetchMock.mock.calls
-      .map(([url]) => String(url))
-      .filter((url) => url.includes('/api/session?'));
+    const warmups = fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith('/api/location'))
+      .map(([url, init]) => [String(url), init.headers['x-opencode-directory']]);
     // Each warmed directory boots its whole MCP fleet on OpenCode 2 (#4018).
-    expect(warmupUrls).toEqual([
-      'http://127.0.0.1:45678/api/session?directory=%2Ftmp%2Fworktree-a&limit=1',
+    // v2 reads the directory from the header, and only location routes start
+    // one: `/api/session` is a global list.
+    expect(warmups).toEqual([
+      ['http://127.0.0.1:45678/api/location', '%2Ftmp%2Fworktree-a'],
     ]);
   });
 

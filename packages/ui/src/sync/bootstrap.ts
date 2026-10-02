@@ -148,13 +148,13 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
     }),
     read(async () => {
       const form = await readDirectoryFormSnapshot(store, () => (
-        opencodeClient.listPendingForms({ directories: [directory], includeGlobal: false })
+        opencodeClient.listPendingForms({ directories: [directory] })
       ))
       commit({ form })
     }),
     read(async () => {
       const permission = await readDirectoryPermissionSnapshot(store, () => (
-        opencodeClient.listPendingPermissions({ directories: [directory], includeGlobal: false })
+        opencodeClient.listPendingPermissions({ directories: [directory] })
       ))
       commit({ permission })
     }),

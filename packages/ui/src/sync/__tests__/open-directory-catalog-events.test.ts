@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { SyncEvent } from "@/lib/opencode/events"
+import { opencodeClient } from "@/lib/opencode/client"
 import { ChildStoreManager } from "../child-store"
 import { createEventRoutingIndex, handleEvent } from "../sync-context"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -16,23 +17,33 @@ const CATALOG_SETTLE_MS = 400
 describe("catalog events for an open directory", () => {
   let childStores: ChildStoreManager
   let agentLoads = 0
+  let directoryAgentReads: Array<string | null | undefined> = []
   const originalLoadAgents = useAgentsStore.getState().loadAgents
+  const originalListAgents = opencodeClient.listAgents
+  const originalDirectory = opencodeClient.getDirectory()
 
   beforeEach(() => {
     childStores = new ChildStoreManager()
     childStores.ensureChild("/open", { bootstrap: false })
     agentLoads = 0
+    directoryAgentReads = []
     useAgentsStore.setState({
       loadAgents: async () => {
         agentLoads += 1
         return true
       },
     })
+    opencodeClient.listAgents = async (directory) => {
+      directoryAgentReads.push(directory)
+      return []
+    }
   })
 
   afterEach(() => {
     childStores.disposeAll()
     useAgentsStore.setState({ loadAgents: originalLoadAgents })
+    opencodeClient.listAgents = originalListAgents
+    opencodeClient.setDirectory(originalDirectory)
   })
 
   test("agent.updated in the open directory re-reads the agents list", async () => {
@@ -49,5 +60,28 @@ describe("catalog events for an open directory", () => {
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
     expect(agentLoads).toBe(1)
+  })
+
+  // Reading a directory makes OpenCode start it, MCP servers included. The
+  // first project to announce its catalog used to start every other one.
+  test("re-reads only the directory the event names, not every store", async () => {
+    childStores.ensureChild("/sidebar-project", { bootstrap: false })
+
+    handleEvent("/open", agentUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
+
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+    expect(directoryAgentReads).toEqual(["/open"])
+  })
+
+  test("an event without a location re-reads the current directory only", async () => {
+    childStores.ensureChild("/sidebar-project", { bootstrap: false })
+    opencodeClient.setDirectory("/open")
+
+    handleEvent("global", agentUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
+
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+    expect(directoryAgentReads).toEqual(["/open"])
   })
 })

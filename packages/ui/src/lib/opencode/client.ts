@@ -19,8 +19,6 @@ import type {
   FormAnswer,
   FormInfo,
   LocationGetOutput,
-  PermissionEffect,
-  PermissionSource,
   SessionInboxDelivery,
   SessionRevert,
 } from "@opencode/client"
@@ -441,10 +439,14 @@ export type FetchPermissionResult =
   | { state: "unknown" }
 
 type DirectoryAvailability = "available" | "missing" | "unknown"
+/**
+ * Pending requests live in the location that raised them, so a list is asked
+ * per directory. There is no global list on v2: a request without a directory
+ * answers for OpenCode's own working directory and makes OpenCode start it,
+ * MCP servers included.
+ */
 type PendingRequestListOptions = {
   directories?: Array<string | null | undefined>
-  /** Skip the global fallback when initializing one explicit directory. */
-  includeGlobal?: boolean
 }
 const directoryProbeErrorSchema = z.object({ reason: z.string().optional(), isDirectory: z.boolean().optional() })
 
@@ -677,8 +679,13 @@ class OpencodeService {
     return call("location.get", () => this.clientFor(directory).location.get())
   }
 
+  /**
+   * The list is global, but v2 serves it through a location: asked without a
+   * directory, OpenCode starts its own working directory (MCP servers
+   * included) to answer. The current directory is already running.
+   */
   async listProjects(): Promise<Project[]> {
-    const projects = await call("project.list", () => this.client.project.list())
+    const projects = await call("project.list", () => this.clientFor().project.list())
     return projects.map(projectProject)
   }
 
@@ -1421,46 +1428,6 @@ class OpencodeService {
   }
 
   /**
-   * Programmatically evaluate and (when approval is required) create a
-   * permission request for a session.
-   *
-   * Returns `{ id, effect }` on success, or `null` on any failure. Callers
-   * driving authoritative state must treat `null` as "unknown — do not act"
-   * rather than "permission allowed."
-   */
-  async createPermission(
-    sessionID: string,
-    action: string,
-    resources: string[],
-    options?: {
-      id?: string
-      save?: string[]
-      metadata?: ContextPartMetadata
-      source?: PermissionSource
-      agent?: string
-      directory?: string | null
-    },
-  ): Promise<{ id: string; effect: PermissionEffect } | null> {
-    try {
-      const result = await call("permission.create", () =>
-        this.clientFor(options?.directory).permission.create({
-          sessionID,
-          action,
-          resources,
-          id: options?.id,
-          save: options?.save,
-          metadata: options?.metadata ? toJsonRecord(options.metadata) : undefined,
-          source: options?.source,
-          agent: options?.agent,
-        }),
-      )
-      return { id: result.id, effect: result.effect }
-    } catch {
-      return null
-    }
-  }
-
-  /**
    * Fetch a pending permission request owned by a session. A 404 is the
    * server confirming the request has settled; every other failure stays
    * distinct so auto-accept fails closed while the request stays visible.
@@ -1482,11 +1449,11 @@ class OpencodeService {
    * returned no pending permissions".
    */
   async listPendingPermissions(options?: PendingRequestListOptions): Promise<PermissionRequest[]> {
-    const directories = this.uniqueDirectories(options?.directories, options?.includeGlobal)
+    const directories = this.uniqueDirectories(options?.directories)
     const lists = await Promise.all(
       directories.map((directory) =>
         call("permission.request.list", () =>
-          (directory ? this.getScopedSdkClient(directory) : this.client).permission.request.list().then((r) => r.data),
+          this.getScopedSdkClient(directory).permission.request.list().then((r) => r.data),
         ),
       ),
     )
@@ -1509,11 +1476,11 @@ class OpencodeService {
 
   /** Throws on fetch failure; see {@link listPendingPermissions}. */
   async listPendingForms(options?: PendingRequestListOptions): Promise<FormInfo[]> {
-    const directories = this.uniqueDirectories(options?.directories, options?.includeGlobal)
+    const directories = this.uniqueDirectories(options?.directories)
     const lists = await Promise.all(
       directories.map((directory) =>
         call("form.list", () =>
-          (directory ? this.getScopedSdkClient(directory) : this.client).form.list().then((r) => r.data),
+          this.getScopedSdkClient(directory).form.list().then((r) => r.data),
         ),
       ),
     )
@@ -1585,13 +1552,13 @@ class OpencodeService {
   }
 
   /** Global pending items when requested, then each distinct directory. */
-  private uniqueDirectories(entries: Array<string | null | undefined> | undefined, includeGlobal = true): Array<string | null> {
+  private uniqueDirectories(entries: Array<string | null | undefined> | undefined): string[] {
     const unique = new Set<string>()
     for (const entry of entries ?? []) {
       const normalized = this.normalizeCandidatePath(entry)
       if (normalized) unique.add(normalized)
     }
-    return includeGlobal ? [null, ...unique] : [...unique]
+    return [...unique]
   }
 
   // -------------------------------------------------------------------------

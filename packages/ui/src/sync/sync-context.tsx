@@ -1479,13 +1479,23 @@ async function resyncDirectoryAfterReconnect(
  * OpenCode reports a catalog change (`config.updated`, `agent.updated`, ...)
  * without saying what changed, so the affected slice is re-read rather than
  * patched. Agents, commands, config and providers resolve per directory, so
- * every open directory refreshes its own copy; projects are global.
+ * each directory the change was announced for refreshes its own copy;
+ * projects are global.
+ *
+ * Only those directories: a directory-scoped read makes OpenCode start that
+ * location, MCP servers included, so re-reading every directory with a store
+ * started every project in the sidebar the first time one of them announced
+ * its catalog. A directory OpenCode names in an event is already running.
  *
  * The sync stores only hold what chat needs; the Settings lists and the
  * composer read their own stores, which `refreshStoresForCatalogKind` re-reads
  * for the same kind.
  */
-async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager): Promise<void> {
+async function reloadCatalog(
+  kind: CatalogKind,
+  childStores: ChildStoreManager,
+  directories: ReadonlySet<string>,
+): Promise<void> {
   // Before anything re-reads: a fresh GET must not be served the config the
   // client cached seconds ago.
   if (kind === "config") opencodeClient.clearConfigCache()
@@ -1500,7 +1510,9 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
   // No sync-store slice of their own: their consumers read them on demand.
   if (kind === "skill" || kind === "plugin" || kind === "websearch") return
 
-  await Promise.all([...childStores.children.entries()].map(async ([directory, store]) => {
+  await Promise.all([...directories].map(async (directory) => {
+    const store = childStores.getChild(directory)
+    if (!store) return
     try {
       if (kind === "agent") {
         store.setState({ agent: await opencodeClient.listAgents(directory) })
@@ -1531,12 +1543,15 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
 
 /**
  * One saved file makes v2 rebuild several catalogs, so the events arrive in a
- * burst. Collect the kinds and re-read each one once the burst settles; the
- * lists are whole-slice reads, so a later event supersedes an earlier one of
- * the same kind anyway.
+ * burst. Collect the kinds and the directories they name, and re-read once the
+ * burst settles; the lists are whole-slice reads, so a later event supersedes
+ * an earlier one of the same kind anyway. An event without a location (a
+ * credential change) re-reads the current directory.
  */
 const CATALOG_RELOAD_DEBOUNCE_MS = 250
 const pendingCatalogKinds = new Set<CatalogKind>()
+const pendingCatalogDirectories = new Set<string>()
+let pendingCatalogCurrentDirectory = false
 let catalogReloadTimer: ReturnType<typeof setTimeout> | null = null
 
 function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager, directory: string | null): void {
@@ -1544,12 +1559,19 @@ function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager
   // event names loses its fresh mark now, so switching to it re-reads.
   markConfigCatalogStale(kind, directory)
   pendingCatalogKinds.add(kind)
+  if (directory) pendingCatalogDirectories.add(directory)
+  else pendingCatalogCurrentDirectory = true
   if (catalogReloadTimer) clearTimeout(catalogReloadTimer)
   catalogReloadTimer = setTimeout(() => {
     catalogReloadTimer = null
     const kinds = [...pendingCatalogKinds]
+    const directories = new Set(pendingCatalogDirectories)
+    const currentDirectory = opencodeClient.getDirectory()
+    if (pendingCatalogCurrentDirectory && currentDirectory) directories.add(currentDirectory)
     pendingCatalogKinds.clear()
-    for (const pending of kinds) void reloadCatalog(pending, childStores)
+    pendingCatalogDirectories.clear()
+    pendingCatalogCurrentDirectory = false
+    for (const pending of kinds) void reloadCatalog(pending, childStores, directories)
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }
 
