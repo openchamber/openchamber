@@ -274,33 +274,7 @@ const getUrlAuthTokenFromRequest = (req) => {
     }
   }
   if (typeof token === 'string' && token.trim()) return token.trim();
-  return getServedPageSubresourceToken(req);
-};
-
-/**
- * An HTML file shown through `/api/fs/serve/` loads its own images, styles
- * and scripts with plain relative URLs, which carry no token: only the page's
- * URL has one. The browser sends that page URL as the Referer of every
- * same-origin subresource request, so the page's token is taken from there,
- * and only when both the page and the subresource live under `/api/fs/serve/`.
- * Nothing else about the token changes: it is still checked for validity,
- * expiry and scope like a query token.
- */
-const SERVED_PAGE_PREFIX = '/api/fs/serve/';
-
-const getServedPageSubresourceToken = (req) => {
-  if (!getRequestPathname(req).startsWith(SERVED_PAGE_PREFIX)) return null;
-  const referer = req?.headers?.referer;
-  const value = Array.isArray(referer) ? referer[0] : referer;
-  if (typeof value !== 'string' || !value) return null;
-  try {
-    const url = new URL(value);
-    if (!url.pathname.startsWith(SERVED_PAGE_PREFIX)) return null;
-    const token = url.searchParams.get('oc_url_token');
-    return token && token.trim() ? token.trim() : null;
-  } catch {
-    return null;
-  }
+  return null;
 };
 
 const getRequestPathname = (req) => {
@@ -355,8 +329,6 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/openchamber/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
-    || pathname === '/api/fs/serve'
-    || pathname.startsWith('/api/fs/serve/')
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
     || pathname === '/api/guests'

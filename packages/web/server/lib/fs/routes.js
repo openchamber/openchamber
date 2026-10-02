@@ -17,6 +17,49 @@ const pruneOutsideFileGrants = () => {
   }
 };
 
+const PREVIEW_GRANT_IDLE_TTL_MS = 10 * 60 * 1000;
+const PREVIEW_GRANT_MAX_ENTRIES = 256;
+const PREVIEW_SANDBOX_POLICY = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads';
+
+/**
+ * Grants for HTML previews. A grant names the workspace base the page's files
+ * resolve against and the read root its script may read bytes from. It stays
+ * valid while the page keeps loading files and lapses after ten idle minutes.
+ */
+const createPreviewGrants = ({ crypto = globalThis.crypto, now = () => Date.now() } = {}) => {
+  const grants = new Map();
+
+  const prune = () => {
+    const at = now();
+    for (const [id, grant] of grants.entries()) {
+      if (grant.expiresAt <= at) grants.delete(id);
+    }
+    while (grants.size >= PREVIEW_GRANT_MAX_ENTRIES) {
+      grants.delete(grants.keys().next().value);
+    }
+  };
+
+  return {
+    mint: ({ base, readRoot }) => {
+      prune();
+      const grant = crypto.randomUUID();
+      const expiresAt = now() + PREVIEW_GRANT_IDLE_TTL_MS;
+      grants.set(grant, { base, readRoot, expiresAt });
+      return { grant, expiresAt };
+    },
+    use: (id) => {
+      const grant = grants.get(id);
+      if (!grant) return null;
+      if (grant.expiresAt <= now()) {
+        grants.delete(id);
+        return null;
+      }
+      grant.expiresAt = now() + PREVIEW_GRANT_IDLE_TTL_MS;
+      return grant;
+    },
+  };
+};
+
 const isOsPermissionError = (error) => (
   error
   && typeof error === 'object'
@@ -587,6 +630,7 @@ export const registerFsRoutes = (app, dependencies) => {
     ? path.resolve(managedChatsRoot.trim())
     : path.join(openchamberUserConfigRoot, 'chats');
   const managedRoots = [path.resolve(openchamberUserConfigRoot), chatsRoot];
+  const previewGrants = createPreviewGrants({ crypto });
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
   });
@@ -1165,22 +1209,57 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
-  app.get(/^\/api\/fs\/serve\/(.+)$/, async (req, res) => {
-    const rawPath = req.params[0] || '';
-    if (!rawPath) {
-      return res.status(400).json({ error: 'Path is required' });
+  // An HTML preview is untrusted content: it runs in an opaque-origin sandbox
+  // and reaches its own files through a grant carried in the URL path, so
+  // relative URLs keep it and no session credential is ever in the page's URL.
+  app.post('/api/fs/preview', async (req, res) => {
+    try {
+      // The workspace resolver normalizes and rejects a missing or non-string path.
+      const resolved = await resolveReadPathFromContext({
+        req,
+        targetPath: req.body?.path,
+        resolveProjectDirectory,
+        path,
+        os,
+        fsPromises,
+        normalizeDirectoryPath,
+        managedRoots,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      const canonicalPage = await fsPromises.realpath(resolved.resolved);
+      const stats = await fsPromises.stat(canonicalPage);
+      if (!stats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+      const isManagedBase = managedRoots.some((root) => path.resolve(root) === resolved.base);
+      const readRoot = isManagedBase
+        ? path.dirname(canonicalPage)
+        : await fsPromises.realpath(resolved.base);
+      return res.json(previewGrants.mint({ base: resolved.base, readRoot }));
+    } catch (error) {
+      if (error instanceof Error && error.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
+      }
+      console.error('Failed to grant file preview:', error);
+      return res.status(500).json({ error: 'Failed to grant file preview' });
+    }
+  });
+
+  app.get(/^\/api\/fs\/preview\/([^/]+)\/(.+)$/, async (req, res) => {
+    const grant = previewGrants.use(req.params[0]);
+    if (!grant) {
+      return res.status(403).json({ error: 'Preview grant is invalid or expired' });
     }
 
     try {
-      if (req.query?.allowOutsideWorkspace === 'true') {
-        return res.status(403).json({ error: 'allowOutsideWorkspace is not permitted for this endpoint' });
-      }
-
-      const filePath = path.resolve('/', rawPath);
-      const resolved = await resolveReadPathFromContext({
-        req,
-        targetPath: filePath,
-        resolveProjectDirectory,
+      const resolved = resolveWorkspacePath({
+        targetPath: path.resolve('/', req.params[1]),
+        baseDirectory: grant.base,
         path,
         os,
         normalizeDirectoryPath,
@@ -1205,6 +1284,14 @@ export const registerFsRoutes = (app, dependencies) => {
       const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      // Opened directly in a tab, the page is still an opaque-origin sandbox.
+      res.setHeader('Content-Security-Policy', PREVIEW_SANDBOX_POLICY);
+      // Embedding (img, stylesheet, classic script) needs no CORS. Reading a
+      // file's bytes from script (fetch, fonts, module scripts) is CORS, and
+      // the opaque page may do that only inside its read root.
+      if (isPathWithinRoot(canonicalPath, grant.readRoot, path, os) && !res.getHeader('Access-Control-Allow-Origin')) {
+        res.setHeader('Access-Control-Allow-Origin', 'null');
+      }
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;

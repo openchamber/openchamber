@@ -77,11 +77,13 @@ const HOST_ONLY_ROUTES = Object.freeze([
 
 // Route families refused across the boundary: they would move something between the host and
 // a space, or render a space's file as a page under the app's origin. Moving a session, the
-// worktree and git-integrate actions, `/api/fs/serve` and `/api/preview/proxy`.
+// worktree and git-integrate actions, `/api/fs/preview` and `/api/preview/proxy`.
 const REFUSED_ACROSS_BOUNDARY_ROUTES = Object.freeze([
   '/api/git/worktrees',
   '/api/git/worktree-type',
   '/api/git/integrate',
+  '/api/fs/preview',
+  // Older inside servers answered this one; it stays refused.
   '/api/fs/serve',
   '/api/preview/proxy',
 ]);

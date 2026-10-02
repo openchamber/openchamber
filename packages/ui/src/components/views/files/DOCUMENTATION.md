@@ -65,6 +65,15 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
+An HTML file's preview is untrusted content. `useHtmlPreviewUrl` asks the
+server for a grant (`POST /api/fs/preview`) and loads the page from
+`/api/fs/preview/<grant>/<path>`; the frame's `sandbox` has no
+`allow-same-origin`, so the page runs as an opaque origin with no session and
+cannot reach the app's API, DOM or terminal. Its neighbouring images, styles
+and scripts load through the grant in the path. VS Code renders `srcDoc` in
+the same sandbox. The server side (read root, CORS, CSP) is described in
+`packages/web/server/lib/fs/DOCUMENTATION.md`.
+
 The Markdown preview renders the file's raw HTML the way GitHub does
 (`SimpleMarkdownRenderer allowRawHtml`): right after marked, a separate
 DOMPurify instance keeps a GitHub-like allowlist (`markdownSecurity.ts`:

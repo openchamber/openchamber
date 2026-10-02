@@ -1862,3 +1862,99 @@ describe('canonical managed roots with real filesystem aliases', () => {
     });
   });
 });
+
+describe('fs html preview grants', () => {
+  const files = new Map([
+    ['/workspace/site/index.html', '<img src="logo.png">'],
+    ['/workspace/site/logo.png', 'png'],
+    ['/workspace/data.json', '{}'],
+    ['/home/user/.config/openchamber/projects/p1/canvases/c1/index.html', '<h1>canvas</h1>'],
+    ['/home/user/.config/openchamber/projects/p1/canvases/c1/data.json', '[]'],
+    ['/home/user/.config/openchamber/guest-auth.json', '{"token":"secret"}'],
+  ]);
+
+  const register = () => {
+    const routes = [];
+    const app = {
+      get: (routePath, handler) => routes.push({ method: 'GET', routePath, handler }),
+      post: (routePath, handler) => routes.push({ method: 'POST', routePath, handler }),
+    };
+    let uuid = 0;
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat: async (targetPath) => {
+          if (!files.has(targetPath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          return { isFile: () => true, size: files.get(targetPath).length };
+        },
+        readFile: async (targetPath) => Buffer.from(files.get(targetPath)),
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => `grant-${++uuid}` },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/workspace' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config/openchamber',
+    });
+    const mintHandler = routes.find((route) => route.method === 'POST' && route.routePath === '/api/fs/preview').handler;
+    const serveRoute = routes.find((route) => route.method === 'GET' && route.routePath instanceof RegExp && route.routePath.test('/api/fs/preview/g/x'));
+    const mint = async (pagePath) => {
+      const res = createMockResponse();
+      await mintHandler({ body: { path: pagePath }, query: {} }, res);
+      return res;
+    };
+    const serve = async (url) => {
+      const match = url.match(serveRoute.routePath);
+      const res = createMockResponse();
+      await serveRoute.handler({ params: { 0: decodeURIComponent(match[1]), 1: decodeURIComponent(match[2]) }, query: {} }, res);
+      return res;
+    };
+    return { mint, serve };
+  };
+
+  it('serves a project page and its neighbours sandboxed, readable from script only inside the project', async () => {
+    const { mint, serve } = register();
+    const minted = await mint('/workspace/site/index.html');
+    expect(minted.statusCode).toBe(200);
+    const { grant } = minted.body;
+
+    const page = await serve(`/api/fs/preview/${grant}/workspace/site/index.html`);
+    expect(page.statusCode).toBe(200);
+    expect(page.getHeader('content-security-policy')).toMatch(/^sandbox allow-scripts /);
+    expect(page.getHeader('content-security-policy')).not.toContain('allow-same-origin');
+    expect(page.getHeader('access-control-allow-origin')).toBe('null');
+
+    const sibling = await serve(`/api/fs/preview/${grant}/workspace/data.json`);
+    expect(sibling.statusCode).toBe(200);
+    expect(sibling.getHeader('access-control-allow-origin')).toBe('null');
+
+    // OpenChamber's own folder can be embedded but never read from script.
+    const managed = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/guest-auth.json`);
+    expect(managed.statusCode).toBe(200);
+    expect(managed.getHeader('access-control-allow-origin')).toBeUndefined();
+  });
+
+  it('limits a page inside the OpenChamber folder to reading its own folder', async () => {
+    const { mint, serve } = register();
+    const { grant } = (await mint('/home/user/.config/openchamber/projects/p1/canvases/c1/index.html')).body;
+
+    const data = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/projects/p1/canvases/c1/data.json`);
+    expect(data.statusCode).toBe(200);
+    expect(data.getHeader('access-control-allow-origin')).toBe('null');
+
+    const secret = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/guest-auth.json`);
+    expect(secret.getHeader('access-control-allow-origin')).toBeUndefined();
+  });
+
+  it('refuses unknown grants and files outside the workspace', async () => {
+    const { mint, serve } = register();
+    expect((await serve('/api/fs/preview/forged/workspace/site/index.html')).statusCode).toBe(403);
+
+    const { grant } = (await mint('/workspace/site/index.html')).body;
+    expect((await serve(`/api/fs/preview/${grant}/etc/passwd`)).statusCode).toBe(400);
+    expect((await mint('/etc/passwd')).statusCode).toBe(400);
+  });
+});
