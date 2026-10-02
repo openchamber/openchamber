@@ -185,6 +185,9 @@
     "sessionRetentionAction": {
       "scope": "instance"
     },
+    "mergedWorktreeCleanupEnabled": {
+      "scope": "instance"
+    },
     "terminalShell": {
       "scope": "instance"
     },

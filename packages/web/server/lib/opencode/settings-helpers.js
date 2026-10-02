@@ -507,6 +507,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
       result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
     }
+    if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
+      result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
