@@ -36,7 +36,6 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Suivi de l’utilisation d’OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Connectez le tableau de bord OpenCode Go pour afficher les quotas glissant, hebdomadaire et mensuel.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID de l’espace de travail',
-  'settings.providers.page.openCodeGo.authCookie': 'Cookie d’authentification',
   'settings.providers.page.openCodeGo.apiKey': 'Clé API',
   'settings.providers.page.openCodeGo.help': 'Copiez l’ID depuis l’URL du tableau de bord et le cookie auth depuis les outils du navigateur. OpenChamber n’analyse jamais les cookies du navigateur.',
   'settings.providers.page.openCodeGo.save': 'Enregistrer et valider',

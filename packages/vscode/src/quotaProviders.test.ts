@@ -37,7 +37,6 @@ configureOpenCodeCredentials({
 });
 
 import { fetchClinePassQuota, fetchHyperQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
-import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -1199,51 +1198,62 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
   });
 });
 
-describe('Ollama Cloud quota validation and refresh', () => {
-  const credential = { cookie: 'test-ollama-cookie' };
-  const readCookie = () => credential.cookie;
+describe('Ollama Cloud quota (API key)', () => {
+  const apiKey = 'test-ollama-key';
+  const readAuth = () => ({ 'ollama-cloud': { key: apiKey } });
 
-  for (const { html, expected } of [
-    { html: '<h1>Monthly usage</h1><p>$25.00 of $100.00</p>', expected: { monthly: { usedPercent: 25, valueLabel: '$25.00 / $100.00' } } },
-    { html: 'Monthly usage $1,250.00 of $2,500.00', expected: { monthly: { usedPercent: 50, valueLabel: '$1,250.00 / $2,500.00' } } },
-    { html: 'Session usage 12% Weekly usage 34% Premium 2 / 10', expected: { session: { usedPercent: 12 }, weekly: { usedPercent: 34 }, premium: { usedPercent: 20, valueLabel: '2 / 10' } } },
-    { html: 'Monthly usage $0 of $100 Balance remaining $5.25 Add $5', expected: { monthly: { usedPercent: 0, valueLabel: '$0 / $100' }, credits_balance: { usedPercent: null, valueLabel: '$5.25' } } },
-    { html: 'Monthly usage $0 of $100 Balance remaining $0.00 Add $5', expected: { monthly: { usedPercent: 0, valueLabel: '$0 / $100' } } },
-    { html: 'Monthly usage $125 of $100 Add $5', expected: { monthly: { usedPercent: 100, valueLabel: '$125 / $100' } } },
+  for (const { body, expected } of [
+    // The current shape: a single monthly bucket as a 0..1 fraction.
+    { body: { limits: { monthly: { usage: 0.25 } } }, expected: { monthly: { usedPercent: 25 } } },
+    // The older shape, which must keep working: separate session and weekly.
+    { body: { limits: { session: { usage: 0.12 }, weekly: { usage: 0.34 } } }, expected: { session: { usedPercent: 12 }, weekly: { usedPercent: 34 } } },
+    // Every shape the endpoint has served at some point.
+    { body: { limits: { daily: { usage: 0.1 }, weekly: { usage: 0.6 }, monthly: { usage: 0.9 } } }, expected: { daily: { usedPercent: 10 }, weekly: { usedPercent: 60 }, monthly: { usedPercent: 90 } } },
+    // A capped plan: usage at or over 1 reads as 100, never above.
+    { body: { limits: { monthly: { usage: 1 } } }, expected: { monthly: { usedPercent: 100 } } },
+    { body: { limits: { monthly: { usage: 1.4 } } }, expected: { monthly: { usedPercent: 100 } } },
+    // More than one bucket at a time, all of them rendered.
+    { body: { limits: { monthly: { usage: 0.25 }, daily: { usage: 0.1 } } }, expected: { monthly: { usedPercent: 25 }, daily: { usedPercent: 10 } } },
   ]) {
-    test(`accepts and displays ${html}`, async () => {
-      let requests = 0;
+    test(`maps ${JSON.stringify(body.limits)}`, async () => {
       const fetchImpl = async (url: string, init: RequestInit) => {
-        requests += 1;
-        assert.equal(url, 'https://ollama.com/settings');
-        assert.equal(init.redirect, 'manual');
+        assert.equal(url, 'https://ollama.com/api/usage');
         assert.equal(init.method, 'GET');
-        assert.equal(new Headers(init.headers).get('Cookie'), credential.cookie);
+        assert.equal(new Headers(init.headers).get('Authorization'), `Bearer ${apiKey}`);
         assert.ok(init.signal instanceof AbortSignal);
-        return new Response(html);
+        return new Response(JSON.stringify(body));
       };
-      await validateCredential('ollama-cloud', credential, fetchImpl);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
-      assert.equal(requests, 2);
+      const result = await fetchOllamaCloudQuota({ readAuth, fetchImpl });
       assert.equal(result.ok, true);
       assert.ok(result.usage);
       assert.deepEqual(Object.keys(result.usage.windows), Object.keys(expected));
       for (const [key, expectedWindow] of Object.entries(expected)) {
-        const window: NonNullable<typeof result.usage>['windows'][string] = result.usage.windows[key];
-        assert.ok(window);
-        assert.equal(window.usedPercent, expectedWindow.usedPercent);
-        if ('valueLabel' in expectedWindow) assert.equal(window.valueLabel, expectedWindow.valueLabel);
-        assert.equal(window.resetAt, null);
+        assert.equal(result.usage.windows[key]!.usedPercent, expectedWindow.usedPercent);
+        assert.equal(result.usage.windows[key]!.resetAt, null);
       }
-      assert.equal(JSON.stringify(result).includes(credential.cookie), false);
+      // The key must never come back through the result.
+      assert.equal(JSON.stringify(result).includes(apiKey), false);
     });
   }
 
-  for (const html of ['', '<h1>Monthly usage</h1>', 'Session usage', 'Session usage 1.2.3%', 'Weekly usage 1.2.3%', 'Add $5', 'Monthly usage $1.2.3 of $100', 'Balance remaining $1.2.3']) {
-    test(`rejects unparseable HTML ${JSON.stringify(html)} in both consumers`, async () => {
-      const fetchImpl = async () => new Response(html);
-      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /usage data could not be parsed/);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+  test('keeps the buckets it understands when one bucket is a shape we do not', async () => {
+    // The endpoint is undocumented and has changed shape repeatedly, so an
+    // unfamiliar bucket must cost only itself, never the whole tracker.
+    const result = await fetchOllamaCloudQuota({
+      readAuth,
+      fetchImpl: async () => new Response(JSON.stringify({
+        limits: { monthly: { usage: 0.25 }, tomorrow: { note: 'something new' } },
+      })),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly']);
+    assert.equal(result.usage!.windows.monthly!.usedPercent, 25);
+  });
+
+  for (const body of [{}, { limits: {} }, { limits: { monthly: {} } }, { limits: { monthly: { usage: 'half' } } }, null]) {
+    test(`rejects a response without usable usage data: ${JSON.stringify(body)}`, async () => {
+      const fetchImpl = async () => new Response(JSON.stringify(body));
+      const result = await fetchOllamaCloudQuota({ readAuth, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.configured, true);
       assert.equal(result.usage, null);
@@ -1251,35 +1261,43 @@ describe('Ollama Cloud quota validation and refresh', () => {
     });
   }
 
-  for (const status of [302, 307, 401, 403, 429, 500]) {
-    test(`rejects HTTP ${status} in both consumers`, async () => {
-      const fetchImpl = async () => new Response('Monthly usage $25 of $100', { status });
-      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /authentication failed/);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+  for (const status of [401, 403]) {
+    test(`reports an auth failure for HTTP ${status}`, async () => {
+      const fetchImpl = async () => new Response('{"error":"invalid credentials"}', { status });
+      const result = await fetchOllamaCloudQuota({ readAuth, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.usage, null);
       assert.equal(result.error, 'Ollama Cloud authentication failed');
     });
   }
 
+  for (const status of [429, 500, 503]) {
+    test(`reports HTTP ${status} without calling it an auth failure`, async () => {
+      const fetchImpl = async () => new Response('', { status });
+      const result = await fetchOllamaCloudQuota({ readAuth, fetchImpl });
+      assert.equal(result.ok, false);
+      assert.equal(result.usage, null);
+      assert.equal(result.error, `Ollama Cloud returned HTTP ${status}`);
+    });
+  }
+
   for (const failure of [new DOMException('Request timed out', 'TimeoutError'), new Error('Network unavailable')]) {
-    test(`reports ${failure.message} in both consumers`, async () => {
+    test(`reports ${failure.message}`, async () => {
       const fetchImpl = async () => { throw failure; };
-      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), failure);
-      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      const result = await fetchOllamaCloudQuota({ readAuth, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.usage, null);
       assert.equal(result.error, failure.message);
     });
   }
 
-  test('does not request usage without a cookie', async () => {
-    const result = await fetchOllamaCloudQuota({ readCookie: () => undefined, fetchImpl: async () => { assert.fail('Unexpected request'); } });
+  test('does not request usage without an API key', async () => {
+    const result = await fetchOllamaCloudQuota({ readAuth: () => ({}), fetchImpl: async () => { assert.fail('Unexpected request'); } });
     assert.equal(result.configured, false);
     assert.equal(result.ok, false);
   });
 
-  test('reports response body failures in both consumers', async () => {
+  test('reports response body failures', async () => {
     const failure = new Error('Response body interrupted');
     const fetchImpl = async () => new Response(new ReadableStream<Uint8Array>({
       start(controller) {
@@ -1287,13 +1305,11 @@ describe('Ollama Cloud quota validation and refresh', () => {
       },
     }));
 
-    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), failure);
-    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    const result = await fetchOllamaCloudQuota({ readAuth, fetchImpl });
     assert.equal(result.ok, false);
     assert.equal(result.configured, true);
     assert.equal(result.usage, null);
     assert.equal(result.error, failure.message);
-    assert.deepEqual(credential, { cookie: 'test-ollama-cookie' });
   });
 });
 

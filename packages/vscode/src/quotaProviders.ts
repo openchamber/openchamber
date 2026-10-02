@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
-import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
+import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
-import { fetchOllamaUsage } from './ollamaQuota';
+import { fetchOllamaCloudUsage } from './ollamaQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -799,9 +799,13 @@ export const listConfiguredQuotaProviders = async () => {
   const configured = new Set<string>();
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
-  if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
+
+  // Ollama Cloud reads its key from OpenCode's credential store, so it is
+  // configured exactly when that integration has a key.
+  const ollamaAuth = normalizeAuthEntry(getAuthEntry(auth, ['ollama-cloud', 'ollamacloud']));
+  if (asNonEmptyString(ollamaAuth?.key) ?? asNonEmptyString(ollamaAuth?.token)) configured.add('ollama-cloud');
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -1887,16 +1891,24 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
-export const fetchOllamaCloudQuota = async ({
-  readCookie = () => readCredential('ollama-cloud')?.cookie,
-  fetchImpl = fetch,
-}: {
-  readCookie?: () => string | undefined;
+type OllamaCloudQuotaDependencies = {
+  readAuth?: () => AuthFile | Promise<AuthFile>;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
-} = {}): Promise<ProviderResult> => {
-  const cookie = readCookie();
+};
 
-  if (!cookie) {
+/** The active account's Ollama Cloud API key, the same one chat requests use. */
+const readOllamaCloudApiKey = (auth: AuthFile): string | undefined => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['ollama-cloud', 'ollamacloud']));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token) ?? undefined;
+};
+
+export const fetchOllamaCloudQuota = async ({
+  readAuth = readOpenCodeCredentials,
+  fetchImpl = fetch,
+}: OllamaCloudQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = readOllamaCloudApiKey(await readAuth());
+
+  if (!apiKey) {
     return buildResult({
       providerId: 'ollama-cloud',
       providerName: 'Ollama Cloud',
@@ -1906,8 +1918,12 @@ export const fetchOllamaCloudQuota = async ({
     });
   }
 
+  // The cookie this provider used to store is obsolete the first time we reach
+  // for the key instead. Mirrors the web server's cleanup.
+  deleteLegacyOllamaCloudCredential();
+
   try {
-    const parsed = await fetchOllamaUsage(cookie, fetchImpl);
+    const parsed = await fetchOllamaCloudUsage(apiKey, fetchImpl);
     const windows = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [
       key, toUsageWindow({ ...value, windowSeconds: null, resetAt: null }),
     ]));

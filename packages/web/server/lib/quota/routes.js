@@ -1,12 +1,15 @@
 import express from 'express';
 import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
-import { fetchOllamaCloudUsage } from './providers/ollama-cloud.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
 
+// Keyed by the same provider ids as `normalizers`, and it has to stay that way.
+// A provider with a normalizer but no validator would be stored without ever
+// being checked; a validator with no normalizer is unreachable today, because
+// `getProvider` rejects the id first, and would call a now-wrong signature if a
+// normalizer were ever added back.
 const validators = {
   'exe-dev': fetchExeDevUsage,
-  'ollama-cloud': fetchOllamaCloudUsage,
   cursor: validateCursorCredential,
 };
 

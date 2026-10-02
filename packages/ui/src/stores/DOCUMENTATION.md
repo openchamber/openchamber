@@ -57,8 +57,30 @@ These stores act like centralized keyed caches. UI should consume narrow slices 
 `refreshErrors`. Transport failures and configured-provider errors preserve the
 last usage sample and its timestamp. An explicit unconfigured response replaces
 old configuration; a first-load transport failure leaves it unknown. Concurrent
-refreshes share one request per provider. Runtime reset aborts those requests,
-and generation checks prevent their completions from changing the next runtime.
+refreshes share one request per provider, except after a provider-account switch,
+which passes `invalidate` to ask again rather than join a request that still
+describes the account being switched away from. Runtime reset aborts those
+requests, and generation checks prevent their completions from changing the next
+runtime.
+
+`invalidate` also decides what happens to the last sample when a refresh fails.
+A periodic refresh keeps the previous numbers, because that sample belongs to
+the same account and a blip should not blank a surface showing real data. A
+refresh after a switch does not: the sample is the account just left, so keeping
+it would show one account's usage as the new account's, which reads as the
+credential never changing. The entry is replaced by the new account's failure.
+
+A switch is picked up from OpenCode's event stream rather than from the screen
+that made it, so `catalogRefreshTasks("credential")` re-reads the selected
+trackers when a credential changes. That is what covers a switch made in
+OpenCode's own TUI or by another client, which no OpenChamber screen can see.
+Only the trackers the store already shows are re-read. That is gated on the
+results the store holds, not on the instance-level load flag, because runtimes
+differ in how they load: the VS Code layout fetches quotas on open and never
+calls `ensureLoadedForRuntime`, so `loadedRuntimeKey` stays null there and
+gating on it skipped every refresh in the extension. With nothing fetched there
+is nothing on screen to update, and the un-loaded provider list is every tracker
+rather than the user's selection.
 `lib/quota/fetchQuota.ts` validates response payloads and bounds the complete
 request, including JSON body delivery. Compact usage cards and Settings display
 refresh errors alongside retained data. The mobile popover makes at most one

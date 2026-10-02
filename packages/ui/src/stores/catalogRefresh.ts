@@ -19,6 +19,7 @@ import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
 import { useConfigStore } from "@/stores/useConfigStore";
 import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
 import { usePluginsStore } from "@/stores/usePluginsStore";
+import { useQuotaStore } from "@/stores/useQuotaStore";
 import { refreshWebSearchIfLoaded } from "@/stores/useWebSearchStore";
 
 const SOURCE = "catalogRefresh";
@@ -81,6 +82,35 @@ const refreshProvidersAfterCredentialChange = async (): Promise<void> => {
   await refreshProviders();
 };
 
+/**
+ * A credential event is the live channel for "which account is active", so the
+ * usage trackers re-read from it rather than from whichever screen switched the
+ * account. That is also what covers a switch made in OpenCode's own TUI or by
+ * another client, which no OpenChamber screen can see.
+ *
+ * Every tracker the user selected is re-read, because the event does not name
+ * the provider and threading that through the event, the sync layer and this
+ * table costs more than the extra requests on an action a person performs a few
+ * times a day.
+ */
+const refreshUsageAfterCredentialChange = async (): Promise<void> => {
+  const { results, dropdownProviderIds, fetchQuotas } = useQuotaStore.getState();
+  // Only the trackers this store already shows. Gating on `results` rather than
+  // on the instance-level load flag is what makes this work in the VS Code
+  // extension: that layout fetches quotas on open and never calls
+  // `ensureLoadedForRuntime`, so `loadedRuntimeKey` stays null there and gating
+  // on it silently skipped every refresh. With nothing fetched there is nothing
+  // on screen to update, and `dropdownProviderIds` is still its default of every
+  // tracker rather than the user's selection.
+  const shown = new Set(results.map((result) => result.providerId));
+  const targets = dropdownProviderIds.filter((providerId) => shown.has(providerId));
+  if (targets.length === 0) return;
+  // `invalidate` because a credential event means the last sample can belong to
+  // the account just left; keeping it would show that account's numbers as the
+  // new one's.
+  await fetchQuotas(targets, { invalidate: true });
+};
+
 /** The lists a catalog kind invalidates, in the order they are re-read. */
 export function catalogRefreshTasks(kind: CatalogKind): Array<() => Promise<void>> {
   switch (kind) {
@@ -99,9 +129,10 @@ export function catalogRefreshTasks(kind: CatalogKind): Array<() => Promise<void
     case "provider":
     case "model":
       return [refreshProviders];
-    // A web search key is a credential too.
+    // A web search key is a credential too, and a switch of provider accounts
+    // changes which account the usage trackers report on.
     case "credential":
-      return [refreshProvidersAfterCredentialChange, refreshWebSearchIfLoaded];
+      return [refreshProvidersAfterCredentialChange, refreshWebSearchIfLoaded, refreshUsageAfterCredentialChange];
     // A config file can carry any of them (a provider declared in
     // opencode.json included), and OpenChamber's own plugin injection lives
     // in one, so the whole set is re-read.

@@ -5,9 +5,9 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-type ProviderId = 'exe-dev' | 'ollama-cloud' | 'cursor';
+type ProviderId = 'exe-dev' | 'cursor';
 type Status = { configured: boolean; secretMasked?: string };
-type CredentialPayload = { usageToken?: string; cookie?: string; accessToken?: string; refreshToken?: string };
+type CredentialPayload = { usageToken?: string; accessToken?: string; refreshToken?: string };
 const EXE_DEV_TOKEN_COMMAND = `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`;
 
 export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: string }> = ({ providerId, providerName }) => {
@@ -41,7 +41,6 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
         <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.exeDevTokenInstructions')}</p>
         <code className="typography-code block whitespace-pre-wrap break-all rounded bg-muted/50 px-2 py-1.5 text-xs text-foreground">{EXE_DEV_TOKEN_COMMAND}</code>
       </div>}
-      {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'aid=...; __Secure-session=...')}
       {providerId === 'exe-dev' && field('usageToken', t('settings.providers.page.quotaCredentials.usageToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.quotaCredentials.refreshToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
