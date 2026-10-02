@@ -73,6 +73,7 @@ import {
 } from "./vscode-permission-auto-accept"
 import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
+import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { refreshSpacesJourney, useSpacesStore } from "@/lib/spaces/spaces-store"
@@ -1575,6 +1576,24 @@ function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }
 
+/**
+ * OpenCode starts a location's MCP servers asynchronously and announces each
+ * server's status as it settles, in the location it runs in. A status read
+ * moments after the location started holds `pending` until that announcement
+ * re-reads it. One re-read per directory once the burst settles.
+ */
+const MCP_STATUS_REFRESH_DEBOUNCE_MS = 250
+const mcpStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function scheduleMcpStatusRefresh(directory: string): void {
+  const pending = mcpStatusRefreshTimers.get(directory)
+  if (pending) clearTimeout(pending)
+  mcpStatusRefreshTimers.set(directory, setTimeout(() => {
+    mcpStatusRefreshTimers.delete(directory)
+    void useMcpStore.getState().refreshIfHeld(directory)
+  }, MCP_STATUS_REFRESH_DEBOUNCE_MS))
+}
+
 // Only top-level sessions raise notifications. The directory store knows the
 // parent when the directory is open; the global cache covers the rest.
 const isSubtaskSession = (
@@ -1896,6 +1915,7 @@ export function handleEvent(
       ? permissionReplayAsAsk(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, streamingDirectory)
       : null
     notifyBlockingRequestWithoutStore(payload, directory, replayAsAsk)
+    if (payload.type === "mcp.status.changed") scheduleMcpStatusRefresh(directory)
     // Try as global event for unknown directories
     const result = reduceGlobalEvent(payload)
     if (result?.type === "refresh") {
@@ -2069,6 +2089,7 @@ export function handleEvent(
   // directory it lands here rather than in the global branch above.
   const reducerResult = applyDirectoryEvent(draft, payload, {
     onCatalogUpdated: (kind) => scheduleCatalogReload(kind, childStores, resolvedDirectory),
+    onLoadMcp: () => scheduleMcpStatusRefresh(resolvedDirectory),
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization

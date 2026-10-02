@@ -5,6 +5,7 @@ import { ChildStoreManager } from "../child-store"
 import { createEventRoutingIndex, handleEvent } from "../sync-context"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { useAgentsStore } from "@/stores/useAgentsStore"
+import { useMcpStore } from "@/stores/useMcpStore"
 
 // OpenCode announces a rebuilt catalog in the location it rebuilt it for. The
 // project being worked in has a directory store, so its events take the
@@ -83,5 +84,51 @@ describe("catalog events for an open directory", () => {
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
     expect(directoryAgentReads).toEqual(["/open"])
+  })
+})
+
+// OpenCode starts a location's MCP servers asynchronously, so a status read
+// right after the location started says `pending`; the change announcement
+// is what brings the panel to `connected`.
+describe("MCP status announcements", () => {
+  const mcpStatusChanged: SyncEvent = { type: "mcp.status.changed", properties: { server: "linear" } }
+  const originalListMcpServers = opencodeClient.listMcpServers
+  let childStores: ChildStoreManager
+  let statusReads: Array<string | null | undefined> = []
+
+  beforeEach(() => {
+    childStores = new ChildStoreManager()
+    childStores.ensureChild("/open", { bootstrap: false })
+    statusReads = []
+    opencodeClient.listMcpServers = async (directory) => {
+      statusReads.push(directory)
+      return [{ name: "linear", status: { status: "connected" } }]
+    }
+    useMcpStore.getState().resetForRuntimeSwitch()
+  })
+
+  afterEach(() => {
+    childStores.disposeAll()
+    opencodeClient.listMcpServers = originalListMcpServers
+    useMcpStore.getState().resetForRuntimeSwitch()
+  })
+
+  test("re-reads a held status once the burst settles", async () => {
+    useMcpStore.setState({ byDirectory: { "/open": { linear: { name: "linear", status: { status: "pending" } } } } })
+
+    handleEvent("/open", mcpStatusChanged, childStores, createEventRoutingIndex(), getRuntimeKey())
+    handleEvent("/open", mcpStatusChanged, childStores, createEventRoutingIndex(), getRuntimeKey())
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+    expect(statusReads).toEqual(["/open"])
+    expect(useMcpStore.getState().getStatusForDirectory("/open").linear?.status.status).toBe("connected")
+  })
+
+  test("leaves a directory nobody asked about alone", async () => {
+    handleEvent("/open", mcpStatusChanged, childStores, createEventRoutingIndex(), getRuntimeKey())
+    handleEvent("/far", mcpStatusChanged, childStores, createEventRoutingIndex(), getRuntimeKey())
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+    expect(statusReads).toEqual([])
   })
 })
