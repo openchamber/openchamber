@@ -73,6 +73,7 @@ import { shouldAllowBrowserPanelCertificateError } from './browser-panel-securit
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
+import { createLoadFailureWarningFilter } from './load-failure-warnings.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
@@ -105,6 +106,19 @@ log.transports.console.level = isDev ? 'debug' : 'warn';
 // the fact. Route all console calls through electron-log so server-side
 // diagnostics are persisted.
 Object.assign(console, log.functions);
+
+// Node prints process warnings through console.error, so Electron's per-attempt
+// "Failed to load URL" warnings would flood main.log while the browser panel
+// waits for a dev server. Wrap Node's printer so repeats go to debug instead.
+const printProcessWarning = process.listeners('warning').find((listener) => listener.name === 'onWarning');
+if (printProcessWarning) {
+  const shouldReportWarning = createLoadFailureWarningFilter();
+  process.off('warning', printProcessWarning);
+  process.on('warning', (warning) => {
+    if (shouldReportWarning(warning)) printProcessWarning(warning);
+    else log.debug(`electron: ${warning.message}`);
+  });
+}
 
 const STARTUP_PERF_ENABLED_VALUES = new Set(['1', 'true']);
 const ELECTRON_STARTUP_PERF_PHASES = new Set([
