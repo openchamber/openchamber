@@ -1408,6 +1408,35 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
   }, 10_000);
 
+  test('a transient agent.list failure recovers on its own once OpenCode catches up', async () => {
+    let calls = 0;
+    listAgentsImpl = async () => {
+      calls += 1;
+      if (calls < 3) throw new Error('agent.list failed (500): unexpected status');
+      return [testAgent('build')];
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(calls).toBe(3);
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
+  test('a config error is not retried before being reported', async () => {
+    listAgentsImpl = async () => {
+      throw new Error('agent.list failed (400)', {
+        cause: Object.assign(new Error('bad file reference'), {
+          name: 'ConfigInvalidError',
+          data: { path: `${DIRECTORY}/opencode.json`, message: 'bad file reference' },
+        }),
+      });
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(listAgentsCalls).toBe(1);
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+  }, 10_000);
+
   test('publishes configured defaults before slow catalogs finish', async () => {
     const providers = deferred<TestProviderResponse>();
     const agents = deferred<TestAgent[]>();

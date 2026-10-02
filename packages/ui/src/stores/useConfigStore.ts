@@ -3842,12 +3842,29 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             if (debug) console.log("Loading providers and agents...");
-                            const [, agentsLoaded] = await Promise.all([
+                            const [, firstAgentsLoaded] = await Promise.all([
                                 get().loadProviders({ directory: configDirectory, source: 'initializeApp' }),
                                 get().loadAgents({ directory: configDirectory, source: 'initializeApp' }),
                             ]);
 
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+
+                            // agent.list can race OpenCode's own startup (a plugin or custom
+                            // provider still registering) and fail transiently. A config error
+                            // or a missing project directory won't resolve by retrying, so only
+                            // retry the kind of failure that might just need a moment more.
+                            let agentsLoaded = firstAgentsLoaded;
+                            const maxAgentRetries = 3;
+                            for (let attempt = 0; !agentsLoaded && attempt < maxAgentRetries; attempt++) {
+                                if (get().projectConfigErrors[configDirectoryKey]) break;
+                                if (await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') break;
+                                await sleep(500 * (attempt + 1));
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                                markStartupTrace('initializeApp:loadAgentsRetry', { attempt: attempt + 1, configDirectoryKey });
+                                agentsLoaded = await get().loadAgents({ directory: configDirectory, source: 'initializeApp:retry' });
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            }
+
                             if (!agentsLoaded) {
                                 // A broken config belongs to this one project. Finish startup
                                 // so the user can read the error and move to another project;
