@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useUIStore } from '@/stores/useUIStore';
 import type { IconName } from '@/components/icon/icons';
 
@@ -124,6 +125,7 @@ type RowProps = {
   /** Turns the row into a button; the caller decides what it opens. */
   onClick?: () => void;
   ariaLabel?: string;
+  tooltip?: React.ReactNode;
   className?: string;
 };
 
@@ -140,6 +142,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   muted,
   onClick,
   ariaLabel,
+  tooltip,
   className,
 }) => {
   const labelId = React.useId();
@@ -166,12 +169,10 @@ export const WorkStatusRow: React.FC<RowProps> = ({
     className,
   );
 
-  if (!onClick) return <div className={shared}>{body}</div>;
-
   // A button cannot hold another one, and rows often carry their own (unpin,
   // a row action). The row's button is stretched under the content instead:
   // the whole row still answers a press, and controls inside it sit above.
-  return (
+  const row = onClick ? (
     <div className={cn(shared, 'relative transition-colors hover:text-foreground')}>
       <button
         type="button"
@@ -185,6 +186,17 @@ export const WorkStatusRow: React.FC<RowProps> = ({
         {body}
       </div>
     </div>
+  ) : <div className={shared} tabIndex={tooltip ? 0 : undefined}>{body}</div>;
+
+  if (!tooltip) return row;
+
+  return (
+    <Tooltip delayDuration={750}>
+      <TooltipTrigger asChild>{row}</TooltipTrigger>
+      <TooltipContent side="left" sideOffset={8} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-left">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 };
 
