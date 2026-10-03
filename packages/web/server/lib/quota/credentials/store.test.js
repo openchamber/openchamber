@@ -22,6 +22,17 @@ describe('quota credential store', () => {
     deleteQuotaCredential('zenmux');
   });
 
+  it.runIf(process.platform !== 'win32')('leaves an existing directory with the permissions it already has', () => {
+    const directory = path.join(temporaryDirectory, 'quota');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.chmodSync(directory, 0o750);
+    writeQuotaCredential('exe-dev', { usageToken: 'secret' });
+    expect(fs.statSync(directory).mode & 0o777).toBe(0o750);
+    expect(fs.statSync(path.join(directory, 'exe-dev.json')).mode & 0o777).toBe(0o600);
+    deleteQuotaCredential('exe-dev');
+    fs.chmodSync(directory, 0o700);
+  });
+
   it('removes the obsolete OpenCode Go credential without parsing it', () => {
     const legacyPath = path.join(temporaryDirectory, 'quota', 'opencode-go.json');
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
