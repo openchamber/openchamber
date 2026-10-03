@@ -312,7 +312,18 @@ describe('auto sessions', () => {
 });
 
 describe('evaluatePermission', () => {
-  const permission = { id: 'p1', sessionID: 's1', permission: 'bash', patterns: ['git push --force'], metadata: { command: 'git push --force origin main' } };
+  // The v2 shape permission auto-accept hands over: `action` and `resources`.
+  const permission = { id: 'p1', sessionID: 's1', action: 'bash', resources: ['git push --force'], metadata: { command: 'git push --force origin main' } };
+
+  it('tells Jev what the request does and to what', async () => {
+    const { runtime, jev } = makeRuntime({ answers: { ask: { noul: 0.1 }, kind: { choice: 'read_only' } } });
+    await runtime.evaluatePermission(permission, '/repo');
+    expect(jev.ask.mock.calls[0][0].state.permission).toEqual({
+      type: 'bash',
+      patterns: ['git push --force'],
+      metadata: { command: 'git push --force origin main' },
+    });
+  });
 
   it('holds a risky permission and remembers the decision', async () => {
     const { runtime, jev, events } = makeRuntime({ answers: { ask: { noul: 0.9 }, kind: { choice: 'git_history' } } });

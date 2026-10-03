@@ -19,12 +19,15 @@ export const buildRoutingRequest = ({ categories, history, request }) => {
   };
 };
 
-/** `permission` is what OpenCode reported: the tool kind, its patterns and its metadata. */
+/**
+ * `permission` is the v2 request OpenCode reported: the action (tool kind), the
+ * resources it touches and its metadata. Jev's contract keeps its own names.
+ */
 export const buildPermissionRequest = (permission) => ({
   state: {
     permission: {
-      type: permission.permission,
-      patterns: permission.patterns,
+      type: permission.action,
+      patterns: permission.resources,
       metadata: permission.metadata,
     },
   },
