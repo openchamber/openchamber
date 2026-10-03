@@ -281,6 +281,21 @@ describe('Markdown images', () => {
     expect(html).not.toContain('data-openchamber-markdown-image-label');
   });
 
+  test('links remote images in tool output and keeps local ones drawn', () => {
+    const html = renderMarkdownSync([
+      '![tracker](https://evil.example/pixel.png?seen=secret)',
+      '![screenshot](screens/run.png)',
+      '[![badge](https://img.shields.io/badge/ci-passing-green)](https://ci.example)',
+    ].join('\n\n'), 'local');
+
+    // The remote image never becomes an <img>: it is a link to open on purpose.
+    expect(html).not.toContain('<img src="https://');
+    expect(html).toContain('<a href="https://evil.example/pixel.png?seen=secret" class="external-link"');
+    expect(html).toContain('<img src="screens/run.png" alt="screenshot">');
+    // A badge inside a link stays a label: a link cannot hold another.
+    expect(html.match(/<a /g)).toHaveLength(2);
+  });
+
   test('collects image syntax across mixed Markdown and ignores links and code', () => {
     const candidates = extractMarkdownImageCandidates([
       [

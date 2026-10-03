@@ -32,7 +32,17 @@ export interface MarkdownImageCandidate {
   filename: string;
 }
 
-export type MarkdownImageMode = 'inline' | 'label';
+/**
+ * `inline` draws every image. `label` draws none: the image becomes its file
+ * name (assistant text, whose images the gallery shows). `local` draws images
+ * from this machine and `data:` images, and turns a remote one into a link.
+ * A remote image loads by itself the moment it renders, so in output the
+ * model or a tool wrote (tool results, reasoning) it could report what the
+ * user is reading to any server; a link waits for a click.
+ */
+export type MarkdownImageMode = 'inline' | 'label' | 'local';
+
+export const isRemoteMarkdownImageSource = (source: string): boolean => /^(?:https?:)?\/\//i.test(source);
 
 /**
  * `escape` keeps raw HTML visible as text (assistant output and every other
@@ -159,6 +169,9 @@ export const __markdownImageCandidateCacheForTests = {
   }),
 };
 
+/** Links being rendered right now; parsing is synchronous, so a counter is exact. */
+let markdownLinkDepth = 0;
+
 const renderMarkdownImageLabel = ({
   href,
   title,
@@ -170,7 +183,11 @@ const renderMarkdownImageLabel = ({
 }): string => {
   const label = getMarkdownImageFilename(href ?? '', text);
   const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-  return `<span${titleAttr} class="inline-flex items-center gap-1 align-text-bottom text-muted-foreground" data-openchamber-markdown-image-label="true">${escapeAttr(label)}</span>`;
+  const span = `<span${titleAttr} class="inline-flex items-center gap-1 align-text-bottom text-muted-foreground" data-openchamber-markdown-image-label="true">${escapeAttr(label)}</span>`;
+  // A remote image becomes a link to itself, unless it already sits inside
+  // one (a badge): a link cannot hold another.
+  if (!isRemoteMarkdownImageSource(href ?? '') || markdownLinkDepth > 0) return span;
+  return `<a href="${escapeAttr(href)}" class="external-link" target="_blank" rel="noopener noreferrer">${span}</a>`;
 };
 
 export const extractMarkdownImageCandidates = (
@@ -648,7 +665,13 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
         link({ href, title, tokens }) {
           // The link text goes through the inline renderer, so an image
           // inside it (a badge) renders and raw HTML in it follows the mode.
-          const text = this.parser.parseInline(tokens);
+          markdownLinkDepth += 1;
+          let text: string;
+          try {
+            text = this.parser.parseInline(tokens);
+          } finally {
+            markdownLinkDepth -= 1;
+          }
           const target = href ?? '';
           const agentName = parseAgentHref(target);
           if (agentName) {
@@ -662,6 +685,10 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
           return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
         },
         ...(imageMode === 'label' ? { image: renderMarkdownImageLabel } : {}),
+        // `false` hands a local image back to marked's own renderer.
+        ...(imageMode === 'local'
+          ? { image: (token: Tokens.Image) => (isRemoteMarkdownImageSource(token.href ?? '') ? renderMarkdownImageLabel(token) : false) }
+          : {}),
       },
     },
   );
@@ -669,11 +696,13 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
 
 const inlineImageParser = createParser('inline', 'escape');
 const imageLabelParser = createParser('label', 'escape');
+const localImageParser = createParser('local', 'escape');
 const documentParser = createParser('inline', 'sanitize');
 
 const parserFor = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
   if (rawHtml === 'sanitize') return documentParser;
-  return imageMode === 'label' ? imageLabelParser : inlineImageParser;
+  if (imageMode === 'label') return imageLabelParser;
+  return imageMode === 'local' ? localImageParser : inlineImageParser;
 };
 
 // ---------------------------------------------------------------------------

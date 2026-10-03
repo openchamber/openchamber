@@ -1268,7 +1268,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const { locale } = useI18n();
-  const imageMode: MarkdownImageMode = variant === 'assistant' ? 'label' : 'inline';
+  // Assistant images live in the gallery under the message; tool output and
+  // reasoning draw local images and link remote ones (see MarkdownImageMode).
+  const imageMode: MarkdownImageMode = variant === 'assistant' ? 'label' : 'local';
   const settledPart = part
     && (part.type === 'text' || part.type === 'reasoning')
     && part.time?.end !== undefined
@@ -1397,6 +1399,9 @@ const SimpleMarkdownRendererImpl: React.FC<{
     containerRef,
     text: renderedContent,
     streaming: false,
+    // A document a user opened (allowRawHtml) draws its images like GitHub
+    // does; everything else here is written by a model or a tool.
+    imageMode: 'local',
     rawHtml: allowRawHtml ? 'sanitize' : 'escape',
     syntaxVars,
     ctx,

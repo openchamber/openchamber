@@ -13,6 +13,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import type { ToolPopupContent } from './message/types';
 import {
   extractMarkdownImageCandidates,
+  isRemoteMarkdownImageSource,
   MAX_MARKDOWN_IMAGE_COUNT,
   type MarkdownImageCandidate,
 } from './markdown/markdownCore';
@@ -209,8 +210,12 @@ export const MarkdownImageGallery: React.FC<{
   const [prepared, setPrepared] = React.useState<Map<string, PreparedMarkdownImage> | null>(null);
   const [prepareEpoch, setPrepareEpoch] = React.useState(0);
   const useWorkspaceFsBridge = isVSCodeRuntime();
+  // Only images on this machine or inside the message. A remote image would
+  // load by itself as the thumbnail scrolls into view and tell its server what
+  // the user is reading; in the text it is a link to open on purpose.
   const candidates = React.useMemo(
-    () => extractMarkdownImageCandidates(contents, MAX_MARKDOWN_IMAGE_COUNT),
+    () => extractMarkdownImageCandidates(contents, MAX_MARKDOWN_IMAGE_COUNT)
+      .filter((candidate) => !isRemoteMarkdownImageSource(candidate.source)),
     [contents],
   );
   const serverPreparationSources = React.useMemo(
