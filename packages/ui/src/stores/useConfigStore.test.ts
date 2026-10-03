@@ -6,7 +6,7 @@ import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 const DIRECTORY = '/workspace/project';
 const OTHER_DIRECTORY = '/workspace/other';
 const STORAGE_KEY = 'config-store';
-type TestAgent = { name: string; mode?: string; hidden?: boolean; model?: { providerID?: string; modelID?: string }; variant?: string };
+type TestAgent = { name: string; mode?: string; hidden?: boolean; model?: { providerID?: string; modelID?: string }; variant?: string; options?: { hidden?: boolean } };
 
 let storage = new Map<string, string>();
 let liveProviderId = 'live';
@@ -101,6 +101,8 @@ const testAgent = (name: string, options?: Partial<TestAgent>): Agent => ({
     : undefined,
   request: { settings: {}, headers: {}, body: {} },
   permissions: [],
+  // Older agent files carry `options.hidden`; isAgentHidden reads both spellings.
+  ...(options?.options ? { options: options.options } : {}),
 });
 
 const deferred = <T,>() => {
@@ -2666,6 +2668,24 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentAgentName).toBe('manual-agent');
     expect(state.currentProviderId).toBe('manual');
     expect(state.selectionSource).toBe('manual');
+  });
+
+  test('skips hidden primary agents during fallback selection (both hidden and options.hidden)', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('live')],
+      agents: [
+        testAgent('compaction', { mode: 'primary', hidden: true }),
+        testAgent('options-hidden', { mode: 'primary', options: { hidden: true } }),
+        testAgent('summary', { mode: 'primary', hidden: true }),
+        testAgent('custom-agent', { mode: 'primary', hidden: false }),
+      ],
+      settingsDefaultAgent: undefined,
+      opencodeDefaultAgent: undefined,
+      currentAgentName: undefined,
+    });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState().currentAgentName).toBe('custom-agent');
   });
 });
 
