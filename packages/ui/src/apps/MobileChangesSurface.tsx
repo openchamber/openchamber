@@ -19,7 +19,7 @@ import { describePulledFiles, pullUpstreamChanges, pushCommittedChanges } from '
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { SyncActions } from '@/components/views/git/SyncActions';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
-import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
+import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
@@ -32,7 +32,7 @@ import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
 import { mapWithConcurrency } from '@/lib/concurrency';
-import type { FileDiffMetadata } from '@pierre/diffs';
+import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
 import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
 import { SubmoduleDiffSummary } from '@/components/views/SubmoduleDiffSummary';
@@ -77,6 +77,7 @@ type ComparisonDiff =
   | { status: 'ready'; diff: MobileDiffData }
   | { status: 'error'; message: string };
 const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
+const FULL_CONTEXT_DIFF_LINES = 1_000_000;
 const LIST_ROUTE: ChangesRoute = { type: 'list' };
 
 // The server already serializes reverts per repository, so anything beyond a
@@ -223,7 +224,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }, [branchComparison.base, currentBranch, mode, selectedCommitHash, selectedPr]);
   const comparisonRevision = mode === 'branch' ? branchComparison.revision : '';
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision);
-  const { fetchDiff: loadComparisonDiff } = comparison;
+  const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
   const activeComparisonPath = route.type === 'comparison' && route.sourceKey === comparison.key ? route.path : null;
   const [comparisonRetry, setComparisonRetry] = React.useState(0);
@@ -245,6 +246,44 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     JSON.stringify([comparisonRevision, mode === 'pr' ? comparison.revision : 0, comparisonRetry]),
   );
   const activeComparisonDiff = activeComparisonPath ? comparisonDiffs.get(activeComparisonPath) ?? LOADING_COMPARISON_DIFF : null;
+  // Comparison diffs are patches with 3 lines of context. Expanding collapsed
+  // context switches this file alone to full contents, then the viewer replays
+  // the expansion, as in the desktop Changes view. Both states belong to the
+  // cache entry they were made for, so a new path, range or retry drops them.
+  const [contextExpansion, setContextExpansion] = React.useState<{ source: ComparisonDiff; request: ContextExpansionRequest } | null>(null);
+  const [fullComparisonDiff, setFullComparisonDiff] = React.useState<{ source: ComparisonDiff; diff: MobileDiffData } | null>(null);
+  const pendingContextExpansion = contextExpansion && contextExpansion.source === activeComparisonDiff ? contextExpansion.request : null;
+  const activeFullComparisonDiff = fullComparisonDiff && fullComparisonDiff.source === activeComparisonDiff ? fullComparisonDiff.diff : null;
+  React.useEffect(() => {
+    const source = activeComparisonDiff;
+    if (!pendingContextExpansion || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
+    let cancelled = false;
+    const path = activeComparisonPath;
+    // Branch and commit diffs are re-read from git with the whole file as
+    // context; a PR diff comes from GitHub at fixed context, so its full view
+    // is built from both sides of the file as GitHub has them.
+    const loadFullDiff = async (): Promise<MobileDiffData> => {
+      if (mode === 'pr') {
+        const { original, modified } = await loadComparisonFullFile(path);
+        return { original, modified, fileDiff: parseDiffFromFile({ name: path, contents: original }, { name: path, contents: modified }) };
+      }
+      const { diff: patch } = await loadComparisonDiff(path, FULL_CONTEXT_DIFF_LINES);
+      return { original: '', modified: '', fileDiff: fileDiffFromPatch(path, patch) };
+    };
+    void (async () => {
+      try {
+        const diff = await loadFullDiff();
+        if (!cancelled) setFullComparisonDiff({ source, diff });
+      } catch (error) {
+        if (cancelled) return;
+        toast.error(error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff'));
+        setContextExpansion(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
 
   React.useEffect(() => {
     if (mode === 'branch' && branchUnavailable) changeMode('working');
@@ -808,7 +847,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       <MobileDiffDetail
         path={activeComparisonPath}
         subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
-        diff={activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null}
+        diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
         fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
         error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
         onBack={() => setRoute(LIST_ROUTE)}
@@ -816,6 +855,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           if (comparison.error) void comparison.refresh();
           setComparisonRetry((value) => value + 1);
         }}
+        onExpandContextRequest={activeComparisonDiff.status === 'ready'
+          ? (request) => setContextExpansion({ source: activeComparisonDiff, request })
+          : undefined}
+        pendingContextExpansion={pendingContextExpansion}
+        contextLoading={pendingContextExpansion !== null && !activeFullComparisonDiff}
       />
     );
   }
@@ -1083,7 +1127,10 @@ const MobileDiffDetail: React.FC<{
   error: string | null;
   onBack: () => void;
   onRetry: () => void;
-}> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error, onBack, onRetry }) => {
+  onExpandContextRequest?: (request: ContextExpansionRequest) => void;
+  pendingContextExpansion?: ContextExpansionRequest | null;
+  contextLoading?: boolean;
+}> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
 
@@ -1141,6 +1188,9 @@ const MobileDiffDetail: React.FC<{
               renderSideBySide={false}
               wrapLines={true}
               layout="inline"
+              onExpandContextRequest={onExpandContextRequest}
+              pendingContextExpansion={pendingContextExpansion}
+              contextLoading={contextLoading}
             />
           </ScrollShadow>
         )}

@@ -66,6 +66,12 @@ PR mode with the shared selection. Picking a PR never generates a walkthrough.
 Web, Electron, hosted mobile and Capacitor use the server route. VS Code keeps
 PR comparison unavailable, like the other server-backed comparison modes.
 
+Mobile Changes uses the same expansion for branch, commit and PR files: the
+patch opens with 3 lines of context, and expanding reads that file in full once
+(git with whole-file context, or both PR sides from GitHub), then replays the
+expansion. A failed read toasts and keeps the patch. Working-tree files there
+already load both full sides, so they expand without a read.
+
 Most focused tests use Bun. `MultiFileDiffEntry.vitest.tsx` exercises the real
 diff component through the web workspace's Vitest runner because its transitive
 UI imports require Vite asset transforms. The web test configuration includes

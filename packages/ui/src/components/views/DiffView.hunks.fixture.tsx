@@ -349,3 +349,116 @@ export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-
     await restore();
   }
 }
+
+// Mobile Changes opens a commit file as a 3-line patch; expanding the tail reads
+// the whole file once, replays the expansion, and a failed read only toasts.
+export async function exerciseMobileComparisonContextExpansion() {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const { MobileChangesPane } = await import('@/apps/MobileChangesSurface');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const lineCount = 150;
+  const changedIndex = 49;
+  const makePatch = (full: boolean) => {
+    const [start, end] = full ? [0, lineCount] : [changedIndex - 3, changedIndex + 4];
+    return `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`
+      + `@@ -${start + 1},${end - start} +${start + 1},${end - start} @@\n`
+      + Array.from({ length: end - start }, (_, offset) => {
+        const index = start + offset;
+        return index === changedIndex ? `-line${index}\n+changed${index}\n` : ` line${index}\n`;
+      }).join('');
+  };
+  const commits = [{
+    hash: 'c'.repeat(40), date: '2026-10-03T09:00:00Z', message: 'Change a line', refs: '', body: '',
+    author_name: 'Test Author', author_email: 'test@example.com', filesChanged: 1, insertions: 1, deletions: 1, parents: [],
+  }];
+  let fullReads = 0;
+  let failFullRead = true;
+  const pendingFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/remote-url': return Response.json({ url: null });
+      case '/api/git/branch-base': return Response.json({ base: null });
+      case '/api/git/log': return Response.json({ all: commits, latest: commits[0], total: commits.length });
+      case '/api/git/commit-files': return Response.json({ files: [{ path: 'file.txt', changeType: 'M', insertions: 1, deletions: 1, isBinary: false }] });
+      case '/api/git/commit-diff': {
+        const full = Number(url.searchParams.get('context') ?? 3) > 3;
+        if (!full) return Response.json({ diff: makePatch(false) });
+        fullReads += 1;
+        return failFullRead ? Response.json({ error: 'Full file read failed' }, { status: 500 }) : Response.json({ diff: makePatch(true) });
+      }
+      default: return pendingFetch(input);
+    }
+  }, pendingFetch);
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const previous = useGitStore.getState().getDirectoryState('/repo');
+  if (!previous) throw new Error('Missing repository state');
+  const now = Date.now();
+  const directories = new Map(useGitStore.getState().directories);
+  directories.set('/repo', {
+    ...previous, status, isGitRepo: true,
+    branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
+    log: { all: commits, latest: commits[0], total: 1 }, identity: { userName: 'Test Author', userEmail: 'test@example.com', sshCommand: null },
+    lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+  });
+  useGitStore.setState({ directories });
+  const container = document.createElement('div');
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 390, 2000);
+  document.body.append(container);
+  const root = createRoot(container);
+  const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
+  const waitFor = async (label: string, condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (condition()) return;
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
+  };
+  const click = async (selector: string) => {
+    const element = container.querySelector<HTMLElement>(selector) ?? document.querySelector<HTMLElement>(selector);
+    if (!element) throw new Error(`Missing ${selector}`);
+    await act(async () => { element.click(); });
+  };
+  try {
+    await act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={createWebAPIs()}>
+      <MobileChangesPane rootDirectory="/repo" visible initialDiff={null}
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null }} />
+    </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+    await click('[aria-label="Select change mode"]');
+    const commitMode = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === 'Commit');
+    if (!commitMode) throw new Error('Missing Commit mode');
+    await act(async () => { commitMode.click(); });
+    await waitFor('the commit file row', () => container.querySelector('[title="file.txt"]') !== null);
+    const fileButton = container.querySelector('[title="file.txt"]')?.closest('button');
+    await act(async () => { fileButton?.click(); });
+    await waitFor('the partial diff', () => shadowText().includes('changed49'));
+    await waitFor('the trailing row', () => container.querySelector('[data-oc-trailing-expand]') !== null);
+    expect(shadowText()).not.toContain('line53');
+
+    // A failed read leaves the patch on screen and the row available again.
+    await act(async () => container.querySelector<HTMLElement>('[data-oc-trailing-expand]')?.click());
+    await waitFor('the failed full read', () => fullReads === 1 && container.querySelector('[data-oc-trailing-expand]') !== null);
+    expect(shadowText()).toContain('changed49');
+    expect(shadowText()).not.toContain('line53');
+
+    failFullRead = false;
+    await act(async () => container.querySelector<HTMLElement>('[data-oc-trailing-expand]')?.click());
+    await waitFor('the expanded tail', () => shadowText().includes('line72'));
+    expect(fullReads).toBe(2);
+    expect(shadowText()).not.toContain('line73');
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
+  }
+}
