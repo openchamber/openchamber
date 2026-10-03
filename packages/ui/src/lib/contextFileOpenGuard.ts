@@ -2,6 +2,7 @@ import type { FilesAPI } from '@/lib/api/types';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+import { isFilePathWithinDirectory } from '@/lib/path-utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 
@@ -40,10 +41,15 @@ const readFileContent = async (
   path: string,
   options?: ContextFileOpenOptions,
 ): Promise<string> => {
+  // A referenced file outside the active workspace (a skill, an agent output
+  // under /tmp) is a legitimate read. Without the flag the server rejects it
+  // and the caller reports the file as unreadable.
+  const allowOutsideWorkspace = Boolean(options?.directory && !isFilePathWithinDirectory(path, options.directory));
   if (files.readFile) {
     const result = await files.readFile(path, {
       optional: true,
       directory: options?.directory,
+      allowOutsideWorkspace,
     });
     return result.content ?? '';
   }
@@ -51,6 +57,9 @@ const readFileContent = async (
   const params = new URLSearchParams({ path, optional: 'true' });
   if (options?.directory) {
     params.set('directory', options.directory);
+  }
+  if (allowOutsideWorkspace) {
+    params.set('allowOutsideWorkspace', 'true');
   }
   const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
     // Avoid conditional requests (304 + empty body).
