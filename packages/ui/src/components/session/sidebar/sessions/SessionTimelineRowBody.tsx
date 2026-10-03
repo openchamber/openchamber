@@ -122,7 +122,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   </span>;
   if (compact) {
     return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
-      <div className={cn('min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
+      <div dir="auto" className={cn('min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
       {meta}
     </div>;
   }
@@ -137,7 +137,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
       ) : null}
       {meta}
     </div>
-    <div className={cn('w-full min-w-0 truncate typography-ui-label font-normal', titleClassName)}>{title}</div>
+    <div dir="auto" className={cn('w-full min-w-0 truncate typography-ui-label font-normal', titleClassName)}>{title}</div>
     {hasThirdLine ? (
       <div className="flex w-full min-w-0 items-center gap-1">
         {thirdLineLead ?? (branchLabel ? (

@@ -116,7 +116,7 @@ export const MobileHeader: React.FC<{
             style={{ touchAction: 'manipulation' }}
           >
             <span className="flex min-w-0 items-center gap-1">
-              <span className="block min-w-0 truncate typography-ui-label text-foreground">{primaryLabel}</span>
+              <span dir="auto" className="block min-w-0 truncate text-left typography-ui-label text-foreground">{primaryLabel}</span>
               {/* Discoverability: the chevron marks the title as a disclosure
                   trigger and flips while the switcher is open. */}
               <Icon

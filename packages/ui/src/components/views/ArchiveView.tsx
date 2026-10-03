@@ -242,7 +242,7 @@ export function ArchiveView(): React.ReactNode {
                       }
                     }}
                   >
-                    <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                    <span dir="auto" className="min-w-0 flex-1 truncate text-left typography-ui-label text-foreground">
                       {session.title || t('sessions.sidebar.session.untitled')}
                     </span>
                     {normalizedQuery && directoryLabel ? (

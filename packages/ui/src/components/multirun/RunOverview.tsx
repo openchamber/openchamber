@@ -447,6 +447,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
                 <button
                   type="button"
                   onClick={() => setRenaming(run.title)}
+                  dir="auto"
                   className="max-w-full truncate text-left typography-heading-lg text-foreground hover:underline decoration-dotted underline-offset-4"
                   title={t('multirun.overview.rename.aria')}
                 >

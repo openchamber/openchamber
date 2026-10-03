@@ -105,7 +105,7 @@ const MobileTimelineRunRow: React.FC<{
           {activity ? <CollapsedActivityIndicator state={activity} /> : null}
           {time ? <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span> : null}
         </span>
-        <span className={cn('block min-w-0 truncate typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+        <span dir="auto" className={cn('block min-w-0 truncate text-left typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
           {run.title}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
@@ -220,7 +220,7 @@ const MobileTimelineRow: React.FC<{
                 onCancel={handlers.onCancelRename}
               />
             ) : (
-              <span className={cn('block min-w-0 truncate typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+              <span dir="auto" className={cn('block min-w-0 truncate text-left typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
                 {title}
               </span>
             )}

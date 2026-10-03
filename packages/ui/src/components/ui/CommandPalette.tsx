@@ -953,7 +953,7 @@ export const CommandPalette: React.FC = () => {
                           onSelect={() => handleOpenSession(session)}
                         >
                           <Icon name="chat-ai-3" className="mr-2 h-4 w-4" />
-                          <span className="min-w-0 flex-1 truncate">{title}</span>
+                          <span dir="auto" className="min-w-0 flex-1 truncate text-left">{title}</span>
                           {projectLabel ? (
                             <span className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
                           ) : null}
