@@ -705,6 +705,18 @@ class OpencodeService {
   }
 
   /**
+   * Drops the location OpenCode keeps for a directory, which stops that
+   * directory's MCP servers; the next read of it starts them again. OpenCode
+   * serves this among its debug routes. Asked without a directory it would
+   * drop its own working directory, so one is required.
+   */
+  async releaseLocation(directory: string): Promise<void> {
+    const normalized = this.normalizeCandidatePath(directory)
+    if (!normalized) throw new Error("releaseLocation needs a directory")
+    await call("debug.location.evict", () => this.getScopedSdkClient(normalized).debug.location.evict())
+  }
+
+  /**
    * The list is global, but v2 serves it through a location: asked without a
    * directory, OpenCode starts its own working directory (MCP servers
    * included) to answer. The current directory is already running.

@@ -183,6 +183,18 @@ describe("request fidelity", () => {
     expect(page.cursor).toEqual({ next: "c2" })
   })
 
+  test("releasing a location names its directory, never OpenCode's own", async () => {
+    opencodeClient.setDirectory("/repo/current")
+    responses.push(noContent())
+    await opencodeClient.releaseLocation("/chats/2026-10-03/session-a b")
+    expect(requests[0].url.pathname).toBe("/api/debug/location")
+    expect(requests[0].method).toBe("DELETE")
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/chats/2026-10-03/session-a b"))
+
+    await expect(opencodeClient.releaseLocation("")).rejects.toThrow()
+    expect(requests).toHaveLength(1)
+  })
+
   test("a global list sends no directory scope at all", async () => {
     opencodeClient.setDirectory("/repo/app")
     responses.push(json({ data: [], cursor: {} }))

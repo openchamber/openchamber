@@ -92,6 +92,8 @@ import {
 } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { chatDirectoryUse, createRealChatLocationRelease, type ChatLocationRelease } from "./chat-location-release"
+import { isChatDirectoryPath } from "@/lib/chatDirectories"
 import type { State } from "./types"
 import {
   getSessionMaterializationRequestKey,
@@ -647,6 +649,16 @@ export function setExternallyViewedSession(directory: string, sessionId: string,
     return
   }
   externallyViewedSessions.set(key, Date.now() + EXTERNAL_VIEW_TTL_MS)
+}
+
+/** A side panel in this window shows a session of `directory`. */
+export function isDirectoryExternallyViewed(directory: string): boolean {
+  pruneExternallyViewedSessions()
+  const prefix = `${directory}\n`
+  for (const key of externallyViewedSessions.keys()) {
+    if (key.startsWith(prefix)) return true
+  }
+  return false
 }
 
 function isViewedInCurrentSession(directory: string, sessionId?: string): boolean {
@@ -2441,6 +2453,33 @@ export function SyncProvider(props: {
   }), [])
   React.useLayoutEffect(() => {
     for (const notify of currentDirectoryListenersRef.current) notify()
+  }, [props.directory])
+  const chatLocationReleaseRef = useRef<ChatLocationRelease | null>(null)
+  const previousDirectoryRef = useRef(props.directory)
+  useEffect(() => {
+    const expectedRuntimeKey = getRuntimeKey()
+    const sdkEpoch = opencodeClient.getSdkClient()
+    const release = createRealChatLocationRelease({
+      isChatDirectory: isChatDirectoryPath,
+      isCurrentDirectory: (directory) => directory === currentDirectoryRef.current,
+      directoryUse: (directory) => isDirectoryExternallyViewed(directory)
+        ? "busy"
+        : chatDirectoryUse(directory, childStores.getChild(directory)?.getState()),
+      release: async (directory) => {
+        if (getRuntimeKey() !== expectedRuntimeKey || opencodeClient.getSdkClient() !== sdkEpoch) return
+        await opencodeClient.releaseLocation(directory)
+      },
+    })
+    chatLocationReleaseRef.current = release
+    return () => {
+      release.dispose()
+      if (chatLocationReleaseRef.current === release) chatLocationReleaseRef.current = null
+    }
+  }, [childStores, props.sdk])
+  useEffect(() => {
+    const previous = previousDirectoryRef.current
+    previousDirectoryRef.current = props.directory
+    chatLocationReleaseRef.current?.directoryChanged(previous, props.directory)
   }, [props.directory])
   const lastStreamActivityAtRef = useRef(0)
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())

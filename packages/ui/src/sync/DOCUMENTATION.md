@@ -159,6 +159,20 @@ are re-read when selected or on the next `server.connected`. The pending
 permissions and forms OpenCode rejected on the way out and the turns it
 interrupted arrive as their own events.
 
+Every managed chat has its own directory, so each chat opened would keep its
+own set of MCP servers for that hour. `chat-location-release.ts` releases a
+chat directory's location (`DELETE /api/debug/location`, the route the
+worktree removal paths already use) 30 s after the selected directory moves
+away from it. It checks again at that moment and keeps the location while the
+chat is selected again, shown in a side panel, has a busy or retrying session,
+a pending permission or form, or a running background command; a busy chat is
+re-checked every 30 s until it settles or is selected. A directory without a
+store is left to OpenCode's own sweep. Project and worktree directories are never released this
+way. Another client still showing the chat gets `location.shutdown` and
+bootstraps it again, which restarts that chat's MCP servers. A failed release
+is ignored: OpenCode's own sweep still applies. VS Code has no managed chats,
+so nothing there qualifies.
+
 ## Committing a revert
 
 A staged revert is a marker (`session.revert.messageID`); the transcript
