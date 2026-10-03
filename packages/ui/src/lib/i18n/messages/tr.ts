@@ -1346,6 +1346,8 @@ export const dict = {
   'contextPanel.browser.waitingForServer': 'Dev server bekleniyor',
   'contextPanel.browser.waitingForServerHint': 'Sunucu henüz bağlantı kabul etmiyor. Kabul ettiği anda bu sayfa yüklenecek.',
   'contextPanel.browser.tunnelFailed': 'Bu dev server\'a ulaşılamadı',
+  'contextPanel.browser.remoteLoopback.title': '{url} OpenChamber makinesinde çalışıyor',
+  'contextPanel.browser.remoteLoopback.hint': 'Tarayıcı sekmesi orada çalışan sayfaları açamaz. Masaüstü uygulamasında açın.',
   'contextPanel.browser.tunnelFailedHint': '{url}, OpenChamber\'ın çalıştığı makinede çalışıyor ve onunla bağlantı kurulamadı. Kendi makinendeki hiçbir şey burada gösterilmiyor.',
   'contextPanel.browser.loadFailedUnknown': 'Sayfaya ulaşılamadı.',
   'contextPanel.browser.crashed': 'Bu sayfa yanıt vermeyi bıraktı',

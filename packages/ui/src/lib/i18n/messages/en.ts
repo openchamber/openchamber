@@ -1371,6 +1371,8 @@ export const dict = {
   'contextPanel.browser.waitingForServer': 'Waiting for the dev server',
   'contextPanel.browser.waitingForServerHint': 'It is not accepting connections yet. This page will load as soon as it does.',
   'contextPanel.browser.tunnelFailed': 'This dev server could not be reached',
+  'contextPanel.browser.remoteLoopback.title': '{url} is on the OpenChamber machine',
+  'contextPanel.browser.remoteLoopback.hint': 'A browser tab can\'t open pages that run there. Open this in the desktop app.',
   'contextPanel.browser.tunnelFailedHint': '{url} runs on the machine OpenChamber is on, and the connection to it could not be opened. Nothing from your own machine is shown here.',
   'contextPanel.browser.loadFailedUnknown': 'The page could not be reached.',
   'contextPanel.browser.crashed': 'This page stopped responding',

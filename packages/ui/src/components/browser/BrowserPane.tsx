@@ -8,7 +8,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { BLANK_URL, isLoopbackUrl, normalizeBrowserUrl } from '@/lib/browser/url';
+import { BLANK_URL, browserUrlLabel, isLoopbackUrl, normalizeBrowserUrl } from '@/lib/browser/url';
 import {
   acceptsBrowserTabLoadRequest,
   forgetBrowserTabOpenedWithAddress,
@@ -1022,9 +1022,11 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
       <div className="relative min-h-0 flex-1 bg-background">
         {unreachableUrl ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
-            <span className="typography-ui-header text-foreground">{t('contextPanel.browser.tunnelFailed')}</span>
+            <span className="typography-ui-header text-foreground">
+              {t('contextPanel.browser.remoteLoopback.title', { url: browserUrlLabel(unreachableUrl) })}
+            </span>
             <span className="typography-micro text-muted-foreground">
-              {t('contextPanel.browser.devServers.remoteOnly')}
+              {t('contextPanel.browser.remoteLoopback.hint')}
             </span>
           </div>
         ) : loadedUrl ? (

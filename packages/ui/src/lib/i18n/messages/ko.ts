@@ -1372,6 +1372,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.waitingForServer': '개발 서버를 기다리는 중',
   'contextPanel.browser.waitingForServerHint': '아직 연결을 받지 않습니다. 준비되는 대로 이 페이지를 불러옵니다.',
   'contextPanel.browser.tunnelFailed': '이 개발 서버에 연결하지 못했습니다',
+  'contextPanel.browser.remoteLoopback.title': '{url}은(는) OpenChamber 컴퓨터에 있습니다',
+  'contextPanel.browser.remoteLoopback.hint': '브라우저 탭에서는 그곳에서 실행 중인 페이지를 열 수 없습니다. 데스크톱 앱에서 여세요.',
   'contextPanel.browser.tunnelFailedHint': '{url} 은(는) OpenChamber가 실행 중인 컴퓨터에 있으며, 그곳으로의 연결을 열지 못했습니다. 이 화면에는 사용자 컴퓨터의 내용이 표시되지 않습니다.',
   'contextPanel.browser.loadFailedUnknown': '페이지에 접근할 수 없습니다.',
   'contextPanel.browser.crashed': '이 페이지가 응답하지 않습니다',

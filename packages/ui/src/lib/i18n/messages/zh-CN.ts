@@ -1372,6 +1372,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.waitingForServer': '正在等待开发服务器',
   'contextPanel.browser.waitingForServerHint': '它还没有开始接受连接。一旦可用，本页就会加载。',
   'contextPanel.browser.tunnelFailed': '无法连接到这个开发服务器',
+  'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的机器上',
+  'contextPanel.browser.remoteLoopback.hint': '浏览器标签页无法打开在那里运行的页面。请在桌面应用中打开。',
   'contextPanel.browser.tunnelFailedHint': '{url} 运行在 OpenChamber 所在的机器上，无法与其建立连接。这里不会显示你本机上的任何内容。',
   'contextPanel.browser.loadFailedUnknown': '无法访问该页面。',
   'contextPanel.browser.crashed': '此页面已停止响应',
