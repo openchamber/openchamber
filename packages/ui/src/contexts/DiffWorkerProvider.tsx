@@ -29,7 +29,7 @@ interface DiffWorkerProviderProps {
 
 type WorkerPoolStyle = 'unified' | 'split';
 
-const WORKER_POOL_CONFIG: Record<WorkerPoolStyle, { poolSize: number; totalASTLRUCacheSize: number; lineDiffType: 'none' | 'word-alt' }> = {
+const WORKER_POOL_CONFIG: Record<WorkerPoolStyle, { poolSize: number; totalASTLRUCacheSize: number; lineDiffType: 'none' | 'word-line' }> = {
   unified: {
     poolSize: 1,
     totalASTLRUCacheSize: 24,
@@ -38,7 +38,7 @@ const WORKER_POOL_CONFIG: Record<WorkerPoolStyle, { poolSize: number; totalASTLR
   split: {
     poolSize: 2,
     totalASTLRUCacheSize: 56,
-    lineDiffType: 'word-alt',
+    lineDiffType: 'word-line',
   },
 };
 
