@@ -1639,10 +1639,14 @@ const permissionsAwaitingAutoAnswer = new Map<string, () => void>()
 // Reports that arrived before their request: the request is shown at once.
 const leftForUserBeforeAsked = new Set<string>()
 
-/** Whether `permission.asked` is held back until the server rules on it. */
+/** Whether a fresh `permission.asked` will be held back until the server rules on it. */
+const isHeldUntilAutoAnswered = (permission: PermissionRequest): boolean =>
+  !leftForUserBeforeAsked.has(permission.id) && !isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)
+
+/** Hold `permission.asked` back until the server rules on it, when it may answer it. */
 const holdBackUntilAutoAnswered = (permission: PermissionRequest, replayAsAsk: () => void): boolean => {
   if (leftForUserBeforeAsked.delete(permission.id)) return false
-  if (isVSCodeRuntime() || !isAnsweredWithoutUser(permission.sessionID)) return false
+  if (!isHeldUntilAutoAnswered(permission)) return false
   permissionsAwaitingAutoAnswer.set(permission.id, replayAsAsk)
   return true
 }
@@ -1672,7 +1676,9 @@ const permissionReplayAsAsk = (
   streamingDirectory: string | undefined,
 ) => () => {
   if (expectedRuntimeKey !== getRuntimeKey()) return
-  handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory, undefined, true)
+  // The first pass kept the held request out of the cross-directory index too,
+  // so the replay applies global effects and the sidebar badge appears now.
+  handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory, undefined, false)
 }
 
 const forgetAutoAnswerWait = (permissionID: string): void => {
@@ -1824,18 +1830,27 @@ export function handleEvent(
   }
 
   if (!globalEffectsAlreadyApplied) {
+    // A request the server may answer on its own stays out of the
+    // cross-directory index as well, or collapsed rows, the tray and run
+    // overviews would flash a shield for a request that is then auto-approved.
+    // It enters the index when it is replayed for the user.
+    const heldForAutoAnswer = payload.type === "permission.asked"
+      && !autoAnswerDeclined
+      && isHeldUntilAutoAnswered(payload.properties)
     if (batch) {
       batch.globalSessionEvents.push(payload)
-      const statusEvents = batch.globalStatusEventsByDirectory.get(directory)
-      if (statusEvents) statusEvents.push(payload)
-      else batch.globalStatusEventsByDirectory.set(directory, [payload])
+      if (!heldForAutoAnswer) {
+        const statusEvents = batch.globalStatusEventsByDirectory.get(directory)
+        if (statusEvents) statusEvents.push(payload)
+        else batch.globalStatusEventsByDirectory.set(directory, [payload])
+      }
     } else {
       applySessionEventToGlobalSessions(payload)
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
-      applyGlobalBlockingRequestEvents(directory, [payload])
+      if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
     }
   }
 

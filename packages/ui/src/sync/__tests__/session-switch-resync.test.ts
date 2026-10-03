@@ -1,3 +1,4 @@
+import { resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from "../global-blocking-requests"
 import { describe, expect, test, afterEach, beforeEach, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
 import type { SyncEvent, ToolTransition } from "@/lib/opencode/events"
@@ -535,6 +536,21 @@ describe("permission.asked in a session the server may answer", () => {
       expect(storedIds()).toEqual(["perm_early"])
       expect(infoToasts).toHaveLength(1)
     })
+  })
+
+  test("keeps a held request out of the cross-directory badge index until it is left for the user", () => {
+    const indexed = (id: string) => useGlobalBlockingRequestsStore.getState().bySession.get("ses_a")?.permissions.some((entry) => entry.id === id) ?? false
+    for (const store of [true, false]) {
+      resetGlobalBlockingRequests()
+      const id = `perm_index_${store}`
+      withDirectory({ store }, (send) => {
+        send(asked(id))
+        expect(indexed(id)).toBe(false)
+        send(leftForUser(id))
+        expect(indexed(id)).toBe(true)
+      })
+    }
+    resetGlobalBlockingRequests()
   })
 
   test("announces a held request in a directory without a store", () => {
