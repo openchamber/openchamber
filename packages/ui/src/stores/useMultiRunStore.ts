@@ -22,6 +22,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { RUN_LAUNCHER_ID } from '@/lib/multirun/launcher';
 import { multiRunVariantLabel } from '@/lib/multirun/runs';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
+import { generateUuid } from '@/lib/uuid';
 
 export const toGitSafeSlug = (value: string): string => {
   return value
@@ -204,7 +205,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const shouldIsolateRuns = isGit && params.isolateRuns !== false;
 
           const groupSlug = toGitSafeSlug(groupName) || 'multi-run';
-          const membershipGroup: MultiRunMembership['group'] = { kind: 'id', id: crypto.randomUUID() };
+          const membershipGroup: MultiRunMembership['group'] = { kind: 'id', id: generateUuid() };
           const rootBranch = shouldIsolateRuns ? await getRootBranch(directory) : undefined;
           assertCurrent();
           const rootTrackingRemote = shouldIsolateRuns ? await resolveRootTrackingRemote(directory) : null;

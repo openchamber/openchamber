@@ -14,6 +14,7 @@ import { resolveRunMemberLocation, runSnapshotRef } from './keep';
 import { loadLaneFirstPrompt } from './laneData';
 import { multiRunMembershipPatch, type MultiRunMembership } from './identity';
 import { multiRunVariantLabel, readMultiRunIdentity, type MultiRunSummary } from './runs';
+import { generateUuid } from '@/lib/uuid';
 
 /**
  * Renames the run on every member. Each write is a merge patch of the title
@@ -88,7 +89,7 @@ export async function askOtherModels(input: {
   const membership: MultiRunMembership = {
     version: 1,
     sessionID: session.id,
-    group: { kind: 'id', id: crypto.randomUUID() },
+    group: { kind: 'id', id: generateUuid() },
     groupSlug: toGitSafeSlug(title) || 'multi-run',
     providerID,
     modelID,
